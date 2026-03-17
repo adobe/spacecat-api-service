@@ -19,6 +19,7 @@ import nock from 'nock';
 
 import {
   createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig, getIsSummitPlgEnabled,
+  getCookieValue,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -471,7 +472,10 @@ describe('utils', () => {
 
     beforeEach(() => {
       sandbox = sinon.createSandbox();
-      site = { getId: sandbox.stub().returns('site-123') };
+      site = {
+        getId: sandbox.stub().returns('site-123'),
+        getOrganizationId: sandbox.stub().returns('org-456'),
+      };
       context = {
         log: { error: sandbox.stub() },
         dataAccess: {},
@@ -482,12 +486,17 @@ describe('utils', () => {
       sandbox.restore();
     });
 
-    it('returns true when Configuration has summit-plg enabled for site', async () => {
+    it('returns true when summit-plg is enabled and entitlement is FREE_TRIAL ASO', async () => {
       const isHandlerEnabledForSite = sandbox.stub().withArgs('summit-plg', site).returns(true);
       context.dataAccess.Configuration = {
         findLatest: sandbox.stub().resolves({
           isHandlerEnabledForSite,
         }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .withArgs('org-456', 'ASO')
+          .resolves({ getTier: () => 'FREE_TRIAL' }),
       };
 
       const result = await getIsSummitPlgEnabled(site, context);
@@ -495,6 +504,69 @@ describe('utils', () => {
       expect(result).to.be.true;
       expect(context.dataAccess.Configuration.findLatest).to.have.been.calledOnce;
       expect(isHandlerEnabledForSite).to.have.been.calledWith('summit-plg', site);
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.have.been.calledWith('org-456', 'ASO');
+    });
+
+    it('returns false when summit-plg is enabled but entitlement is PAID', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .resolves({ getTier: () => 'PAID' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when summit-plg is enabled but no ASO entitlement exists', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves(null),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when summit-plg is enabled but Entitlement model is missing', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when summit-plg is enabled but organizationId is missing', async () => {
+      site.getOrganizationId.returns(undefined);
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub(),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+      const findEntitlement = context.dataAccess.Entitlement.findByOrganizationIdAndProductCode;
+      expect(findEntitlement).to.not.have.been.called;
     });
 
     it('returns false when Configuration has summit-plg disabled for site', async () => {
@@ -532,6 +604,61 @@ describe('utils', () => {
 
       expect(result).to.be.false;
       expect(context.log.error).to.have.been.calledWithMatch(/Error checking audit summit-plg for site/, sinon.match.instanceOf(Error));
+    });
+
+    it('returns false and logs error when entitlement lookup throws', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+      expect(context.log.error).to.have.been.calledOnce;
+    });
+  });
+
+  describe('getCookieValue', () => {
+    it('returns the value for a matching cookie name', () => {
+      const context = { pathInfo: { headers: { cookie: 'session=abc; promiseToken=token123' } } };
+      expect(getCookieValue(context, 'promiseToken')).to.equal('token123');
+    });
+
+    it('returns null when the cookie is not present', () => {
+      const context = { pathInfo: { headers: { cookie: 'session=abc' } } };
+      expect(getCookieValue(context, 'promiseToken')).to.equal(null);
+    });
+
+    it('returns null when cookie header is missing', () => {
+      expect(getCookieValue({}, 'promiseToken')).to.equal(null);
+      expect(getCookieValue({ pathInfo: {} }, 'promiseToken')).to.equal(null);
+      expect(getCookieValue({ pathInfo: { headers: {} } }, 'promiseToken')).to.equal(null);
+    });
+
+    it('preserves value containing = characters (base64 tokens)', () => {
+      const base64Token = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGVzdHNpZw==';
+      const context = { pathInfo: { headers: { cookie: `promiseToken=${base64Token}` } } };
+      expect(getCookieValue(context, 'promiseToken')).to.equal(base64Token);
+    });
+
+    it('preserves value with multiple = padding characters', () => {
+      const context = { pathInfo: { headers: { cookie: 'promiseToken=abc123==' } } };
+      expect(getCookieValue(context, 'promiseToken')).to.equal('abc123==');
+    });
+
+    it('handles multiple cookies with = in values', () => {
+      const context = { pathInfo: { headers: { cookie: 'other=x=y; promiseToken=a=b=c; last=z' } } };
+      expect(getCookieValue(context, 'promiseToken')).to.equal('a=b=c');
+    });
+
+    it('returns null for empty cookie string', () => {
+      const context = { pathInfo: { headers: { cookie: '' } } };
+      expect(getCookieValue(context, 'promiseToken')).to.equal(null);
     });
   });
 });

@@ -268,8 +268,15 @@ EdgeOptimizeConfig:
   description: Edge optimize configuration for a site
   properties:
     enabled:
-      description: Whether edge optimize is enabled for the site
-      type: boolean
+      description: Indicates when edge optimization was enabled for the site
+      oneOf:
+        - type: boolean
+          deprecated: true
+          example: true
+          description: Deprecated. Use timestamp format instead.
+        - type: number
+          example: 1772531669121
+          description: Timestamp (milliseconds since epoch) indicating when edge optimization was enabled for the site.
     opted:
       description: Timestamp (milliseconds since epoch) when the site opted into edge optimize
       type: number
@@ -6487,6 +6494,7 @@ PlgOnboarding:
       type: string
       description: Current onboarding status
       enum:
+        - PRE_ONBOARDING
         - IN_PROGRESS
         - ONBOARDED
         - ERROR
