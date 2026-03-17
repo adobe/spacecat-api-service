@@ -96,3 +96,32 @@ node scripts/plg-backfill-delivery-config.js scripts/input.json
 Uses the same input JSON format as `plg-preonboard.js`.
 
 Skips sites that already have `authorURL` set in `deliveryConfig`.
+
+---
+
+## 3. `plg-rollback.js` — Rollback a preonboarding
+
+Reverses what `plg-preonboard.js` created, using the `steps` recorded on the
+`PlgOnboarding` record to determine what is safe to remove. Safe to re-run —
+already-removed resources are skipped gracefully.
+
+### What gets rolled back (in reverse order)
+
+1. Disables audits (`alt-text`, `cwv`, `broken-backlinks`, `scrape-top-pages`) + `summit-plg` via API
+2. Deletes ASO entitlement (only if `entitlementCreated` step is set)
+3. Deletes the site (only if `siteCreated` step is set — pre-existing sites are left alone)
+4. Deletes the org (only if it has no remaining sites)
+5. Deletes the `PlgOnboarding` record
+
+### Environment variables
+
+Same as `plg-preonboard.js` (no `RUM_ADMIN_KEY` needed).
+
+### Usage
+
+```bash
+nvm use 24
+node scripts/plg-rollback.js scripts/input.json
+```
+
+Uses the same input JSON format as `plg-preonboard.js`.
