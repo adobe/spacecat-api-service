@@ -24,6 +24,7 @@ const AUDIT_TYPES = {
   CDN_LOGS_ANALYSIS: 'cdn-logs-analysis',
   CDN_LOGS_REPORT: 'cdn-logs-report',
   LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
+  LLM_ERROR_PAGES: 'llm-error-pages',
 };
 
 function parseArgs(args) {
@@ -110,6 +111,26 @@ async function triggerBackfill(
       break;
     }
 
+    case AUDIT_TYPES.LLM_ERROR_PAGES: {
+      const errorPagesWeeks = timeValue;
+      const errorPagesOffsets = errorPagesWeeks === 0
+        ? [0]
+        : Array.from({ length: errorPagesWeeks }, (_, i) => -(i + 1));
+
+      for (const weekOffset of errorPagesOffsets) {
+        const message = {
+          type: auditType,
+          siteId,
+          auditContext: {
+            weekOffset,
+          },
+        };
+        // eslint-disable-next-line no-await-in-loop
+        await sqs.sendMessage(configuration.getQueues().audits, message);
+      }
+      break;
+    }
+
     case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC: {
       const weeks = timeValue;
       const weekYearPairs = getLastNumberOfWeeks(weeks);
@@ -162,6 +183,8 @@ function BackfillLlmoCommand(context) {
         await say(`• \`backfill-llmo baseurl=all audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (all enabled sites)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=2\``);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=0\` (current week)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
         return;
       }
@@ -219,6 +242,22 @@ function BackfillLlmoCommand(context) {
           }
           break;
 
+        case AUDIT_TYPES.LLM_ERROR_PAGES:
+          timeValue = parseInt(parsed.weeks, 10);
+          if (Number.isNaN(timeValue)) timeValue = 4;
+
+          if (timeValue > 4) {
+            await say(`:warning: Max 4 weeks for ${AUDIT_TYPES.LLM_ERROR_PAGES}`);
+            return;
+          }
+
+          if (timeValue === 0) {
+            timeDesc = 'current week only';
+          } else {
+            timeDesc = `${timeValue} previous weeks`;
+          }
+          break;
+
         case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC:
           timeValue = parseInt(parsed.weeks, 10);
           if (Number.isNaN(timeValue)) timeValue = 1;
@@ -232,7 +271,7 @@ function BackfillLlmoCommand(context) {
           break;
 
         default:
-          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
+          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLM_ERROR_PAGES}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
           return;
       }
 
@@ -272,8 +311,9 @@ function BackfillLlmoCommand(context) {
         );
       }
 
-      const msgsPerSite = auditType === AUDIT_TYPES.CDN_LOGS_REPORT
-        && timeValue === 0 ? 1 : timeValue;
+      const usesWeekOffsets = auditType === AUDIT_TYPES.CDN_LOGS_REPORT
+        || auditType === AUDIT_TYPES.LLM_ERROR_PAGES;
+      const msgsPerSite = usesWeekOffsets && timeValue === 0 ? 1 : timeValue;
       await say(`:white_check_mark: Done! ${sites.length * msgsPerSite} messages queued.`);
     } catch (error) {
       log.error('Error in LLMO backfill:', error);
