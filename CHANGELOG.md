@@ -1,3 +1,17 @@
+## [1.352.2](https://github.com/adobe/spacecat-api-service/compare/v1.352.1...v1.352.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* derive no-cta autofix URL from contentFix page_patch ([#1972](https://github.com/adobe/spacecat-api-service/issues/1972)) ([1020e93](https://github.com/adobe/spacecat-api-service/commit/1020e93532841db4a31e59223251b46de37aa911))
+
+## [1.352.1](https://github.com/adobe/spacecat-api-service/compare/v1.352.0...v1.352.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* rename fix:read/write capability to fixEntity:read/write ([#1969](https://github.com/adobe/spacecat-api-service/issues/1969)) ([7c76393](https://github.com/adobe/spacecat-api-service/commit/7c763939ed42f01b320e3d9cbfdb919acf537aa1))
+
 # [1.352.0](https://github.com/adobe/spacecat-api-service/compare/v1.351.4...v1.352.0) (2026-03-17)
 
 

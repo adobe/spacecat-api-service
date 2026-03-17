@@ -1033,6 +1033,9 @@ function SuggestionsController(ctx, sqs, env) {
         const url = data?.url || data?.recommendations?.[0]?.pageUrl
           || data?.url_from
           || data?.urlFrom
+          || (opportunity.getType() === 'no-cta-above-the-fold'
+            ? data?.contentFix?.page_patch?.original_page_url
+            : null)
           || opportunityData?.page; // for high-organic-low-ctr
         if (!url) return acc;
 
