@@ -884,6 +884,15 @@ function SuggestionsController(ctx, sqs, env) {
     };
     return createResponse(fullResponse, 207);
   };
+  const getSuggestionUrl = (suggestionData, opp) => suggestionData?.url
+    || suggestionData?.recommendations?.[0]?.pageUrl
+    || suggestionData?.url_from
+    || suggestionData?.urlFrom
+    || (opp?.getType() === 'no-cta-above-the-fold'
+      ? suggestionData?.contentFix?.page_patch?.original_page_url
+      : null)
+    || opp?.getData()?.page;
+
   /**
    * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
    * suggestions, then queues an autofix message via SQS.
@@ -1074,18 +1083,9 @@ function SuggestionsController(ctx, sqs, env) {
             const groupedSuggestions = validSuggestions.filter(
               (s) => groupIds.includes(s.getId()),
             );
-            const firstData = groupedSuggestions[0]?.getData();
-            const groupUrl = firstData?.url
-              || firstData?.recommendations?.[0]?.pageUrl
-              || firstData?.url_from
-              || firstData?.urlFrom
-              || (opportunity.getType() === 'no-cta-above-the-fold'
-                ? firstData?.contentFix?.page_patch?.original_page_url
-                : null)
-              || opportunity.getData()?.page;
             return {
               groupedSuggestions,
-              url: groupUrl,
+              url: getSuggestionUrl(groupedSuggestions[0]?.getData(), opportunity),
               relationshipContext: { ...relationshipContext },
             };
           })
@@ -1101,15 +1101,8 @@ function SuggestionsController(ctx, sqs, env) {
           (s) => !coveredIds.has(s.getId()),
         );
         if (isNonEmptyArray(uncoveredSuggestions)) {
-          const opportunityData = opportunity.getData();
           const uncoveredByUrl = uncoveredSuggestions.reduce((acc, suggestion) => {
-            const data = suggestion.getData();
-            const url = data?.url || data?.recommendations?.[0]?.pageUrl
-              || data?.url_from || data?.urlFrom
-              || (opportunity.getType() === 'no-cta-above-the-fold'
-                ? data?.contentFix?.page_patch?.original_page_url
-                : null)
-              || opportunityData?.page;
+            const url = getSuggestionUrl(suggestion.getData(), opportunity);
             if (!url) return acc;
             if (!acc[url]) acc[url] = [];
             acc[url].push(suggestion);
@@ -1120,17 +1113,8 @@ function SuggestionsController(ctx, sqs, env) {
           });
         }
       } else {
-        // MAIN CODE: default URL-based grouping (unchanged from main branch)
-        const opportunityData = opportunity.getData();
         const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-          const data = suggestion.getData();
-          const url = data?.url || data?.recommendations?.[0]?.pageUrl
-            || data?.url_from
-            || data?.urlFrom
-            || (opportunity.getType() === 'no-cta-above-the-fold'
-              ? data?.contentFix?.page_patch?.original_page_url
-              : null)
-            || opportunityData?.page; // for high-organic-low-ctr
+          const url = getSuggestionUrl(suggestion.getData(), opportunity);
           if (!url) return acc;
 
           if (!acc[url]) {
