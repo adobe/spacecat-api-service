@@ -33,7 +33,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, logWrapper } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -72,6 +72,7 @@ import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
+import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
@@ -199,6 +200,7 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
+    const llmoMysticatController = LlmoMysticatController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
@@ -241,6 +243,7 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
+      llmoMysticatController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,
@@ -268,6 +271,12 @@ async function run(request, context) {
       if (params.organizationId
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.spaceCatId && !isValidUUID(params.spaceCatId)) {
+        return badRequest('Organization Id (spaceCatId) is invalid. Please provide a valid UUID.');
+      }
+      if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
+        return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
       }
       context.params = params;
       context.request = request;
