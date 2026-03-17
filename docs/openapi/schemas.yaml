@@ -150,6 +150,7 @@ AuditType:
     - 'experimentation-opportunities'
     - 'llm-error-pages'
     - 'prerender'
+    - 'related-urls'
     - 'summarization'
     - 'faqs'
   example: 'cwv'
@@ -267,8 +268,15 @@ EdgeOptimizeConfig:
   description: Edge optimize configuration for a site
   properties:
     enabled:
-      description: Whether edge optimize is enabled for the site
-      type: boolean
+      description: Indicates when edge optimization was enabled for the site
+      oneOf:
+        - type: boolean
+          deprecated: true
+          example: true
+          description: Deprecated. Use timestamp format instead.
+        - type: number
+          example: 1772531669121
+          description: Timestamp (milliseconds since epoch) indicating when edge optimization was enabled for the site.
     opted:
       description: Timestamp (milliseconds since epoch) when the site opted into edge optimize
       type: number
@@ -1143,6 +1151,30 @@ AuditResult:
                 description: A list of prompts for this URL and topic
                 items:
                   type: string
+    - type: object
+      description: The result of related-urls audit (brand presence prompts by region)
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        baseURL:
+          type: string
+          description: Base URL of the site (present when success is true)
+        fanoutCount:
+          type: integer
+          description: Number of URLs to fan out for related-urls processing (present when success is true)
+        promptRegions:
+          type: array
+          description: List of prompt and region pairs used for related-urls
+          items:
+            type: object
+            properties:
+              prompt:
+                type: string
+                description: The brand presence prompt
+              region:
+                type: string
+                description: Region for the prompt (e.g. GLOBAL or region code)
 AuditList:
   type: array
   items:
@@ -3970,6 +4002,74 @@ FixStatusUpdateListResponse:
     - fixes
     - metadata
 
+FixRollbackResponse:
+  type: object
+  description: Response after successfully rolling back a failed fix
+  properties:
+    fix:
+      type: object
+      description: The rolled back fix with metadata
+      properties:
+        index:
+          type: integer
+          description: Index of the fix in the response
+          example: 0
+        uuid:
+          type: string
+          format: uuid
+          description: UUID of the fix entity
+        fix:
+          $ref: '#/Fix'
+          description: The updated fix entity with ROLLED_BACK status
+        statusCode:
+          type: integer
+          description: HTTP status code for this fix operation
+          example: 200
+      required:
+        - index
+        - uuid
+        - fix
+        - statusCode
+    suggestions:
+      type: object
+      description: Summary of suggestions that were updated
+      properties:
+        updated:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+                description: Index of the suggestion in the response array
+              uuid:
+                type: string
+                format: uuid
+                description: UUID of the suggestion entity
+              suggestion:
+                $ref: '#/Suggestion'
+                description: The updated suggestion entity with SKIPPED status
+              statusCode:
+                type: integer
+                description: HTTP status code for this suggestion operation
+                example: 200
+            required:
+              - index
+              - uuid
+              - suggestion
+              - statusCode
+          description: List of suggestions that were marked as SKIPPED
+      required:
+        - updated
+    message:
+      type: string
+      description: Human-readable message describing the result
+      example: "Fix rolled back successfully. All 3 suggestion(s) marked as SKIPPED."
+  required:
+    - fix
+    - suggestions
+    - message
+
 PaidSiteTopPage:
   type: object
   required:
@@ -5467,43 +5567,107 @@ PreflightJobResponse:
       type: object
       description: The error of the preflight job if it failed
 
+PreflightOpportunityElementSelector:
+  type: object
+  description: DOM element selector for locating the issue on the page (e.g. for link audits). CSS selector for use with document.querySelector.
+  properties:
+    selector:
+      type: string
+      description: CSS selector string (e.g. body > a, cq[data-path="..."], or data-aue-resource for Universal Editor).
+  required: [selector]
+
+PreflightOpportunityIssueItem:
+  type: object
+  description: |
+    A single occurrence when the opportunity groups multiple items. Used when opportunity.issue is an array.
+    - Links audit (broken-internal-links, broken-external-links): url, issue, seoImpact, seoRecommendation, elements, aiSuggestion, aiRationale.
+    - Alt-text audit: src, alt, issue, seoImpact, seoRecommendation.
+    All properties are optional; presence depends on audit type.
+  properties:
+    url:
+      type: string
+      description: Affected URL (e.g. broken link target). Used by links audit.
+    issue:
+      type: string
+      description: Human-readable description for this occurrence (e.g. "Status 404" for links, or alt-text issue message).
+    seoImpact:
+      type: string
+      description: SEO impact of this occurrence.
+    seoRecommendation:
+      type: string
+      description: Recommendation to fix this occurrence.
+    src:
+      type: string
+      description: Image source URL. Used by alt-text audit.
+    alt:
+      type: string
+      description: Current alt attribute value. Used by alt-text audit.
+    elements:
+      type: array
+      description: DOM element selectors for this occurrence. Used by links audit; format matches PreflightOpportunityElementSelector.
+      items:
+        $ref: '#/PreflightOpportunityElementSelector'
+    aiSuggestion:
+      type: string
+      description: AI-generated suggestion for this occurrence (e.g. suggested fix URL from suggest step). Used by links audit.
+    aiRationale:
+      type: string
+      description: AI rationale for the suggestion. Used by links audit.
+
 PreflightResultItem:
   type: object
+  description: One page's preflight result; each item in the job result array corresponds to one audited page URL.
   properties:
     audits:
       type: array
+      description: Audits run for this page (e.g. links, alt-text, metatags, body-size, h1-count).
       items:
         type: object
         properties:
           name:
             type: string
-            description: The name of the audit
+            description: The name of the audit (e.g. links, alt-text, metatags).
           opportunities:
             type: array
+            description: Findings for this audit. Each opportunity has a check and an issue (string or array of issue items).
             items:
               type: object
+              description: |
+                One finding. issue is either a single string (single-summary audits like body-size, lorem-ipsum, h1-count)
+                or an array of PreflightOpportunityIssueItem (links, alt-text) with per-item url/issue, and for links
+                optionally elements, aiSuggestion, aiRationale.
               properties:
                 check:
                   type: string
-                  description: The title of the opportunity
+                  description: The title of the opportunity (e.g. broken-internal-links, missing-alt, meta-description).
                 issue:
-                  type: string
-                  description: The description of the opportunity
+                  oneOf:
+                    - type: string
+                      description: |
+                        Single issue description. Used when the opportunity has one summary (e.g. body-size,
+                        lorem-ipsum, h1-count, headings, metatags).
+                    - type: array
+                      description: |
+                        List of structured issue occurrences. Used by links audit (broken-internal-links,
+                        broken-external-links) and alt-text audit; each item is a PreflightOpportunityIssueItem
+                        with url/issue/elements/aiSuggestion/aiRationale for links or src/alt/issue for alt-text.
+                      items:
+                        $ref: '#/PreflightOpportunityIssueItem'
                 seoImpact:
                   type: string
-                  description: The SEO impact of the opportunity
+                  description: SEO impact of the opportunity (when issue is a string).
                 seoRecommendation:
                   type: string
-                  description: The SEO recommendation of the opportunity
+                  description: SEO recommendation for the opportunity (when issue is a string).
                 aiSuggestion:
                   type: string
-                  description: The AI suggestion of the opportunity
+                  description: AI suggestion at opportunity level (when issue is a string).
                 aiRationale:
                   type: string
-                  description: The AI rationale of the opportunity
+                  description: AI rationale at opportunity level (when issue is a string).
           type:
             type: string
-            description: The type of the audit
+            description: The type/category of the audit (e.g. seo, accessibility).
     pageUrl:
       type: string
       format: uri
@@ -6308,3 +6472,110 @@ StageConfigsResponse:
   description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
   items:
     $ref: '#/StageConfigItem'
+
+PlgOnboarding:
+  type: object
+  description: A PLG ASO onboarding record tracking the lifecycle of a domain onboarding.
+  properties:
+    id:
+      $ref: '#/Id'
+    imsOrgId:
+      $ref: '#/ImsOrganizationId'
+    domain:
+      type: string
+      description: The domain being onboarded
+      example: "example.com"
+    baseURL:
+      type: string
+      format: uri
+      description: The composed base URL for the domain
+      example: "https://www.example.com"
+    status:
+      type: string
+      description: Current onboarding status
+      enum:
+        - PRE_ONBOARDING
+        - IN_PROGRESS
+        - ONBOARDED
+        - ERROR
+        - WAITING_FOR_IP_ALLOWLISTING
+        - WAITLISTED
+      example: "ONBOARDED"
+    siteId:
+      $ref: '#/Id'
+    organizationId:
+      $ref: '#/Id'
+    steps:
+      type: object
+      description: Progress tracking for individual onboarding steps
+      properties:
+        orgResolved:
+          type: boolean
+          description: Whether the organization was resolved or created
+        rumVerified:
+          type: boolean
+          description: Whether RUM domain key was verified
+        siteCreated:
+          type: boolean
+          description: Whether a new site was created
+        siteResolved:
+          type: boolean
+          description: Whether the site was resolved (created or found)
+        configUpdated:
+          type: boolean
+          description: Whether site configuration was updated
+        auditsEnabled:
+          type: boolean
+          description: Whether audits were enabled for the site
+        entitlementCreated:
+          type: boolean
+          description: Whether the ASO entitlement was provisioned
+      additionalProperties: false
+      example:
+        orgResolved: true
+        rumVerified: true
+        siteCreated: true
+        siteResolved: true
+        configUpdated: true
+        auditsEnabled: true
+        entitlementCreated: true
+    error:
+      type:
+        - object
+        - 'null'
+      description: Error details if status is ERROR
+      properties:
+        message:
+          type: string
+          description: Error message
+      example: null
+    botBlocker:
+      type:
+        - object
+        - 'null'
+      description: Bot blocker details if the site blocks crawling
+      properties:
+        type:
+          type: string
+          description: Type of bot blocker detected
+        ipsToAllowlist:
+          type: array
+          items:
+            type: string
+          description: IPs that need to be allowlisted
+        userAgent:
+          type: string
+          description: User agent string to allowlist
+      example: null
+    waitlistReason:
+      type:
+        - string
+        - 'null'
+      description: Reason for waitlisting, if applicable
+      example: null
+    completedAt:
+      $ref: '#/DateTime'
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'

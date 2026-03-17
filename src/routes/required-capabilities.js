@@ -56,6 +56,10 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize-routing',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
+  // PLG onboarding - IMS token auth, self-service flow, not S2S
+  'POST /plg/onboard',
+  'GET /plg/onboard/status/:imsOrgId',
+
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
   'POST /sites/:siteId/user-activities',
@@ -117,6 +121,10 @@ const routeRequiredCapabilities = {
   'DELETE /organizations/:organizationId': 'organization:write',
   'GET /organizations/:organizationId/sites': 'site:read',
   'GET /organizations/:organizationId/brands': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',
@@ -312,6 +320,7 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'fix:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
 
   // LLMO
@@ -369,8 +378,6 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/sentiment/topics': 'sentimentTopic:write',
   'PATCH /sites/:siteId/sentiment/topics/:topicId': 'sentimentTopic:write',
   'DELETE /sites/:siteId/sentiment/topics/:topicId': 'sentimentTopic:write',
-  'POST /sites/:siteId/sentiment/topics/:topicId/prompts': 'sentimentTopic:write',
-  'POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove': 'sentimentTopic:write',
 
   // Sentiment - Guidelines
   'GET /sites/:siteId/sentiment/guidelines': 'sentimentGuideline:read',

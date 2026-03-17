@@ -18,8 +18,6 @@
  * - TOPIC_2: enabled, 0 urls
  * - TOPIC_3: disabled
  *
- * Note: urls field is postgrestIgnore so not included here.
- *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
 export const sentimentTopics = [
@@ -28,6 +26,20 @@ export const sentimentTopics = [
     topic_id: 'a1111111-1111-4111-b111-111111111111',
     name: 'Product Quality',
     description: 'Tracks sentiment about product quality',
+    urls: [
+      {
+        url: 'https://en.wikipedia.org/wiki/Product_Quality',
+        times_cited: 10,
+        category: 'manufacturing',
+        sub_prompts: ['How is build quality?'],
+      },
+      {
+        url: 'https://www.reddit.com/r/quality',
+        times_cited: 5,
+        category: 'reviews',
+        sub_prompts: ['Is the product reliable?'],
+      },
+    ],
     enabled: true,
     created_by: 'seed@test.com',
   },
@@ -36,6 +48,7 @@ export const sentimentTopics = [
     topic_id: 'a2222222-2222-4222-a222-222222222222',
     name: 'Customer Service',
     description: 'Tracks sentiment about customer service',
+    urls: [],
     enabled: true,
     created_by: 'seed@test.com',
   },
@@ -44,6 +57,12 @@ export const sentimentTopics = [
     topic_id: 'a3333333-3333-4333-b333-333333333333',
     name: 'Pricing',
     description: 'Tracks sentiment about pricing',
+    urls: [{
+      url: 'https://en.wikipedia.org/wiki/Pricing',
+      times_cited: 3,
+      category: 'pricing',
+      sub_prompts: ['Is it affordable?'],
+    }],
     enabled: false,
     created_by: 'seed@test.com',
   },

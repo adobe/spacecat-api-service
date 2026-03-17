@@ -591,13 +591,25 @@ export async function resolveWwwUrl(site, context) {
  */
 export async function getIsSummitPlgEnabled(site, context) {
   try {
-    const { Configuration } = context.dataAccess || {};
+    const { Configuration, Entitlement } = context.dataAccess || {};
     if (!Configuration) return false;
     const configuration = await Configuration.findLatest();
     if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
       return false;
     }
-    return configuration.isHandlerEnabledForSite('summit-plg', site);
+    if (!configuration.isHandlerEnabledForSite('summit-plg', site)) {
+      return false;
+    }
+
+    const organizationId = site.getOrganizationId();
+    if (!Entitlement || !organizationId) return false;
+
+    const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
+      organizationId,
+      EntitlementModel.PRODUCT_CODES.ASO,
+    );
+
+    return entitlement?.getTier() === EntitlementModel.TIERS.FREE_TRIAL;
   } catch (err) {
     context.log?.error?.('Error checking audit summit-plg for site:', err);
     return false;
@@ -670,6 +682,33 @@ export async function exchangePromiseToken(context, promiseToken) {
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   )).access_token;
   return accessToken;
+}
+
+/**
+ * Parses and retrieves a specific cookie value by name from the request context.
+ * Uses indexOf-based splitting to correctly handle values containing '='
+ * (e.g. base64-encoded or encrypted tokens).
+ * @param {Object} context - The request context with pathInfo.headers.cookie
+ * @param {string} name - The cookie name to look up
+ * @returns {string|null} The cookie value, or null if not found
+ */
+export function getCookieValue(context, name) {
+  const cookieString = context.pathInfo?.headers?.cookie || '';
+  if (!cookieString) return null;
+
+  const cookies = cookieString.split(';');
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+    const idx = trimmed.indexOf('=');
+    if (idx !== -1) {
+      const cookieName = trimmed.substring(0, idx).trim();
+      const cookieValue = trimmed.substring(idx + 1).trim();
+      if (cookieName === name) {
+        return cookieValue;
+      }
+    }
+  }
+  return null;
 }
 
 /**

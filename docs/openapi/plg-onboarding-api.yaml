@@ -1,0 +1,83 @@
+plg-onboard:
+  post:
+    tags:
+      - plg
+    summary: Onboard a domain via PLG ASO flow
+    description: |
+      Performs ASO PLG onboarding for a given domain and IMS organization.
+      Creates or resumes a PlgOnboarding record, resolves/creates the organization and site,
+      checks for bot blockers, configures audits and imports, creates ASO entitlements,
+      and triggers initial audit runs and brand profile generation.
+    operationId: plgOnboard
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - domain
+            properties:
+              domain:
+                type: string
+                format: hostname
+                description: The domain name to onboard (without protocol)
+                example: "example.com"
+              imsOrgId:
+                $ref: './schemas.yaml#/ImsOrganizationId'
+                description: |
+                  Optional IMS Organization ID hint. When provided, must match one of the
+                  caller's token tenants. Use this when the caller belongs to multiple orgs.
+                  If omitted, the first tenant from the token is used.
+    responses:
+      '200':
+        description: PLG onboarding completed or in progress
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '409':
+        description: Conflict - organization creation conflict
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+plg-onboard-status:
+  parameters:
+    - $ref: './parameters.yaml#/imsOrgId'
+  get:
+    tags:
+      - plg
+    summary: Get PLG onboarding status for an IMS org
+    description: |
+      Retrieves all PLG onboarding records for a given IMS Organization ID.
+      Returns the current status and progress of each onboarding.
+    operationId: getPlgOnboardStatus
+    responses:
+      '200':
+        description: List of PLG onboarding records
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
