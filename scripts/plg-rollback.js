@@ -181,24 +181,15 @@ async function rollbackDomain({ domain, imsOrgId }, context) {
     log.info('  Entitlement was not created, skipping delete');
   }
 
-  // Step 3: Delete site (only if created by preonboarding)
+  // Step 3: Site deletion is not supported via the data access layer.
+  // Log the site ID so it can be manually removed if needed.
   if (steps.siteCreated && siteId) {
-    try {
-      const site = await Site.findById(siteId);
-      if (site) {
-        await site.remove();
-        log.info(`  Deleted site ${siteId}`);
-      } else {
-        log.info(`  Site ${siteId} not found, already deleted`);
-      }
-    } catch (error) {
-      log.warn(`  Failed to delete site ${siteId}: ${error.message}`);
-    }
+    log.warn(`  Site ${siteId} was created by preonboarding — manual deletion required (site deletion is a restricted operation)`);
   } else if (siteId) {
     log.info(`  Site ${siteId} was pre-existing, not deleting`);
   }
 
-  // Step 4: Delete org only if it has no remaining sites
+  // Step 4: Org cleanup — only if it has no remaining sites
   if (organizationId) {
     try {
       const organization = await Organization.findById(organizationId);
