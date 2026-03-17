@@ -76,7 +76,7 @@ The S2S Admin and SpaceCat Security Team will review your JIRA request:
 - **Read capabilities** (`*:read`): Generally approved quickly
 - **Write capabilities** (`*:write`): Require business justification and scrutiny
 - **Restricted capabilities**: The following are typically denied:
-  - `fix:write` - Never granted
+  - `fixEntity:write` - Never granted
   - `site:write` - Rarely granted, requires executive approval
   - `organization:write` - Rarely granted, requires executive approval
 
@@ -595,7 +595,7 @@ PATCH /organizations/{id}               → organization:write
 
 ### Restricted Capabilities (Typically Denied)
 
-- `fix:write` - Never granted, internal use only
+- `fixEntity:write` - Never granted, internal use only
 - `site:write` - Rarely granted, requires executive approval
 - `organization:write` - Rarely granted, requires executive approval
 

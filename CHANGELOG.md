@@ -1,3 +1,59 @@
+# [1.353.0](https://github.com/adobe/spacecat-api-service/compare/v1.352.2...v1.353.0) (2026-03-17)
+
+
+### Features
+
+* add `documentPath` in fix entity for manual mark as deployed ([#1835](https://github.com/adobe/spacecat-api-service/issues/1835)) ([1e8d564](https://github.com/adobe/spacecat-api-service/commit/1e8d5641911e2ae9b3818bbb45c5d537ac10e5d7)), closes [this.#ctx](https://github.com/this./issues/ctx) [this.#ctx](https://github.com/this./issues/ctx)
+
+## [1.352.2](https://github.com/adobe/spacecat-api-service/compare/v1.352.1...v1.352.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* derive no-cta autofix URL from contentFix page_patch ([#1972](https://github.com/adobe/spacecat-api-service/issues/1972)) ([1020e93](https://github.com/adobe/spacecat-api-service/commit/1020e93532841db4a31e59223251b46de37aa911))
+
+## [1.352.1](https://github.com/adobe/spacecat-api-service/compare/v1.352.0...v1.352.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* rename fix:read/write capability to fixEntity:read/write ([#1969](https://github.com/adobe/spacecat-api-service/issues/1969)) ([7c76393](https://github.com/adobe/spacecat-api-service/commit/7c763939ed42f01b320e3d9cbfdb919acf537aa1))
+
+# [1.352.0](https://github.com/adobe/spacecat-api-service/compare/v1.351.4...v1.352.0) (2026-03-17)
+
+
+### Features
+
+* added backfill to llm-error-pages ([#1932](https://github.com/adobe/spacecat-api-service/issues/1932)) ([b7ef1e3](https://github.com/adobe/spacecat-api-service/commit/b7ef1e31955c2a2456905aafd6c2ee86fefccf6f))
+
+## [1.351.4](https://github.com/adobe/spacecat-api-service/compare/v1.351.3...v1.351.4) (2026-03-17)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.22.0 ([#1968](https://github.com/adobe/spacecat-api-service/issues/1968)) ([a45df10](https://github.com/adobe/spacecat-api-service/commit/a45df102831a6b9543f2be8d4696c6224f6bc2b7))
+
+## [1.351.3](https://github.com/adobe/spacecat-api-service/compare/v1.351.2...v1.351.3) (2026-03-17)
+
+
+### Bug Fixes
+
+* use promise token cookie in preflight and suggestions controller ([#1917](https://github.com/adobe/spacecat-api-service/issues/1917)) ([ef3feb3](https://github.com/adobe/spacecat-api-service/commit/ef3feb3446620cb879e80a193303c3cab71427ea))
+
+## [1.351.2](https://github.com/adobe/spacecat-api-service/compare/v1.351.1...v1.351.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* Restrict when the Summit PLG (product-led growth) experience is … ([#1967](https://github.com/adobe/spacecat-api-service/issues/1967)) ([744b932](https://github.com/adobe/spacecat-api-service/commit/744b932a434492c861adb0081a93819342a63dd2))
+
+## [1.351.1](https://github.com/adobe/spacecat-api-service/compare/v1.351.0...v1.351.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* improve import service E2E test diagnostics ([#1938](https://github.com/adobe/spacecat-api-service/issues/1938)) ([f94101b](https://github.com/adobe/spacecat-api-service/commit/f94101b011e5c5bf60061e528643c795607354fe))
+
 # [1.351.0](https://github.com/adobe/spacecat-api-service/compare/v1.350.0...v1.351.0) (2026-03-16)
 
 

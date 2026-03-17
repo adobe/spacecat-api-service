@@ -26,7 +26,7 @@ As an S2S Admin, you are responsible for:
 2. **Access Management**: Reviewing and approving capability upgrade requests with security scrutiny
 3. **Security Enforcement**:
    - Scrutinizing write permission requests on all entities
-   - Denying restricted capabilities (e.g., `fix:write`, `organization:write`, `site:write`)
+   - Denying restricted capabilities (e.g., `fixEntity:write`, `organization:write`, `site:write`)
    - Ensuring least-privilege access principles
 4. **Lifecycle Management**: Suspending or revoking consumer access when necessary
 5. **Secret Rotation**: Coordinating secret rotation in response to security incidents or compromised credentials
@@ -162,7 +162,7 @@ When a consumer team requests capability changes:
 
 2. **Check Restricted Capabilities**:
    > 🚨 **CRITICAL**: The following capabilities are RESTRICTED and must be explicitly denied:
-   - `fix:write` - Restricted capability for internal use only
+   - `fixEntity:write` - Restricted capability for internal use only
    - `site:write` - Critical write access, rarely granted
    - `organization:write` - Critical write access, rarely granted
 
@@ -440,7 +440,7 @@ All capabilities must follow the format: `entity:operation`
 | `*:read` | Low | Generally safe, verify legitimate need |
 | `*:write` (general) | **High** | Requires strong business justification |
 | `*:delete` | **Critical** | Rarely granted, executive approval recommended |
-| `fix:write` | **RESTRICTED** | Never grant under any circumstances |
+| `fixEntity:write` | **RESTRICTED** | Never grant under any circumstances |
 | `site:write` | **RESTRICTED** | Critical write access, rarely granted |
 | `organization:write` | **RESTRICTED** | Critical write access, rarely granted |
 | `admin:*` | **INVALID** | Invalid capability |
@@ -449,7 +449,7 @@ All capabilities must follow the format: `entity:operation`
 
 The following capabilities are **RESTRICTED** and should **NEVER** be granted:
 
-1. **`fix:write`**: Restricted capability for internal use only
+1. **`fixEntity:write`**: Restricted capability for internal use only
 2. **`site:write`**: Critical write access to site configurations - rarely granted, requires executive approval
 3. **`organization:write`**: Critical write access to organization configurations - rarely granted, requires executive approval
 4. Wildcard capabilities (e.g., `*:*`, `*:write`)
