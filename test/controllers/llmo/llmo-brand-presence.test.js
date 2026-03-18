@@ -1328,11 +1328,12 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('applies optional filters (category, topic, region, origin)', async () => {
+    it('applies optional filters (category, topicIds, region, origin)', async () => {
+      const topicUuid = '0178a3f0-1234-7000-8000-000000000099';
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.data = {
         categoryId: 'Acrobat',
-        topic: 'pdf editing',
+        topicIds: topicUuid,
         region: 'US',
         origin: 'human',
       };
@@ -1342,9 +1343,36 @@ describe('llmo-brand-presence', () => {
       await handler(mockContext);
 
       expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
-      expect(chainMock.eq).to.have.been.calledWith('topics', 'pdf editing');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', [topicUuid]);
       expect(chainMock.eq).to.have.been.calledWith('region_code', 'US');
       expect(chainMock.ilike).to.have.been.calledWith('origin', 'human');
+    });
+
+    it('filters by topicIds (comma-separated UUIDs) when provided', async () => {
+      const topicUuids = [
+        '0178a3f0-1234-7000-8000-000000000091',
+        '0178a3f0-1234-7000-8000-000000000092',
+      ];
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: topicUuids.join(',') };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+    });
+
+    it('ignores non-UUID topicIds in sentiment-overview', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: 'pdf editing' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
+      expect(topicInCalls).to.have.lengthOf(0);
     });
 
     it('filters by brandId when single brand route', async () => {
