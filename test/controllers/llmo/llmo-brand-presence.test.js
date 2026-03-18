@@ -2861,6 +2861,37 @@ describe('llmo-brand-presence', () => {
       expect(aggregateTopicData(lowRows)[0].popularityVolume).to.equal('Low');
     });
 
+    it('uses empty string fallbacks for null execution_date and other fields', () => {
+      const rows = [
+        {
+          topics: 'T',
+          prompt: null,
+          region_code: null,
+          category_name: null,
+          execution_date: null,
+          url: null,
+          sentiment: null,
+          error_code: null,
+          origin: null,
+          mentions: null,
+          citations: null,
+          visibility_score: null,
+          position: null,
+          volume: null,
+        },
+      ];
+      const result = aggregateTopicData(rows);
+      const item = result[0].items[0];
+      expect(item.executionDate).to.equal('');
+      expect(item.prompt).to.equal('');
+      expect(item.region).to.equal('');
+      expect(item.category).to.equal('');
+      expect(item.relatedURL).to.equal('');
+      expect(item.sentiment).to.equal('');
+      expect(item.errorCode).to.equal('');
+      expect(item.origin).to.equal('');
+    });
+
     it('keeps the latest execution when deduplicating', () => {
       const rows = [
         {
@@ -3155,6 +3186,135 @@ describe('llmo-brand-presence', () => {
         },
       ];
       mockContext.data = { sortBy: 'mentions', sortOrder: 'desc' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topicDetails[0].topic).to.equal('T2');
+      expect(body.topicDetails[1].topic).to.equal('T1');
+    });
+
+    it('uses default pagination when context.data is null', async () => {
+      const rows = [
+        {
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+      ];
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(1);
+    });
+
+    it('falls back to topic field for unknown sortBy', async () => {
+      const rows = [
+        {
+          topics: 'Zebra',
+          prompt: 'q1',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'Apple',
+          prompt: 'q2',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+      ];
+      mockContext.data = { sortBy: 'nonexistent' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topicDetails[0].topic).to.equal('Apple');
+      expect(body.topicDetails[1].topic).to.equal('Zebra');
+    });
+
+    it('handles numeric sorting with zero and NaN values gracefully', async () => {
+      const rows = [
+        {
+          topics: 'T2',
+          prompt: 'q2',
+          region_code: 'US',
+          visibility_score: 50,
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'T1',
+          prompt: 'q1',
+          region_code: 'US',
+          visibility_score: null,
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'T3',
+          prompt: 'q3',
+          region_code: 'US',
+          visibility_score: null,
+          execution_date: '2026-03-01',
+        },
+      ];
+      mockContext.data = {
+        sortBy: 'visibility',
+        sortOrder: 'asc',
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topicDetails[0].averageVisibilityScore).to.equal(0);
+      expect(body.topicDetails[2].topic).to.equal('T2');
+    });
+
+    it('handles numeric sorting when field values are numbers', async () => {
+      const rows = [
+        {
+          topics: 'T1',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          visibility_score: 20,
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'T2',
+          prompt: 'q2',
+          region_code: 'US',
+          mentions: true,
+          visibility_score: 80,
+          execution_date: '2026-03-01',
+        },
+      ];
+      mockContext.data = {
+        sortBy: 'visibility',
+        sortOrder: 'desc',
+      };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
         data: rows,
         error: null,
