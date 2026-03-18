@@ -3922,11 +3922,13 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body).to.have.property('message', 'Assess-urls job queued');
       expect(body).to.have.property('siteId', SITE_ID);
+      expect(body).to.have.property('opportunityId', OPPORTUNITY_ID);
       expect(body).to.have.property('pagesCount', 2);
 
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const payload = mockSqs.sendMessage.firstCall.args[1];
       expect(payload).to.have.property('siteId', SITE_ID);
+      expect(payload).to.have.property('opportunityId', OPPORTUNITY_ID);
       expect(payload).to.have.property('action', 'assess-urls');
       expect(payload).to.deep.include({ pages });
     });
@@ -3942,6 +3944,29 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(202);
       const payload = mockSqs.sendMessage.firstCall.args[1];
       expect(payload).to.have.property('precheckOnly', true);
+    });
+
+    it('passes opportunityId to worker for precheck result persistence', async () => {
+      const pages = ['https://example.com/page1', 'https://example.com/page2'];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body).to.have.property('opportunityId', OPPORTUNITY_ID);
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('opportunityId', OPPORTUNITY_ID);
+      // Verify opportunityId is passed alongside siteId and action
+      expect(payload).to.include({
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        action: 'assess-urls',
+      });
     });
 
     it('accepts pages as array of objects with pageUrl and imageUrls', async () => {
