@@ -16,6 +16,7 @@ import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { computeAuditCompletion } from '../../../../src/support/slack/commands/onboard-status.js';
 
 use(sinonChai);
 
@@ -114,7 +115,6 @@ describe('OnboardStatusCommand', () => {
     it('says error when URL cannot be parsed', async () => {
       extractURLFromSlackInputStub.returns(null);
       const command = OnboardStatusCommand(context);
-      // After extractURLFromSlackInput returns null, the fallback trim+replace of '/' → ''
       await command.handleExecution(['/'], slackContext);
       expect(slackContext.say).to.have.been.calledWith(
         ':x: Could not parse a valid URL. Usage: `onboard status <site-url>`',
@@ -156,10 +156,11 @@ describe('OnboardStatusCommand', () => {
       expect(slackContext.say).to.have.been.calledWith('No opportunities found');
     });
 
-    it('shows checkmark for opportunity with suggestions', async () => {
+    it('shows checkmark for opportunity with suggestions when audit is complete', async () => {
       const opp = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([{ id: 's1' }]) };
       const siteWithOpp = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
+      // audit completed after onboardStartTime
       dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
       ]);
@@ -170,7 +171,7 @@ describe('OnboardStatusCommand', () => {
       expect(slackContext.say).to.have.been.calledWith('Core Web Vitals :white_check_mark:');
     });
 
-    it('shows info icon for opportunity with no suggestions', async () => {
+    it('shows info icon for opportunity with no suggestions when audit is complete', async () => {
       const opp = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([]) };
       const siteWithOpp = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
@@ -182,6 +183,37 @@ describe('OnboardStatusCommand', () => {
       await command.handleExecution([siteUrl], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith('Core Web Vitals :information_source:');
+    });
+
+    it('shows hourglass for opportunity whose source audit is still pending', async () => {
+      const opp = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([{ id: 's1' }]) };
+      const siteWithOpp = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
+      dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
+      // audit predates onboardStartTime → pending
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
+        makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
+      ]);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith('Core Web Vitals :hourglass_flowing_sand:');
+      // getSuggestions should NOT be called — no point fetching for a pending audit
+      expect(opp.getSuggestions).to.not.have.been.called;
+    });
+
+    it('does not fetch suggestions for pending opportunity', async () => {
+      const opp = { getType: sinon.stub().returns('sitemap'), getSuggestions: sinon.stub().resolves([]) };
+      const siteWithOpp = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
+      dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
+        makeAudit('sitemap', new Date(onboardTime - 500).toISOString()),
+      ]);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      expect(opp.getSuggestions).to.not.have.been.called;
     });
 
     it('processes each duplicate opportunity type only once', async () => {
@@ -201,10 +233,10 @@ describe('OnboardStatusCommand', () => {
     });
 
     it('skips opportunity not in expected audit types', async () => {
-      // auditTypes = ['cwv'], opportunity is 'meta-tags' → filtered out
-      const opp = { getType: sinon.stub().returns('meta-tags'), getSuggestions: sinon.stub().resolves([{ id: 's1' }]) };
+      const opp = { getType: sinon.stub().returns('meta-tags'), getSuggestions: sinon.stub().resolves([]) };
       const siteWithMetaTags = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithMetaTags);
+      // auditTypes = ['cwv'], meta-tags opportunity is filtered out
       dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
       ]);
@@ -217,7 +249,6 @@ describe('OnboardStatusCommand', () => {
     });
 
     it('does not filter when auditTypes contain unknown types', async () => {
-      // 'unknown-audit-type' not in AUDIT_OPPORTUNITY_MAP → hasUnknownAuditTypes=true → no filter
       const opp = { getType: sinon.stub().returns('some-opp'), getSuggestions: sinon.stub().resolves([]) };
       const siteWithUnknown = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithUnknown);
@@ -262,21 +293,6 @@ describe('OnboardStatusCommand', () => {
       expect(disclaimer).to.include(`Run \`onboard status ${siteUrl}\``);
     });
 
-    it('shows pending warning when no audit record exists for a type', async () => {
-      dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      // First call: get audit types → ['cwv']
-      dataAccessStub.LatestAudit.allBySiteId
-        .onFirstCall().resolves([makeAudit('cwv', new Date(onboardTime - 1000).toISOString())])
-        // Second call in checkAuditCompletion: no cwv record → cwv is pending
-        .onSecondCall().resolves([]);
-
-      const command = OnboardStatusCommand(context);
-      await command.handleExecution([siteUrl], slackContext);
-
-      const calls = slackContext.say.args.map((a) => a[0]);
-      expect(calls.some((m) => m.includes('may still be in progress'))).to.be.true;
-    });
-
     it('uses singular "audit" grammar when one audit is pending', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
       dataAccessStub.LatestAudit.allBySiteId.resolves([
@@ -309,14 +325,14 @@ describe('OnboardStatusCommand', () => {
     it('falls back to LOOKBACK_MS when getCreatedAt returns null', async () => {
       const site = makeSite({ getCreatedAt: sinon.stub().returns(null) });
       dataAccessStub.Site.findByBaseURL.resolves(site);
+      // Recent audit beats LOOKBACK_MS anchor → all complete
       dataAccessStub.LatestAudit.allBySiteId.resolves([
-        makeAudit('cwv', new Date().toISOString()), // recent audit beats LOOKBACK_MS anchor
+        makeAudit('cwv', new Date().toISOString()),
       ]);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
 
-      // Should complete without error; recent audit beats LOOKBACK_MS anchor → "all complete"
       expect(slackContext.say).to.have.been.calledWith(
         ':white_check_mark: All audits have completed. The statuses above are up to date.',
       );
@@ -334,6 +350,24 @@ describe('OnboardStatusCommand', () => {
       expect(calls.some((m) => m.includes('All audits have completed'))).to.be.false;
     });
 
+    it('excludes infrastructure audit types not in AUDIT_OPPORTUNITY_MAP from disclaimer', async () => {
+      // cwv is in the map; scrape-top-pages is not
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite());
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
+        makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
+        makeAudit('scrape-top-pages', new Date(onboardTime - 1000).toISOString()),
+      ]);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      const calls = slackContext.say.args.map((a) => a[0]);
+      const disclaimer = calls.find((m) => m.includes('may still be in progress'));
+      expect(disclaimer).to.exist;
+      expect(disclaimer).to.include('Core Web Vitals');
+      expect(disclaimer).to.not.include('Scrape Top Pages');
+    });
+
     it('uses kebab-to-Title-Case conversion for audit types not in the title map', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
       dataAccessStub.LatestAudit.allBySiteId.resolves([
@@ -347,28 +381,10 @@ describe('OnboardStatusCommand', () => {
       const disclaimer = calls.find((m) => m.includes('may still be in progress'));
       expect(disclaimer).to.include('Forms Opportunities');
     });
-
-    it('warns and falls back conservatively when checkAuditCompletion DB query fails', async () => {
-      dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      // First call succeeds (get auditTypes), second call fails (in checkAuditCompletion)
-      dataAccessStub.LatestAudit.allBySiteId
-        .onFirstCall().resolves([makeAudit('cwv', new Date(onboardTime + 1000).toISOString())])
-        .onSecondCall().rejects(new Error('DB connection lost'));
-
-      const command = OnboardStatusCommand(context);
-      await command.handleExecution([siteUrl], slackContext);
-
-      expect(context.log.warn).to.have.been.calledWith(
-        sinon.match(/Could not check audit completion for site test-site-id: DB connection lost/),
-      );
-      // Conservative fallback: cwv is treated as pending
-      const calls = slackContext.say.args.map((a) => a[0]);
-      expect(calls.some((m) => m.includes('may still be in progress'))).to.be.true;
-    });
   });
 
   describe('handleExecution — error handling', () => {
-    it('warns and continues when audit types fetch fails', async () => {
+    it('warns and continues when audit fetch fails', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
       dataAccessStub.LatestAudit.allBySiteId.rejects(new Error('timeout'));
 
@@ -378,7 +394,6 @@ describe('OnboardStatusCommand', () => {
       expect(context.log.warn).to.have.been.calledWith(
         sinon.match(/Could not fetch audit types for site test-site-id: timeout/),
       );
-      // Still sends opportunity statuses section
       expect(slackContext.say).to.have.been.calledWith(
         `*Opportunity Statuses for site ${siteUrl}*`,
       );
@@ -390,7 +405,6 @@ describe('OnboardStatusCommand', () => {
       dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
       const command = OnboardStatusCommand(context);
-      // Should complete without throwing
       await command.handleExecution([siteUrl], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
@@ -413,5 +427,20 @@ describe('OnboardStatusCommand', () => {
         sinon.match(/:x: Error checking status for `https:\/\/example\.com`: DB error/),
       );
     });
+  });
+});
+
+describe('computeAuditCompletion', () => {
+  it('marks audit type as pending when no record exists in latestAudits', () => {
+    const onboardStartTime = Date.now() - 3600000;
+    // Pass auditTypes that include 'cwv', but latestAudits has no cwv record
+    const latestAudits = [];
+    const { pendingAuditTypes, completedAuditTypes } = computeAuditCompletion(
+      ['cwv'],
+      onboardStartTime,
+      latestAudits,
+    );
+    expect(pendingAuditTypes).to.deep.equal(['cwv']);
+    expect(completedAuditTypes).to.deep.equal([]);
   });
 });

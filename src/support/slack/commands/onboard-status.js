@@ -58,44 +58,46 @@ const AUDIT_OPPORTUNITY_MAP = {
 };
 
 /**
- * Checks which audit types have completed since onboardStartTime by querying the database.
- * An audit is considered complete when a record exists with auditedAt >= onboardStartTime.
+ * Returns the audit types that can generate the given opportunity type.
+ * @param {string} oppType
+ * @returns {string[]}
+ */
+function getAuditTypesForOpportunity(oppType) {
+  return Object.entries(AUDIT_OPPORTUNITY_MAP)
+    .filter(([, opps]) => opps.includes(oppType))
+    .map(([auditType]) => auditType);
+}
+
+/**
+ * Computes which audit types are pending vs completed from already-fetched audit records.
+ * Pure function — no DB calls.
  *
- * @param {string} siteId
  * @param {string[]} auditTypes
  * @param {number} onboardStartTime - ms timestamp
- * @param {object} dataAccess
- * @param {object} log
- * @returns {Promise<{pendingAuditTypes: string[], completedAuditTypes: string[]}>}
+ * @param {Array} latestAudits - records from LatestAudit.allBySiteId
+ * @returns {{pendingAuditTypes: string[], completedAuditTypes: string[]}}
  */
-async function checkAuditCompletion(siteId, auditTypes, onboardStartTime, dataAccess, log) {
+export function computeAuditCompletion(auditTypes, onboardStartTime, latestAudits) {
   const pendingAuditTypes = [];
   const completedAuditTypes = [];
-  try {
-    const { LatestAudit } = dataAccess;
-    const latestAudits = await LatestAudit.allBySiteId(siteId);
-    const auditsByType = {};
-    if (latestAudits) {
-      for (const audit of latestAudits) {
-        auditsByType[audit.getAuditType()] = audit;
-      }
+  const auditsByType = {};
+  if (latestAudits) {
+    for (const audit of latestAudits) {
+      auditsByType[audit.getAuditType()] = audit;
     }
-    for (const auditType of auditTypes) {
-      const audit = auditsByType[auditType];
-      if (!audit) {
+  }
+  for (const auditType of auditTypes) {
+    const audit = auditsByType[auditType];
+    if (!audit) {
+      pendingAuditTypes.push(auditType);
+    } else {
+      const auditedAt = new Date(audit.getAuditedAt()).getTime();
+      if (onboardStartTime && auditedAt < onboardStartTime) {
         pendingAuditTypes.push(auditType);
       } else {
-        const auditedAt = new Date(audit.getAuditedAt()).getTime();
-        if (onboardStartTime && auditedAt < onboardStartTime) {
-          pendingAuditTypes.push(auditType);
-        } else {
-          completedAuditTypes.push(auditType);
-        }
+        completedAuditTypes.push(auditType);
       }
     }
-  } catch (error) {
-    log.warn(`[onboard-status] Could not check audit completion for site ${siteId}: ${error.message}`);
-    pendingAuditTypes.push(...auditTypes.filter((t) => !completedAuditTypes.includes(t)));
   }
   return { pendingAuditTypes, completedAuditTypes };
 }
@@ -130,7 +132,7 @@ Example:
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
     const { dataAccess, log } = context;
-    const { Site } = dataAccess;
+    const { Site, LatestAudit } = dataAccess;
 
     if (!args || args.length === 0) {
       await say(':x: Please provide a site URL. Usage: `onboard status <site-url>`');
@@ -156,20 +158,7 @@ Example:
 
       const siteId = site.getId();
 
-      // Determine audit types: use what has actually been run for this site
-      let auditTypes = [];
-      try {
-        const { LatestAudit } = dataAccess;
-        const latestAudits = await LatestAudit.allBySiteId(siteId);
-        if (latestAudits && latestAudits.length > 0) {
-          auditTypes = [...new Set(latestAudits.map((a) => a.getAuditType()))];
-        }
-      } catch (auditErr) {
-        log.warn(`[onboard-status] Could not fetch audit types for site ${siteId}: ${auditErr.message}`);
-      }
-
-      // Use site creation time as the lookback anchor so audit records from the original
-      // onboard session are correctly identified. Fall back to LOOKBACK_MS.
+      // Use site creation time as the lookback anchor. Fall back to LOOKBACK_MS.
       let onboardStartTime;
       try {
         const createdAt = site.getCreatedAt();
@@ -178,7 +167,21 @@ Example:
         onboardStartTime = Date.now() - LOOKBACK_MS;
       }
 
-      // Build expected opportunity types from audit types
+      // Fetch latest audits once — derive both auditTypes and pendingAuditTypes from the same data.
+      let auditTypes = [];
+      let pendingAuditTypes = [];
+      try {
+        const latestAudits = await LatestAudit.allBySiteId(siteId);
+        if (latestAudits && latestAudits.length > 0) {
+          auditTypes = [...new Set(latestAudits.map((a) => a.getAuditType()))];
+          const completion = computeAuditCompletion(auditTypes, onboardStartTime, latestAudits);
+          ({ pendingAuditTypes } = completion);
+        }
+      } catch (auditErr) {
+        log.warn(`[onboard-status] Could not fetch audit types for site ${siteId}: ${auditErr.message}`);
+      }
+
+      // Build expected opportunity types from known audit types
       let expectedOpportunityTypes = [];
       let hasUnknownAuditTypes = false;
       for (const auditType of auditTypes) {
@@ -191,7 +194,8 @@ Example:
       }
       expectedOpportunityTypes = [...new Set(expectedOpportunityTypes)];
 
-      // Fetch opportunities and build status lines
+      // Fetch opportunities and build status lines.
+      // Opportunities whose source audit is still pending show ⏳ instead of stale ✅/ℹ️.
       const opportunities = await site.getOpportunities();
       const opportunityStatusLines = [];
       const processedTypes = new Set();
@@ -214,10 +218,17 @@ Example:
         }
         processedTypes.add(oppType);
 
-        const suggestions = await opportunity.getSuggestions();
-        const hasSuggestions = suggestions && suggestions.length > 0;
-        const statusIcon = hasSuggestions ? ':white_check_mark:' : ':information_source:';
-        opportunityStatusLines.push(`${getAuditTitle(oppType)} ${statusIcon}`);
+        const sourceAuditIsPending = getAuditTypesForOpportunity(oppType)
+          .some((auditType) => pendingAuditTypes.includes(auditType));
+
+        if (sourceAuditIsPending) {
+          opportunityStatusLines.push(`${getAuditTitle(oppType)} :hourglass_flowing_sand:`);
+        } else {
+          const suggestions = await opportunity.getSuggestions();
+          const hasSuggestions = suggestions && suggestions.length > 0;
+          const statusIcon = hasSuggestions ? ':white_check_mark:' : ':information_source:';
+          opportunityStatusLines.push(`${getAuditTitle(oppType)} ${statusIcon}`);
+        }
       }
       /* eslint-enable no-await-in-loop */
 
@@ -229,19 +240,18 @@ Example:
         await say('No opportunities found');
       }
 
-      // Audit completion disclaimer
+      // Disclaimer: list pending audits, or confirm all complete
       if (auditTypes.length > 0) {
-        const { pendingAuditTypes } = await checkAuditCompletion(
-          siteId,
-          auditTypes,
-          onboardStartTime,
-          dataAccess,
-          log,
+        // Only list audit types that have known opportunity mappings; infrastructure audits
+        // (auto-suggest, auto-fix, scrape, etc.) are not shown since they don't affect
+        // the displayed opportunity statuses.
+        const relevantPendingTypes = pendingAuditTypes.filter(
+          (t) => AUDIT_OPPORTUNITY_MAP[t]?.length > 0,
         );
-        if (pendingAuditTypes.length > 0) {
-          const pendingList = pendingAuditTypes.map(getAuditTitle).join(', ');
+        if (relevantPendingTypes.length > 0) {
+          const pendingList = relevantPendingTypes.map(getAuditTitle).join(', ');
           await say(
-            `:warning: *Heads-up:* The following audit${pendingAuditTypes.length > 1 ? 's' : ''} `
+            `:warning: *Heads-up:* The following audit${relevantPendingTypes.length > 1 ? 's' : ''} `
             + `may still be in progress: *${pendingList}*.\n`
             + 'The statuses above reflect data available at this moment and may be incomplete. '
             + `Run \`onboard status ${siteUrl}\` again once all audits have completed.`,
