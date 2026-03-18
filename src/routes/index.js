@@ -396,6 +396,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': llmoMysticatController.getSentimentOverview,
     'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': llmoMysticatController.getMarketTrackingTrends,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': llmoMysticatController.getMarketTrackingTrends,
+    'GET /org/:spaceCatId/brands/all/brand-presence/topics': llmoMysticatController.getTopics,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': llmoMysticatController.getTopics,
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
 

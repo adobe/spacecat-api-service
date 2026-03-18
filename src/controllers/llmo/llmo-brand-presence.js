@@ -855,6 +855,249 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
   );
 }
 
+// ── Topics (Data Insights Table) ────────────────────────────────────────────
+
+const SORT_FIELD_MAP = {
+  name: 'topic',
+  visibility: 'averageVisibilityScore',
+  mentions: 'brandMentions',
+  citations: 'brandCitations',
+  sentiment: 'averageSentiment',
+  popularity: 'popularityVolume',
+  position: 'averagePosition',
+};
+
+/**
+ * Builds a deduplication key for prompts within a single topic.
+ * Since all rows in the group already share the same topic name,
+ * the dedup key is prompt|region_code (not including topics).
+ * @internal Exported for testing
+ */
+export function buildTopicPromptKey(row) {
+  const prompt = row.prompt || '';
+  const region = row.region_code || 'Unknown';
+  return `${prompt}|${region}`;
+}
+
+/**
+ * Aggregates raw execution rows into TopicDetail objects.
+ * Groups by topic name, deduplicates prompts by prompt|region_code within
+ * each topic, keeps the latest execution per unique prompt, and computes
+ * topic-level aggregate metrics.
+ *
+ * @param {Array<Object>} rows - Raw brand_presence_executions rows
+ * @returns {Array<Object>} TopicDetail-compatible objects
+ * @internal Exported for testing
+ */
+export function aggregateTopicData(rows) {
+  const topicMap = new Map();
+
+  rows.forEach((row) => {
+    const topicName = row.topics || 'Unknown';
+    if (!topicMap.has(topicName)) {
+      topicMap.set(topicName, new Map());
+    }
+    const promptMap = topicMap.get(topicName);
+    const key = buildTopicPromptKey(row);
+
+    const existing = promptMap.get(key);
+    if (!existing || (row.execution_date > existing.execution_date)) {
+      promptMap.set(key, row);
+    }
+  });
+
+  return [...topicMap.entries()].map(([topicName, promptMap]) => {
+    const prompts = [...promptMap.values()];
+    let totalMentions = 0;
+    let totalCitations = 0;
+    let visibilitySum = 0;
+    let visibilityCount = 0;
+    let positionSum = 0;
+    let positionCount = 0;
+    let sentimentSum = 0;
+    let sentimentCount = 0;
+    let volumeSum = 0;
+    let volumeCount = 0;
+
+    const items = prompts.map((r) => {
+      const mentioned = r.mentions === true || r.mentions === 'true';
+      const cited = r.citations === true || r.citations === 'true';
+      if (mentioned) totalMentions += 1;
+      if (cited) totalCitations += 1;
+
+      const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+      if (!Number.isNaN(vs)) {
+        visibilitySum += vs;
+        visibilityCount += 1;
+      }
+
+      const pos = r.position;
+      if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
+        positionSum += Number(pos);
+        positionCount += 1;
+      }
+
+      const sentiment = (r.sentiment || '').toLowerCase().trim();
+      if (sentiment === 'positive') {
+        sentimentSum += 1;
+        sentimentCount += 1;
+      } else if (sentiment === 'neutral') {
+        sentimentSum += 0.5;
+        sentimentCount += 1;
+      } else if (sentiment === 'negative') {
+        sentimentCount += 1;
+      }
+
+      const vol = r.volume != null ? Number(r.volume) : NaN;
+      if (!Number.isNaN(vol)) {
+        volumeSum += vol;
+        volumeCount += 1;
+      }
+
+      return {
+        topic: topicName,
+        prompt: r.prompt || '',
+        region: r.region_code || '',
+        category: r.category_name || '',
+        executionDate: r.execution_date || '',
+        answer: '',
+        sources: '',
+        relatedURL: r.url || '',
+        citationsCount: cited ? 1 : 0,
+        mentionsCount: mentioned ? 1 : 0,
+        isAnswered: !(r.error_code),
+        visibilityScore: Number.isNaN(vs) ? 0 : vs,
+        position: r.position ? String(r.position) : '',
+        sentiment: r.sentiment || '',
+        errorCode: r.error_code || '',
+        origin: r.origin || '',
+      };
+    });
+
+    const avgVisibility = visibilityCount > 0
+      ? Math.round((visibilitySum / visibilityCount) * 100) / 100 : 0;
+    const avgPosition = positionCount > 0
+      ? Math.round((positionSum / positionCount) * 100) / 100 : 0;
+    const avgSentiment = sentimentCount > 0
+      ? Math.round((sentimentSum / sentimentCount) * 100) / 100 : 0;
+    const avgVolume = volumeCount > 0
+      ? String(Math.round(volumeSum / volumeCount)) : '0';
+
+    return {
+      topic: topicName,
+      items,
+      brandMentions: totalMentions,
+      brandCitations: totalCitations,
+      popularityVolume: avgVolume,
+      averageVisibilityScore: avgVisibility,
+      averagePosition: avgPosition,
+      averageSentiment: avgSentiment,
+    };
+  });
+}
+
+function parsePaginationParams(context) {
+  const q = context.data || {};
+  return {
+    sortBy: q.sortBy || 'name',
+    sortOrder: q.sortOrder || 'asc',
+    page: Number.parseInt(q.page, 10) || 0,
+    pageSize: Number.parseInt(q.pageSize, 10) || 100,
+  };
+}
+
+function sortTopicDetails(topicDetails, sortBy, sortOrder) {
+  const field = SORT_FIELD_MAP[sortBy] || 'topic';
+  const dir = sortOrder === 'desc' ? -1 : 1;
+
+  return topicDetails.sort((a, b) => {
+    const va = a[field];
+    const vb = b[field];
+    if (typeof va === 'string' && typeof vb === 'string') {
+      return dir * va.localeCompare(vb);
+    }
+    return dir * ((Number(va) || 0) - (Number(vb) || 0));
+  });
+}
+
+// eslint-disable-next-line max-len
+const TOPICS_SELECT = 'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+
+/**
+ * Creates the getTopics handler.
+ * Returns topic-level aggregated data with prompt-level items for the
+ * Data Insights table. Supports pagination, sorting, and filtering.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createTopicsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'topics',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const pagination = parsePaginationParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      let q = client
+        .from('brand_presence_executions')
+        .select(TOPICS_SELECT)
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model);
+
+      if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
+      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (shouldApplyFilter(params.categoryId)) {
+        q = isValidUUID(params.categoryId)
+          ? q.eq('category_id', params.categoryId)
+          : q.eq('category_name', params.categoryId);
+      }
+      if (shouldApplyFilter(params.topic)) q = q.eq('topics', params.topic);
+      if (params.topicIds?.length > 0) q = q.in('topic_id', params.topicIds);
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
+      }
+      if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence topics PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const topicDetails = aggregateTopicData(data || []);
+      sortTopicDetails(topicDetails, pagination.sortBy, pagination.sortOrder);
+
+      const totalCount = topicDetails.length;
+      const start = pagination.page * pagination.pageSize;
+      const paged = topicDetails.slice(start, start + pagination.pageSize);
+
+      return ok({ topicDetails: paged, totalCount });
+    },
+  );
+}
+
 /**
  * Creates the getFilterDimensions handler.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
