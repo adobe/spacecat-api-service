@@ -880,6 +880,22 @@ export function buildTopicPromptKey(row) {
 }
 
 /**
+ * Converts the average of imputed volume values to a categorical label.
+ * Backend encoding: -30 = High, -20 = Medium, -10 = Low.
+ * @param {number} volumeSum - Sum of volume values
+ * @param {number} volumeCount - Number of volume values
+ * @returns {string} 'High', 'Medium', 'Low', or 'N/A'
+ */
+function volumeToCategory(volumeSum, volumeCount) {
+  if (volumeCount === 0) return 'N/A';
+  const avg = volumeSum / volumeCount;
+  if (avg <= -25) return 'High';
+  if (avg <= -15) return 'Medium';
+  if (avg < 0) return 'Low';
+  return 'N/A';
+}
+
+/**
  * Aggregates raw execution rows into TopicDetail objects.
  * Groups by topic name, deduplicates prompts by prompt|region_code within
  * each topic, keeps the latest execution per unique prompt, and computes
@@ -939,10 +955,10 @@ export function aggregateTopicData(rows) {
 
       const sentiment = (r.sentiment || '').toLowerCase().trim();
       if (sentiment === 'positive') {
-        sentimentSum += 1;
+        sentimentSum += 100;
         sentimentCount += 1;
       } else if (sentiment === 'neutral') {
-        sentimentSum += 0.5;
+        sentimentSum += 50;
         sentimentCount += 1;
       } else if (sentiment === 'negative') {
         sentimentCount += 1;
@@ -979,9 +995,8 @@ export function aggregateTopicData(rows) {
     const avgPosition = positionCount > 0
       ? Math.round((positionSum / positionCount) * 100) / 100 : 0;
     const avgSentiment = sentimentCount > 0
-      ? Math.round((sentimentSum / sentimentCount) * 100) / 100 : 0;
-    const avgVolume = volumeCount > 0
-      ? String(Math.round(volumeSum / volumeCount)) : '0';
+      ? Math.round(sentimentSum / sentimentCount) : -1;
+    const avgVolume = volumeToCategory(volumeSum, volumeCount);
 
     return {
       topic: topicName,

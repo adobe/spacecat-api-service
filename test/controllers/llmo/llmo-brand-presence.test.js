@@ -2676,8 +2676,8 @@ describe('llmo-brand-presence', () => {
       expect(result[0].brandCitations).to.equal(1);
       expect(result[0].averageVisibilityScore).to.equal(70);
       expect(result[0].averagePosition).to.equal(4);
-      expect(result[0].averageSentiment).to.equal(0.5);
-      expect(result[0].popularityVolume).to.equal('150');
+      expect(result[0].averageSentiment).to.equal(50);
+      expect(result[0].popularityVolume).to.equal('N/A');
     });
 
     it('uses "Unknown" for rows with null topics', () => {
@@ -2711,8 +2711,8 @@ describe('llmo-brand-presence', () => {
       const result = aggregateTopicData(rows);
       expect(result[0].averageVisibilityScore).to.equal(0);
       expect(result[0].averagePosition).to.equal(0);
-      expect(result[0].averageSentiment).to.equal(0);
-      expect(result[0].popularityVolume).to.equal('0');
+      expect(result[0].averageSentiment).to.equal(-1);
+      expect(result[0].popularityVolume).to.equal('N/A');
     });
 
     it('skips "Not Mentioned" positions in average calculation', () => {
@@ -2788,8 +2788,8 @@ describe('llmo-brand-presence', () => {
       expect(result[0].items[0].errorCode).to.equal('TIMEOUT');
     });
 
-    it('handles sentiment scoring: neutral = 0.5', () => {
-      const rows = [
+    it('uses 0-100 sentiment scale: neutral = 50, positive = 100', () => {
+      const neutralRows = [
         {
           topics: 'T',
           prompt: 'q1',
@@ -2798,8 +2798,67 @@ describe('llmo-brand-presence', () => {
           execution_date: '2026-03-01',
         },
       ];
-      const result = aggregateTopicData(rows);
-      expect(result[0].averageSentiment).to.equal(0.5);
+      const neutralResult = aggregateTopicData(neutralRows);
+      expect(neutralResult[0].averageSentiment).to.equal(50);
+
+      const positiveRows = [
+        {
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          sentiment: 'Positive',
+          execution_date: '2026-03-01',
+        },
+      ];
+      const positiveResult = aggregateTopicData(positiveRows);
+      expect(positiveResult[0].averageSentiment).to.equal(100);
+
+      const negativeRows = [
+        {
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          sentiment: 'Negative',
+          execution_date: '2026-03-01',
+        },
+      ];
+      const negativeResult = aggregateTopicData(negativeRows);
+      expect(negativeResult[0].averageSentiment).to.equal(0);
+    });
+
+    it('converts imputed volume values to categorical labels', () => {
+      const highRows = [
+        {
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          volume: -30,
+          execution_date: '2026-03-01',
+        },
+      ];
+      expect(aggregateTopicData(highRows)[0].popularityVolume).to.equal('High');
+
+      const medRows = [
+        {
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          volume: -20,
+          execution_date: '2026-03-01',
+        },
+      ];
+      expect(aggregateTopicData(medRows)[0].popularityVolume).to.equal('Medium');
+
+      const lowRows = [
+        {
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          volume: -10,
+          execution_date: '2026-03-01',
+        },
+      ];
+      expect(aggregateTopicData(lowRows)[0].popularityVolume).to.equal('Low');
     });
 
     it('keeps the latest execution when deduplicating', () => {
