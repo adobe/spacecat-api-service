@@ -556,7 +556,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: { useFilters: 'true' },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       ...context,
     })).to.be.rejectedWith('Failed to filter suggestions by grant status');
   });
@@ -583,7 +583,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: { useFilters: 'true' },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       ...context,
     });
     expect(response.status).to.equal(200);
@@ -592,7 +592,7 @@ describe('Suggestions Controller', () => {
     expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
   });
 
-  it('skips grant filtering when useFilters is not set', async () => {
+  it('skips grant filtering when x-client-type is not sites-optimizer-ui', async () => {
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
       '../../src/support/utils.js': {
         getIsSummitPlgEnabled: async () => true,
@@ -634,7 +634,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: { useFilters: 'true' },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       ...context,
     })).to.be.rejectedWith('Failed to filter suggestions by grant status');
     expect(mockLog.error).to.have.been.calledOnce;
@@ -1723,7 +1723,7 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'not found');
   });
 
-  it('getByID returns not found for summit-plg enabled site with ungranted suggestion when useFilters is true', async () => {
+  it('getByID returns not found for summit-plg enabled site with ungranted suggestion when x-client-type is sites-optimizer-ui', async () => {
     mockSuggestionGrant.isSuggestionGranted.resolves(false);
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
       '../../src/support/utils.js': {
@@ -1741,13 +1741,13 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
-      data: { useFilters: 'true' },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       ...context,
     });
     expect(response.status).to.equal(404);
   });
 
-  it('getByID returns suggestion for summit-plg enabled site with ungranted suggestion when useFilters is not set', async () => {
+  it('getByID returns suggestion for summit-plg enabled site with ungranted suggestion when x-client-type is not sites-optimizer-ui', async () => {
     mockSuggestionGrant.isSuggestionGranted.resolves(false);
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
       '../../src/support/utils.js': {

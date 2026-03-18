@@ -445,6 +445,7 @@ describe('Opportunities Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       });
       expect(response.status).to.equal(200);
       expect(mockContext.log.warn).to.have.been.calledOnce;
@@ -497,6 +498,7 @@ describe('Opportunities Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       });
       expect(response.status).to.equal(200);
       expect(mockContext.log.warn).to.have.been.calledOnceWith(
