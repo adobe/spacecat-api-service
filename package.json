@@ -76,7 +76,7 @@
     "@adobe/spacecat-shared-ahrefs-client": "1.10.7",
     "@adobe/spacecat-shared-athena-client": "1.9.7",
     "@adobe/spacecat-shared-brand-client": "1.1.38",
-    "@adobe/spacecat-shared-data-access": "https://gist.githubusercontent.com/sandsinh/e6c7d5895ece4f0ad3b32a64701faf3b/raw/f5aa0f15c554f5c31bdab9112e95011b6a723ec8/adobe-spacecat-shared-data-access-3.22.0.tgz",
+    "@adobe/spacecat-shared-data-access": "https://gist.githubusercontent.com/sandsinh/e6c7d5895ece4f0ad3b32a64701faf3b/raw/285c2ba0d9740c27994aa01b5df272138895c3b0/adobe-spacecat-shared-data-access-3.22.0.tgz",
     "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-drs-client": "1.3.0",
     "@adobe/spacecat-shared-gpt-client": "1.6.19",
