@@ -1012,6 +1012,31 @@ describe('llmo-brand-presence', () => {
       expect(colors).to.include('#B91C1C');
     });
 
+    it('returns zero percentages when no prompts have sentiment', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09',
+          sentiment: '',
+          prompt: 'p1',
+          region_code: 'US',
+          topics: 't1',
+        },
+        {
+          execution_date: '2026-03-09',
+          sentiment: null,
+          prompt: 'p2',
+          region_code: 'US',
+          topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+
+      expect(result[0].totalPrompts).to.equal(2);
+      expect(result[0].promptsWithSentiment).to.equal(0);
+      const total = result[0].sentiment.reduce((sum, s) => sum + s.value, 0);
+      expect(total).to.equal(0);
+    });
+
     it('ensures percentages sum to 100', () => {
       const rows = [
         {
@@ -1146,6 +1171,36 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.eq).to.have.been.calledWith('topics', 'pdf editing');
       expect(chainMock.eq).to.have.been.calledWith('region_code', 'US');
       expect(chainMock.ilike).to.have.been.calledWith('origin', 'human');
+    });
+
+    it('filters by brandId when single brand route', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith(
+        'brand_id',
+        '0178a3f0-1234-7000-8000-000000000002',
+      );
+    });
+
+    it('filters by category_id when categoryId is a valid UUID', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = {
+        categoryId: '0178a3f0-1234-7000-8000-000000000099',
+      };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith(
+        'category_id',
+        '0178a3f0-1234-7000-8000-000000000099',
+      );
     });
 
     it('uses WEEKS_QUERY_LIMIT (200000) for the query', async () => {
