@@ -264,11 +264,21 @@ describe('OnboardStatusCommand', () => {
   });
 
   describe('handleExecution — audit completion disclaimer', () => {
-    it('shows "all complete" when all audits ran after onboardStartTime', async () => {
+    // All 9 audit types present in AUDIT_OPPORTUNITY_MAP
+    const ALL_MAP_TYPES = [
+      'cwv', 'forms-opportunities', 'meta-tags', 'experimentation-opportunities',
+      'broken-backlinks', 'broken-internal-links', 'sitemap', 'alt-text', 'accessibility',
+    ];
+
+    function makeAllMapAudits(timestamp) {
+      return ALL_MAP_TYPES.map((t) => makeAudit(t, timestamp));
+    }
+
+    it('shows "all complete" when all map-known audits ran after onboardStartTime', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.LatestAudit.allBySiteId.resolves([
-        makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
-      ]);
+      dataAccessStub.LatestAudit.allBySiteId.resolves(
+        makeAllMapAudits(new Date(onboardTime + 1000).toISOString()),
+      );
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -280,9 +290,10 @@ describe('OnboardStatusCommand', () => {
 
     it('shows pending warning when audit predates onboardStartTime', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.LatestAudit.allBySiteId.resolves([
-        makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
-      ]);
+      // cwv is stale; all others are fresh
+      const audits = makeAllMapAudits(new Date(onboardTime + 1000).toISOString());
+      audits[0] = makeAudit('cwv', new Date(onboardTime - 1000).toISOString());
+      dataAccessStub.LatestAudit.allBySiteId.resolves(audits);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -293,11 +304,12 @@ describe('OnboardStatusCommand', () => {
       expect(disclaimer).to.include(`Run \`onboard status ${siteUrl}\``);
     });
 
-    it('uses singular "audit" grammar when one audit is pending', async () => {
+    it('uses singular "audit" grammar when exactly one audit is pending', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.LatestAudit.allBySiteId.resolves([
-        makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
-      ]);
+      // All types fresh except cwv which is stale → only cwv is pending
+      const audits = makeAllMapAudits(new Date(onboardTime + 1000).toISOString());
+      audits[0] = makeAudit('cwv', new Date(onboardTime - 1000).toISOString());
+      dataAccessStub.LatestAudit.allBySiteId.resolves(audits);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -309,10 +321,8 @@ describe('OnboardStatusCommand', () => {
 
     it('uses plural "audits" grammar when multiple audits are pending', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.LatestAudit.allBySiteId.resolves([
-        makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
-        makeAudit('sitemap', new Date(onboardTime - 1000).toISOString()),
-      ]);
+      // No records at all → all map types are pending
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -325,10 +335,10 @@ describe('OnboardStatusCommand', () => {
     it('falls back to LOOKBACK_MS when getCreatedAt returns null', async () => {
       const site = makeSite({ getCreatedAt: sinon.stub().returns(null) });
       dataAccessStub.Site.findByBaseURL.resolves(site);
-      // Recent audit beats LOOKBACK_MS anchor → all complete
-      dataAccessStub.LatestAudit.allBySiteId.resolves([
-        makeAudit('cwv', new Date().toISOString()),
-      ]);
+      // All map types with very recent timestamps beat the 48h LOOKBACK_MS anchor
+      dataAccessStub.LatestAudit.allBySiteId.resolves(
+        makeAllMapAudits(new Date().toISOString()),
+      );
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -338,7 +348,7 @@ describe('OnboardStatusCommand', () => {
       );
     });
 
-    it('skips disclaimer when no audit types found', async () => {
+    it('shows all map-known types as pending when no audit records exist yet', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
       dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
@@ -346,8 +356,18 @@ describe('OnboardStatusCommand', () => {
       await command.handleExecution([siteUrl], slackContext);
 
       const calls = slackContext.say.args.map((a) => a[0]);
-      expect(calls.some((m) => m.includes('may still be in progress'))).to.be.false;
-      expect(calls.some((m) => m.includes('All audits have completed'))).to.be.false;
+      expect(calls.some((m) => m.includes('may still be in progress'))).to.be.true;
+    });
+
+    it('treats null response from allBySiteId as empty and shows all types pending', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite());
+      dataAccessStub.LatestAudit.allBySiteId.resolves(null);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      const calls = slackContext.say.args.map((a) => a[0]);
+      expect(calls.some((m) => m.includes('may still be in progress'))).to.be.true;
     });
 
     it('excludes infrastructure audit types not in AUDIT_OPPORTUNITY_MAP from disclaimer', async () => {

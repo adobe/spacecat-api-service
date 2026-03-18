@@ -167,16 +167,20 @@ Example:
         onboardStartTime = Date.now() - LOOKBACK_MS;
       }
 
-      // Fetch latest audits once — derive both auditTypes and pendingAuditTypes from the same data.
+      // Fetch latest audits — derive auditTypes (for opportunity filtering) from records.
+      // For the pending check, always compare against ALL map-known audit types so that
+      // audits not yet started (no DB record) are correctly identified as pending.
       let auditTypes = [];
       let pendingAuditTypes = [];
       try {
         const latestAudits = await LatestAudit.allBySiteId(siteId);
         if (latestAudits && latestAudits.length > 0) {
           auditTypes = [...new Set(latestAudits.map((a) => a.getAuditType()))];
-          const completion = computeAuditCompletion(auditTypes, onboardStartTime, latestAudits);
-          ({ pendingAuditTypes } = completion);
         }
+        const knownTypes = Object.keys(AUDIT_OPPORTUNITY_MAP);
+        const audits = latestAudits || [];
+        pendingAuditTypes = computeAuditCompletion(knownTypes, onboardStartTime, audits)
+          .pendingAuditTypes;
       } catch (auditErr) {
         log.warn(`[onboard-status] Could not fetch audit types for site ${siteId}: ${auditErr.message}`);
       }
@@ -240,25 +244,23 @@ Example:
         await say('No opportunities found');
       }
 
-      // Disclaimer: list pending audits, or confirm all complete
-      if (auditTypes.length > 0) {
-        // Only list audit types that have known opportunity mappings; infrastructure audits
-        // (auto-suggest, auto-fix, scrape, etc.) are not shown since they don't affect
-        // the displayed opportunity statuses.
-        const relevantPendingTypes = pendingAuditTypes.filter(
-          (t) => AUDIT_OPPORTUNITY_MAP[t]?.length > 0,
+      // Disclaimer: list pending audits, or confirm all complete.
+      // pendingAuditTypes is always computed against all map-known types, so this runs
+      // unconditionally — audits not yet started (no DB record) correctly appear as pending.
+      // Only list types with known opportunity mappings; infrastructure audits are excluded.
+      const relevantPendingTypes = pendingAuditTypes.filter(
+        (t) => AUDIT_OPPORTUNITY_MAP[t]?.length > 0,
+      );
+      if (relevantPendingTypes.length > 0) {
+        const pendingList = relevantPendingTypes.map(getAuditTitle).join(', ');
+        await say(
+          `:warning: *Heads-up:* The following audit${relevantPendingTypes.length > 1 ? 's' : ''} `
+          + `may still be in progress: *${pendingList}*.\n`
+          + 'The statuses above reflect data available at this moment and may be incomplete. '
+          + `Run \`onboard status ${siteUrl}\` again once all audits have completed.`,
         );
-        if (relevantPendingTypes.length > 0) {
-          const pendingList = relevantPendingTypes.map(getAuditTitle).join(', ');
-          await say(
-            `:warning: *Heads-up:* The following audit${relevantPendingTypes.length > 1 ? 's' : ''} `
-            + `may still be in progress: *${pendingList}*.\n`
-            + 'The statuses above reflect data available at this moment and may be incomplete. '
-            + `Run \`onboard status ${siteUrl}\` again once all audits have completed.`,
-          );
-        } else {
-          await say(':white_check_mark: All audits have completed. The statuses above are up to date.');
-        }
+      } else {
+        await say(':white_check_mark: All audits have completed. The statuses above are up to date.');
       }
     } catch (error) {
       log.error(`[onboard-status] Error for ${siteUrl}: ${error.message}`);
