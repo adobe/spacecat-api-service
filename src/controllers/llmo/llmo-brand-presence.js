@@ -109,6 +109,7 @@ function parseFilterDimensionsParams(context) {
     siteId: q.siteId || q.site_id,
     categoryId: q.categoryId || q.category_id,
     topicIds: parseTopicIds(q),
+    topic: q.topic,
     regionCode: q.regionCode || q.region_code || q.region,
     origin: q.origin,
     user_intent: q.user_intent || q.userIntent,
@@ -778,7 +779,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
           ? q.eq('category_id', params.categoryId)
           : q.eq('category_name', params.categoryId);
       }
-      if (shouldApplyFilter(params.topicId)) q = q.eq('topics', params.topicId);
+      if (shouldApplyFilter(params.topic)) q = q.eq('topics', params.topic);
       if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
       if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
 
