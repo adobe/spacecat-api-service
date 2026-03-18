@@ -353,7 +353,7 @@ describe('llmo-brand-presence', () => {
         model: 'gemini',
         site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
         category_id: '0178a3f0-1234-7000-8000-000000000099',
-        topic_id: 't1',
+        topicIds: '0178a3f0-1234-7000-8000-0000000000aa',
         region_code: 'US',
         user_intent: 'TRANSACTIONAL',
         prompt_branding: 'true',
@@ -367,16 +367,20 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.lte).to.have.been.calledWith('execution_date', '2025-01-31');
       expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
       expect(chainMock.eq).to.have.been.calledWith('site_id', 'cccdac43-1a22-4659-9086-b762f59b9928');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', ['0178a3f0-1234-7000-8000-0000000000aa']);
       expect(chainMock.limit).to.have.been.calledWith(5000);
     });
 
     it('returns ok with brands, categories, topics, origins, regions, page_intents', async () => {
+      const topicId1 = '0178a3f0-1234-7000-8000-0000000000a1';
+      const topicId2 = '0178a3f0-1234-7000-8000-0000000000a2';
       const brandData = {
         data: [
           {
             brand_id: '0178a3f0-1234-7000-8000-000000000002',
             brand_name: 'Brand A',
             category_name: 'Cat1',
+            topic_id: topicId1,
             topics: 't1',
             region_code: 'US',
             origin: 'human',
@@ -386,6 +390,7 @@ describe('llmo-brand-presence', () => {
             brand_id: '0178a3f0-1234-7000-8000-000000000003',
             brand_name: 'Brand B',
             category_name: 'Cat2',
+            topic_id: topicId2,
             topics: 't2',
             region_code: 'DE',
             origin: 'ai',
@@ -413,11 +418,48 @@ describe('llmo-brand-presence', () => {
       expect(body.brands[0]).to.have.property('label');
       expect(body.categories).to.have.lengthOf(2);
       expect(body.topics).to.have.lengthOf(2);
+      expect(body.topics[0]).to.deep.include({ id: topicId1, label: 't1' });
+      expect(body.topics[1]).to.deep.include({ id: topicId2, label: 't2' });
       expect(body.origins).to.have.lengthOf(2);
       expect(body.regions).to.have.lengthOf(2);
       expect(body.page_intents).to.have.lengthOf(2);
       expect(body.page_intents[0]).to.have.property('id');
       expect(body.page_intents[0]).to.have.property('label');
+    });
+
+    it('uses topic_id as label when topics is null or empty', async () => {
+      const topicIdNoLabel = '0178a3f0-1234-7000-8000-0000000000ff';
+      const brandData = {
+        data: [
+          {
+            brand_id: '0178a3f0-1234-7000-8000-000000000002',
+            brand_name: 'Brand A',
+            category_name: 'Cat1',
+            topic_id: topicIdNoLabel,
+            topics: null,
+            region_code: 'US',
+            origin: 'human',
+            site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
+          },
+        ],
+        error: null,
+      };
+      const pageIntentsData = {
+        data: [{ page_intent: 'TRANSACTIONAL' }],
+        error: null,
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        brandData,
+        [brandData, pageIntentsData],
+      );
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topics).to.have.lengthOf(1);
+      expect(body.topics[0]).to.deep.include({ id: topicIdNoLabel, label: topicIdNoLabel });
     });
 
     it('filters by brandId when single brand route', async () => {
@@ -469,26 +511,72 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
     });
 
-    it('filters by topicId when provided', async () => {
+    it('filters by topicIds (single UUID) when provided', async () => {
+      const topicUuid = '0178a3f0-1234-7000-8000-0000000000aa';
       const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { topicId: 'combine pdf' };
+      mockContext.data = { topicIds: topicUuid };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('topics', 'combine pdf');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', [topicUuid]);
     });
 
-    it('accepts topic/topics as fallback for topicId', async () => {
+    it('filters by topicIds (comma-separated UUIDs) when provided', async () => {
+      const topicUuids = [
+        '0178a3f0-1234-7000-8000-0000000000aa',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+      ];
       const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { topic: 'combine pdf' };
+      mockContext.data = { topicIds: topicUuids.join(',') };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('topics', 'combine pdf');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+    });
+
+    it('filters by topicIds (array) when provided', async () => {
+      const topicUuids = [
+        '0178a3f0-1234-7000-8000-0000000000aa',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+      ];
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: topicUuids };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+    });
+
+    it('ignores non-UUID topicIds values', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: 'combine pdf' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicIdCalls = chainMock.eq.getCalls().filter((c) => c.args[0] === 'topic_id');
+      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
+      expect(topicIdCalls).to.have.lengthOf(0);
+      expect(topicInCalls).to.have.lengthOf(0);
+    });
+
+    it('does not apply topic filter when topicIds is non-string, non-array value that fails UUID validation', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: 12345 };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
+      expect(topicInCalls).to.have.lengthOf(0);
     });
 
     it('filters by regionCode when provided', async () => {
