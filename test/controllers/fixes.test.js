@@ -16,6 +16,7 @@
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import esmock from 'esmock';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import EntityRegistry from '@adobe/spacecat-shared-data-access/src/models/base/entity.registry.js';
@@ -61,11 +62,18 @@ describe('Fixes Controller', () => {
   /** @type {RequestContext} */
   let requestContext;
   let opportunityGetStub;
+  /**
+   * @type {import('@adobe/spacecat-shared-data-access').SiteCollection
+   *   & { findById: sinon.SinonStub }}
+   */
+  let dataAccess;
 
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
 
-  const log = { ...console, debug: () => undefined, info: () => undefined };
+  const log = {
+    ...console, debug: () => undefined, info: () => undefined, warn: () => undefined,
+  };
 
   beforeEach(() => {
     const { fixEntity, opportunity, suggestion } = electroService.entities;
@@ -78,7 +86,7 @@ describe('Fixes Controller', () => {
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
     const entityRegistry = new EntityRegistry({ postgrest: electroService, s3: null }, {}, log);
-    const dataAccess = entityRegistry.getCollections();
+    dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;
     fixEntitySuggestionCollection = dataAccess.FixEntitySuggestion;
@@ -87,6 +95,9 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'findById');
     sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
     sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
+    sandbox.stub(fixEntityCollection, 'updateByKeys');
+    sandbox.stub(fixEntityCollection, 'getSuggestionsByFixEntityId');
+    sandbox.stub(suggestionCollection, 'bulkUpdateStatus');
     sandbox.stub(suggestionCollection, 'allByIndexKeys');
     sandbox.stub(suggestionCollection, 'findById');
     sandbox.stub(fixEntitySuggestionCollection, 'createMany');
@@ -602,6 +613,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves(suggestions);
       fixEntitySuggestionCollection.allByFixEntityId.resolves(suggestions.map((s) => ({
         getSuggestionId: () => s.getId(),
         getFixEntityId: () => fixId,
@@ -899,6 +913,394 @@ describe('Fixes Controller', () => {
       expect(fixes).have.lengthOf(1);
       expect(fixes[0]).includes({ index: 0, statusCode: 500 });
       expect(fixes[0].message).to.include('Invalid suggestion IDs');
+    });
+
+    describe('document path enrichment (AEM CS and AEM Edge)', () => {
+      let FixesControllerWithStubbedResolver;
+      let getIMSPromiseTokenStub;
+      let exchangePromiseTokenStub;
+      const EDIT_URL = 'https://editor.example.com/page';
+
+      before(async () => {
+        const resolveDocumentPathStub = sinon.stub().resolves(EDIT_URL);
+        getIMSPromiseTokenStub = sinon.stub().resolves({ promise_token: 'mock-promise-token' });
+        exchangePromiseTokenStub = sinon.stub().resolves('mock-ims-access-token');
+        const mod = await esmock('../../src/controllers/fixes.js', {
+          '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+          '../../src/support/utils.js': {
+            getIMSPromiseToken: getIMSPromiseTokenStub,
+            exchangePromiseToken: exchangePromiseTokenStub,
+          },
+        });
+        FixesControllerWithStubbedResolver = mod.FixesController;
+      });
+
+      afterEach(() => {
+        getIMSPromiseTokenStub.resetBehavior();
+        getIMSPromiseTokenStub.resolves({ promise_token: 'mock-promise-token' });
+        exchangePromiseTokenStub.resetBehavior();
+        exchangePromiseTokenStub.resolves('mock-ims-access-token');
+      });
+
+      it('enriches manual fix (origin aso) with documentPath when site is AEM CS', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+      });
+
+      it('enriches manual fix with documentPath when site is AEM Edge and ContentClient is created', async () => {
+        const mockContentClient = {};
+        const mockSite = {
+          getDeliveryType: () => 'aem_edge',
+          getDeliveryConfig: () => ({}),
+        };
+        const mockOpportunity = { getType: () => 'meta-tags', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        const ContentClientStub = { createFrom: sinon.stub().resolves(mockContentClient) };
+        const resolveDocumentPathStub = sinon.stub().resolves(EDIT_URL);
+        const mod = await esmock('../../src/controllers/fixes.js', {
+          '@adobe/spacecat-shared-content-client': { ContentClient: ContentClientStub },
+          '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+          '../../src/support/utils.js': {
+            getIMSPromiseToken: sinon.stub().resolves({ promise_token: 'mock-promise-token' }),
+            exchangePromiseToken: sinon.stub().resolves('mock-ims-access-token'),
+          },
+        });
+        const EdgeFixesController = mod.FixesController;
+
+        fixesController = new EdgeFixesController(
+          {
+            dataAccess,
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'METADATA_UPDATE',
+          opportunityId,
+          changeDetails: { url: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(ContentClientStub.createFrom).to.have.been.calledOnce;
+        expect(resolveDocumentPathStub).to.have.been.calledWith(
+          mockSite,
+          'meta-tags',
+          { url: 'https://example.com/page' },
+          'Bearer mock-ims-access-token',
+          log,
+          mockContentClient,
+        );
+      });
+
+      it('does not enrich when fix already has documentPath in changeDetails', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        const existingDocPath = 'https://already-set.com/editor';
+        // Batch: one needs enrichment, one already has documentPath so
+        // enrichWithDocumentPath returns early at line 333
+        requestContext.data = [
+          {
+            origin: 'aso',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page1' },
+          },
+          {
+            origin: 'aso',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page2', documentPath: existingDocPath },
+          },
+        ];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes).have.lengthOf(2);
+        expect(fixes[0].fix.changeDetails.documentPath).to.equal(EDIT_URL);
+        expect(fixes[1].fix.changeDetails.documentPath).to.equal(existingDocPath);
+      });
+
+      it('enriches fix when origin is aso and changeDetails is undefined (branch coverage)', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: undefined,
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails).to.exist;
+        expect(fixes[0].fix.changeDetails.documentPath).to.equal(EDIT_URL);
+      });
+
+      it('skips enrichment when IMS promise token exchange fails and creates fix', async () => {
+        getIMSPromiseTokenStub.rejects(new Error('Missing Authorization header'));
+        sandbox.stub(log, 'warn');
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          { dataAccess, log },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+        expect(log.warn).to.have.been.calledWith(
+          sinon.match(/Could not prepare documentPath enrichment/),
+        );
+      });
+
+      it('skips enrichment when site is not found in prepareDocumentPathEnrichment (second findById returns null)', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        // checkAccess calls Site.findById first; prepareDocumentPathEnrichment calls it again
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId)
+          .onFirstCall().resolves(mockSite)
+          .onSecondCall()
+          .resolves(null);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+      });
+
+      it('skips enrichment when opportunity is not found in prepareDocumentPathEnrichment', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId)
+          .onFirstCall().resolves(mockOpportunity)
+          .onSecondCall()
+          .resolves(null);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+      });
+
+      it('does not enrich when fix origin is not aso', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        // Batch: one aso (enrichment runs), one worker (enrichWithDocumentPath
+        // returns early at origin check)
+        requestContext.data = [
+          {
+            origin: 'aso',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page1' },
+          },
+          {
+            origin: 'worker',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page2' },
+          },
+        ];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes).have.lengthOf(2);
+        expect(fixes[0].fix.changeDetails.documentPath).to.equal(EDIT_URL);
+        expect(fixes[1].fix.changeDetails.documentPath).to.be.undefined;
+      });
+
+      it('continues when ContentClient.createFrom fails for AEM Edge and logs warning', async () => {
+        sandbox.stub(log, 'warn');
+        const mockSite = {
+          getDeliveryType: () => 'aem_edge',
+          getDeliveryConfig: () => ({}),
+        };
+        const mockOpportunity = { getType: () => 'meta-tags', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        const ContentClientStub = { createFrom: sinon.stub().rejects(new Error('ContentClient init failed')) };
+        const resolveDocumentPathStub = sinon.stub().resolves(null);
+        const mod = await esmock('../../src/controllers/fixes.js', {
+          '@adobe/spacecat-shared-content-client': { ContentClient: ContentClientStub },
+          '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+          '../../src/support/utils.js': {
+            getIMSPromiseToken: sinon.stub().resolves({ promise_token: 'mock-promise-token' }),
+            exchangePromiseToken: sinon.stub().resolves('mock-ims-access-token'),
+          },
+        });
+        const EdgeFixesController = mod.FixesController;
+
+        fixesController = new EdgeFixesController(
+          {
+            dataAccess,
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'METADATA_UPDATE',
+          opportunityId,
+          changeDetails: { url: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+        expect(log.warn).to.have.been.calledWith(
+          sinon.match(/Could not create ContentClient for AEM Edge documentPath enrichment/),
+        );
+      });
     });
   });
 
@@ -1223,6 +1625,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fix.getId())
+        .resolves(suggestions);
 
       const executedAt = '2025-05-19T10:27:27.903Z';
       const publishedAt = '2025-05-19T11:27:27.903Z';
@@ -1269,6 +1674,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fix.getId())
+        .resolves(suggestions);
 
       const newOrigin = FixEntity.ORIGINS.ASO;
       requestContext.data = {
@@ -1582,6 +1990,333 @@ describe('Fixes Controller', () => {
 
       expect(serialized.origin).to.equal(FixEntity.ORIGINS.SPACECAT);
       expect(serialized.status).to.equal(FixEntity.STATUSES.PENDING);
+    });
+  });
+
+  describe('rollbackFailedFix', () => {
+    async function createFixWithStatus(fixEntityId, status, opportunity = opportunityId) {
+      const fix = await fixEntityCollection.create({
+        fixEntityId,
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId: opportunity,
+        status,
+      });
+      fixEntityCollection.findById.withArgs(fixEntityId).resolves(fix);
+      sandbox.stub(fix.patcher, 'save');
+      return fix;
+    }
+
+    async function createSuggestionWithStatus(status, opportunity = opportunityId) {
+      const suggestion = await suggestionCollection.create({
+        opportunityId: opportunity,
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        status,
+      });
+      sandbox.stub(suggestion.patcher, 'save');
+      return suggestion;
+    }
+
+    it('responds 400 if siteId is not a valid UUID', async () => {
+      requestContext.params.siteId = 'not-a-uuid';
+      requestContext.params.fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Site ID required' });
+    });
+
+    it('responds 400 if opportunityId is not a valid UUID', async () => {
+      requestContext.params.opportunityId = 'not-a-uuid';
+      requestContext.params.fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Opportunity ID required' });
+    });
+
+    it('responds 400 if fixId is not a valid UUID', async () => {
+      requestContext.params.fixId = 'not-a-uuid';
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Fix ID required' });
+    });
+
+    it('responds 403 if the request does not have authorization/access', async () => {
+      requestContext.params.fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      accessControlUtil.hasAccess.resolves(false);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only users belonging to the organization may access fix entities.',
+      });
+    });
+
+    it('responds 404 if the fix is not found', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+      fixEntityCollection.findById.withArgs(fixId).resolves(null);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Fix not found' });
+    });
+
+    it('responds 404 if the fix does not belong to the given opportunity', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED', 'different-opportunity-id');
+      fixEntityCollection.findById.withArgs(fixId).resolves(fix);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Opportunity not found' });
+    });
+
+    it('responds 400 if the fix is not in FAILED status', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      await createFixWithStatus(fixId, 'PENDING');
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      const json = await response.json();
+      expect(json.message).to.include("current status is 'PENDING'");
+      expect(json.message).to.include("expected 'FAILED'");
+    });
+
+    it('successfully rolls back when fix has no linked suggestions', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([]);
+      fixEntityCollection.updateByKeys.resolves();
+
+      const mockUpdatedFix = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({}),
+        getOrigin: () => 'SPACECAT',
+        record: { fixEntityId: fixId, status: 'ROLLED_BACK', opportunityId },
+      };
+      fixEntityCollection.findById.withArgs(fixId)
+        .onFirstCall()
+        .resolves(fix)
+        .onSecondCall()
+        .resolves(mockUpdatedFix);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.suggestions.updated).to.have.lengthOf(0);
+      expect(result.message).to.include('0 suggestion(s) marked as SKIPPED');
+    });
+
+    it('successfully rolls back a failed fix with suggestions', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      const suggestion2 = await createSuggestionWithStatus('ERROR');
+      suggestion1.setStatus('SKIPPED');
+      suggestion2.setStatus('SKIPPED');
+
+      const mockFixEntity = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({ arbitrary: 'test value' }),
+        getOrigin: () => 'SPACECAT',
+        record: {
+          fixEntityId: fixId,
+          status: 'ROLLED_BACK',
+          opportunityId,
+          type: 'CONTENT_UPDATE',
+          createdAt: '2025-05-19T01:23:45.678Z',
+        },
+      };
+
+      fixEntityCollection.updateByKeys.resolves();
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1, suggestion2]);
+      suggestionCollection.bulkUpdateStatus.resolves([suggestion1, suggestion2]);
+      fixEntityCollection.findById.withArgs(fixId)
+        .onFirstCall()
+        .resolves(fix)
+        .onSecondCall()
+        .resolves(mockFixEntity);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 200 });
+
+      const result = await response.json();
+      expect(result.message).to.equal(
+        'Fix rolled back successfully. All 2 suggestion(s) marked as SKIPPED.',
+      );
+
+      // Check the wrapped response structure
+      expect(result.fix).to.exist;
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.fix.fix.id).to.equal(fixId); // Normalized id field
+      expect(result.fix.statusCode).to.equal(200);
+      expect(result.fix.index).to.equal(0);
+      expect(result.fix.uuid).to.equal(fixId);
+
+      expect(result.suggestions.updated).to.have.lengthOf(2);
+      expect(result.suggestions.updated[0].suggestion.status).to.equal('SKIPPED');
+      // Normalized id field
+      expect(result.suggestions.updated[0].suggestion.id).to.equal(suggestion1.getId());
+      expect(result.suggestions.updated[0].statusCode).to.equal(200);
+      expect(result.suggestions.updated[0].index).to.equal(0);
+      expect(result.suggestions.updated[0].uuid).to.equal(suggestion1.getId());
+      expect(result.suggestions.updated[1].suggestion.status).to.equal('SKIPPED');
+      // Normalized id field
+      expect(result.suggestions.updated[1].suggestion.id).to.equal(suggestion2.getId());
+      expect(result.suggestions.updated[1].statusCode).to.equal(200);
+      expect(result.suggestions.updated[1].index).to.equal(1);
+      expect(result.suggestions.updated[1].uuid).to.equal(suggestion2.getId());
+    });
+
+    it('handles fixData with id field when fixEntityId is missing', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      suggestion1.setStatus('SKIPPED');
+
+      const mockFixEntity = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({ arbitrary: 'test value' }),
+        getOrigin: () => 'SPACECAT',
+        record: {
+          id: fixId,
+          status: 'ROLLED_BACK',
+          opportunityId,
+          type: 'CONTENT_UPDATE',
+          createdAt: '2025-05-19T01:23:45.678Z',
+        },
+      };
+
+      fixEntityCollection.updateByKeys.resolves();
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1]);
+      suggestionCollection.bulkUpdateStatus.resolves([suggestion1]);
+      fixEntityCollection.findById.withArgs(fixId)
+        .onFirstCall()
+        .resolves(fix)
+        .onSecondCall()
+        .resolves(mockFixEntity);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 200 });
+
+      const result = await response.json();
+      expect(result.message).to.equal(
+        'Fix rolled back successfully. All 1 suggestion(s) marked as SKIPPED.',
+      );
+
+      // With FixDto.toJSON(), the id field is always present because it calls fixEntity.getId()
+      // The DTO normalizes the id field regardless of the underlying record structure
+      expect(result.fix).to.exist;
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.fix.fix.id).to.equal(fixId); // DTO always includes id from getId()
+      expect(result.fix.statusCode).to.equal(200);
+      expect(result.fix.index).to.equal(0);
+      expect(result.fix.uuid).to.equal(fixId); // Controller calls fixEntity.getId() directly
+    });
+
+    it('responds 500 if an error occurs during rollback', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      fix.patcher.save.rejects(new Error('Database connection failed'));
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 500 });
+
+      const result = await response.json();
+      expect(result.message).to.include('Error rolling back fix:');
+    });
+
+    it('reverts fix status and returns 500 when bulkUpdateStatus fails', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      sandbox.spy(fix, 'setStatus');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1]);
+      suggestionCollection.bulkUpdateStatus.rejects(new Error('Suggestion update failed'));
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 500 });
+
+      const result = await response.json();
+      expect(result.message).to.equal('Error rolling back fix: Suggestion update failed');
+
+      // Revert should have been attempted: fix status set back to FAILED and save called
+      expect(fix.setStatus).to.have.been.calledWith('FAILED');
+      expect(fix.patcher.save).to.have.been.calledTwice; // once for ROLLED_BACK, once for revert
+    });
+
+    it('returns 500 with bulk error when bulkUpdateStatus fails and revert save also fails', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1]);
+      suggestionCollection.bulkUpdateStatus.rejects(new Error('Suggestion update failed'));
+      fix.patcher.save.onFirstCall().resolves();
+      fix.patcher.save.onSecondCall().rejects(new Error('Revert save failed'));
+
+      requestContext.log = { error: sandbox.stub() };
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 500 });
+
+      const result = await response.json();
+      expect(result.message).to.equal('Error rolling back fix: Suggestion update failed');
+
+      expect(requestContext.log.error).to.have.been.calledOnce;
+      expect(requestContext.log.error.firstCall.args[0]).to.equal('Failed to revert fix status after suggestion update failure');
     });
   });
 });

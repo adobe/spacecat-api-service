@@ -56,6 +56,10 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize-routing',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
+  // PLG onboarding - IMS token auth, self-service flow, not S2S
+  'POST /plg/onboard',
+  'GET /plg/onboard/status/:imsOrgId',
+
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
   'POST /sites/:siteId/user-activities',
@@ -117,6 +121,14 @@ const routeRequiredCapabilities = {
   'DELETE /organizations/:organizationId': 'organization:write',
   'GET /organizations/:organizationId/sites': 'site:read',
   'GET /organizations/:organizationId/brands': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',
@@ -187,7 +199,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fix:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
@@ -305,14 +317,15 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fix:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': 'suggestion:read',
-  'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'opportunity:write',
-  'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
-  'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
+  'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'fixEntity:write',
+  'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:write',
 
   // LLMO
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',

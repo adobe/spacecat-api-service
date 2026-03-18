@@ -73,6 +73,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
@@ -86,6 +87,7 @@ function isStaticRoute(routePattern) {
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
+ * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -115,6 +117,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  llmoMysticatController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -128,6 +131,7 @@ export default function getRouteHandlers(
   botBlockerController,
   sentimentController,
   consumersController,
+  plgOnboardingController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -339,6 +343,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': (c) => fixesController.getAllSuggestionsForFix(c),
     'POST /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.createFixes(c),
+    'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': (c) => fixesController.rollbackFailedFix(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
@@ -380,6 +385,21 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+
+    // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
+    // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
+    'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
+    'GET /org/:spaceCatId/brands/all/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
+    'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': llmoMysticatController.getSentimentOverview,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': llmoMysticatController.getSentimentOverview,
+    'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': llmoMysticatController.getMarketTrackingTrends,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': llmoMysticatController.getMarketTrackingTrends,
+
+    // PLG Routes
+    'POST /plg/onboard': plgOnboardingController.onboard,
+    'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,

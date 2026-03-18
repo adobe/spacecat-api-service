@@ -408,6 +408,7 @@ describe('Suggestions Controller', () => {
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('alt-text-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('no-cta-above-the-fold-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('form-accessibility-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('product-metatags-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
@@ -3331,6 +3332,54 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
     });
 
+    it('derives no-cta auto-fix URL from contentFix.page_patch.original_page_url', async () => {
+      const noCtaSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CONTENT_UPDATE',
+        rank: 1,
+        status: 'NEW',
+        data: {
+          contentFix: {
+            page_patch: {
+              original_page_url: 'https://example.com/no-cta-page',
+              changes: {
+                type: 'patch',
+                patch: {
+                  operations: [
+                    { op: 'add', path: '/items/0', value: { text: 'Explore' } },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        updatedAt: new Date(),
+      };
+      opportunity.getType = sandbox.stub().returns('no-cta-above-the-fold');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(noCtaSuggestion)]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...noCtaSuggestion, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('url', 'https://example.com/no-cta-page');
+      expect(sqsPayload.suggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
+    });
+
     it('skips bulkUpdateStatus when action is assess and still sends SQS message', async () => {
       opportunity.getType = sandbox.stub().returns('alt-text');
       mockSuggestion.allByOpportunityId.resolves(
@@ -4275,7 +4324,7 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Error getting promise token');
     });
 
-    it('uses x-promise-token header when present instead of IMS', async () => {
+    it('uses promiseToken cookie when present instead of IMS', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -4304,7 +4353,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-            'x-promise-token': 'header-promise-token',
+            cookie: 'promiseToken=promiseToken123',
           },
         },
         params: {
@@ -4316,11 +4365,11 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'header-promise-token');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseToken123');
       expect(getIMSPromiseTokenStub).to.not.have.been.called;
     });
 
-    it('falls back to IMS when x-promise-token header is absent', async () => {
+    it('falls back to IMS when promiseToken cookie is absent', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -4346,7 +4395,7 @@ describe('Suggestions Controller', () => {
       expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
     });
 
-    it('falls back to IMS when x-promise-token header is empty', async () => {
+    it('falls back to IMS when promiseToken cookie is not present among other cookies', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -4358,7 +4407,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-            'x-promise-token': '',
+            cookie: 'otherCookie=abc',
           },
         },
         params: {
