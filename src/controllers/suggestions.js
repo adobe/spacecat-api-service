@@ -188,14 +188,16 @@ function SuggestionsController(ctx, sqs, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Filters suggestions to only granted ones when summit-plg is enabled for the site.
-   * Returns all suggestions unchanged when summit-plg is not enabled.
+   * Filters suggestions to only granted ones when summit-plg is enabled for the site
+   * and useFilters is enabled.
+   * Returns all suggestions unchanged when either condition is not met.
    * @param {Object} site - Site entity.
    * @param {Array} suggestions - Suggestion entities to filter.
+   * @param {boolean} useFilters - Whether grant filtering is enabled.
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
-  const filterByGrantStatus = async (site, suggestions) => {
-    if (!await getIsSummitPlgEnabled(site, ctx)) return suggestions;
+  const filterByGrantStatus = async (site, suggestions, useFilters = false) => {
+    if (!useFilters || !await getIsSummitPlgEnabled(site, ctx)) return suggestions;
     try {
       const ids = suggestions.map((s) => s.getId());
       const { grantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(ids);
@@ -217,6 +219,7 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const viewParam = context.data?.view;
     const statusParam = context.data?.status;
+    const useFilters = context.data?.useFilters === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -260,7 +263,7 @@ function SuggestionsController(ctx, sqs, env) {
         (sugg) => statuses.includes(sugg.getStatus()),
       );
     }
-    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, useFilters);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -281,6 +284,7 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const useFilters = context.data?.useFilters === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -319,7 +323,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, useFilters);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -344,6 +348,7 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
     const viewParam = context.data?.view;
+    const useFilters = context.data?.useFilters === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -375,7 +380,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, useFilters);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -394,6 +399,7 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const useFilters = context.data?.useFilters === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -434,7 +440,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, useFilters);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -458,6 +464,7 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
     const viewParam = context.data?.view;
+    const useFilters = context.data?.useFilters === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -491,7 +498,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    if (await getIsSummitPlgEnabled(site, ctx)
+    if (useFilters && await getIsSummitPlgEnabled(site, ctx)
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
@@ -1018,14 +1025,6 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );
-    const requestedSuggestions = suggestions.filter((s) => suggestionIds.includes(s.getId()));
-    if (await getIsSummitPlgEnabled(site, ctx) && requestedSuggestions.length > 0) {
-      const requestedIds = requestedSuggestions.map((s) => s.getId());
-      const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(requestedIds);
-      if (notGrantedIds.length > 0) {
-        return badRequest('All suggestion IDs must be granted before autofix can be executed');
-      }
-    }
     const validSuggestions = [];
     const failedSuggestions = [];
     suggestions.forEach((suggestion) => {

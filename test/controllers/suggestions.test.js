@@ -541,13 +541,103 @@ describe('Suggestions Controller', () => {
 
   it('propagates error when grant filtering throws an error', async () => {
     mockSuggestionGrant.splitSuggestionsByGrantStatus.rejects(new Error('db failure'));
-    await expect(suggestionsController.getAllForOpportunity({
+    const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithSummitPlg = ControllerWithSummitPlg({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    await expect(controllerWithSummitPlg.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { useFilters: 'true' },
+      ...context,
+    })).to.be.rejectedWith('Failed to filter suggestions by grant status');
+  });
+
+  it('filters suggestions by grant status when summit-plg is enabled', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: [],
+      grantIds: [`grant-${grantedId}`],
+    });
+    const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithSummitPlg = ControllerWithSummitPlg({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithSummitPlg.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { useFilters: 'true' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+  });
+
+  it('skips grant filtering when useFilters is not set', async () => {
+    const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithSummitPlg = ControllerWithSummitPlg({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resetHistory();
+    const response = await controllerWithSummitPlg.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.not.have.been.called;
+  });
+
+  it('propagates error and logs when grant filtering throws a non-Error value', async () => {
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.callsFake(() => Promise.reject({ code: 500 }));
+    const mockLog = { error: sandbox.stub() };
+    const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithSummitPlg = ControllerWithSummitPlg({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      log: mockLog,
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    await expect(controllerWithSummitPlg.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { useFilters: 'true' },
+      ...context,
     })).to.be.rejectedWith('Failed to filter suggestions by grant status');
+    expect(mockLog.error).to.have.been.calledOnce;
   });
 
   it('returns all suggestions without grant filtering when summit-plg is not enabled', async () => {
@@ -1633,9 +1723,43 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'not found');
   });
 
-  it('getByID returns not found for summit-plg enabled site with ungranted suggestion', async () => {
+  it('getByID returns not found for summit-plg enabled site with ungranted suggestion when useFilters is true', async () => {
     mockSuggestionGrant.isSuggestionGranted.resolves(false);
-    const response = await suggestionsController.getByID({
+    const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithSummitPlg = ControllerWithSummitPlg({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithSummitPlg.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: { useFilters: 'true' },
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+  });
+
+  it('getByID returns suggestion for summit-plg enabled site with ungranted suggestion when useFilters is not set', async () => {
+    mockSuggestionGrant.isSuggestionGranted.resolves(false);
+    const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithSummitPlg = ControllerWithSummitPlg({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithSummitPlg.getByID({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -1643,7 +1767,7 @@ describe('Suggestions Controller', () => {
       },
       ...context,
     });
-    expect(response.status).to.equal(404);
+    expect(response.status).to.equal(200);
   });
 
   describe('getSuggestionFixes', () => {
@@ -3314,26 +3438,6 @@ describe('Suggestions Controller', () => {
 
     afterEach(() => {
       sandbox.restore();
-    });
-
-    it('returns bad request when any suggestion ID is not granted for autofix', async () => {
-      opportunity.getType = sandbox.stub().returns('meta-tags');
-      const requestedEntities = [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])];
-      mockSuggestion.allByOpportunityId.resolves(requestedEntities);
-      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
-        grantedIds: [requestedEntities[0].getId()],
-        notGrantedIds: [requestedEntities[1].getId()],
-        grantIds: ['grant-1'],
-      });
-      const response = await suggestionsControllerWithMock.autofixSuggestions({
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
-        ...context,
-      });
-      expect(response.status).to.equal(400);
-      const body = await response.json();
-      expect(body).to.have.property('message', 'All suggestion IDs must be granted before autofix can be executed');
-      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {

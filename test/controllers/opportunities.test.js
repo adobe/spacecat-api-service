@@ -413,14 +413,27 @@ describe('Opportunities Controller', () => {
         isHandlerEnabledForSite: sandbox.stub().returns(true),
       }),
     };
+    const mockSiteWithOrg = {
+      findById: sandbox.stub().resolves({
+        getId: () => SITE_ID,
+        getOrganizationId: () => 'org-123',
+      }),
+    };
+    const mockEntitlement = {
+      findByOrganizationIdAndProductCode: sandbox.stub().resolves({
+        getTier: () => 'FREE_TRIAL',
+      }),
+    };
     const ctxWithToken = {
       ...mockContext,
       dataAccess: {
         ...mockOpportunityDataAccess,
+        Site: mockSiteWithOrg,
         Suggestion: mockSuggestion,
         SuggestionGrant: mockSuggestionGrant,
         Token: mockToken,
         Configuration: mockConfig,
+        Entitlement: mockEntitlement,
       },
     };
     const controllerWithToken = OpportunitiesController(ctxWithToken);
@@ -451,10 +464,16 @@ describe('Opportunities Controller', () => {
     };
     const mockSiteEntity = {
       getId: () => SITE_ID,
+      getOrganizationId: () => 'org-123',
     };
     const mockConfig = {
       findLatest: sandbox.stub().resolves({
         isHandlerEnabledForSite: sandbox.stub().returns(true),
+      }),
+    };
+    const mockEntitlement = {
+      findByOrganizationIdAndProductCode: sandbox.stub().resolves({
+        getTier: () => 'FREE_TRIAL',
       }),
     };
     const ctxWithToken = {
@@ -466,6 +485,7 @@ describe('Opportunities Controller', () => {
         SuggestionGrant: {},
         Token: mockToken,
         Configuration: mockConfig,
+        Entitlement: mockEntitlement,
       },
     };
     const controllerWithToken = OpportunitiesController(ctxWithToken);
