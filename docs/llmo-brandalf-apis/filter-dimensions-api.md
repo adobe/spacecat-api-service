@@ -26,7 +26,7 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 | `model` | — | string | `chatgpt` | LLM model (e.g. chatgpt, gemini, copilot) |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site |
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category. If UUID → `category_id`; if not UUID (e.g. "Acrobat") → `category_name` |
-| `topicId` | `topic_id`, `topic`, `topics` | string | — | Filter by topic (exact match on `topics` column) |
+| `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated UUIDs (e.g. `uuid1,uuid2`), or repeated param. Non-UUID values are ignored. Uses `topic_id` column. |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
 | `origin` | — | string | — | Filter by origin (exact match, case-insensitive; e.g. `human`, `ai`) |
 
@@ -49,12 +49,17 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 ## Sample URL (All Parameters)
 
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicId=combine%20pdf&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=AI
+```
+
+**Multiple topicIds (comma-separated):**
+```
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?topicIds=uuid1,uuid2,uuid3
 ```
 
 **Single brand variant:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicId=combine%20pdf&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=AI
 ```
 
 ---
@@ -70,7 +75,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
     { "id": "Acrobat", "label": "Acrobat" }
   ],
   "topics": [
-    { "id": "combine pdf", "label": "combine pdf" }
+    { "id": "0178a3f0-1234-7000-8000-0000000000aa", "label": "combine pdf" }
   ],
   "origins": [
     { "id": "ai", "label": "ai" }
@@ -97,7 +102,7 @@ The API builds a PostgREST query against the `brand_presence_executions` table. 
 // Base query
 client
   .from('brand_presence_executions')
-  .select('brand_id, brand_name, category_name, topics, origin, region_code, site_id')
+  .select('brand_id, brand_name, category_name, topic_id, topics, origin, region_code, site_id')
   .eq('organization_id', organizationId)
   .gte('execution_date', startDate)
   .lte('execution_date', endDate)
@@ -107,20 +112,22 @@ client
   .eq('site_id', siteId)                    // if siteId
   .eq('brand_id', brandId)                  // if brandId !== 'all' (path param)
   .eq('category_id', categoryId)            // if categoryId is valid UUID
-  .eq('category_name', categoryId)          // if categoryId is NOT valid UUID (e.g. "Acrobat")
-  .eq('topics', topicId)                    // if topicId
+  .eq('category_name', categoryId)         // if categoryId is NOT valid UUID (e.g. "Acrobat")
+  .in('topic_id', topicIds)                // if topicIds (array of valid UUIDs; single or multiple)
   .eq('region_code', regionCode)            // if regionCode
   .ilike('origin', origin)                  // if origin (exact match, case-insensitive)
 
   .limit(5000)
 ```
 
-**Equivalent PostgREST HTTP request** (example with all filters):
+**Equivalent PostgREST HTTP request** (example with all filters, including multiple topicIds):
 ```
-GET /brand_presence_executions?select=brand_id,brand_name,category_name,topics,origin,region_code&organization_id=eq.44568c3e-efd4-4a7f-8ecd-8caf615f836c&execution_date=gte.2025-09-27&execution_date=lte.2025-09-30&model=eq.google-ai-mode&site_id=eq.c2473d89-e997-458d-a86d-b4096649c12b&category_name=eq.Acrobat&topics=eq.combine%20pdf&region_code=eq.US&origin=ilike.ai&limit=5000
+GET /brand_presence_executions?select=brand_id,brand_name,category_name,topic_id,topics,origin,region_code,site_id&organization_id=eq.44568c3e-efd4-4a7f-8ecd-8caf615f836c&execution_date=gte.2025-09-27&execution_date=lte.2025-09-30&model=eq.google-ai-mode&site_id=eq.c2473d89-e997-458d-a86d-b4096649c12b&category_name=eq.Acrobat&topic_id=in.(uuid1,uuid2)&region_code=eq.US&origin=ilike.ai&limit=5000
 ```
 
-**Response processing:** The API deduplicates and sorts the results to build `brands`, `categories`, `topics`, `origins`, `regions`, and `page_intents` arrays. Each array is an array of `{ id, label }` objects.
+**topicIds parsing:** Accepts `topicIds` as a comma-separated string (`uuid1,uuid2`), an array, or a single UUID. Non-UUID values are filtered out. The filter uses `topic_id IN (...)` (PostgREST `topic_id=in.(...)`).
+
+**Response processing:** The API deduplicates and sorts the results to build `brands`, `categories`, `topics`, `origins`, `regions`, and `page_intents` arrays. Each array is an array of `{ id, label }` objects. For `topics`, `id` is the `topic_id` (UUID) and `label` is the denormalized topic name from the `topics` column; only rows with non-null `topic_id` are included.
 
 ---
 
