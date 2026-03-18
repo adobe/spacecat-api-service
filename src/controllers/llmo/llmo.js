@@ -833,6 +833,38 @@ function LlmoController(ctx) {
     }
   };
 
+  // Handles requests to update per-site country code ignore list for CDN logs reports
+  const patchLlmoCountryCodeIgnoreList = async (context) => {
+    const { log } = context;
+    const { data } = context;
+    const { siteId } = context.params;
+
+    try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the country code ignore list');
+      }
+
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
+
+      if (!isObject(data)) {
+        return badRequest('Update data must be provided as an object');
+      }
+
+      const { countryCodeIgnoreList } = data;
+
+      config.updateLlmoCountryCodeIgnoreList(countryCodeIgnoreList);
+
+      await saveSiteConfig(site, config, log, 'updating country code ignore list');
+
+      return ok(config.getLlmoConfig().countryCodeIgnoreList || []);
+    } catch (error) {
+      log.error(`Error updating country code ignore list for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   /**
    * Onboards a new customer to LLMO.
    * This endpoint handles the complete onboarding process for net new customers
@@ -1702,6 +1734,7 @@ function LlmoController(ctx) {
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
     patchLlmoCdnBucketConfig,
+    patchLlmoCountryCodeIgnoreList,
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,

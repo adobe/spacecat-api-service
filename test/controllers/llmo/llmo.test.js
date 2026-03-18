@@ -330,6 +330,7 @@ describe('LlmoController', () => {
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
       updateLlmoCdnBucketConfig: sinon.stub(),
+      updateLlmoCountryCodeIgnoreList: sinon.stub(),
       addLlmoTag: sinon.stub(),
       state: { llmo: mockLlmoConfig },
       getSlackConfig: sinon.stub().returns(null),
@@ -2455,6 +2456,77 @@ describe('LlmoController', () => {
     it('should return 404 when site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+      expect(result.status).to.equal(404);
+    });
+  });
+
+  describe('patchLlmoCountryCodeIgnoreList', () => {
+    beforeEach(() => {
+      mockContext.data = {
+        countryCodeIgnoreList: ['PS', 'AD'],
+      };
+    });
+
+    it('should update country code ignore list successfully', async () => {
+      const result = await controller.patchLlmoCountryCodeIgnoreList(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.updateLlmoCountryCodeIgnoreList).to.have.been.calledWith(
+        mockContext.data.countryCodeIgnoreList,
+      );
+    });
+
+    it('should return bad request when no data provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.patchLlmoCountryCodeIgnoreList(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('should handle errors and log them', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('Database error'));
+
+      const result = await controller.patchLlmoCountryCodeIgnoreList(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error updating country code ignore list for siteId: ${TEST_SITE_ID}, error: Database error`,
+      );
+    });
+
+    it('should return empty array when getLlmoConfig().countryCodeIgnoreList is null', async () => {
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: TEST_FOLDER,
+        brand: TEST_BRAND,
+        countryCodeIgnoreList: null,
+      });
+
+      const result = await controller.patchLlmoCountryCodeIgnoreList(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.be.an('array');
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.patchLlmoCountryCodeIgnoreList(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the country code ignore list');
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.patchLlmoCountryCodeIgnoreList(mockContext);
       expect(result.status).to.equal(404);
     });
   });

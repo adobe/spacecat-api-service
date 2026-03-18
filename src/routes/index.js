@@ -372,6 +372,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
+    'PATCH /sites/:siteId/llmo/country-code-ignore-list': llmoController.patchLlmoCountryCodeIgnoreList,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
