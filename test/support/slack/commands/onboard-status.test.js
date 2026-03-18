@@ -51,7 +51,7 @@ describe('OnboardStatusCommand', () => {
 
     dataAccessStub = {
       Site: { findByBaseURL: sinon.stub() },
-      Audit: { allLatestForSite: sinon.stub() },
+      LatestAudit: { allBySiteId: sinon.stub() },
     };
 
     context = {
@@ -134,7 +134,7 @@ describe('OnboardStatusCommand', () => {
 
     it('sends hourglass message immediately after site found', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([]);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -148,7 +148,7 @@ describe('OnboardStatusCommand', () => {
   describe('handleExecution — opportunity statuses', () => {
     it('shows "No opportunities found" when site has no opportunities', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([]);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -160,7 +160,7 @@ describe('OnboardStatusCommand', () => {
       const opp = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([{ id: 's1' }]) };
       const siteWithOpp = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
       ]);
 
@@ -174,7 +174,7 @@ describe('OnboardStatusCommand', () => {
       const opp = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([]) };
       const siteWithOpp = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
       ]);
 
@@ -189,7 +189,7 @@ describe('OnboardStatusCommand', () => {
       const opp2 = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([{ id: 's2' }]) };
       const siteWithDupes = makeSite({ getOpportunities: sinon.stub().resolves([opp1, opp2]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithDupes);
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
       ]);
 
@@ -205,7 +205,7 @@ describe('OnboardStatusCommand', () => {
       const opp = { getType: sinon.stub().returns('meta-tags'), getSuggestions: sinon.stub().resolves([{ id: 's1' }]) };
       const siteWithMetaTags = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithMetaTags);
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
       ]);
 
@@ -221,7 +221,7 @@ describe('OnboardStatusCommand', () => {
       const opp = { getType: sinon.stub().returns('some-opp'), getSuggestions: sinon.stub().resolves([]) };
       const siteWithUnknown = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithUnknown);
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('unknown-audit-type', new Date(onboardTime + 1000).toISOString()),
       ]);
 
@@ -235,7 +235,7 @@ describe('OnboardStatusCommand', () => {
   describe('handleExecution — audit completion disclaimer', () => {
     it('shows "all complete" when all audits ran after onboardStartTime', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
       ]);
 
@@ -249,7 +249,7 @@ describe('OnboardStatusCommand', () => {
 
     it('shows pending warning when audit predates onboardStartTime', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
       ]);
 
@@ -263,14 +263,9 @@ describe('OnboardStatusCommand', () => {
     });
 
     it('shows pending warning when no audit record exists for a type', async () => {
-      // allLatestForSite returns no records → all auditTypes pending
-      // But wait: auditTypes is derived from allLatestForSite on first call.
-      // If it returns [], auditTypes=[] and no disclaimer is shown.
-      // To test "no record for a type": first call returns records for getting auditTypes,
-      // second call (in checkAuditCompletion) returns records for a DIFFERENT type.
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
       // First call: get audit types → ['cwv']
-      dataAccessStub.Audit.allLatestForSite
+      dataAccessStub.LatestAudit.allBySiteId
         .onFirstCall().resolves([makeAudit('cwv', new Date(onboardTime - 1000).toISOString())])
         // Second call in checkAuditCompletion: no cwv record → cwv is pending
         .onSecondCall().resolves([]);
@@ -284,7 +279,7 @@ describe('OnboardStatusCommand', () => {
 
     it('uses singular "audit" grammar when one audit is pending', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
       ]);
 
@@ -298,7 +293,7 @@ describe('OnboardStatusCommand', () => {
 
     it('uses plural "audits" grammar when multiple audits are pending', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
         makeAudit('sitemap', new Date(onboardTime - 1000).toISOString()),
       ]);
@@ -314,8 +309,8 @@ describe('OnboardStatusCommand', () => {
     it('falls back to LOOKBACK_MS when getCreatedAt returns null', async () => {
       const site = makeSite({ getCreatedAt: sinon.stub().returns(null) });
       dataAccessStub.Site.findByBaseURL.resolves(site);
-      dataAccessStub.Audit.allLatestForSite.resolves([
-        makeAudit('cwv', new Date().toISOString()), // recent — will be "complete" vs LOOKBACK_MS anchor
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
+        makeAudit('cwv', new Date().toISOString()), // recent audit beats LOOKBACK_MS anchor
       ]);
 
       const command = OnboardStatusCommand(context);
@@ -329,7 +324,7 @@ describe('OnboardStatusCommand', () => {
 
     it('skips disclaimer when no audit types found', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([]);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -341,7 +336,7 @@ describe('OnboardStatusCommand', () => {
 
     it('uses kebab-to-Title-Case conversion for audit types not in the title map', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.resolves([
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('forms-opportunities', new Date(onboardTime - 1000).toISOString()),
       ]);
 
@@ -356,7 +351,7 @@ describe('OnboardStatusCommand', () => {
     it('warns and falls back conservatively when checkAuditCompletion DB query fails', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
       // First call succeeds (get auditTypes), second call fails (in checkAuditCompletion)
-      dataAccessStub.Audit.allLatestForSite
+      dataAccessStub.LatestAudit.allBySiteId
         .onFirstCall().resolves([makeAudit('cwv', new Date(onboardTime + 1000).toISOString())])
         .onSecondCall().rejects(new Error('DB connection lost'));
 
@@ -375,7 +370,7 @@ describe('OnboardStatusCommand', () => {
   describe('handleExecution — error handling', () => {
     it('warns and continues when audit types fetch fails', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
-      dataAccessStub.Audit.allLatestForSite.rejects(new Error('timeout'));
+      dataAccessStub.LatestAudit.allBySiteId.rejects(new Error('timeout'));
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);
@@ -392,7 +387,7 @@ describe('OnboardStatusCommand', () => {
     it('falls back to LOOKBACK_MS when getCreatedAt throws', async () => {
       const site = makeSite({ getCreatedAt: sinon.stub().throws(new Error('no field')) });
       dataAccessStub.Site.findByBaseURL.resolves(site);
-      dataAccessStub.Audit.allLatestForSite.resolves([]);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
       const command = OnboardStatusCommand(context);
       // Should complete without throwing
@@ -406,7 +401,7 @@ describe('OnboardStatusCommand', () => {
     it('logs error and says error when getOpportunities throws', async () => {
       const site = makeSite({ getOpportunities: sinon.stub().rejects(new Error('DB error')) });
       dataAccessStub.Site.findByBaseURL.resolves(site);
-      dataAccessStub.Audit.allLatestForSite.resolves([]);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
 
       const command = OnboardStatusCommand(context);
       await command.handleExecution([siteUrl], slackContext);

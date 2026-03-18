@@ -72,8 +72,8 @@ async function checkAuditCompletion(siteId, auditTypes, onboardStartTime, dataAc
   const pendingAuditTypes = [];
   const completedAuditTypes = [];
   try {
-    const { Audit } = dataAccess;
-    const latestAudits = await Audit.allLatestForSite(siteId);
+    const { LatestAudit } = dataAccess;
+    const latestAudits = await LatestAudit.allBySiteId(siteId);
     const auditsByType = {};
     if (latestAudits) {
       for (const audit of latestAudits) {
@@ -159,8 +159,8 @@ Example:
       // Determine audit types: use what has actually been run for this site
       let auditTypes = [];
       try {
-        const { Audit } = dataAccess;
-        const latestAudits = await Audit.allLatestForSite(siteId);
+        const { LatestAudit } = dataAccess;
+        const latestAudits = await LatestAudit.allBySiteId(siteId);
         if (latestAudits && latestAudits.length > 0) {
           auditTypes = [...new Set(latestAudits.map((a) => a.getAuditType()))];
         }
