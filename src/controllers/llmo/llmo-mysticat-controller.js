@@ -13,7 +13,7 @@
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
   createFilterDimensionsHandler,
-  createBrandPresenceWeeksHandler,
+  createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
 } from './llmo-brand-presence.js';
 
@@ -42,11 +42,13 @@ function LlmoMysticatController(ctx) {
   const getFilterDimensions = createFilterDimensionsHandler(getOrgAndValidateAccess);
   const getBrandPresenceWeeks = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
   const getMarketTrackingTrends = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+  const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
 
   return {
     getFilterDimensions,
     getBrandPresenceWeeks,
     getMarketTrackingTrends,
+    getSentimentOverview,
   };
 }
 

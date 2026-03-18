@@ -1,3 +1,17 @@
+## [1.353.1](https://github.com/adobe/spacecat-api-service/compare/v1.353.0...v1.353.1) (2026-03-18)
+
+
+### Bug Fixes
+
+* llmo mysticat apis allow passing multiple topicIds ([#1982](https://github.com/adobe/spacecat-api-service/issues/1982)) ([dcbc2f1](https://github.com/adobe/spacecat-api-service/commit/dcbc2f1777b23e3bfdfe3820c83d9b1a3ecbef76))
+
+# [1.353.0](https://github.com/adobe/spacecat-api-service/compare/v1.352.2...v1.353.0) (2026-03-17)
+
+
+### Features
+
+* add `documentPath` in fix entity for manual mark as deployed ([#1835](https://github.com/adobe/spacecat-api-service/issues/1835)) ([1e8d564](https://github.com/adobe/spacecat-api-service/commit/1e8d5641911e2ae9b3818bbb45c5d537ac10e5d7)), closes [this.#ctx](https://github.com/this./issues/ctx) [this.#ctx](https://github.com/this./issues/ctx)
+
 ## [1.352.2](https://github.com/adobe/spacecat-api-service/compare/v1.352.1...v1.352.2) (2026-03-17)
 
 
