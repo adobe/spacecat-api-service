@@ -109,6 +109,7 @@ function parseFilterDimensionsParams(context) {
     siteId: q.siteId || q.site_id,
     categoryId: q.categoryId || q.category_id,
     topicIds: parseTopicIds(q),
+    topic: q.topic,
     regionCode: q.regionCode || q.region_code || q.region,
     origin: q.origin,
     user_intent: q.user_intent || q.userIntent,

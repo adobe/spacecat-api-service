@@ -1,3 +1,11 @@
+# [1.354.0](https://github.com/adobe/spacecat-api-service/compare/v1.353.1...v1.354.0) (2026-03-18)
+
+
+### Features
+
+* add market tracking trends handler | LLMO-3605 ([#1975](https://github.com/adobe/spacecat-api-service/issues/1975)) ([b995822](https://github.com/adobe/spacecat-api-service/commit/b995822c9ff6d2cf4d9f3c849885a1978f15fa73))
+* add sentiment-overview endpoint for brand presence | LLMO-3605 ([#1974](https://github.com/adobe/spacecat-api-service/issues/1974)) ([6ec5cbf](https://github.com/adobe/spacecat-api-service/commit/6ec5cbf0f87600a048b9a33ef959ca7644691053))
+
 ## [1.353.1](https://github.com/adobe/spacecat-api-service/compare/v1.353.0...v1.353.1) (2026-03-18)
 
 
