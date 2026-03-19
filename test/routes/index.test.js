@@ -484,6 +484,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends',
       'GET /org/:spaceCatId/brands/all/brand-presence/topics',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics',
+      'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts',
       'GET /org/:spaceCatId/brands/all/brand-presence/stats',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',

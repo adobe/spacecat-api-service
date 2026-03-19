@@ -15,6 +15,7 @@ import {
   createFilterDimensionsHandler,
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler, createTopicsHandler,
+  createTopicPromptsHandler,
   createBrandPresenceStatsHandler,
 } from './llmo-brand-presence.js';
 
@@ -45,6 +46,7 @@ function LlmoMysticatController(ctx) {
   const getMarketTrackingTrends = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
   const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
   const getTopics = createTopicsHandler(getOrgAndValidateAccess);
+  const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
 
   return {
@@ -53,6 +55,7 @@ function LlmoMysticatController(ctx) {
     getMarketTrackingTrends,
     getSentimentOverview,
     getTopics,
+    getTopicPrompts,
     getBrandPresenceStats,
   };
 }

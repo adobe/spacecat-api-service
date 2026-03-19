@@ -896,13 +896,14 @@ function volumeToCategory(volumeSum, volumeCount) {
 }
 
 /**
- * Aggregates raw execution rows into TopicDetail objects.
+ * Aggregates raw execution rows into topic-level summary objects.
  * Groups by topic name, deduplicates prompts by prompt|region_code within
  * each topic, keeps the latest execution per unique prompt, and computes
- * topic-level aggregate metrics.
+ * topic-level aggregate metrics. Does NOT return individual prompt items
+ * (those are loaded separately via the /topics/:topicId/prompts endpoint).
  *
  * @param {Array<Object>} rows - Raw brand_presence_executions rows
- * @returns {Array<Object>} TopicDetail-compatible objects
+ * @returns {Array<Object>} TopicDetail-compatible objects (without items)
  * @internal Exported for testing
  */
 export function aggregateTopicData(rows) {
@@ -935,7 +936,7 @@ export function aggregateTopicData(rows) {
     let volumeSum = 0;
     let volumeCount = 0;
 
-    const items = prompts.map((r) => {
+    prompts.forEach((r) => {
       const mentioned = r.mentions === true || r.mentions === 'true';
       const cited = r.citations === true || r.citations === 'true';
       if (mentioned) totalMentions += 1;
@@ -969,25 +970,6 @@ export function aggregateTopicData(rows) {
         volumeSum += vol;
         volumeCount += 1;
       }
-
-      return {
-        topic: topicName,
-        prompt: r.prompt || '',
-        region: r.region_code || '',
-        category: r.category_name || '',
-        executionDate: r.execution_date || '',
-        answer: '',
-        sources: '',
-        relatedURL: r.url || '',
-        citationsCount: cited ? 1 : 0,
-        mentionsCount: mentioned ? 1 : 0,
-        isAnswered: !(r.error_code),
-        visibilityScore: Number.isNaN(vs) ? 0 : vs,
-        position: r.position ? String(r.position) : '',
-        sentiment: r.sentiment || '',
-        errorCode: r.error_code || '',
-        origin: r.origin || '',
-      };
     });
 
     const avgVisibility = visibilityCount > 0
@@ -1000,7 +982,7 @@ export function aggregateTopicData(rows) {
 
     return {
       topic: topicName,
-      items,
+      promptCount: prompts.length,
       brandMentions: totalMentions,
       brandCitations: totalCitations,
       popularityVolume: avgVolume,
@@ -1011,13 +993,58 @@ export function aggregateTopicData(rows) {
   });
 }
 
+/**
+ * Builds PromptDetail items from raw execution rows for a specific topic.
+ * Deduplicates by prompt|region_code, keeping the latest execution.
+ *
+ * @param {Array<Object>} rows - Raw brand_presence_executions rows (pre-filtered by topic)
+ * @returns {Array<Object>} PromptDetail-compatible objects
+ * @internal Exported for testing
+ */
+export function buildPromptDetails(rows) {
+  const promptMap = new Map();
+
+  rows.forEach((row) => {
+    const key = buildTopicPromptKey(row);
+    const existing = promptMap.get(key);
+    if (!existing || (row.execution_date > existing.execution_date)) {
+      promptMap.set(key, row);
+    }
+  });
+
+  return [...promptMap.values()].map((r) => {
+    const mentioned = r.mentions === true || r.mentions === 'true';
+    const cited = r.citations === true || r.citations === 'true';
+    const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+
+    return {
+      topic: r.topics || 'Unknown',
+      prompt: r.prompt || '',
+      region: r.region_code || '',
+      category: r.category_name || '',
+      executionDate: r.execution_date || '',
+      answer: '',
+      sources: '',
+      relatedURL: r.url || '',
+      citationsCount: cited ? 1 : 0,
+      mentionsCount: mentioned ? 1 : 0,
+      isAnswered: !(r.error_code),
+      visibilityScore: Number.isNaN(vs) ? 0 : vs,
+      position: r.position ? String(r.position) : '',
+      sentiment: r.sentiment || '',
+      errorCode: r.error_code || '',
+      origin: r.origin || '',
+    };
+  });
+}
+
 function parsePaginationParams(context) {
   const q = context.data || {};
   return {
     sortBy: q.sortBy || 'name',
     sortOrder: q.sortOrder || 'asc',
     page: Number.parseInt(q.page, 10) || 0,
-    pageSize: Number.parseInt(q.pageSize, 10) || 100,
+    pageSize: Number.parseInt(q.pageSize, 10) || 20,
   };
 }
 
@@ -1040,8 +1067,9 @@ const TOPICS_SELECT = 'topics, prompt, region_code, mentions, citations, visibil
 
 /**
  * Creates the getTopics handler.
- * Returns topic-level aggregated data with prompt-level items for the
+ * Returns topic-level aggregated data (without individual prompts) for the
  * Data Insights table. Supports pagination, sorting, and filtering.
+ * Prompts are loaded separately via the /topics/:topicId/prompts endpoint.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createTopicsHandler(getOrgAndValidateAccess) {
@@ -1109,6 +1137,84 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
       const paged = topicDetails.slice(start, start + pagination.pageSize);
 
       return ok({ topicDetails: paged, totalCount });
+    },
+  );
+}
+
+// eslint-disable-next-line max-len
+const PROMPTS_SELECT = 'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+
+/**
+ * Creates the getTopicPrompts handler.
+ * Returns prompt-level data for a single topic (loaded on expansion).
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createTopicPromptsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'topic-prompts',
+    async (ctx, client) => {
+      const { spaceCatId, brandId, topicId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const pagination = parsePaginationParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      const topicName = decodeURIComponent(topicId);
+
+      let q = client
+        .from('brand_presence_executions')
+        .select(PROMPTS_SELECT)
+        .eq('organization_id', organizationId)
+        .eq('topics', topicName)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model);
+
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
+      }
+      if (filterByBrandId) {
+        q = q.eq('brand_id', filterByBrandId);
+      }
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
+      }
+      if (shouldApplyFilter(params.origin)) {
+        q = q.ilike('origin', params.origin);
+      }
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence topic-prompts PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const items = buildPromptDetails(data || []);
+
+      const totalCount = items.length;
+      const start = pagination.page * pagination.pageSize;
+      const paged = items.slice(start, start + pagination.pageSize);
+
+      return ok({ items: paged, totalCount });
     },
   );
 }
