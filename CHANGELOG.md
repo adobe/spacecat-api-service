@@ -1,3 +1,10 @@
+## [1.358.2](https://github.com/adobe/spacecat-api-service/compare/v1.358.1...v1.358.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* **ci:** restore integration tests removed in [#1841](https://github.com/adobe/spacecat-api-service/issues/1841) ([#1996](https://github.com/adobe/spacecat-api-service/issues/1996)) ([ca2d192](https://github.com/adobe/spacecat-api-service/commit/ca2d192eb0e6d95166b1566bc014b54254a90c2e))
+
 ## [1.358.1](https://github.com/adobe/spacecat-api-service/compare/v1.358.0...v1.358.1) (2026-03-19)
 
 
