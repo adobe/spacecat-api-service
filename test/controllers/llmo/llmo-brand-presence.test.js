@@ -15,8 +15,10 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
+  addDaysToDate,
   aggregateSentimentByWeek,
   buildPromptKey,
+  createBrandPresenceStatsHandler,
   createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
   createSentimentOverviewHandler,
@@ -24,6 +26,7 @@ import {
   dateToIsoWeek,
   getWeekDateRange,
   resolveSiteIds,
+  splitDateRangeIntoWeeksBackward,
   strCompare,
   toFilterOption,
   toISOWeek,
@@ -144,6 +147,57 @@ function createTableAwareMock(tableResults = {}, defaultResult = { data: [], err
   return { from: fromStub, ...stubs };
 }
 
+/**
+ * Creates a mock PostgREST client with rpc() and from() for Brand Presence Stats API.
+ * rpcStub can be configured to return different values per call (e.g. main stats + weekly trends).
+ * from() is needed for validateSiteBelongsToOrg when siteId is provided.
+ */
+const defaultStatsRpcData = {
+  data: [
+    {
+      total_executions: 0,
+      average_visibility_score: 0,
+      total_mentions: 0,
+      total_citations: 0,
+    },
+  ],
+  error: null,
+};
+function createStatsRpcMock(
+  rpcResolveValue = defaultStatsRpcData,
+  rpcSequence = null,
+) {
+  const rpcStub = rpcSequence
+    ? sinon.stub()
+      .onFirstCall()
+      .resolves(rpcSequence[0] ?? rpcResolveValue)
+      .onSecondCall()
+      .resolves(rpcSequence[1] ?? rpcResolveValue)
+      .onThirdCall()
+      .resolves(rpcSequence[2] ?? rpcResolveValue)
+      .onCall(3)
+      .resolves(rpcSequence[3] ?? rpcResolveValue)
+      .onCall(4)
+      .resolves(rpcSequence[4] ?? rpcResolveValue)
+      .onCall(5)
+      .resolves(rpcSequence[5] ?? rpcResolveValue)
+      .onCall(6)
+      .resolves(rpcSequence[6] ?? rpcResolveValue)
+      .onCall(7)
+      .resolves(rpcSequence[7] ?? rpcResolveValue)
+      .onCall(8)
+      .resolves(rpcSequence[8] ?? rpcResolveValue)
+    : sinon.stub().resolves(rpcResolveValue);
+  const sitesChain = {
+    from: sinon.stub().returnsThis(),
+    select: sinon.stub().returnsThis(),
+    eq: sinon.stub().returnsThis(),
+    limit: sinon.stub().resolves({ data: [{ id: 'x' }], error: null }),
+  };
+  const fromStub = sinon.stub().returns(sitesChain);
+  return { rpc: rpcStub, from: fromStub };
+}
+
 describe('llmo-brand-presence', () => {
   let sandbox;
   let getOrgAndValidateAccess;
@@ -194,6 +248,57 @@ describe('llmo-brand-presence', () => {
     it('compares truthy strings normally', () => {
       expect(strCompare('a', 'b')).to.be.lessThan(0);
       expect(strCompare('b', 'a')).to.be.greaterThan(0);
+    });
+  });
+
+  describe('addDaysToDate', () => {
+    it('adds positive days', () => {
+      expect(addDaysToDate('2025-01-15', 7)).to.equal('2025-01-22');
+      expect(addDaysToDate('2025-01-31', 1)).to.equal('2025-02-01');
+    });
+
+    it('subtracts days with negative argument', () => {
+      expect(addDaysToDate('2025-01-15', -7)).to.equal('2025-01-08');
+      expect(addDaysToDate('2025-01-21', -6)).to.equal('2025-01-15');
+    });
+
+    it('handles zero', () => {
+      expect(addDaysToDate('2025-01-15', 0)).to.equal('2025-01-15');
+    });
+  });
+
+  describe('splitDateRangeIntoWeeksBackward', () => {
+    it('returns single week when range is 7 days', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-15', '2025-01-21');
+      expect(weeks).to.have.lengthOf(1);
+      expect(weeks[0]).to.deep.equal({ startDate: '2025-01-15', endDate: '2025-01-21' });
+    });
+
+    it('returns weeks in chronological order (oldest first) before slice', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-01', '2025-01-21');
+      expect(weeks).to.have.lengthOf(3);
+      expect(weeks[0]).to.deep.equal({ startDate: '2025-01-01', endDate: '2025-01-07' });
+      expect(weeks[1]).to.deep.equal({ startDate: '2025-01-08', endDate: '2025-01-14' });
+      expect(weeks[2]).to.deep.equal({ startDate: '2025-01-15', endDate: '2025-01-21' });
+    });
+
+    it('limits to 8 weeks when range spans more', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-01', '2025-03-19');
+      expect(weeks).to.have.lengthOf(8);
+      expect(weeks[0].startDate).to.equal('2025-01-23');
+      expect(weeks[0].endDate).to.equal('2025-01-29');
+      expect(weeks[7].endDate).to.equal('2025-03-19');
+    });
+
+    it('handles partial first week when startDate is mid-week', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-03', '2025-01-21');
+      expect(weeks).to.have.lengthOf(3);
+      expect(weeks[0]).to.deep.equal({ startDate: '2025-01-03', endDate: '2025-01-07' });
+    });
+
+    it('returns empty array when endDate is before startDate', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-21', '2025-01-15');
+      expect(weeks).to.deep.equal([]);
     });
   });
 
@@ -2052,6 +2157,360 @@ describe('llmo-brand-presence', () => {
       expect(body.weeklyTrends).to.have.lengthOf(1);
       expect(body.weeklyTrends[0].weekNumber).to.equal(0);
       expect(body.weeklyTrends[0].year).to.equal(0);
+    });
+  });
+
+  describe('createBrandPresenceStatsHandler', () => {
+    const statsRow = {
+      total_executions: 150,
+      average_visibility_score: 7.33,
+      total_mentions: 11,
+      total_citations: 76,
+    };
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: x'));
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden when site does not belong to org', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      const sitesChain = {
+        from: sinon.stub().returnsThis(),
+        select: sinon.stub().returnsThis(),
+        eq: sinon.stub().returnsThis(),
+        limit: sinon.stub().resolves({ data: [], error: null }),
+      };
+      mockContext.dataAccess.Site.postgrestService = {
+        ...rpcMock,
+        from: sinon.stub().returns(sitesChain),
+      };
+      mockContext.data = { siteId: '0178a3f0-1234-7000-8000-000000000099' };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when RPC returns error', async () => {
+      const rpcMock = createStatsRpcMock({ data: null, error: { message: 'relation does not exist' } });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation does not exist');
+    });
+
+    it('returns ok with stats when RPC succeeds (no showTrends)', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-31',
+        model: 'chatgpt',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends).to.be.undefined;
+      expect(rpcMock.rpc).to.have.been.calledOnceWith('rpc_brand_presence_stats', sinon.match.object);
+    });
+
+    it('handles null ctx.data (uses empty object fallback for showTrends)', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = null;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends).to.be.undefined;
+    });
+
+    it('returns zero stats when RPC returns null row', async () => {
+      const rpcMock = createStatsRpcMock({ data: [null], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+    });
+
+    it('returns zero stats when RPC returns empty data', async () => {
+      const rpcMock = createStatsRpcMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+    });
+
+    it('returns trends when showTrends=true', async () => {
+      const weekRow = {
+        total_executions: 20,
+        average_visibility_score: 6.5,
+        total_mentions: 2,
+        total_citations: 10,
+      };
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: [weekRow], error: null },
+          { data: [weekRow], error: null },
+          { data: [weekRow], error: null },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-21',
+        model: 'chatgpt',
+        showTrends: true,
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends).to.be.an('array');
+      expect(body.trends).to.have.lengthOf(3);
+      expect(body.trends[0].startDate).to.equal('2025-01-15');
+      expect(body.trends[0].endDate).to.equal('2025-01-21');
+      expect(body.trends[0].data.stats).to.deep.equal({
+        total_executions: 20,
+        average_visibility_score: 6.5,
+        total_mentions: 2,
+        total_citations: 10,
+      });
+      expect(body.trends[2].startDate).to.equal('2025-01-01');
+      expect(body.trends[2].endDate).to.equal('2025-01-07');
+      expect(rpcMock.rpc).to.have.been.callCount(4);
+    });
+
+    it('returns trends with zero stats when a trend week has empty or null data', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: [], error: null },
+          { data: null, error: null },
+          { data: [statsRow], error: null },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-21',
+        model: 'chatgpt',
+        showTrends: true,
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.trends).to.have.lengthOf(3);
+      expect(body.trends[0].data.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends[1].data.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+      expect(body.trends[2].data.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+    });
+
+    it('parses showTrends from show_trends alias and truthy values', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: [statsRow], error: null },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-07',
+        show_trends: 'true',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.trends).to.be.an('array');
+      expect(body.trends).to.have.lengthOf(1);
+    });
+
+    it('parses showTrends from string "1"', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [{ data: [statsRow], error: null }],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-07',
+        showTrends: '1',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.trends).to.be.an('array');
+      expect(body.trends).to.have.lengthOf(1);
+    });
+
+    it('returns badRequest when trends RPC fails', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: null, error: { message: 'trends RPC failed' } },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-14',
+        showTrends: true,
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('trends RPC failed');
+    });
+
+    it('passes brandId filter when brandId is not all', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.params.brandId = '019cb903-1184-7f92-8325-f9d1176af316';
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(rpcMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_stats',
+        sinon.match.has('p_brand_id', '019cb903-1184-7f92-8325-f9d1176af316'),
+      );
+    });
+
+    it('passes all filter params to RPC', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-31',
+        model: 'gemini',
+        siteId: '0178a3f0-1234-7000-8000-0000000000aa',
+        categoryId: '0178a3f0-1234-7000-8000-0000000000bb',
+        topicIds: '0178a3f0-1234-7000-8000-0000000000cc',
+        regionCode: 'US',
+        origin: 'ai',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const callArgs = rpcMock.rpc.firstCall.args[1];
+      expect(callArgs.p_organization_id).to.equal(mockContext.params.spaceCatId);
+      expect(callArgs.p_start_date).to.equal('2025-01-01');
+      expect(callArgs.p_end_date).to.equal('2025-01-31');
+      expect(callArgs.p_model).to.equal('gemini');
+      expect(callArgs.p_site_id).to.equal('0178a3f0-1234-7000-8000-0000000000aa');
+      expect(callArgs.p_category_id).to.equal('0178a3f0-1234-7000-8000-0000000000bb');
+      expect(callArgs.p_topic_ids).to.deep.equal(['0178a3f0-1234-7000-8000-0000000000cc']);
+      expect(callArgs.p_region_code).to.equal('US');
+      expect(callArgs.p_origin).to.equal('ai');
     });
   });
 });
