@@ -1,3 +1,17 @@
+# [1.356.0](https://github.com/adobe/spacecat-api-service/compare/v1.355.1...v1.356.0) (2026-03-19)
+
+
+### Features
+
+* **ci:** migrate to centralized mysticat-ci workflow ([#1990](https://github.com/adobe/spacecat-api-service/issues/1990)) ([9f92daf](https://github.com/adobe/spacecat-api-service/commit/9f92daf1545c9ac9203084a043050ed402d1f2ce))
+
+## [1.355.1](https://github.com/adobe/spacecat-api-service/compare/v1.355.0...v1.355.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1988](https://github.com/adobe/spacecat-api-service/issues/1988)) ([16834d2](https://github.com/adobe/spacecat-api-service/commit/16834d2c2abcf61040ed68559b1583bf691ed3d0))
+
 # [1.355.0](https://github.com/adobe/spacecat-api-service/compare/v1.354.1...v1.355.0) (2026-03-19)
 
 
