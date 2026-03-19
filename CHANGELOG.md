@@ -1,3 +1,10 @@
+# [1.355.0](https://github.com/adobe/spacecat-api-service/compare/v1.354.1...v1.355.0) (2026-03-19)
+
+
+### Features
+
+* add experimentation topics field to llmo config model ([#1989](https://github.com/adobe/spacecat-api-service/issues/1989)) ([717b17b](https://github.com/adobe/spacecat-api-service/commit/717b17bfe850f4fe8a9195a5f82743e298b6edfb))
+
 ## [1.354.1](https://github.com/adobe/spacecat-api-service/compare/v1.354.0...v1.354.1) (2026-03-19)
 
 
