@@ -26,13 +26,7 @@
 			"alt-text": {},
 			"cwv": {},
 			"broken-backlinks": {},
-			"scrape-top-pages": {},
-			"broken-backlinks-auto-suggest": {},
-			"broken-backlinks-auto-fix": {},
-			"alt-text-auto-fix": {},
-			"alt-text-auto-suggest-mystique": {},
-			"cwv-auto-fix": {},
-			"cwv-auto-suggest": {}
+			"scrape-top-pages": {}
 		},
 		"imports": {
 			"organic-traffic": {},
