@@ -91,7 +91,6 @@ async function seed() {
     insertRows('trial_users', trialUsers),
     insertRows('async_jobs', asyncJobs),
     insertRows('consumers', consumers),
-    insertRows('sentiment_topics', sentimentTopics),
   ]);
 
   // Level 1: depend on organizations
@@ -110,6 +109,7 @@ async function seed() {
     insertRows('site_top_pages', siteTopPages),
     insertRows('plg_onboardings', plgOnboardings),
     insertRows('trial_user_activities', trialUserActivities),
+    insertRows('sentiment_topics', sentimentTopics),
   ]);
 
   // Level 3: depend on opportunities, audits, topics
