@@ -16,11 +16,11 @@
  *
  * One-time script to preonboard domains for PLG ASO customers.
  * Creates site under demo org, enables audits/imports, triggers audit runs,
- * and creates ASO entitlement + site enrollment.
+ * and creates ASO org-level entitlement (no site enrollment).
  * Sets PlgOnboarding status to PRE_ONBOARDING (keeps customer imsOrgId).
  *
  * When the customer later calls POST /plg/onboard, the fast-track path
- * picks up the PRE_ONBOARDING record and sets it directly to ONBOARDED.
+ * picks up the PRE_ONBOARDING record, creates site enrollment, and sets ONBOARDED.
  *
  * Usage:
  *   node scripts/plg-preonboard.js <input.json>
