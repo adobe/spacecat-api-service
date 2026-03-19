@@ -186,8 +186,6 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     const site = await Site.findById(onboarding.getSiteId());
     if (site) {
       await ensureAsoEntitlement(site, context);
-      const auditTypes = Object.keys(profile.audits || {});
-      await triggerAudits(auditTypes, context, site);
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setSteps(steps);
