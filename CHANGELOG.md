@@ -1,3 +1,10 @@
+# [1.358.0](https://github.com/adobe/spacecat-api-service/compare/v1.357.2...v1.358.0) (2026-03-19)
+
+
+### Features
+
+* **plg:** allow admin callers to bypass tenant check in get status call ([#1995](https://github.com/adobe/spacecat-api-service/issues/1995)) ([8683d80](https://github.com/adobe/spacecat-api-service/commit/8683d80de81ee1a1247d40d42c86dfb68c07abee))
+
 ## [1.357.2](https://github.com/adobe/spacecat-api-service/compare/v1.357.1...v1.357.2) (2026-03-19)
 
 
