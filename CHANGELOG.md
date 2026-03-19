@@ -1,3 +1,10 @@
+## [1.357.1](https://github.com/adobe/spacecat-api-service/compare/v1.357.0...v1.357.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* multiple topic filtering follow up | LLMO-3605 ([#1984](https://github.com/adobe/spacecat-api-service/issues/1984)) ([4459f19](https://github.com/adobe/spacecat-api-service/commit/4459f19f7d1accf7289a84cc7db7a2cc1dadc7d4))
+
 # [1.357.0](https://github.com/adobe/spacecat-api-service/compare/v1.356.0...v1.357.0) (2026-03-19)
 
 
