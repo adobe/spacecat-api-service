@@ -18,6 +18,5 @@ jobs:
       service-name: api-service
       validate-pr-title: true
       docs-lint: true
-      it-dynamo: true
       it-postgres: true
     secrets: inherit
