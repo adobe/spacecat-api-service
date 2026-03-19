@@ -296,6 +296,54 @@ function parseWeeksParams(context) {
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const TRENDS_MAX_WEEKS = 8;
+const TRENDS_WEEK_SIZE = 7;
+
+/**
+ * Adds days to a YYYY-MM-DD date string. Uses UTC noon to avoid DST edge cases.
+ * @param {string} dateStr - YYYY-MM-DD
+ * @param {number} days - Number of days to add (negative to subtract)
+ * @returns {string} YYYY-MM-DD
+ * @internal Exported for testing
+ */
+export function addDaysToDate(dateStr, days) {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Splits a date range into 7-day weeks, building backward from endDate.
+ * Returns at most maxWeeks (8) weeks, ordered oldest-first (chronological).
+ * @param {string} startDate - YYYY-MM-DD
+ * @param {string} endDate - YYYY-MM-DD
+ * @param {number} weekSize - Days per week (default 7)
+ * @param {number} maxWeeks - Max weeks to return (default 8)
+ * @returns {Array<{ startDate: string, endDate: string }>}
+ * @internal Exported for testing
+ */
+export function splitDateRangeIntoWeeksBackward(
+  startDate,
+  endDate,
+  weekSize = TRENDS_WEEK_SIZE,
+  maxWeeks = TRENDS_MAX_WEEKS,
+) {
+  const weeks = [];
+  let weekEnd = endDate;
+  let weekStart = addDaysToDate(weekEnd, -weekSize + 1);
+
+  while (weekEnd >= startDate) {
+    const actualStart = weekStart < startDate ? startDate : weekStart;
+    if (actualStart <= weekEnd) {
+      weeks.push({ startDate: actualStart, endDate: weekEnd });
+    }
+    weekEnd = addDaysToDate(weekStart, -1);
+    weekStart = addDaysToDate(weekEnd, -weekSize + 1);
+  }
+
+  weeks.reverse();
+  return weeks.slice(-maxWeeks);
+}
 
 /**
  * Returns startDate (Monday) and endDate (Sunday) for an ISO week string (YYYY-Wnn).
@@ -865,6 +913,142 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         regions,
         page_intents: pageIntents,
       });
+    },
+  );
+}
+
+function parseShowTrends(q) {
+  const v = q?.showTrends ?? q?.show_trends;
+  if (v === true || v === 1) return true;
+  if (typeof v === 'string') {
+    const s = v.toLowerCase().trim();
+    return s === 'true' || s === '1';
+  }
+  return false;
+}
+
+function rowToStats(row) {
+  if (!row) {
+    return {
+      total_executions: 0,
+      average_visibility_score: 0,
+      total_mentions: 0,
+      total_citations: 0,
+    };
+  }
+  return {
+    total_executions: Number(row.total_executions ?? 0),
+    average_visibility_score: Number(row.average_visibility_score ?? 0),
+    total_mentions: Number(row.total_mentions ?? 0),
+    total_citations: Number(row.total_citations ?? 0),
+  };
+}
+
+function buildRpcParams(organizationId, startDate, endDate, model, filterByBrandId, params) {
+  const topicIds = params.topicIds?.length ? params.topicIds : null;
+  const categoryId = shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
+    ? params.categoryId
+    : null;
+  return {
+    p_organization_id: organizationId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_model: model,
+    p_brand_id: filterByBrandId,
+    p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+    p_category_id: categoryId,
+    p_topic_ids: topicIds,
+    p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
+    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+  };
+}
+
+/**
+ * Creates the getBrandPresenceStats handler.
+ * Returns aggregated visibility stats
+ * (total_executions, average_visibility_score, total_mentions, total_citations)
+ * via the rpc_brand_presence_stats RPC in mysticat-data-service.
+ * When showTrends=true, adds weekly trends (max 8 weeks, backward from endDate).
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'stats',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const q = ctx.data || {};
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+      const showTrends = parseShowTrends(q);
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const rpcParams = buildRpcParams(
+        organizationId,
+        startDate,
+        endDate,
+        model,
+        filterByBrandId,
+        params,
+      );
+
+      const { data, error } = await client.rpc('rpc_brand_presence_stats', rpcParams);
+
+      if (error) {
+        ctx.log.error(`Brand presence stats RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const row = Array.isArray(data) && data.length > 0 ? data[0] : data;
+      const stats = rowToStats(row);
+      const response = { stats };
+
+      if (showTrends) {
+        const weeks = splitDateRangeIntoWeeksBackward(startDate, endDate);
+        if (weeks.length > 0) {
+          const trendResults = await Promise.all(
+            weeks.map((w) => client.rpc('rpc_brand_presence_stats', {
+              ...rpcParams,
+              p_start_date: w.startDate,
+              p_end_date: w.endDate,
+            })),
+          );
+
+          const failed = trendResults.find((r) => r.error);
+          if (failed) {
+            ctx.log.error(`Brand presence stats trends RPC error: ${failed.error.message}`);
+            return badRequest(failed.error.message);
+          }
+
+          response.trends = trendResults.map((r, i) => {
+            const weekRow = Array.isArray(r.data) && r.data.length > 0 ? r.data[0] : r.data;
+            return {
+              startDate: weeks[i].startDate,
+              endDate: weeks[i].endDate,
+              data: { stats: rowToStats(weekRow) },
+            };
+          }).reverse();
+        }
+      }
+
+      return ok(response);
     },
   );
 }
