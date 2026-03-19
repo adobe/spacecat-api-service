@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-disable no-await-in-loop */
 import { execSync } from 'child_process';
 
 import { organizations } from './seed-data/organizations.js';
@@ -37,23 +36,23 @@ const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
 
 /**
- * Inserts rows into a PostgREST table.
+ * Bulk-inserts rows into a PostgREST table (single HTTP request per table).
  */
 async function insertRows(table, rows) {
-  for (const row of rows) {
-    const res = await fetch(`${POSTGREST_URL}/${table}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify(row),
-    });
+  if (rows.length === 0) return;
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
-    }
+  const res = await fetch(`${POSTGREST_URL}/${table}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(rows),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
   }
 }
 
@@ -73,27 +72,53 @@ function truncate() {
   );
 }
 
+/**
+ * Seeds all tables, parallelizing inserts within each FK dependency level.
+ *
+ * Level 0: no FK deps
+ * Level 1: depend on organizations
+ * Level 2: depend on sites
+ * Level 3: depend on opportunities, audits, topics, trial_users
+ * Level 4: depend on fix_entities + suggestions
+ */
 async function seed() {
-  await insertRows('organizations', organizations);
-  await insertRows('projects', projects);
-  await insertRows('sites', sites);
-  await insertRows('audits', audits);
-  await insertRows('opportunities', opportunities);
-  await insertRows('suggestions', suggestions);
-  await insertRows('fix_entities', fixes);
+  // Level 0: no dependencies
+  await Promise.all([
+    insertRows('organizations', organizations),
+    insertRows('trial_users', trialUsers),
+    insertRows('async_jobs', asyncJobs),
+    insertRows('consumers', consumers),
+    insertRows('sentiment_topics', sentimentTopics),
+  ]);
+
+  // Level 1: depend on organizations
+  await Promise.all([
+    insertRows('projects', projects),
+    insertRows('sites', sites),
+    insertRows('entitlements', entitlements),
+  ]);
+
+  // Level 2: depend on sites
+  await Promise.all([
+    insertRows('audits', audits),
+    insertRows('opportunities', opportunities),
+    insertRows('site_enrollments', siteEnrollments),
+    insertRows('experiments', experiments),
+    insertRows('site_top_pages', siteTopPages),
+    insertRows('plg_onboardings', plgOnboardings),
+    insertRows('trial_user_activities', trialUserActivities),
+  ]);
+
+  // Level 3: depend on opportunities, audits, topics
+  await Promise.all([
+    insertRows('suggestions', suggestions),
+    insertRows('fix_entities', fixes),
+    insertRows('audit_urls', auditUrls),
+    insertRows('sentiment_guidelines', sentimentGuidelines),
+  ]);
+
+  // Level 4: depend on fix_entities + suggestions
   await insertRows('fix_entity_suggestions', fixEntitySuggestions);
-  await insertRows('entitlements', entitlements);
-  await insertRows('site_enrollments', siteEnrollments);
-  await insertRows('experiments', experiments);
-  await insertRows('site_top_pages', siteTopPages);
-  await insertRows('sentiment_topics', sentimentTopics);
-  await insertRows('sentiment_guidelines', sentimentGuidelines);
-  await insertRows('audit_urls', auditUrls);
-  await insertRows('trial_users', trialUsers);
-  await insertRows('trial_user_activities', trialUserActivities);
-  await insertRows('async_jobs', asyncJobs);
-  await insertRows('consumers', consumers);
-  await insertRows('plg_onboardings', plgOnboardings);
 }
 
 /**
