@@ -37,7 +37,11 @@ import {
   ASO_DEMO_ORG,
 } from '../llmo/llmo-onboarding.js';
 import {
-  autoResolveAuthorUrl, findDeliveryType, deriveProjectName, updateCodeConfig,
+  autoResolveAuthorUrl,
+  findDeliveryType,
+  deriveProjectName,
+  updateCodeConfig,
+  queueIdentifyRedirectsAudit,
 } from '../../support/utils.js';
 import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -418,6 +422,33 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
     steps.configUpdated = true;
+
+    // Queue update-redirects for AEM CS/CW site. No Slack context in PLG onboarding.
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+    const validForRedirects = [
+      SiteModel.AUTHORING_TYPES.CS,
+      SiteModel.AUTHORING_TYPES.CS_CW,
+    ].includes(authoringType)
+    || [SiteModel.DELIVERY_TYPES.AEM_CS].includes(deliveryType);
+
+    if (!validForRedirects) {
+      log.info(`skipping update-redirects, as the site ${baseURL} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`);
+    } else {
+      const redirectsResult = await queueIdentifyRedirectsAudit(
+        {
+          site,
+          baseURL,
+          minutes: 2000,
+          updateRedirects: true,
+          slackContext: {},
+        },
+        context,
+      );
+      if (!redirectsResult.ok) {
+        log.warn(`update-redirects queue failed for ${baseURL}: ${redirectsResult.error || redirectsResult.message}`);
+      }
+    }
 
     // Step 7: Enable audits from PLG profile
     const auditTypes = Object.keys(profile.audits || {});

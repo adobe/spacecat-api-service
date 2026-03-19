@@ -11,6 +11,7 @@
  */
 
 /* eslint-env mocha */
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -48,6 +49,7 @@ describe('PlgOnboardingController', () => {
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
   let loadProfileConfigStub;
+  let queueIdentifyRedirectsAuditStub;
   let triggerBrandProfileAgentStub;
   let tierClientCreateForSiteStub;
   let tierClientCreateEntitlementStub;
@@ -97,6 +99,8 @@ describe('PlgOnboardingController', () => {
       setHlxConfig: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
+      getAuthoringType: sandbox.stub().returns(overrides.authoringType ?? null),
+      getDeliveryType: sandbox.stub().returns(overrides.deliveryType ?? null),
       save: sandbox.stub().resolves(),
     };
   }
@@ -172,6 +176,7 @@ describe('PlgOnboardingController', () => {
     updateCodeConfigStub = sandbox.stub().resolves();
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
+    queueIdentifyRedirectsAuditStub = sandbox.stub().resolves({ ok: true });
 
     // Profile config
     loadProfileConfigStub = sandbox.stub().returns(PLG_PROFILE);
@@ -312,6 +317,7 @@ describe('PlgOnboardingController', () => {
           updateCodeConfig: updateCodeConfigStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
+          queueIdentifyRedirectsAudit: queueIdentifyRedirectsAuditStub,
         },
         '../../../src/utils/slack/base.js': {
           loadProfileConfig: loadProfileConfigStub,
@@ -1426,6 +1432,47 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setError).to.have.been.calledWith({
         message: 'An internal error occurred',
       });
+    });
+  });
+
+  // --- Identify and Update Redirects ---
+
+  describe('onboard - identify and update redirects', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('continues onboarding when redirects queue fails with error', async () => {
+      queueIdentifyRedirectsAuditStub.resolves({ ok: false, error: 'mock error' });
+      mockSite = createMockSite({ authoringType: SiteModel.AUTHORING_TYPES.CS });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueIdentifyRedirectsAuditStub).to.have.been.calledOnce;
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /update-redirects queue failed for .*mock error/,
+      );
+    });
+
+    it('continues onboarding when redirects queue fails with message', async () => {
+      queueIdentifyRedirectsAuditStub.resolves({ ok: false, message: 'mock message' });
+      mockSite = createMockSite({ authoringType: SiteModel.AUTHORING_TYPES.CS });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueIdentifyRedirectsAuditStub).to.have.been.calledOnce;
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /update-redirects queue failed for .*mock message/,
+      );
     });
   });
 
