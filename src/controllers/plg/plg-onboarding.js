@@ -180,7 +180,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
-  // Fast path: preonboarded sites just need enrollment + audit triggers + ONBOARDED
+  // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
     const site = await Site.findById(onboarding.getSiteId());
