@@ -80,15 +80,36 @@ export function toFilterOption(id, label) {
   return { id: id ?? '', label: label ?? id ?? '' };
 }
 
+/**
+ * Normalizes topicIds param to an array of valid UUIDs.
+ * Accepts topicIds as: array, comma-separated string, or single UUID.
+ * Non-UUID values are filtered out.
+ * @returns {string[]} Array of valid topic_id UUIDs, empty if none
+ */
+function parseTopicIds(q) {
+  const raw = q.topicIds;
+  if (raw == null) return [];
+  let arr;
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === 'string') {
+    arr = raw.split(',').map((s) => s.trim());
+  } else {
+    arr = [raw];
+  }
+  return arr.filter((id) => id != null && isValidUUID(String(id)));
+}
+
 function parseFilterDimensionsParams(context) {
   const q = context.data || {};
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
-    model: q.model,
+    model: q.model || q.platform,
     siteId: q.siteId || q.site_id,
     categoryId: q.categoryId || q.category_id,
-    topicId: q.topicId || q.topic_id || q.topic || q.topics,
+    topicIds: parseTopicIds(q),
+    topic: q.topic,
     regionCode: q.regionCode || q.region_code || q.region,
     origin: q.origin,
     user_intent: q.user_intent || q.userIntent,
@@ -111,12 +132,12 @@ function buildExecutionsQuery(client, organizationId, params, defaults, filterBy
   const endDate = params.endDate || defaults.endDate;
   const model = params.model || 'chatgpt';
   const {
-    siteId, categoryId, topicId, regionCode, origin,
+    siteId, categoryId, topicIds, regionCode, origin,
   } = params;
 
   let q = client
     .from('brand_presence_executions')
-    .select('brand_id, brand_name, category_name, topics, origin, region_code, site_id')
+    .select('brand_id, brand_name, category_name, topic_id, topics, origin, region_code, site_id')
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
@@ -131,8 +152,8 @@ function buildExecutionsQuery(client, organizationId, params, defaults, filterBy
   if (shouldApplyFilter(categoryId)) {
     q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
   }
-  if (shouldApplyFilter(topicId)) {
-    q = q.eq('topics', topicId);
+  if (topicIds?.length > 0) {
+    q = q.in('topic_id', topicIds);
   }
   if (shouldApplyFilter(regionCode)) {
     q = q.eq('region_code', regionCode);
@@ -239,8 +260,15 @@ function buildDimensionOptions(rows) {
   const catNames = [...new Set(rows.map((r) => r.category_name).filter(Boolean))];
   const categories = catNames.toSorted(strCompare).map((c) => toFilterOption(c, c));
 
-  const topicVals = [...new Set(rows.map((r) => r.topics).filter(Boolean))];
-  const topics = topicVals.toSorted(strCompare).map((t) => toFilterOption(t, t));
+  const topicEntries = new Map();
+  rows.forEach((r) => {
+    if (r.topic_id && !topicEntries.has(r.topic_id)) {
+      topicEntries.set(r.topic_id, r.topics || r.topic_id);
+    }
+  });
+  const topics = [...topicEntries.entries()]
+    .toSorted((a, b) => strCompare(a[1], b[1]))
+    .map(([id, label]) => toFilterOption(id, label));
 
   const originVals = [...new Set(
     rows.map((r) => r.origin).filter(Boolean).map((o) => o.toLowerCase()),
@@ -262,7 +290,7 @@ function buildDimensionOptions(rows) {
 function parseWeeksParams(context) {
   const q = context.data || {};
   return {
-    model: q.model,
+    model: q.model || q.platform,
     siteId: q.siteId || q.site_id,
   };
 }
@@ -372,6 +400,409 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
       });
 
       return ok({ weeks });
+    },
+  );
+}
+
+// ── Market Tracking Trends ──────────────────────────────────────────────────
+
+function parseMarketTrackingTrendsParams(context) {
+  const q = context.data || {};
+  return {
+    startDate: q.startDate || q.start_date,
+    endDate: q.endDate || q.end_date,
+    model: q.model,
+    siteId: q.siteId || q.site_id,
+    categoryId: q.categoryId || q.category_id,
+    regionCode: q.regionCode || q.region_code || q.region,
+  };
+}
+
+/**
+ * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
+ * @param {string} dateStr - e.g. "2026-03-15"
+ * @returns {string} e.g. "2026-W11"
+ * @internal Exported for testing
+ */
+export function dateToIsoWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dayOfWeek = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
+  const year = d.getUTCFullYear();
+  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
+}
+
+function parseIsoWeek(weekStr) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
+  if (!match) return { weekNumber: 0, year: 0 };
+  return {
+    year: Number.parseInt(match[1], 10),
+    weekNumber: Number.parseInt(match[2], 10),
+  };
+}
+
+/**
+ * Queries brand_presence_executions for raw execution rows.
+ * Mirrors the legacy UI approach which reads from the brand_all sheet
+ * (equivalent to brand_presence_executions) and deduplicates by unique prompt
+ * before counting mentions and citations per week.
+ *
+ * Deduplication key: prompt|topics|region_code|site_id — matches the legacy UI
+ * composite key (prompt|Region|Topics|siteId).
+ *
+ * TODO: Once prompt_id is populated on brand_presence_executions, replace the
+ * composite-key deduplication with a simple distinct count on prompt_id for
+ * better performance and correctness.
+ */
+function buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = params.model || 'chatgpt';
+  const {
+    siteId, categoryId, regionCode,
+  } = params;
+
+  let q = client
+    .from('brand_presence_executions')
+    .select('execution_date, prompt, topics, region_code, site_id, mentions, citations')
+    .eq('organization_id', organizationId)
+    .eq('model', model)
+    .gte('execution_date', startDate)
+    .lte('execution_date', endDate);
+
+  if (shouldApplyFilter(siteId)) {
+    q = q.eq('site_id', siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(categoryId)) {
+    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
+  }
+  if (shouldApplyFilter(regionCode)) {
+    q = q.eq('region_code', regionCode);
+  }
+
+  return q;
+}
+
+function buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = params.model || 'chatgpt';
+  const {
+    siteId, categoryId, regionCode,
+  } = params;
+
+  let q = client
+    .from('executions_competitor_data')
+    .select('execution_date, competitor, mentions, citations')
+    .eq('organization_id', organizationId)
+    .eq('model', model)
+    .gte('execution_date', startDate)
+    .lte('execution_date', endDate);
+
+  if (shouldApplyFilter(siteId)) {
+    q = q.eq('site_id', siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(categoryId)) {
+    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
+  }
+  if (shouldApplyFilter(regionCode)) {
+    q = q.eq('region_code', regionCode);
+  }
+
+  return q;
+}
+
+function aggregateWeeklyTrends(brandRows, competitorRows) {
+  // Deduplicate brand rows by unique prompt key per week before counting.
+  // Key: prompt|topics|region_code|site_id — mirrors the legacy UI composite key.
+  const brandByWeek = new Map();
+  brandRows.forEach((r) => {
+    if (!r.execution_date) return;
+    const w = dateToIsoWeek(String(r.execution_date));
+    if (!brandByWeek.has(w)) {
+      brandByWeek.set(w, { mentionKeys: new Set(), citationKeys: new Set() });
+    }
+    const bucket = brandByWeek.get(w);
+    const key = `${r.prompt || ''}|${r.topics || ''}|${r.region_code || ''}|${r.site_id || ''}`;
+    if (r.mentions === true || r.mentions === 'true') bucket.mentionKeys.add(key);
+    if (r.citations === true || r.citations === 'true') bucket.citationKeys.add(key);
+  });
+
+  const competitorByWeek = new Map();
+  competitorRows.forEach((r) => {
+    if (!r.execution_date || !r.competitor) return;
+    const week = dateToIsoWeek(String(r.execution_date));
+    if (!competitorByWeek.has(week)) {
+      competitorByWeek.set(week, new Map());
+    }
+    const weekMap = competitorByWeek.get(week);
+    const existing = weekMap.get(r.competitor) || { mentions: 0, citations: 0 };
+    existing.mentions += r.mentions || 0;
+    existing.citations += r.citations || 0;
+    weekMap.set(r.competitor, existing);
+  });
+
+  const allWeeks = new Set([...brandByWeek.keys(), ...competitorByWeek.keys()]);
+  return [...allWeeks].sort().map((weekStr) => {
+    const { weekNumber, year } = parseIsoWeek(weekStr);
+    const brandBucket = brandByWeek.get(weekStr);
+    const brand = brandBucket
+      ? { mentions: brandBucket.mentionKeys.size, citations: brandBucket.citationKeys.size }
+      : { mentions: 0, citations: 0 };
+    const competitorMap = competitorByWeek.get(weekStr) || new Map();
+
+    const competitors = [...competitorMap.entries()]
+      .map(([name, data]) => ({ name, mentions: data.mentions, citations: data.citations }))
+      .sort((a, b) => (b.mentions + b.citations) - (a.mentions + a.citations));
+
+    return {
+      week: weekStr,
+      weekNumber,
+      year,
+      mentions: brand.mentions,
+      citations: brand.citations,
+      competitors,
+    };
+  });
+}
+
+/**
+ * Creates the getMarketTrackingTrends handler.
+ * Returns weekly brand mentions/citations + per-competitor breakdowns.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'market-tracking-trends',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseMarketTrackingTrendsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      // eslint-disable-next-line max-len
+      const brandQuery = buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
+      // eslint-disable-next-line max-len
+      const competitorQuery = buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId);
+
+      const [brandResult, competitorResult] = await Promise.all([brandQuery, competitorQuery]);
+
+      if (brandResult.error) {
+        ctx.log.error(`Market-tracking-trends brand query error: ${brandResult.error.message}`);
+        return badRequest(brandResult.error.message);
+      }
+      if (competitorResult.error) {
+        ctx.log.error(`Market-tracking-trends competitor query error: ${competitorResult.error.message}`);
+        return badRequest(competitorResult.error.message);
+      }
+
+      const weeklyTrends = aggregateWeeklyTrends(
+        brandResult.data || [],
+        competitorResult.data || [],
+      );
+
+      return ok({
+        weeklyTrends,
+        weeklyTrendsForComparison: weeklyTrends,
+      });
+    },
+  );
+}
+
+/**
+ * Converts a YYYY-MM-DD date string to an ISO week object.
+ * @param {string} dateStr - e.g. "2026-03-11"
+ * @returns {{ week: string, weekNumber: number, year: number }}
+ * @internal Exported for testing
+ */
+export function toISOWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const thursday = new Date(d);
+  thursday.setUTCDate(thursday.getUTCDate() + 3 - ((thursday.getUTCDay() + 6) % 7));
+  const yearStart = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((thursday - yearStart) / MS_PER_DAY + 1) / 7);
+  const year = thursday.getUTCFullYear();
+  return { week: `${year}-W${String(weekNumber).padStart(2, '0')}`, weekNumber, year };
+}
+
+const SENTIMENT_COLORS = {
+  positive: '#047857',
+  neutral: '#4B5563',
+  negative: '#B91C1C',
+};
+
+/**
+ * Builds a deduplication key matching the original UI's `buildPromptKey`:
+ *   prompt | region | topics
+ * @internal Exported for testing
+ */
+export function buildPromptKey(row) {
+  const prompt = row.prompt || '';
+  const region = row.region_code || 'Unknown';
+  const topics = row.topics || 'Unknown';
+  return `${prompt}|${region}|${topics}`;
+}
+
+/**
+ * Aggregates execution rows into per-week sentiment percentages.
+ * Deduplicates by (prompt, region_code, topics) within each week to match
+ * the original brand-presence UI which counts unique prompts, not raw rows.
+ * When the same prompt appears for multiple brands, only the first-seen
+ * sentiment is used — this avoids inflating counts when using brands=all.
+ *
+ * @param {Array<{execution_date: string, sentiment: string|null, prompt: string|null,
+ *   region_code: string|null, topics: string|null}>} rows
+ * @returns {Array<Object>} weeklyTrends sorted by week ascending
+ * @internal Exported for testing
+ */
+export function aggregateSentimentByWeek(rows) {
+  const weekMap = new Map();
+
+  rows.forEach((row) => {
+    const { week, weekNumber, year } = toISOWeek(row.execution_date);
+    if (!weekMap.has(week)) {
+      weekMap.set(week, {
+        week,
+        weekNumber,
+        year,
+        positive: 0,
+        neutral: 0,
+        negative: 0,
+        totalPrompts: 0,
+        promptsWithSentiment: 0,
+        seenKeys: new Set(),
+      });
+    }
+    const entry = weekMap.get(week);
+
+    const key = buildPromptKey(row);
+    if (entry.seenKeys.has(key)) return;
+    entry.seenKeys.add(key);
+
+    entry.totalPrompts += 1;
+
+    const sentiment = (row.sentiment || '').toLowerCase().trim();
+    if (sentiment === 'positive') {
+      entry.positive += 1;
+      entry.promptsWithSentiment += 1;
+    } else if (sentiment === 'neutral') {
+      entry.neutral += 1;
+      entry.promptsWithSentiment += 1;
+    } else if (sentiment === 'negative') {
+      entry.negative += 1;
+      entry.promptsWithSentiment += 1;
+    }
+  });
+
+  return [...weekMap.values()]
+    .sort((a, b) => a.week.localeCompare(b.week))
+    .map((entry) => {
+      const total = entry.promptsWithSentiment;
+      const positivePct = total > 0 ? Math.round((entry.positive / total) * 100) : 0;
+      const negativePct = total > 0 ? Math.round((entry.negative / total) * 100) : 0;
+      const neutralPct = total > 0 ? 100 - positivePct - negativePct : 0;
+
+      return {
+        week: entry.week,
+        weekNumber: entry.weekNumber,
+        year: entry.year,
+        sentiment: [
+          { name: 'Positive', value: positivePct, color: SENTIMENT_COLORS.positive },
+          { name: 'Neutral', value: neutralPct, color: SENTIMENT_COLORS.neutral },
+          { name: 'Negative', value: negativePct, color: SENTIMENT_COLORS.negative },
+        ],
+        totalPrompts: entry.totalPrompts,
+        promptsWithSentiment: entry.promptsWithSentiment,
+        mentions: 0,
+        citations: 0,
+        visibilityScore: 0,
+        competitors: [],
+      };
+    });
+}
+
+/**
+ * Creates the getSentimentOverview handler.
+ * Returns per-week sentiment counts (positive, neutral, negative) and prompt metrics.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'sentiment-overview',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      let q = client
+        .from('brand_presence_executions')
+        .select('execution_date, sentiment, prompt, region_code, topics')
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model);
+
+      if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
+      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (shouldApplyFilter(params.categoryId)) {
+        q = isValidUUID(params.categoryId)
+          ? q.eq('category_id', params.categoryId)
+          : q.eq('category_name', params.categoryId);
+      }
+      if (shouldApplyFilter(params.topic)) q = q.eq('topics', params.topic);
+      if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
+      if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence sentiment-overview PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const weeklyTrends = aggregateSentimentByWeek(data || []);
+      return ok({ weeklyTrends });
     },
   );
 }

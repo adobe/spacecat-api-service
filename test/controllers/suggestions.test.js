@@ -409,6 +409,7 @@ describe('Suggestions Controller', () => {
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('alt-text-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('no-cta-above-the-fold-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('form-accessibility-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('product-metatags-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('summit-plg', site).returns(true);
@@ -3514,6 +3515,54 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('derives no-cta auto-fix URL from contentFix.page_patch.original_page_url', async () => {
+      const noCtaSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CONTENT_UPDATE',
+        rank: 1,
+        status: 'NEW',
+        data: {
+          contentFix: {
+            page_patch: {
+              original_page_url: 'https://example.com/no-cta-page',
+              changes: {
+                type: 'patch',
+                patch: {
+                  operations: [
+                    { op: 'add', path: '/items/0', value: { text: 'Explore' } },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        updatedAt: new Date(),
+      };
+      opportunity.getType = sandbox.stub().returns('no-cta-above-the-fold');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(noCtaSuggestion)]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...noCtaSuggestion, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('url', 'https://example.com/no-cta-page');
+      expect(sqsPayload.suggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
     });
 
     it('skips bulkUpdateStatus when action is assess and still sends SQS message', async () => {

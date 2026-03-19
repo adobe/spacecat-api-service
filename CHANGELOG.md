@@ -1,3 +1,39 @@
+## [1.354.1](https://github.com/adobe/spacecat-api-service/compare/v1.354.0...v1.354.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1987](https://github.com/adobe/spacecat-api-service/issues/1987)) ([f4c7501](https://github.com/adobe/spacecat-api-service/commit/f4c75011995fc220bd71dde6d3050494c448154b))
+
+# [1.354.0](https://github.com/adobe/spacecat-api-service/compare/v1.353.1...v1.354.0) (2026-03-18)
+
+
+### Features
+
+* add market tracking trends handler | LLMO-3605 ([#1975](https://github.com/adobe/spacecat-api-service/issues/1975)) ([b995822](https://github.com/adobe/spacecat-api-service/commit/b995822c9ff6d2cf4d9f3c849885a1978f15fa73))
+* add sentiment-overview endpoint for brand presence | LLMO-3605 ([#1974](https://github.com/adobe/spacecat-api-service/issues/1974)) ([6ec5cbf](https://github.com/adobe/spacecat-api-service/commit/6ec5cbf0f87600a048b9a33ef959ca7644691053))
+
+## [1.353.1](https://github.com/adobe/spacecat-api-service/compare/v1.353.0...v1.353.1) (2026-03-18)
+
+
+### Bug Fixes
+
+* llmo mysticat apis allow passing multiple topicIds ([#1982](https://github.com/adobe/spacecat-api-service/issues/1982)) ([dcbc2f1](https://github.com/adobe/spacecat-api-service/commit/dcbc2f1777b23e3bfdfe3820c83d9b1a3ecbef76))
+
+# [1.353.0](https://github.com/adobe/spacecat-api-service/compare/v1.352.2...v1.353.0) (2026-03-17)
+
+
+### Features
+
+* add `documentPath` in fix entity for manual mark as deployed ([#1835](https://github.com/adobe/spacecat-api-service/issues/1835)) ([1e8d564](https://github.com/adobe/spacecat-api-service/commit/1e8d5641911e2ae9b3818bbb45c5d537ac10e5d7)), closes [this.#ctx](https://github.com/this./issues/ctx) [this.#ctx](https://github.com/this./issues/ctx)
+
+## [1.352.2](https://github.com/adobe/spacecat-api-service/compare/v1.352.1...v1.352.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* derive no-cta autofix URL from contentFix page_patch ([#1972](https://github.com/adobe/spacecat-api-service/issues/1972)) ([1020e93](https://github.com/adobe/spacecat-api-service/commit/1020e93532841db4a31e59223251b46de37aa911))
+
 ## [1.352.1](https://github.com/adobe/spacecat-api-service/compare/v1.352.0...v1.352.1) (2026-03-17)
 
 
