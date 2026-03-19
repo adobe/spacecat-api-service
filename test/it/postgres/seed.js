@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable no-await-in-loop */
 import { execSync } from 'child_process';
 
 import { organizations } from './seed-data/organizations.js';
@@ -36,41 +37,25 @@ const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
 
 /**
- * Normalizes an array of objects so every object has the same keys (required by
- * PostgREST bulk inserts - PGRST102). Missing keys are filled with null.
- */
-function normalizeKeys(rows) {
-  const allKeys = new Set();
-  for (const row of rows) {
-    for (const key of Object.keys(row)) allKeys.add(key);
-  }
-  return rows.map((row) => {
-    const normalized = {};
-    for (const key of allKeys) {
-      normalized[key] = key in row ? row[key] : null;
-    }
-    return normalized;
-  });
-}
-
-/**
- * Bulk-inserts rows into a PostgREST table (single HTTP request per table).
+ * Inserts rows into a PostgREST table one at a time.
+ * (Bulk inserts require uniform keys across all objects - PGRST102 - and seed
+ * data has optional fields, so we insert individually but parallelize across tables.)
  */
 async function insertRows(table, rows) {
-  if (rows.length === 0) return;
+  for (const row of rows) {
+    const res = await fetch(`${POSTGREST_URL}/${table}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(row),
+    });
 
-  const res = await fetch(`${POSTGREST_URL}/${table}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
-    },
-    body: JSON.stringify(normalizeKeys(rows)),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
+    }
   }
 }
 
