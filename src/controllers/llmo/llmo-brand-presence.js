@@ -868,3 +868,80 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     },
   );
 }
+
+/**
+ * Creates the getBrandPresenceStats handler.
+ * Returns aggregated visibility stats
+ * (total_executions, average_visibility_score, total_mentions, total_citations)
+ * via the rpc_brand_presence_stats RPC in mysticat-data-service.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'stats',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const topicIds = params.topicIds?.length ? params.topicIds : null;
+      const categoryId = shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
+        ? params.categoryId
+        : null;
+
+      const { data, error } = await client.rpc('rpc_brand_presence_stats', {
+        p_organization_id: organizationId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_model: model,
+        p_brand_id: filterByBrandId,
+        p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+        p_category_id: categoryId,
+        p_topic_ids: topicIds,
+        p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
+        p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+      });
+
+      if (error) {
+        ctx.log.error(`Brand presence stats RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const row = Array.isArray(data) && data.length > 0 ? data[0] : data;
+      const stats = row
+        ? {
+          total_executions: Number(row.total_executions ?? 0),
+          average_visibility_score: Number(row.average_visibility_score ?? 0),
+          total_mentions: Number(row.total_mentions ?? 0),
+          total_citations: Number(row.total_citations ?? 0),
+        }
+        : {
+          total_executions: 0,
+          average_visibility_score: 0,
+          total_mentions: 0,
+          total_citations: 0,
+        };
+
+      return ok({ stats });
+    },
+  );
+}
