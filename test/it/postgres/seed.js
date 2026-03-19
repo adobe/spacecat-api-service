@@ -40,20 +40,20 @@ const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
  * Inserts rows into a PostgREST table.
  */
 async function insertRows(table, rows) {
-  for (const row of rows) {
-    const res = await fetch(`${POSTGREST_URL}/${table}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify(row),
-    });
+  if (rows.length === 0) return;
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
-    }
+  const res = await fetch(`${POSTGREST_URL}/${table}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(rows),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
   }
 }
 
