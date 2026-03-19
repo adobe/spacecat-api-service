@@ -36,6 +36,24 @@ const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
 
 /**
+ * Normalizes an array of objects so every object has the same keys (required by
+ * PostgREST bulk inserts - PGRST102). Missing keys are filled with null.
+ */
+function normalizeKeys(rows) {
+  const allKeys = new Set();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) allKeys.add(key);
+  }
+  return rows.map((row) => {
+    const normalized = {};
+    for (const key of allKeys) {
+      normalized[key] = key in row ? row[key] : null;
+    }
+    return normalized;
+  });
+}
+
+/**
  * Bulk-inserts rows into a PostgREST table (single HTTP request per table).
  */
 async function insertRows(table, rows) {
@@ -47,7 +65,7 @@ async function insertRows(table, rows) {
       'Content-Type': 'application/json',
       Prefer: 'return=minimal',
     },
-    body: JSON.stringify(rows),
+    body: JSON.stringify(normalizeKeys(rows)),
   });
 
   if (!res.ok) {
