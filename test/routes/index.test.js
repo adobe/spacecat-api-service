@@ -253,6 +253,10 @@ describe('getRouteHandlers', () => {
     takeScreenshots: () => null,
   };
 
+  const mockLlmoMysticatController = {
+    getFilterDimensions: () => null,
+  };
+
   const mockLlmoController = {
     getLlmoSheetData: () => null,
     getLlmoGlobalSheetData: () => null,
@@ -382,6 +386,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockLlmoMysticatController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -450,7 +455,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
-    expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
+    expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
@@ -469,6 +474,14 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean',
       'GET /v2/orgs/:spaceCatId/llmo-topics',
       'GET /v2/orgs/:spaceCatId/llmo-prompts',
+      'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
+      'GET /org/:spaceCatId/brands/all/brand-presence/weeks',
+      'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks',
+      'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
       'POST /v2/orgs/:spaceCatId/llmo-customer-config',
       'GET /organizations/:organizationId/projects',
@@ -558,6 +571,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes',
+      'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
