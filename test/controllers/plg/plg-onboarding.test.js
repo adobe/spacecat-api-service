@@ -434,6 +434,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         '../../../src/support/rum-config-service.js': {
           updateRumConfig: updateRumConfigStub,
         },
+            fromContext: () => ({ hasAdminAccess: () => false }),
+          },
+        },
       },
     )).default;
   });
@@ -5051,6 +5054,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             forbidden: (msg) => ({ status: 403, value: msg }),
             internalServerError: (msg) => ({ status: 500, value: msg }),
             noContent: () => ({ status: 204 }),
+            createResponse: (body, status) => ({ status, value: body }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
             notFound: (msg) => ({ status: 404, value: msg }),
             ok: (data) => ({ status: 200, value: data }),
           },
@@ -5069,6 +5075,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               createForSite: tierClientCreateForSiteStub,
               createForOrg: tierClientCreateForOrgStub,
             },
+          '@adobe/spacecat-shared-tier-client': {
+            default: { createForSite: tierClientCreateForSiteStub },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -5079,6 +5087,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               TIERS: {
                 FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
               },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -5109,6 +5118,13 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
             queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+            ASO_DEMO_ORG: DEMO_ORG_ID,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
           },
           '../../../src/utils/slack/base.js': {
             loadProfileConfig: loadProfileConfigStub,

@@ -1287,6 +1287,7 @@ async function performAsoPlgOnboarding({
     steps.auditsEnabled = true;
 
     // Step 8b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
+    // Step 7b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
     try {
       const { Configuration } = dataAccess;
       const configuration = await Configuration.findLatest();
@@ -1538,6 +1539,7 @@ function PlgOnboardingController(ctx) {
     // permitted on the PLG onboarding flow - this endpoint stays on hasAdminAccess()
     // so that the PLG admin surface (status / waitlist / bypass / etc.) is gated
     // exclusively by the full-admin role.
+    // Admin/API key holders can access any org's status
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       // Non-admin: validate caller's IMS tenant matches requested imsOrgId

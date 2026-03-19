@@ -54,6 +54,17 @@ import { composeBaseURL, tracingFetch as fetch } from '@adobe/spacecat-shared-ut
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 
 const AUDIT_TYPES = ['alt-text', 'cwv', 'broken-backlinks', 'scrape-top-pages'];
+const CONFIG_HANDLERS = [
+  'summit-plg',
+  'broken-backlinks-auto-suggest',
+  'broken-backlinks-auto-fix',
+  'alt-text-auto-fix',
+  'alt-text-auto-suggest-mystique',
+  'alt-text',
+  'cwv-auto-fix',
+  'cwv-auto-suggest',
+  'cwv',
+];
 
 const log = {
   info: (...args) => console.log('[INFO]', ...args), // eslint-disable-line no-console
@@ -111,20 +122,23 @@ async function disableAuditsAndPlg(baseURL) {
     log.warn(`  Error disabling audits: ${error.message}`);
   }
 
-  // Disable summit-plg
+  // Disable config handlers (summit-plg + auto-suggest/auto-fix)
   try {
+    const handlersPayload = CONFIG_HANDLERS.map(
+      (auditType) => ({ baseURL, auditType, enable: false }),
+    );
     const resp = await fetch(`${apiUrl}/configurations/sites/audits`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify([{ baseURL, auditType: 'summit-plg', enable: false }]),
+      body: JSON.stringify(handlersPayload),
     });
     if (!resp.ok) {
-      log.warn(`  Failed to disable summit-plg: ${resp.status}`);
+      log.warn(`  Failed to disable config handlers: ${resp.status}`);
     } else {
-      log.info('  Disabled summit-plg');
+      log.info(`  Disabled config handlers: ${CONFIG_HANDLERS.join(', ')}`);
     }
   } catch (error) {
-    log.warn(`  Error disabling summit-plg: ${error.message}`);
+    log.warn(`  Error disabling config handlers: ${error.message}`);
   }
 }
 

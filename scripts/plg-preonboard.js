@@ -65,7 +65,7 @@ const { STATUSES } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 
-const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
+const ASO_DEMO_ORG = '908936ED5D35CC220A495CD4@AdobeOrg';
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.(com|net)$/i;
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
@@ -86,8 +86,14 @@ const ASO_PLG_PROFILE = {
   audits: {
     'alt-text': {},
     cwv: {},
-    'broken-backlinks': {},
     'scrape-top-pages': {},
+    'broken-backlinks': {},
+    'broken-backlinks-auto-suggest': {},
+    'broken-backlinks-auto-fix': {},
+    'alt-text-auto-fix': {},
+    'alt-text-auto-suggest-mystique': {},
+    'cwv-auto-fix': {},
+    'cwv-auto-suggest': {},
   },
   imports: {
     'organic-traffic': {},
@@ -119,25 +125,6 @@ async function findDeliveryType(url) {
   }
 }
 
-/** Create or find an organization by IMS Org ID (inlined from llmo-onboarding.js). */
-async function createOrFindOrganization(imsOrgId, context) {
-  const { dataAccess: da } = context;
-  const { Organization } = da;
-
-  let organization = await Organization.findByImsOrgId(imsOrgId);
-  if (organization) {
-    log.info(`  Found existing org ${organization.getId()}`);
-    return organization;
-  }
-
-  organization = await Organization.create({
-    name: `Organization ${imsOrgId}`,
-    imsOrgId,
-  });
-  log.info(`  Created org ${organization.getId()}`);
-  return organization;
-}
-
 /**
  * Auto-resolve author URL from RUM bundles (inlined from src/support/utils.js).
  * Returns { authorURL, programId, environmentId, host } or null.
@@ -147,26 +134,37 @@ async function autoResolveAuthorUrl(domain, context) {
     const rumApiClient = RUMAPIClient.createFrom(context);
     const domainkey = await rumApiClient.retrieveDomainkey(domain);
 
-    const yesterday = new Date(Date.now() - ONE_DAY_MS);
-    const year = yesterday.getUTCFullYear();
-    const month = (yesterday.getUTCMonth() + 1).toString().padStart(2, '0');
-    const day = yesterday.getUTCDate().toString().padStart(2, '0');
-    const bundlesUrl = `${RUM_BUNDLER_API_HOST}/bundles/${domain}/${year}/${month}/${day}?domainkey=${domainkey}`;
+    // Try up to 7 days back to find a bundle with a host
+    let host = null;
+    for (let daysBack = 1; daysBack <= 7; daysBack += 1) {
+      const date = new Date(Date.now() - daysBack * ONE_DAY_MS);
+      const year = date.getUTCFullYear();
+      const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+      const day = date.getUTCDate().toString().padStart(2, '0');
+      const bundlesUrl = `${RUM_BUNDLER_API_HOST}/bundles/${domain}/${year}/${month}/${day}?domainkey=${domainkey}`;
 
-    const response = await fetch(bundlesUrl);
-    if (!response.ok) {
-      log.warn(`  Failed to fetch RUM bundles for ${domain}: status ${response.status}`);
-      return null;
+      // eslint-disable-next-line no-await-in-loop
+      const response = await fetch(bundlesUrl);
+      if (!response.ok) {
+        log.warn(`  Failed to fetch RUM bundles for ${domain} (${year}-${month}-${day}): status ${response.status}`);
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      const data = await response.json();
+      const rumBundles = data?.rumBundles || [];
+      if (rumBundles.length > 0) {
+        [{ host }] = rumBundles;
+        log.info(`  Found RUM bundles for ${domain} on ${year}-${month}-${day}`);
+        break;
+      }
     }
 
-    const data = await response.json();
-    const rumBundles = data?.rumBundles || [];
-    if (rumBundles.length === 0) {
-      log.info(`  No RUM bundles found for ${domain}`);
+    if (!host) {
+      log.info(`  No RUM bundles found for ${domain} in last 7 days`);
       return null;
     }
-
-    const { host } = rumBundles[0];
     const match = host?.match(AEM_CS_PUBLISH_HOST_PATTERN);
     if (!match) {
       log.info(`  RUM host '${host}' is not AEM CS publish host`);
@@ -284,7 +282,30 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
     const status = onboarding.getStatus();
     if (status === STATUSES.ONBOARDED || status === STATUSES.PRE_ONBOARDING) {
       log.info(`  Already ${status}, skipping`);
-      return null;
+      return {
+        domain,
+        imsOrgId,
+        siteId: onboarding.getSiteId() || '',
+        organizationId: onboarding.getOrganizationId() || '',
+        status: `SKIPPED (${status})`,
+        botBlocker: '',
+        botBlockerIPs: '',
+        rumHost: '',
+        deliveryType: '',
+        authorURL: '',
+        programId: '',
+        environmentId: '',
+        preferContentApi: false,
+        codeOwner: '',
+        codeRepo: '',
+        hlxConfig: 'no',
+        overrideBaseURL: '',
+        language: '',
+        region: '',
+        entitlement: '',
+        steps: Object.keys(onboarding.getSteps() || {}).join(';'),
+        originalSite: '',
+      };
     }
   }
 
@@ -305,12 +326,18 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
   const steps = { ...(onboarding.getSteps() || {}) };
 
   try {
-    // Step 1: Resolve organization
-    const organization = await createOrFindOrganization(imsOrgId, context);
+    // Step 1: Resolve organization — always use demo org for preonboarding.
+    // PlgOnboarding record keeps customer imsOrgId so GET /plg/onboard/:imsOrgId works.
+    // Once the customer calls POST /plg/onboard, the site org will be reassigned to their org.
+    const { Organization } = da;
+    const organization = await Organization.findByImsOrgId(ASO_DEMO_ORG);
+    if (!organization) {
+      throw new Error(`Demo org ${ASO_DEMO_ORG} not found`);
+    }
     const organizationId = organization.getId();
     onboarding.setOrganizationId(organizationId);
     steps.orgResolved = true;
-    log.info(`  Org resolved: ${organizationId}`);
+    log.info(`  Org resolved (demo): ${organizationId}`);
 
     // Step 2: Check site ownership
     let site = await Site.findByBaseURL(baseURL);
@@ -331,15 +358,38 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
     if (site) {
       const existingOrgId = site.getOrganizationId();
       if (existingOrgId !== organizationId
-        && existingOrgId !== context.env.DEFAULT_ORGANIZATION_ID
-        && existingOrgId !== ASO_DEMO_ORG) {
+        && existingOrgId !== context.env.DEFAULT_ORGANIZATION_ID) {
         log.warn(`  Domain ${domain} belongs to org ${existingOrgId}, waitlisting`);
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is already assigned to another organization`);
         onboarding.setSiteId(site.getId());
         onboarding.setSteps(steps);
         await onboarding.save();
-        return null;
+        return {
+          domain,
+          imsOrgId,
+          siteId: site.getId(),
+          organizationId,
+          status: STATUSES.WAITLISTED,
+          botBlocker: '',
+          botBlockerIPs: '',
+          rumHost: '',
+          deliveryType: site.getDeliveryType() || '',
+          authorURL: '',
+          programId: '',
+          environmentId: '',
+          preferContentApi: false,
+          codeOwner: '',
+          codeRepo: '',
+          hlxConfig: 'no',
+          overrideBaseURL: '',
+          language: '',
+          region: '',
+          entitlement: 'no',
+          steps: Object.keys(steps).filter((k) => steps[k]).join(';'),
+          originalSite: '',
+          waitlistReason: `Domain ${domain} is already assigned to another organization`,
+        };
       }
 
       if (existingOrgId !== organizationId) {
@@ -510,74 +560,69 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
     await site.save();
     steps.configUpdated = true;
 
-    // Step 6: Enable audits via SpaceCat API
-    // (old: direct S3 write via enableAudits — requires IAM permissions not available locally)
-    // await enableAudits(site, context, auditTypes);
-    const auditTypes = Object.keys(profile.audits || {});
+    // Step 6: Enable all audit handlers via SpaceCat API
+    const allHandlers = [
+      ...new Set([
+        ...Object.keys(profile.audits || {}),
+        'summit-plg',
+      ]),
+    ];
     const apiUrl = process.env.SPACECAT_API_BASE_URL;
     const apiKey = process.env.ADMIN_API_KEY;
     try {
-      const auditsPayload = auditTypes.map((auditType) => ({
-        baseURL, auditType, enable: true,
-      }));
-      const auditsResp = await fetch(`${apiUrl}/configurations/sites/audits`, {
+      const payload = allHandlers.map((auditType) => ({ baseURL, auditType, enable: true }));
+      const resp = await fetch(`${apiUrl}/configurations/sites/audits`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-        },
-        body: JSON.stringify(auditsPayload),
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+        body: JSON.stringify(payload),
       });
-      if (!auditsResp.ok) {
-        const errBody = await auditsResp.text();
-        log.warn(`  API enable audits returned ${auditsResp.status}: ${errBody}`);
+      if (!resp.ok) {
+        const errBody = await resp.text();
+        log.warn(`  API enable handlers returned ${resp.status}: ${errBody}`);
       } else {
-        const results = await auditsResp.json();
-        log.info(`  Enabled audits via API: ${JSON.stringify(results)}`);
+        const results = await resp.json();
+        log.info(`  Enabled handlers via API: ${JSON.stringify(results)}`);
         steps.auditsEnabled = true;
       }
     } catch (error) {
-      log.warn(`  Failed to enable audits via API: ${error.message}`);
+      log.warn(`  Failed to enable handlers via API: ${error.message}`);
     }
 
-    // Step 7: Enroll in summit-plg via SpaceCat API
-    // (old: direct Configuration.save — requires IAM permissions not available locally)
-    // const { Configuration } = da;
-    // const configuration = await Configuration.findLatest();
-    // configuration.enableHandlerForSite('summit-plg', site);
-    // await configuration.save();
+    // Step 8: Create ASO entitlement + site enrollment
     try {
-      const summitPayload = [{ baseURL, auditType: 'summit-plg', enable: true }];
-      const summitResp = await fetch(`${apiUrl}/configurations/sites/audits`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-        },
-        body: JSON.stringify(summitPayload),
-      });
-      const summitResults = await summitResp.json();
-      log.info(`  summit-plg API response: ${JSON.stringify(summitResults)}`);
-      if (!summitResp.ok) {
-        log.warn(`  API summit-plg enrollment returned ${summitResp.status}`);
-      }
-    } catch (error) {
-      log.warn(`  Failed to enroll in summit-plg via API: ${error.message}`);
-    }
-
-    // Step 8: Create ASO entitlement (org-level only, no site enrollment)
-    try {
-      const tierClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
-      const { entitlement } = await tierClient.createEntitlement(ASO_TIER);
-      log.info(`  Created ASO entitlement ${entitlement.getId()}`);
+      const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
+      const { entitlement, siteEnrollment } = await tierClient.createEntitlement(ASO_TIER);
+      log.info(`  Created ASO entitlement ${entitlement.getId()} and enrollment ${siteEnrollment.getId()}`);
       steps.entitlementCreated = true;
     } catch (error) {
-      if (error.message?.includes('already exists')) {
-        log.info('  ASO entitlement already exists');
+      if (error.message?.includes('already exists')
+        || error.message?.includes('Already enrolled')) {
+        log.info('  ASO entitlement/enrollment already exists');
         steps.entitlementCreated = true;
       } else {
-        log.warn(`  Failed to create entitlement: ${error.message}`);
+        log.warn(`  Failed to create entitlement/enrollment: ${error.message}`);
       }
+    }
+
+    // Step 9: Trigger audit runs via SQS
+    if (context.sqs && process.env.AUDIT_JOBS_QUEUE_URL) {
+      const auditTypesToTrigger = ['alt-text', 'cwv', 'broken-backlinks', 'scrape-top-pages'];
+      await Promise.allSettled(
+        auditTypesToTrigger.map(async (auditType) => {
+          try {
+            await context.sqs.sendMessage(process.env.AUDIT_JOBS_QUEUE_URL, {
+              type: auditType,
+              siteId: site.getId(),
+            });
+            log.info(`  Triggered ${auditType} audit for site ${site.getId()}`);
+          } catch (error) {
+            log.warn(`  Failed to trigger ${auditType} audit: ${error.message}`);
+          }
+        }),
+      );
+      steps.auditsTriggered = true;
+    } else {
+      log.warn('  AUDIT_JOBS_QUEUE_URL not set, skipping audit triggers');
     }
 
     // Mark as PRE_ONBOARDING
@@ -679,7 +724,8 @@ async function main() {
       headers.join(','),
       ...results.map((r) => headers.map((h) => `"${String(r[h]).replace(/"/g, '""')}"`).join(',')),
     ];
-    const csvFile = inputFile.replace(/\.json$/, '-report.csv');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const csvFile = inputFile.replace(/\.json$/, `-report-${timestamp}.csv`);
     const { writeFileSync } = await import('fs');
     writeFileSync(csvFile, csvLines.join('\n'), 'utf-8');
     log.info(`\nCSV report written to ${csvFile}`);
