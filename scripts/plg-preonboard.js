@@ -654,6 +654,7 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
       }
     }
 
+
     // Step 6: Enable all audit handlers via SpaceCat API
     const allHandlers = [
       ...new Set([
@@ -704,6 +705,27 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
     }
 
     // Step 8: Trigger audit runs via SQS
+    if (context.sqs && process.env.AUDIT_JOBS_QUEUE_URL) {
+      const auditTypesToTrigger = ['alt-text', 'cwv', 'broken-backlinks', 'scrape-top-pages'];
+      await Promise.allSettled(
+        auditTypesToTrigger.map(async (auditType) => {
+          try {
+            await context.sqs.sendMessage(process.env.AUDIT_JOBS_QUEUE_URL, {
+              type: auditType,
+              siteId: site.getId(),
+            });
+            log.info(`  Triggered ${auditType} audit for site ${site.getId()}`);
+          } catch (error) {
+            log.warn(`  Failed to trigger ${auditType} audit: ${error.message}`);
+          }
+        }),
+      );
+      steps.auditsTriggered = true;
+    } else {
+      log.warn('  AUDIT_JOBS_QUEUE_URL not set, skipping audit triggers');
+    }
+
+    // Step 9: Trigger audit runs via SQS
     if (context.sqs && process.env.AUDIT_JOBS_QUEUE_URL) {
       const auditTypesToTrigger = ['alt-text', 'cwv', 'broken-backlinks', 'scrape-top-pages'];
       await Promise.allSettled(
