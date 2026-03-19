@@ -15,12 +15,21 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
+  addDaysToDate,
+  aggregateSentimentByWeek,
+  buildPromptKey,
+  createBrandPresenceStatsHandler,
   createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
+  createSentimentOverviewHandler,
+  createMarketTrackingTrendsHandler,
+  dateToIsoWeek,
   getWeekDateRange,
   resolveSiteIds,
+  splitDateRangeIntoWeeksBackward,
   strCompare,
   toFilterOption,
+  toISOWeek,
   validateSiteBelongsToOrg,
 } from '../../../src/controllers/llmo/llmo-brand-presence.js';
 
@@ -52,6 +61,141 @@ function createChainableMock(resolveValue = { data: [], error: null }, resolveSe
     then(resolve) { return Promise.resolve(resolveValue).then(resolve); },
   };
   return c;
+}
+
+/**
+ * Creates a mock PostgREST client that returns different results per table.
+ * Each `.from(tableName)` call returns a new independent chain object so that
+ * parallel queries (Promise.all) resolve independently with their own result.
+ * Shared sinon stubs on the root object accumulate all calls for assertions.
+ */
+function createTableAwareMock(tableResults = {}, defaultResult = { data: [], error: null }) {
+  // Declare stubs first so makeChain can close over them
+  const stubs = {
+    select: sinon.stub(),
+    eq: sinon.stub(),
+    gte: sinon.stub(),
+    lte: sinon.stub(),
+    ilike: sinon.stub(),
+    in: sinon.stub(),
+    order: sinon.stub(),
+    limit: sinon.stub(),
+    not: sinon.stub(),
+    filter: sinon.stub(),
+    or: sinon.stub(),
+  };
+
+  // Declare fromStub first so makeChain can reference it without a forward-reference lint error.
+  const fromStub = sinon.stub();
+
+  function makeChain(table) {
+    const result = tableResults[table] ?? defaultResult;
+    const chain = {
+      from: fromStub,
+      select(...args) {
+        stubs.select(...args);
+        return chain;
+      },
+      eq(...args) {
+        stubs.eq(...args);
+        return chain;
+      },
+      gte(...args) {
+        stubs.gte(...args);
+        return chain;
+      },
+      lte(...args) {
+        stubs.lte(...args);
+        return chain;
+      },
+      ilike(...args) {
+        stubs.ilike(...args);
+        return chain;
+      },
+      in(...args) {
+        stubs.in(...args);
+        return chain;
+      },
+      order(...args) {
+        stubs.order(...args);
+        return chain;
+      },
+      not(...args) {
+        stubs.not(...args);
+        return chain;
+      },
+      filter(...args) {
+        stubs.filter(...args);
+        return chain;
+      },
+      or(...args) {
+        stubs.or(...args);
+        return chain;
+      },
+      limit(...args) {
+        stubs.limit(...args);
+        return Promise.resolve(result);
+      },
+      then(resolve, reject) {
+        return Promise.resolve(result).then(resolve, reject);
+      },
+    };
+    return chain;
+  }
+
+  fromStub.callsFake((t) => makeChain(t));
+  return { from: fromStub, ...stubs };
+}
+
+/**
+ * Creates a mock PostgREST client with rpc() and from() for Brand Presence Stats API.
+ * rpcStub can be configured to return different values per call (e.g. main stats + weekly trends).
+ * from() is needed for validateSiteBelongsToOrg when siteId is provided.
+ */
+const defaultStatsRpcData = {
+  data: [
+    {
+      total_executions: 0,
+      average_visibility_score: 0,
+      total_mentions: 0,
+      total_citations: 0,
+    },
+  ],
+  error: null,
+};
+function createStatsRpcMock(
+  rpcResolveValue = defaultStatsRpcData,
+  rpcSequence = null,
+) {
+  const rpcStub = rpcSequence
+    ? sinon.stub()
+      .onFirstCall()
+      .resolves(rpcSequence[0] ?? rpcResolveValue)
+      .onSecondCall()
+      .resolves(rpcSequence[1] ?? rpcResolveValue)
+      .onThirdCall()
+      .resolves(rpcSequence[2] ?? rpcResolveValue)
+      .onCall(3)
+      .resolves(rpcSequence[3] ?? rpcResolveValue)
+      .onCall(4)
+      .resolves(rpcSequence[4] ?? rpcResolveValue)
+      .onCall(5)
+      .resolves(rpcSequence[5] ?? rpcResolveValue)
+      .onCall(6)
+      .resolves(rpcSequence[6] ?? rpcResolveValue)
+      .onCall(7)
+      .resolves(rpcSequence[7] ?? rpcResolveValue)
+      .onCall(8)
+      .resolves(rpcSequence[8] ?? rpcResolveValue)
+    : sinon.stub().resolves(rpcResolveValue);
+  const sitesChain = {
+    from: sinon.stub().returnsThis(),
+    select: sinon.stub().returnsThis(),
+    eq: sinon.stub().returnsThis(),
+    limit: sinon.stub().resolves({ data: [{ id: 'x' }], error: null }),
+  };
+  const fromStub = sinon.stub().returns(sitesChain);
+  return { rpc: rpcStub, from: fromStub };
 }
 
 describe('llmo-brand-presence', () => {
@@ -104,6 +248,57 @@ describe('llmo-brand-presence', () => {
     it('compares truthy strings normally', () => {
       expect(strCompare('a', 'b')).to.be.lessThan(0);
       expect(strCompare('b', 'a')).to.be.greaterThan(0);
+    });
+  });
+
+  describe('addDaysToDate', () => {
+    it('adds positive days', () => {
+      expect(addDaysToDate('2025-01-15', 7)).to.equal('2025-01-22');
+      expect(addDaysToDate('2025-01-31', 1)).to.equal('2025-02-01');
+    });
+
+    it('subtracts days with negative argument', () => {
+      expect(addDaysToDate('2025-01-15', -7)).to.equal('2025-01-08');
+      expect(addDaysToDate('2025-01-21', -6)).to.equal('2025-01-15');
+    });
+
+    it('handles zero', () => {
+      expect(addDaysToDate('2025-01-15', 0)).to.equal('2025-01-15');
+    });
+  });
+
+  describe('splitDateRangeIntoWeeksBackward', () => {
+    it('returns single week when range is 7 days', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-15', '2025-01-21');
+      expect(weeks).to.have.lengthOf(1);
+      expect(weeks[0]).to.deep.equal({ startDate: '2025-01-15', endDate: '2025-01-21' });
+    });
+
+    it('returns weeks in chronological order (oldest first) before slice', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-01', '2025-01-21');
+      expect(weeks).to.have.lengthOf(3);
+      expect(weeks[0]).to.deep.equal({ startDate: '2025-01-01', endDate: '2025-01-07' });
+      expect(weeks[1]).to.deep.equal({ startDate: '2025-01-08', endDate: '2025-01-14' });
+      expect(weeks[2]).to.deep.equal({ startDate: '2025-01-15', endDate: '2025-01-21' });
+    });
+
+    it('limits to 8 weeks when range spans more', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-01', '2025-03-19');
+      expect(weeks).to.have.lengthOf(8);
+      expect(weeks[0].startDate).to.equal('2025-01-23');
+      expect(weeks[0].endDate).to.equal('2025-01-29');
+      expect(weeks[7].endDate).to.equal('2025-03-19');
+    });
+
+    it('handles partial first week when startDate is mid-week', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-03', '2025-01-21');
+      expect(weeks).to.have.lengthOf(3);
+      expect(weeks[0]).to.deep.equal({ startDate: '2025-01-03', endDate: '2025-01-07' });
+    });
+
+    it('returns empty array when endDate is before startDate', () => {
+      const weeks = splitDateRangeIntoWeeksBackward('2025-01-21', '2025-01-15');
+      expect(weeks).to.deep.equal([]);
     });
   });
 
@@ -353,7 +548,7 @@ describe('llmo-brand-presence', () => {
         model: 'gemini',
         site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
         category_id: '0178a3f0-1234-7000-8000-000000000099',
-        topic_id: 't1',
+        topicIds: '0178a3f0-1234-7000-8000-0000000000aa',
         region_code: 'US',
         user_intent: 'TRANSACTIONAL',
         prompt_branding: 'true',
@@ -367,16 +562,20 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.lte).to.have.been.calledWith('execution_date', '2025-01-31');
       expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
       expect(chainMock.eq).to.have.been.calledWith('site_id', 'cccdac43-1a22-4659-9086-b762f59b9928');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', ['0178a3f0-1234-7000-8000-0000000000aa']);
       expect(chainMock.limit).to.have.been.calledWith(5000);
     });
 
     it('returns ok with brands, categories, topics, origins, regions, page_intents', async () => {
+      const topicId1 = '0178a3f0-1234-7000-8000-0000000000a1';
+      const topicId2 = '0178a3f0-1234-7000-8000-0000000000a2';
       const brandData = {
         data: [
           {
             brand_id: '0178a3f0-1234-7000-8000-000000000002',
             brand_name: 'Brand A',
             category_name: 'Cat1',
+            topic_id: topicId1,
             topics: 't1',
             region_code: 'US',
             origin: 'human',
@@ -386,6 +585,7 @@ describe('llmo-brand-presence', () => {
             brand_id: '0178a3f0-1234-7000-8000-000000000003',
             brand_name: 'Brand B',
             category_name: 'Cat2',
+            topic_id: topicId2,
             topics: 't2',
             region_code: 'DE',
             origin: 'ai',
@@ -413,11 +613,48 @@ describe('llmo-brand-presence', () => {
       expect(body.brands[0]).to.have.property('label');
       expect(body.categories).to.have.lengthOf(2);
       expect(body.topics).to.have.lengthOf(2);
+      expect(body.topics[0]).to.deep.include({ id: topicId1, label: 't1' });
+      expect(body.topics[1]).to.deep.include({ id: topicId2, label: 't2' });
       expect(body.origins).to.have.lengthOf(2);
       expect(body.regions).to.have.lengthOf(2);
       expect(body.page_intents).to.have.lengthOf(2);
       expect(body.page_intents[0]).to.have.property('id');
       expect(body.page_intents[0]).to.have.property('label');
+    });
+
+    it('uses topic_id as label when topics is null or empty', async () => {
+      const topicIdNoLabel = '0178a3f0-1234-7000-8000-0000000000ff';
+      const brandData = {
+        data: [
+          {
+            brand_id: '0178a3f0-1234-7000-8000-000000000002',
+            brand_name: 'Brand A',
+            category_name: 'Cat1',
+            topic_id: topicIdNoLabel,
+            topics: null,
+            region_code: 'US',
+            origin: 'human',
+            site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
+          },
+        ],
+        error: null,
+      };
+      const pageIntentsData = {
+        data: [{ page_intent: 'TRANSACTIONAL' }],
+        error: null,
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        brandData,
+        [brandData, pageIntentsData],
+      );
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topics).to.have.lengthOf(1);
+      expect(body.topics[0]).to.deep.include({ id: topicIdNoLabel, label: topicIdNoLabel });
     });
 
     it('filters by brandId when single brand route', async () => {
@@ -469,26 +706,72 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
     });
 
-    it('filters by topicId when provided', async () => {
+    it('filters by topicIds (single UUID) when provided', async () => {
+      const topicUuid = '0178a3f0-1234-7000-8000-0000000000aa';
       const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { topicId: 'combine pdf' };
+      mockContext.data = { topicIds: topicUuid };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('topics', 'combine pdf');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', [topicUuid]);
     });
 
-    it('accepts topic/topics as fallback for topicId', async () => {
+    it('filters by topicIds (comma-separated UUIDs) when provided', async () => {
+      const topicUuids = [
+        '0178a3f0-1234-7000-8000-0000000000aa',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+      ];
       const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { topic: 'combine pdf' };
+      mockContext.data = { topicIds: topicUuids.join(',') };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('topics', 'combine pdf');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+    });
+
+    it('filters by topicIds (array) when provided', async () => {
+      const topicUuids = [
+        '0178a3f0-1234-7000-8000-0000000000aa',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+      ];
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: topicUuids };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+    });
+
+    it('ignores non-UUID topicIds values', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: 'combine pdf' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicIdCalls = chainMock.eq.getCalls().filter((c) => c.args[0] === 'topic_id');
+      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
+      expect(topicIdCalls).to.have.lengthOf(0);
+      expect(topicInCalls).to.have.lengthOf(0);
+    });
+
+    it('does not apply topic filter when topicIds is non-string, non-array value that fails UUID validation', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: 12345 };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
+      expect(topicInCalls).to.have.lengthOf(0);
     });
 
     it('filters by regionCode when provided', async () => {
@@ -861,6 +1144,1401 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.eq).to.have.been.calledWith('organization_id', mockContext.params.spaceCatId);
       expect(chainMock.order).to.have.been.calledWith('week', { ascending: false });
       expect(chainMock.limit).to.have.been.calledWith(200000);
+    });
+  });
+
+  describe('toISOWeek', () => {
+    it('converts a date string to ISO week', () => {
+      const result = toISOWeek('2026-03-11');
+      expect(result).to.deep.equal({ week: '2026-W11', weekNumber: 11, year: 2026 });
+    });
+
+    it('handles year boundary (Jan 1 can belong to previous year week)', () => {
+      const result = toISOWeek('2026-01-01');
+      expect(result).to.deep.equal({ week: '2026-W01', weekNumber: 1, year: 2026 });
+    });
+
+    it('handles date in the middle of the year', () => {
+      const result = toISOWeek('2026-06-15');
+      expect(result).to.have.property('week');
+      expect(result).to.have.property('weekNumber');
+      expect(result.year).to.equal(2026);
+    });
+  });
+
+  describe('buildPromptKey', () => {
+    it('builds key from prompt, region_code, and topics', () => {
+      const row = { prompt: 'What is Adobe?', region_code: 'US', topics: 'branding' };
+      expect(buildPromptKey(row)).to.equal('What is Adobe?|US|branding');
+    });
+
+    it('uses Unknown for missing region_code and topics', () => {
+      const row = { prompt: 'test' };
+      expect(buildPromptKey(row)).to.equal('test|Unknown|Unknown');
+    });
+
+    it('uses empty string for null prompt', () => {
+      const row = { prompt: null, region_code: 'DE', topics: 'pdf' };
+      expect(buildPromptKey(row)).to.equal('|DE|pdf');
+    });
+  });
+
+  describe('aggregateSentimentByWeek', () => {
+    it('returns empty array for empty input', () => {
+      expect(aggregateSentimentByWeek([])).to.deep.equal([]);
+    });
+
+    it('aggregates rows into weekly percentages', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-10', sentiment: 'negative', prompt: 'p2', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-11', sentiment: 'neutral', prompt: 'p3', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-11', sentiment: 'positive', prompt: 'p4', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].totalPrompts).to.equal(4);
+      expect(result[0].promptsWithSentiment).to.equal(4);
+      const sentimentMap = {};
+      result[0].sentiment.forEach((s) => {
+        sentimentMap[s.name] = s.value;
+      });
+      expect(sentimentMap.Positive).to.equal(50);
+      expect(sentimentMap.Negative).to.equal(25);
+      expect(sentimentMap.Neutral).to.equal(25);
+    });
+
+    it('deduplicates rows with same prompt key within a week', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-10', sentiment: 'negative', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].totalPrompts).to.equal(1);
+      expect(result[0].promptsWithSentiment).to.equal(1);
+    });
+
+    it('counts same prompt with different region as separate', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-09', sentiment: 'negative', prompt: 'p1', region_code: 'DE', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+
+      expect(result[0].totalPrompts).to.equal(2);
+    });
+
+    it('handles rows with null/missing sentiment', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09', sentiment: null, prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p2', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+
+      expect(result[0].totalPrompts).to.equal(2);
+      expect(result[0].promptsWithSentiment).to.equal(1);
+    });
+
+    it('sorts results by week ascending', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-16', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-02', sentiment: 'positive', prompt: 'p2', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+
+      expect(result).to.have.lengthOf(2);
+      expect(result[0].weekNumber).to.be.lessThan(result[1].weekNumber);
+    });
+
+    it('includes color hex codes in sentiment entries', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+      const colors = result[0].sentiment.map((s) => s.color);
+
+      expect(colors).to.include('#047857');
+      expect(colors).to.include('#4B5563');
+      expect(colors).to.include('#B91C1C');
+    });
+
+    it('returns zero percentages when no prompts have sentiment', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09',
+          sentiment: '',
+          prompt: 'p1',
+          region_code: 'US',
+          topics: 't1',
+        },
+        {
+          execution_date: '2026-03-09',
+          sentiment: null,
+          prompt: 'p2',
+          region_code: 'US',
+          topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+
+      expect(result[0].totalPrompts).to.equal(2);
+      expect(result[0].promptsWithSentiment).to.equal(0);
+      const total = result[0].sentiment.reduce((sum, s) => sum + s.value, 0);
+      expect(total).to.equal(0);
+    });
+
+    it('ensures percentages sum to 100', () => {
+      const rows = [
+        {
+          execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-09', sentiment: 'negative', prompt: 'p2', region_code: 'US', topics: 't1',
+        },
+        {
+          execution_date: '2026-03-09', sentiment: 'neutral', prompt: 'p3', region_code: 'US', topics: 't1',
+        },
+      ];
+      const result = aggregateSentimentByWeek(rows);
+      const total = result[0].sentiment.reduce((sum, s) => sum + s.value, 0);
+
+      expect(total).to.equal(100);
+    });
+  });
+
+  describe('createSentimentOverviewHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when query returns error', async () => {
+      const queryError = { message: 'relation does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: queryError },
+      );
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence sentiment-overview PostgREST error: relation does not exist',
+      );
+    });
+
+    it('returns ok with weeklyTrends for valid data', async () => {
+      const execData = {
+        data: [
+          {
+            execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
+          },
+          {
+            execution_date: '2026-03-10', sentiment: 'negative', prompt: 'p2', region_code: 'US', topics: 't1',
+          },
+        ],
+        error: null,
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(execData);
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.be.an('array');
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      expect(body.weeklyTrends[0]).to.have.property('sentiment');
+      expect(body.weeklyTrends[0].totalPrompts).to.equal(2);
+    });
+
+    it('returns empty weeklyTrends when no data', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal([]);
+    });
+
+    it('handles data: null gracefully', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: null,
+        error: null,
+      });
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal([]);
+    });
+
+    it('returns 403 when siteId does not belong to organization', async () => {
+      const execData = { data: [], error: null };
+      const sitesValidation = { data: [], error: null };
+      const chainMock = createChainableMock(execData, [execData, sitesValidation]);
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('applies optional filters (category, topicIds, region, origin)', async () => {
+      const topicUuid = '0178a3f0-1234-7000-8000-000000000099';
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = {
+        categoryId: 'Acrobat',
+        topicIds: topicUuid,
+        region: 'US',
+        origin: 'human',
+      };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
+      expect(chainMock.in).to.have.been.calledWith('topic_id', [topicUuid]);
+      expect(chainMock.eq).to.have.been.calledWith('region_code', 'US');
+      expect(chainMock.ilike).to.have.been.calledWith('origin', 'human');
+    });
+
+    it('filters by topicIds (comma-separated UUIDs) when provided', async () => {
+      const topicUuids = [
+        '0178a3f0-1234-7000-8000-000000000091',
+        '0178a3f0-1234-7000-8000-000000000092',
+      ];
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: topicUuids.join(',') };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+    });
+
+    it('ignores non-UUID topicIds in sentiment-overview', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { topicIds: 'pdf editing' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
+      expect(topicInCalls).to.have.lengthOf(0);
+    });
+
+    it('filters by brandId when single brand route', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith(
+        'brand_id',
+        '0178a3f0-1234-7000-8000-000000000002',
+      );
+    });
+
+    it('filters by category_id when categoryId is a valid UUID', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = {
+        categoryId: '0178a3f0-1234-7000-8000-000000000099',
+      };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith(
+        'category_id',
+        '0178a3f0-1234-7000-8000-000000000099',
+      );
+    });
+
+    it('uses WEEKS_QUERY_LIMIT (200000) for the query', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.limit).to.have.been.calledWith(200000);
+    });
+
+    it('selects execution_date, sentiment, prompt, region_code, topics', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.select).to.have.been.calledWith('execution_date, sentiment, prompt, region_code, topics');
+    });
+
+    it('maps platform param to model filter', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { platform: 'gemini' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
+    });
+  });
+
+  describe('dateToIsoWeek', () => {
+    it('converts a Monday to the correct ISO week', () => {
+      expect(dateToIsoWeek('2026-03-09')).to.equal('2026-W11');
+    });
+
+    it('converts a Sunday (last day of a week) to the correct ISO week', () => {
+      expect(dateToIsoWeek('2026-03-15')).to.equal('2026-W11');
+    });
+
+    it('converts a Thursday correctly (ISO reference day)', () => {
+      expect(dateToIsoWeek('2026-01-01')).to.equal('2026-W01');
+    });
+
+    it('handles year boundary where Jan 1 belongs to prior year week 53', () => {
+      // 2026-01-01 is Thursday and belongs to 2026-W01
+      // 2025-12-29 is a Monday and belongs to 2026-W01 (ISO year 2026)
+      expect(dateToIsoWeek('2025-12-29')).to.equal('2026-W01');
+    });
+
+    it('is inverse of getWeekDateRange startDate', () => {
+      const range = getWeekDateRange('2026-W11');
+      expect(dateToIsoWeek(range.startDate)).to.equal('2026-W11');
+    });
+
+    it('is inverse of getWeekDateRange endDate', () => {
+      const range = getWeekDateRange('2026-W11');
+      expect(dateToIsoWeek(range.endDate)).to.equal('2026-W11');
+    });
+  });
+
+  describe('createMarketTrackingTrendsHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when brand executions query returns error', async () => {
+      const queryError = { message: 'relation "brand_presence_executions" does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: null, error: queryError },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation "brand_presence_executions" does not exist');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Market-tracking-trends brand query error: relation "brand_presence_executions" does not exist',
+      );
+    });
+
+    it('returns badRequest when competitor data query returns error', async () => {
+      const queryError = { message: 'relation "executions_competitor_data" does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: null, error: queryError },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation "executions_competitor_data" does not exist');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Market-tracking-trends competitor query error: relation "executions_competitor_data" does not exist',
+      );
+    });
+
+    it('returns ok with empty weeklyTrends when no data', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock();
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal([]);
+      expect(body.weeklyTrendsForComparison).to.deep.equal([]);
+    });
+
+    it('counts distinct prompts with mentions per week (deduplication)', async () => {
+      const brandRows = [
+        // Two rows with the same composite key in the same week — should count as 1 mention
+        {
+          execution_date: '2026-03-09',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+        {
+          execution_date: '2026-03-10',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+        // Different prompt in same week — should add 1 more mention
+        {
+          execution_date: '2026-03-11',
+          prompt: 'Best PDF tool?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: true,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      const week = body.weeklyTrends[0];
+      expect(week.week).to.equal('2026-W11');
+      expect(week.mentions).to.equal(2); // 2 distinct prompts with mentions
+      expect(week.citations).to.equal(1); // 1 distinct prompt with citations
+    });
+
+    it('does not deduplicate across different regions or topics', async () => {
+      const brandRows = [
+        {
+          execution_date: '2026-03-09',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+        {
+          execution_date: '2026-03-09',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'DE', // different region — different key
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].mentions).to.equal(2);
+    });
+
+    it('aggregates competitor mentions and citations per week', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: 'CompA', mentions: 5, citations: 2,
+        },
+        {
+          execution_date: '2026-03-11', competitor: 'CompA', mentions: 3, citations: 1,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'CompB', mentions: 10, citations: 4,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      const week = body.weeklyTrends[0];
+      expect(week.week).to.equal('2026-W11');
+
+      const compA = week.competitors.find((c) => c.name === 'CompA');
+      const compB = week.competitors.find((c) => c.name === 'CompB');
+      expect(compA).to.deep.equal({ name: 'CompA', mentions: 8, citations: 3 });
+      expect(compB).to.deep.equal({ name: 'CompB', mentions: 10, citations: 4 });
+    });
+
+    it('sorts competitors by total activity descending', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: 'LowActivity', mentions: 1, citations: 0,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'HighActivity', mentions: 10, citations: 5,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'MidActivity', mentions: 4, citations: 2,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      const names = body.weeklyTrends[0].competitors.map((c) => c.name);
+      expect(names).to.deep.equal(['HighActivity', 'MidActivity', 'LowActivity']);
+    });
+
+    it('spans multiple weeks correctly', async () => {
+      const brandRows = [
+        {
+          execution_date: '2026-03-02',
+          prompt: 'q1',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: false,
+        },
+        {
+          execution_date: '2026-03-09',
+          prompt: 'q2',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: true,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(2);
+      expect(body.weeklyTrends[0].week).to.equal('2026-W10');
+      expect(body.weeklyTrends[1].week).to.equal('2026-W11');
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+      expect(body.weeklyTrends[1].citations).to.equal(1);
+    });
+
+    it('weeklyTrendsForComparison mirrors weeklyTrends', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock();
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal(body.weeklyTrendsForComparison);
+    });
+
+    it('queries brand_presence_executions with correct fields', async () => {
+      const client = createTableAwareMock();
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.from).to.have.been.calledWith('brand_presence_executions');
+      expect(client.select).to.have.been.calledWith(
+        'execution_date, prompt, topics, region_code, site_id, mentions, citations',
+      );
+    });
+
+    it('queries executions_competitor_data for competitor rows', async () => {
+      const client = createTableAwareMock();
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.from).to.have.been.calledWith('executions_competitor_data');
+    });
+
+    it('defaults model to chatgpt when not provided', async () => {
+      const client = createTableAwareMock();
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('model', 'chatgpt');
+    });
+
+    it('uses model from query param when provided', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { model: 'gemini' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('model', 'gemini');
+    });
+
+    it('filters by brandId when single brand route', async () => {
+      const client = createTableAwareMock();
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000002');
+    });
+
+    it('does not filter by brand_id when brandId is "all"', async () => {
+      const client = createTableAwareMock();
+      mockContext.params.brandId = 'all';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const brandIdCalls = client.eq.getCalls().filter((c) => c.args[0] === 'brand_id');
+      expect(brandIdCalls).to.have.lengthOf(0);
+    });
+
+    it('filters by category_id when categoryId is a valid UUID', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { categoryId: '0178a3f0-1234-7000-8000-000000000099' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('category_id', '0178a3f0-1234-7000-8000-000000000099');
+    });
+
+    it('filters by category_name when categoryId is not a UUID', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { categoryId: 'Acrobat' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('category_name', 'Acrobat');
+    });
+
+    it('filters by region_code when region is provided', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { region: 'US' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'US');
+    });
+
+    it('does not filter by topic or origin (comparison filters stripped)', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { topic: 'PDF editing', origin: 'ai' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicCalls = client.eq.getCalls().filter((c) => c.args[0] === 'topic' || c.args[0] === 'topics');
+      const originCalls = client.eq.getCalls().filter((c) => c.args[0] === 'origin');
+      expect(topicCalls).to.have.lengthOf(0);
+      expect(originCalls).to.have.lengthOf(0);
+    });
+
+    it('returns 403 when siteId does not belong to the organization', async () => {
+      const client = createTableAwareMock({
+        sites: { data: [], error: null },
+      });
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Site does not belong to the organization');
+    });
+
+    it('applies site_id filter on both queries when siteId belongs to org', async () => {
+      const siteId = 'cccdac43-1a22-4659-9086-b762f59b9928';
+      const client = createTableAwareMock({
+        sites: { data: [{ id: siteId }], error: null },
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+      mockContext.data = { siteId };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const siteIdCalls = client.eq.getCalls().filter((c) => c.args[0] === 'site_id' && c.args[1] === siteId);
+      // site_id filter applied to brand query AND competitor query (2 calls)
+      expect(siteIdCalls).to.have.lengthOf.at.least(2);
+    });
+
+    it('accepts snake_case params (start_date, end_date, region_code)', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = {
+        start_date: '2026-03-01',
+        end_date: '2026-03-15',
+        model: 'gemini',
+        region_code: 'DE',
+      };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(client.eq).to.have.been.calledWith('model', 'gemini');
+      expect(client.eq).to.have.been.calledWith('region_code', 'DE');
+    });
+
+    it('handles null context.data gracefully', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('handles null data from both queries (uses empty array fallback)', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: null, error: null },
+        executions_competitor_data: { data: null, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal([]);
+    });
+
+    it('skips competitor rows where competitor field is null or missing', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: null, mentions: 5, citations: 2,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'ValidComp', mentions: 3, citations: 1,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].competitors).to.have.lengthOf(1);
+      expect(body.weeklyTrends[0].competitors[0].name).to.equal('ValidComp');
+    });
+
+    it('treats null mentions/citations on competitor rows as 0', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: 'CompA', mentions: null, citations: null,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].competitors[0]).to.deep.equal({
+        name: 'CompA', mentions: 0, citations: 0,
+      });
+    });
+
+    it('handles mentions as string "true" (coercion from PostgREST text column)', async () => {
+      const brandRows = [
+        {
+          execution_date: '2026-03-09',
+          prompt: 'q1',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: 'true',
+          citations: 'false',
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+      expect(body.weeklyTrends[0].citations).to.equal(0);
+    });
+
+    it('skips brand rows where execution_date is null', async () => {
+      const brandRows = [
+        // Row with null execution_date — should be skipped entirely
+        {
+          execution_date: null,
+          prompt: 'q1',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: true,
+        },
+        // Valid row that should be counted
+        {
+          execution_date: '2026-03-09',
+          prompt: 'q2',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: false,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+    });
+
+    it('deduplicates using empty-string fallbacks for null prompt/topics/region/site fields', async () => {
+      const brandRows = [
+        // Both rows have null prompt/topics/region_code/site_id — same dedup key => count as 1
+        {
+          execution_date: '2026-03-09',
+          prompt: null,
+          topics: null,
+          region_code: null,
+          site_id: null,
+          mentions: true,
+          citations: true,
+        },
+        {
+          execution_date: '2026-03-10',
+          prompt: null,
+          topics: null,
+          region_code: null,
+          site_id: null,
+          mentions: true,
+          citations: true,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+      expect(body.weeklyTrends[0].citations).to.equal(1);
+    });
+
+    it('produces weekNumber 0 and year 0 when competitor execution_date yields an invalid ISO week', async () => {
+      // An invalid date string passes the !execution_date check (it is truthy) but
+      // dateToIsoWeek produces 'NaN-WNaN', causing parseIsoWeek to return {weekNumber:0, year:0}
+      const competitorRows = [
+        {
+          execution_date: 'invalid-date', competitor: 'CompA', mentions: 5, citations: 2,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      expect(body.weeklyTrends[0].weekNumber).to.equal(0);
+      expect(body.weeklyTrends[0].year).to.equal(0);
+    });
+  });
+
+  describe('createBrandPresenceStatsHandler', () => {
+    const statsRow = {
+      total_executions: 150,
+      average_visibility_score: 7.33,
+      total_mentions: 11,
+      total_citations: 76,
+    };
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: x'));
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden when site does not belong to org', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      const sitesChain = {
+        from: sinon.stub().returnsThis(),
+        select: sinon.stub().returnsThis(),
+        eq: sinon.stub().returnsThis(),
+        limit: sinon.stub().resolves({ data: [], error: null }),
+      };
+      mockContext.dataAccess.Site.postgrestService = {
+        ...rpcMock,
+        from: sinon.stub().returns(sitesChain),
+      };
+      mockContext.data = { siteId: '0178a3f0-1234-7000-8000-000000000099' };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when RPC returns error', async () => {
+      const rpcMock = createStatsRpcMock({ data: null, error: { message: 'relation does not exist' } });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation does not exist');
+    });
+
+    it('returns ok with stats when RPC succeeds (no showTrends)', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-31',
+        model: 'chatgpt',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends).to.be.undefined;
+      expect(rpcMock.rpc).to.have.been.calledOnceWith('rpc_brand_presence_stats', sinon.match.object);
+    });
+
+    it('handles null ctx.data (uses empty object fallback for showTrends)', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = null;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends).to.be.undefined;
+    });
+
+    it('returns zero stats when RPC returns null row', async () => {
+      const rpcMock = createStatsRpcMock({ data: [null], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+    });
+
+    it('returns zero stats when RPC returns empty data', async () => {
+      const rpcMock = createStatsRpcMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+    });
+
+    it('returns trends when showTrends=true', async () => {
+      const weekRow = {
+        total_executions: 20,
+        average_visibility_score: 6.5,
+        total_mentions: 2,
+        total_citations: 10,
+      };
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: [weekRow], error: null },
+          { data: [weekRow], error: null },
+          { data: [weekRow], error: null },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-21',
+        model: 'chatgpt',
+        showTrends: true,
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends).to.be.an('array');
+      expect(body.trends).to.have.lengthOf(3);
+      expect(body.trends[0].startDate).to.equal('2025-01-15');
+      expect(body.trends[0].endDate).to.equal('2025-01-21');
+      expect(body.trends[0].data.stats).to.deep.equal({
+        total_executions: 20,
+        average_visibility_score: 6.5,
+        total_mentions: 2,
+        total_citations: 10,
+      });
+      expect(body.trends[2].startDate).to.equal('2025-01-01');
+      expect(body.trends[2].endDate).to.equal('2025-01-07');
+      expect(rpcMock.rpc).to.have.been.callCount(4);
+    });
+
+    it('returns trends with zero stats when a trend week has empty or null data', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: [], error: null },
+          { data: null, error: null },
+          { data: [statsRow], error: null },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-21',
+        model: 'chatgpt',
+        showTrends: true,
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.trends).to.have.lengthOf(3);
+      expect(body.trends[0].data.stats).to.deep.equal({
+        total_executions: 150,
+        average_visibility_score: 7.33,
+        total_mentions: 11,
+        total_citations: 76,
+      });
+      expect(body.trends[1].data.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+      expect(body.trends[2].data.stats).to.deep.equal({
+        total_executions: 0,
+        average_visibility_score: 0,
+        total_mentions: 0,
+        total_citations: 0,
+      });
+    });
+
+    it('parses showTrends from show_trends alias and truthy values', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: [statsRow], error: null },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-07',
+        show_trends: 'true',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.trends).to.be.an('array');
+      expect(body.trends).to.have.lengthOf(1);
+    });
+
+    it('parses showTrends from string "1"', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [{ data: [statsRow], error: null }],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-07',
+        showTrends: '1',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.trends).to.be.an('array');
+      expect(body.trends).to.have.lengthOf(1);
+    });
+
+    it('returns badRequest when trends RPC fails', async () => {
+      const rpcMock = createStatsRpcMock(
+        { data: [statsRow], error: null },
+        [
+          { data: [statsRow], error: null },
+          { data: null, error: { message: 'trends RPC failed' } },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-14',
+        showTrends: true,
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('trends RPC failed');
+    });
+
+    it('passes brandId filter when brandId is not all', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.params.brandId = '019cb903-1184-7f92-8325-f9d1176af316';
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(rpcMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_stats',
+        sinon.match.has('p_brand_id', '019cb903-1184-7f92-8325-f9d1176af316'),
+      );
+    });
+
+    it('passes all filter params to RPC', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        startDate: '2025-01-01',
+        endDate: '2025-01-31',
+        model: 'gemini',
+        siteId: '0178a3f0-1234-7000-8000-0000000000aa',
+        categoryId: '0178a3f0-1234-7000-8000-0000000000bb',
+        topicIds: '0178a3f0-1234-7000-8000-0000000000cc',
+        regionCode: 'US',
+        origin: 'ai',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const callArgs = rpcMock.rpc.firstCall.args[1];
+      expect(callArgs.p_organization_id).to.equal(mockContext.params.spaceCatId);
+      expect(callArgs.p_start_date).to.equal('2025-01-01');
+      expect(callArgs.p_end_date).to.equal('2025-01-31');
+      expect(callArgs.p_model).to.equal('gemini');
+      expect(callArgs.p_site_id).to.equal('0178a3f0-1234-7000-8000-0000000000aa');
+      expect(callArgs.p_category_id).to.equal('0178a3f0-1234-7000-8000-0000000000bb');
+      expect(callArgs.p_topic_ids).to.deep.equal(['0178a3f0-1234-7000-8000-0000000000cc']);
+      expect(callArgs.p_region_code).to.equal('US');
+      expect(callArgs.p_origin).to.equal('ai');
     });
   });
 });

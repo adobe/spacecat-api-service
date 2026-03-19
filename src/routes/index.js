@@ -392,6 +392,12 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/all/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
+    'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': llmoMysticatController.getSentimentOverview,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': llmoMysticatController.getSentimentOverview,
+    'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': llmoMysticatController.getMarketTrackingTrends,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': llmoMysticatController.getMarketTrackingTrends,
+    'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
