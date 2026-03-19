@@ -1,3 +1,38 @@
+## [1.357.2](https://github.com/adobe/spacecat-api-service/compare/v1.357.1...v1.357.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1992](https://github.com/adobe/spacecat-api-service/issues/1992)) ([d7e2452](https://github.com/adobe/spacecat-api-service/commit/d7e245264fa6aced35375faa1ef142f2968de747))
+
+## [1.357.1](https://github.com/adobe/spacecat-api-service/compare/v1.357.0...v1.357.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* multiple topic filtering follow up | LLMO-3605 ([#1984](https://github.com/adobe/spacecat-api-service/issues/1984)) ([4459f19](https://github.com/adobe/spacecat-api-service/commit/4459f19f7d1accf7289a84cc7db7a2cc1dadc7d4))
+
+# [1.357.0](https://github.com/adobe/spacecat-api-service/compare/v1.356.0...v1.357.0) (2026-03-19)
+
+
+### Features
+
+* add llmo brand presence stats api with trends support ([#1993](https://github.com/adobe/spacecat-api-service/issues/1993)) ([fee75cb](https://github.com/adobe/spacecat-api-service/commit/fee75cb8eefb1308b77d98c8012b31bb285a8dfc))
+
+# [1.356.0](https://github.com/adobe/spacecat-api-service/compare/v1.355.1...v1.356.0) (2026-03-19)
+
+
+### Features
+
+* **ci:** migrate to centralized mysticat-ci workflow ([#1990](https://github.com/adobe/spacecat-api-service/issues/1990)) ([9f92daf](https://github.com/adobe/spacecat-api-service/commit/9f92daf1545c9ac9203084a043050ed402d1f2ce))
+
+## [1.355.1](https://github.com/adobe/spacecat-api-service/compare/v1.355.0...v1.355.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1988](https://github.com/adobe/spacecat-api-service/issues/1988)) ([16834d2](https://github.com/adobe/spacecat-api-service/commit/16834d2c2abcf61040ed68559b1583bf691ed3d0))
+
 # [1.355.0](https://github.com/adobe/spacecat-api-service/compare/v1.354.1...v1.355.0) (2026-03-19)
 
 
