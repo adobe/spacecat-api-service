@@ -47,6 +47,10 @@ export const INTERNAL_ROUTES = [
   'POST /consent-banner',
   'GET /consent-banner/:jobId',
 
+  // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
+  'GET /org/:spaceCatId/brands/all/brand-presence/stats',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'POST /llmo/onboard',
