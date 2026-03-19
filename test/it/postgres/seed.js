@@ -60,17 +60,22 @@ async function insertRows(table, rows) {
 }
 
 /**
- * Truncates all data tables in the public schema via psql.
- * Uses CASCADE to handle foreign key dependencies.
- * Skips schema_migrations (used by dbmate).
+ * Clears all test data via targeted DELETEs instead of TRUNCATE.
+ * TRUNCATE acquires ACCESS EXCLUSIVE locks on every table even when empty (~1.4s).
+ * DELETE from root tables with ON DELETE CASCADE is <1ms.
+ *
+ * Strategy (from mysticat-data-service#176):
+ * 1. Delete blocker tables (ON DELETE RESTRICT/SET NULL or standalone)
+ * 2. Delete root table (organizations) - CASCADE handles all children
  */
-function truncate() {
+function clearData() {
   execSync(
-    'docker exec spacecat-it-db psql -U postgres -d mysticat -c '
-    + '"DO \\$\\$ DECLARE r RECORD; BEGIN '
-    + "FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename != 'schema_migrations') LOOP "
-    + "EXECUTE 'TRUNCATE TABLE public.' || quote_ident(r.tablename) || ' CASCADE'; "
-    + 'END LOOP; END \\$\\$;"',
+    'docker exec spacecat-it-db psql -U postgres -d mysticat -c "'
+    + 'DELETE FROM plg_onboardings;'
+    + 'DELETE FROM consumers;'
+    + 'DELETE FROM async_jobs;'
+    + 'DELETE FROM organizations;'
+    + '"',
     { stdio: 'pipe', timeout: 10_000 },
   );
 }
@@ -131,6 +136,6 @@ async function seed() {
  * Called by each test suite in before() for full isolation.
  */
 export async function resetPostgres() {
-  truncate();
+  clearData();
   await seed();
 }
