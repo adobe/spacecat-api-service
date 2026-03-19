@@ -41,6 +41,7 @@ import {
 import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
+import AccessControlUtil from '../../support/access-control-util.js';
 
 const { STATUSES } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
@@ -399,15 +400,28 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     await enableAudits(site, context, auditTypes);
     steps.auditsEnabled = true;
 
-    // Step 7b: Enroll site in summit-plg config handler
+    // Step 7b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
     try {
       const { Configuration } = dataAccess;
       const configuration = await Configuration.findLatest();
-      configuration.enableHandlerForSite('summit-plg', site);
+      const configHandlers = [
+        'summit-plg',
+        'broken-backlinks-auto-suggest',
+        'broken-backlinks-auto-fix',
+        'alt-text-auto-fix',
+        'alt-text-auto-suggest-mystique',
+        'alt-text',
+        'cwv-auto-fix',
+        'cwv-auto-suggest',
+        'cwv',
+      ];
+      configHandlers.forEach((handler) => {
+        configuration.enableHandlerForSite(handler, site);
+      });
       await configuration.save();
-      log.info(`Enrolled site ${site.getId()} in summit-plg config`);
+      log.info(`Enrolled site ${site.getId()} in config handlers: ${configHandlers.join(', ')}`);
     } catch (error) {
-      log.warn(`Failed to enroll site in summit-plg config: ${error.message}`);
+      log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
     // Step 8: Add ASO entitlement
@@ -527,16 +541,21 @@ function PlgOnboardingController(ctx) {
       return badRequest('Authentication information is required');
     }
 
-    const profile = authInfo.getProfile();
+    // Admin/API key holders can access any org's status
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      // Non-admin: validate caller's IMS tenant matches requested imsOrgId
+      const profile = authInfo.getProfile();
 
-    if (!profile?.tenants?.[0]?.id) {
-      return badRequest('User profile or organization ID not found in authentication token');
-    }
+      if (!profile?.tenants?.[0]?.id) {
+        return badRequest('User profile or organization ID not found in authentication token');
+      }
 
-    const matchedTenant = profile.tenants
-      .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
-    if (!matchedTenant) {
-      return forbidden('Not authorized for this IMS org');
+      const matchedTenant = profile.tenants
+        .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
+      if (!matchedTenant) {
+        return forbidden('Not authorized for this IMS org');
+      }
     }
 
     const { PlgOnboarding } = da;
