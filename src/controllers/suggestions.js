@@ -1474,6 +1474,7 @@ function SuggestionsController(ctx, sqs, env) {
     const domainWideSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
+
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
