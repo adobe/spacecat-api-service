@@ -59,11 +59,11 @@ function expectPaginated(res, expectedItemCount) {
 export default function sentimentGuidelineTests(getHttpClient, resetData, options = {}) {
   const { skipV2Mutations = false } = options;
   describe('Sentiment Guidelines', () => {
-    before(() => resetData()); // shared seed for read-only blocks
-
     // ── List guidelines ──
 
     describe('GET /sites/:siteId/sentiment/guidelines', () => {
+      before(() => resetData());
+
       it('user: returns all guidelines', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/sentiment/guidelines`);
@@ -94,6 +94,8 @@ export default function sentimentGuidelineTests(getHttpClient, resetData, option
     // ── Get guideline ──
 
     describe('GET /sites/:siteId/sentiment/guidelines/:guidelineId', () => {
+      before(() => resetData());
+
       it('user: returns specific guideline', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/sentiment/guidelines/${GUIDELINE_1_ID}`);

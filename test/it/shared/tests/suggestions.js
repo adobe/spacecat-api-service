@@ -51,11 +51,11 @@ function expectSuggestionDto(suggestion) {
  */
 export default function suggestionTests(getHttpClient, resetData) {
   describe('Suggestions', () => {
-    before(() => resetData()); // shared seed for read-only blocks
-
     // ── Read endpoints ──
 
     describe('GET .../suggestions', () => {
+      before(() => resetData());
+
       it('user: returns suggestions for opportunity', async () => {
         const http = getHttpClient();
         const res = await http.user.get(BASE);
@@ -81,6 +81,8 @@ export default function suggestionTests(getHttpClient, resetData) {
     });
 
     describe('GET .../suggestions/paged/:limit', () => {
+      before(() => resetData());
+
       it('user: returns paginated suggestions', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/paged/2`);
@@ -115,6 +117,8 @@ export default function suggestionTests(getHttpClient, resetData) {
     });
 
     describe('GET .../suggestions/by-status/:status', () => {
+      before(() => resetData());
+
       it('user: returns suggestions filtered by status', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/by-status/NEW`);
@@ -175,6 +179,8 @@ export default function suggestionTests(getHttpClient, resetData) {
     });
 
     describe('GET .../suggestions/:suggestionId', () => {
+      before(() => resetData());
+
       it('user: returns specific suggestion', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${SUGG_1_ID}`);
@@ -210,6 +216,8 @@ export default function suggestionTests(getHttpClient, resetData) {
     });
 
     describe('GET .../suggestions/:suggestionId/fixes', () => {
+      before(() => resetData());
+
       it('user: returns fixes linked to suggestion via junction', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${SUGG_1_ID}/fixes`);

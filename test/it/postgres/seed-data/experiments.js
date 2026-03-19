@@ -42,8 +42,5 @@ export const experiments = [
     status: 'INACTIVE',
     start_date: '2025-02-01T00:00:00.000Z',
     variants: [{ name: 'A', url: '/a' }, { name: 'B', url: '/b' }],
-    end_date: null,
-    conversion_event_name: null,
-    conversion_event_value: null,
   },
 ];

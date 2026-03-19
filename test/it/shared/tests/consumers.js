@@ -45,9 +45,9 @@ function expectConsumerDto(consumer) {
  */
 export default function consumerTests(getHttpClient, resetData) {
   describe('Consumers', () => {
-    before(() => resetData()); // shared seed for read-only blocks
-
     describe('GET /consumers', () => {
+      before(() => resetData());
+
       it('admin: returns all consumers', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/consumers');
@@ -68,6 +68,8 @@ export default function consumerTests(getHttpClient, resetData) {
     });
 
     describe('GET /consumers/:consumerId', () => {
+      before(() => resetData());
+
       it('admin: returns consumer by id', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(`/consumers/${CONSUMER_1_ID}`);
@@ -91,6 +93,8 @@ export default function consumerTests(getHttpClient, resetData) {
     });
 
     describe('GET /consumers/by-client-id/:clientId', () => {
+      before(() => resetData());
+
       it('admin: returns consumer by clientId', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(`/consumers/by-client-id/${CONSUMER_1_CLIENT_ID}`);

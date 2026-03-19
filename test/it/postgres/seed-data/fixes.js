@@ -38,9 +38,6 @@ export const fixes = [
     status: 'DEPLOYED',
     change_details: { file: '/blocks/footer/footer.js', diff: '-old +new' },
     origin: 'spacecat',
-    executed_at: null,
-    executed_by: null,
-    published_at: null,
   },
 ];
 
