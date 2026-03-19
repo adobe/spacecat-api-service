@@ -8,7 +8,6 @@ permissions:
 
 on:
   push:
-    branches: [main]
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened, edited]
 
@@ -24,7 +23,9 @@ jobs:
   it-postgres:
     needs: ci
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.action != 'edited'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && github.event.action != 'edited')
     timeout-minutes: 15
     steps:
       - name: Check out
