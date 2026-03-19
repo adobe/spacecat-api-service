@@ -10,9 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
-import { ctx } from './harness.js';
-import { resetDynamo } from './seed.js';
-import suggestionTests from '../shared/tests/suggestions.js';
-
-// suggestion_grants/tokens tables do not exist in v2 (DynamoDB) — skip grant tests.
-suggestionTests(() => ctx.httpClient, resetDynamo, { skipGrantTests: true });
+/**
+ * Immutable baseline tokens for IT tests (PostgreSQL only).
+ *
+ * - TOKEN_1: SITE_1, grant_cwv, cycle 2025-01 — 3 total, 1 used
+ *
+ * Format: snake_case (v3 / PostgreSQL / PostgREST)
+ */
+export const tokens = [
+  {
+    id: 'f1111111-1111-4111-b111-111111111111',
+    site_id: '33333333-3333-4333-b333-333333333333',
+    token_type: 'grant_cwv',
+    cycle: '2025-01',
+    total: 3,
+    used: 1,
+  },
+];

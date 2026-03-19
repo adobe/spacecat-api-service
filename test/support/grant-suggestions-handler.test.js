@@ -262,7 +262,9 @@ describe('grant-suggestions-handler', () => {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([mockSugg]),
       };
       const SuggestionGrant = {
-        splitSuggestionsByGrantStatus: sandbox.stub(),
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantIds: [], notGrantedIds: ['sugg-1'],
+        }),
         grantSuggestions: sandbox.stub(),
       };
       const Token = {
@@ -271,7 +273,7 @@ describe('grant-suggestions-handler', () => {
       const dataAccess = { Suggestion, SuggestionGrant, Token };
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       expect(SuggestionGrant.splitSuggestionsByGrantStatus)
-        .to.not.have.been.called;
+        .to.have.been.calledOnce;
       expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
     });
 
@@ -283,15 +285,12 @@ describe('grant-suggestions-handler', () => {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
       };
       const SuggestionGrant = {
-        splitSuggestionsByGrantStatus: sandbox.stub(),
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantIds: [],
+          notGrantedIds: ['sugg-1', 'sugg-2'],
+        }),
         grantSuggestions: sandbox.stub().resolves({ success: true }),
       };
-      // First call: no token, second call: create
-      SuggestionGrant.splitSuggestionsByGrantStatus
-        .onFirstCall().resolves({ grantIds: [] })
-        .onSecondCall().resolves({
-          notGrantedIds: ['sugg-1', 'sugg-2'],
-        });
       const Token = {
         findBySiteIdAndTokenType: sandbox.stub(),
       };
@@ -302,6 +301,7 @@ describe('grant-suggestions-handler', () => {
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
       expect(Token.findBySiteIdAndTokenType).to.have.been.calledTwice;
       expect(Token.findBySiteIdAndTokenType.secondCall.args[2])
         .to.deep.include({ createIfNotFound: true });
@@ -342,12 +342,12 @@ describe('grant-suggestions-handler', () => {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
       };
       const SuggestionGrant = {
-        splitSuggestionsByGrantStatus: sandbox.stub(),
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantIds: ['g1', 'g2'],
+          notGrantedIds: ['sugg-1'],
+        }),
         grantSuggestions: sandbox.stub().resolves({ success: true }),
       };
-      SuggestionGrant.splitSuggestionsByGrantStatus
-        .onFirstCall().resolves({ grantIds: ['g1', 'g2'] })
-        .onSecondCall().resolves({ notGrantedIds: ['sugg-1'] });
       const Token = {
         findBySiteIdAndTokenType: sandbox.stub(),
       };
@@ -358,6 +358,7 @@ describe('grant-suggestions-handler', () => {
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
       // tokensPerCycle=3, 2 already granted => total=1
       const createArgs = Token.findBySiteIdAndTokenType.secondCall.args;
       expect(createArgs[2]).to.deep.include({ total: 1 });
@@ -370,12 +371,11 @@ describe('grant-suggestions-handler', () => {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
       };
       const SuggestionGrant = {
-        splitSuggestionsByGrantStatus: sandbox.stub(),
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          notGrantedIds: ['sugg-1'],
+        }),
         grantSuggestions: sandbox.stub().resolves({ success: true }),
       };
-      SuggestionGrant.splitSuggestionsByGrantStatus
-        .onFirstCall().resolves({})
-        .onSecondCall().resolves({ notGrantedIds: ['sugg-1'] });
       const Token = {
         findBySiteIdAndTokenType: sandbox.stub(),
       };
@@ -386,6 +386,7 @@ describe('grant-suggestions-handler', () => {
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
       const createArgs = Token.findBySiteIdAndTokenType.secondCall.args;
       expect(createArgs[2]).to.deep.include({ total: 3 });
     });

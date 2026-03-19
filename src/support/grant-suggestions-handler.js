@@ -74,6 +74,9 @@ function defaultSortFn(groupA, groupB) {
  * suggestion, sorted by rank ascending then id ascending.
  */
 const OPPORTUNITY_STRATEGIES = {
+  // Groups suggestions by target URL (url_to) so all backlinks pointing to the
+  // same broken URL are granted as a single unit. The group rank is the highest
+  // rank among its items, since higher rank = top priority opportunity.
   'broken-backlinks': {
     groupFn: (suggestions) => {
       const groups = new Map();
@@ -153,10 +156,11 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const newSuggestionIds = newSuggestions.map((s) => s.getId());
   if (!newSuggestionIds.length) return;
 
+  const { grantIds, notGrantedIds } = await SuggestionGrant
+    .splitSuggestionsByGrantStatus(newSuggestionIds);
+
   let token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
   if (!token) {
-    const { grantIds } = await SuggestionGrant
-      .splitSuggestionsByGrantStatus(newSuggestionIds);
     const suppliedTotal = Math.max(1, config.tokensPerCycle - (grantIds?.length ?? 0));
     token = await Token.findBySiteIdAndTokenType(siteId, tokenType, {
       createIfNotFound: true,
@@ -166,9 +170,6 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
 
   const remaining = token.getRemaining();
   if (remaining <= 0) return;
-
-  const { notGrantedIds } = await SuggestionGrant
-    .splitSuggestionsByGrantStatus(newSuggestionIds);
   const notGrantedEntities = newSuggestions
     .filter((s) => notGrantedIds.includes(s.getId()));
   const topGroups = getTopSuggestions(notGrantedEntities, oppType)

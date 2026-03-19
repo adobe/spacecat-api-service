@@ -540,7 +540,7 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
   });
 
-  it('propagates error when grant filtering throws an error', async () => {
+  it('returns all suggestions when grant filtering throws an error', async () => {
     mockSuggestionGrant.splitSuggestionsByGrantStatus.rejects(new Error('db failure'));
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
       '../../src/support/utils.js': {
@@ -552,14 +552,17 @@ describe('Suggestions Controller', () => {
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
     }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
-    await expect(controllerWithSummitPlg.getAllForOpportunity({
+    const response = await controllerWithSummitPlg.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       ...context,
-    })).to.be.rejectedWith('Failed to filter suggestions by grant status');
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
   });
 
   it('filters suggestions by grant status when summit-plg is enabled', async () => {
@@ -619,7 +622,7 @@ describe('Suggestions Controller', () => {
     expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.not.have.been.called;
   });
 
-  it('propagates error and logs when grant filtering throws a non-Error value', async () => {
+  it('returns all suggestions and logs when grant filtering throws a non-Error value', async () => {
     mockSuggestionGrant.splitSuggestionsByGrantStatus.callsFake(() => Promise.reject({ code: 500 }));
     const mockLog = { error: sandbox.stub() };
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
@@ -633,14 +636,17 @@ describe('Suggestions Controller', () => {
       log: mockLog,
       ...authContext,
     }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
-    await expect(controllerWithSummitPlg.getAllForOpportunity({
+    const response = await controllerWithSummitPlg.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
       ...context,
-    })).to.be.rejectedWith('Failed to filter suggestions by grant status');
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
     expect(mockLog.error).to.have.been.calledOnce;
   });
 
