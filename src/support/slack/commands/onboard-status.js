@@ -15,10 +15,6 @@ import BaseCommand from './base.js';
 
 const PHRASES = ['onboard status'];
 
-// Lookback window: audits up to 48h old are considered for a re-check.
-// Using site createdAt is preferred (see below), but this caps the fallback.
-const LOOKBACK_MS = 48 * 60 * 60 * 1000;
-
 /**
  * Maps audit types to a human-readable title for Slack output.
  * Mirrors the same helper used in opportunity-status-processor.
@@ -70,14 +66,18 @@ function getAuditTypesForOpportunity(oppType) {
 
 /**
  * Computes which audit types are pending vs completed from already-fetched audit records.
+ * Uses per-audit lastAuditRunTime stored in site config handlers to determine if the
+ * most recent DB record post-dates the last trigger. If lastAuditRunTime is absent for
+ * an audit type (e.g. site onboarded before this feature), any existing record is treated
+ * as completed — only a missing record counts as pending.
  * Pure function — no DB calls.
  *
  * @param {string[]} auditTypes
- * @param {number} onboardStartTime - ms timestamp
+ * @param {Object} handlers - site config handlers keyed by audit type
  * @param {Array} latestAudits - records from LatestAudit.allBySiteId
  * @returns {{pendingAuditTypes: string[], completedAuditTypes: string[]}}
  */
-export function computeAuditCompletion(auditTypes, onboardStartTime, latestAudits) {
+export function computeAuditCompletion(auditTypes, handlers, latestAudits) {
   const pendingAuditTypes = [];
   const completedAuditTypes = [];
   const auditsByType = {};
@@ -91,10 +91,16 @@ export function computeAuditCompletion(auditTypes, onboardStartTime, latestAudit
     if (!audit) {
       pendingAuditTypes.push(auditType);
     } else {
-      const auditedAt = new Date(audit.getAuditedAt()).getTime();
-      if (onboardStartTime && auditedAt < onboardStartTime) {
-        pendingAuditTypes.push(auditType);
+      const lastAuditRunTime = handlers?.[auditType]?.lastAuditRunTime;
+      if (lastAuditRunTime) {
+        const auditedAt = new Date(audit.getAuditedAt()).getTime();
+        if (auditedAt < lastAuditRunTime) {
+          pendingAuditTypes.push(auditType);
+        } else {
+          completedAuditTypes.push(auditType);
+        }
       } else {
+        // No trigger time recorded — treat existing record as completed.
         completedAuditTypes.push(auditType);
       }
     }
@@ -158,14 +164,9 @@ Example:
 
       const siteId = site.getId();
 
-      // Use site creation time as the lookback anchor. Fall back to LOOKBACK_MS.
-      let onboardStartTime;
-      try {
-        const createdAt = site.getCreatedAt();
-        onboardStartTime = createdAt ? new Date(createdAt).getTime() : Date.now() - LOOKBACK_MS;
-      } catch {
-        onboardStartTime = Date.now() - LOOKBACK_MS;
-      }
+      // Per-audit trigger timestamps stored by onboard site in site config handlers.
+      // Used by computeAuditCompletion to detect audits that haven't completed yet.
+      const handlers = site.getConfig()?.getHandlers() || {};
 
       // Fetch latest audits — derive auditTypes (for opportunity filtering) from records.
       // For the pending check, always compare against ALL map-known audit types so that
@@ -179,7 +180,7 @@ Example:
         }
         const knownTypes = Object.keys(AUDIT_OPPORTUNITY_MAP);
         const audits = latestAudits || [];
-        pendingAuditTypes = computeAuditCompletion(knownTypes, onboardStartTime, audits)
+        pendingAuditTypes = computeAuditCompletion(knownTypes, handlers, audits)
           .pendingAuditTypes;
       } catch (auditErr) {
         log.warn(`[onboard-status] Could not fetch audit types for site ${siteId}: ${auditErr.message}`);
