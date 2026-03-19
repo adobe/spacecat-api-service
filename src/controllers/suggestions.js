@@ -197,8 +197,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
   const filterByGrantStatus = async (site, suggestions, context) => {
-    const clientType = context.pathInfo?.headers?.['x-client-type'];
-    if (clientType !== 'sites-optimizer-ui' || !await getIsSummitPlgEnabled(site, ctx)) {
+    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
       return suggestions;
     }
     try {
@@ -496,8 +495,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    const clientType = context.pathInfo?.headers?.['x-client-type'];
-    if (clientType === 'sites-optimizer-ui' && await getIsSummitPlgEnabled(site, ctx)
+    if (await getIsSummitPlgEnabled(site, ctx, context)
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }

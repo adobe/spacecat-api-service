@@ -158,8 +158,7 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-    const clientType = context.pathInfo?.headers?.['x-client-type'];
-    if (clientType === 'sites-optimizer-ui' && await getIsSummitPlgEnabled(site, ctx)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, oppty);
       /* c8 ignore next 3 */

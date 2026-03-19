@@ -595,7 +595,10 @@ describe('Suggestions Controller', () => {
   it('skips grant filtering when x-client-type is not sites-optimizer-ui', async () => {
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
       '../../src/support/utils.js': {
-        getIsSummitPlgEnabled: async () => true,
+        getIsSummitPlgEnabled: async (site, ctx, reqCtx) => {
+          const clientType = reqCtx?.pathInfo?.headers?.['x-client-type'];
+          return clientType === 'sites-optimizer-ui';
+        },
       },
     });
     const controllerWithSummitPlg = ControllerWithSummitPlg({
@@ -1751,7 +1754,10 @@ describe('Suggestions Controller', () => {
     mockSuggestionGrant.isSuggestionGranted.resolves(false);
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
       '../../src/support/utils.js': {
-        getIsSummitPlgEnabled: async () => true,
+        getIsSummitPlgEnabled: async (site, ctx, reqCtx) => {
+          const clientType = reqCtx?.pathInfo?.headers?.['x-client-type'];
+          return clientType === 'sites-optimizer-ui';
+        },
       },
     });
     const controllerWithSummitPlg = ControllerWithSummitPlg({
