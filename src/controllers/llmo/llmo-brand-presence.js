@@ -827,7 +827,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
           ? q.eq('category_id', params.categoryId)
           : q.eq('category_name', params.categoryId);
       }
-      if (shouldApplyFilter(params.topic)) q = q.eq('topics', params.topic);
+      if (params.topicIds?.length > 0) q = q.in('topic_id', params.topicIds);
       if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
       if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
 
