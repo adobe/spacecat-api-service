@@ -3297,6 +3297,30 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
     });
 
+    it('triggers autofix for suggestions in PENDING_VALIDATION status', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const pendingSugg = { ...suggs[0], status: 'PENDING_VALIDATION' };
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(pendingSugg)]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...pendingSugg, status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
     it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
       opportunity.getType = sandbox.stub().returns('alt-text');
       mockSuggestion.allByOpportunityId.resolves(
@@ -3947,7 +3971,7 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 400);
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
-      expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion must be in NEW or PENDING_VALIDATION status for auto-fix');
     });
   });
 
@@ -5293,7 +5317,7 @@ describe('Suggestions Controller', () => {
       expect(failedSuggestion.message).to.include('not found');
     });
 
-    it('should handle suggestions not in NEW status', async () => {
+    it('should reject suggestions not NEW or PENDING_VALIDATION for edge deploy', async () => {
       tokowakaSuggestions[0].getStatus = () => 'IN_PROGRESS';
 
       const response = await suggestionsController.deploySuggestionToEdge({
@@ -5315,7 +5339,29 @@ describe('Suggestions Controller', () => {
 
       const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
       expect(failedSuggestion.statusCode).to.equal(400);
-      expect(failedSuggestion.message).to.include('not in NEW status');
+      expect(failedSuggestion.message).to.include('NEW or PENDING_VALIDATION');
+    });
+
+    it('should deploy suggestions in PENDING_VALIDATION status', async () => {
+      tokowakaSuggestions[0].getStatus = () => 'PENDING_VALIDATION';
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(2);
+      expect(body.metadata.failed).to.equal(0);
+      expect(body.suggestions.every((s) => s.statusCode === 200)).to.equal(true);
     });
 
     it('should reject non-empty headings for headings opportunity', async () => {
