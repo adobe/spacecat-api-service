@@ -16,11 +16,13 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
   aggregateSentimentByWeek,
+  aggregateShareOfVoice,
   buildPromptKey,
   createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
+  createShareOfVoiceHandler,
   dateToIsoWeek,
   getWeekDateRange,
   resolveSiteIds,
@@ -28,6 +30,7 @@ import {
   toFilterOption,
   toISOWeek,
   validateSiteBelongsToOrg,
+  volumeToPopularity,
 } from '../../../src/controllers/llmo/llmo-brand-presence.js';
 
 use(sinonChai);
@@ -66,7 +69,11 @@ function createChainableMock(resolveValue = { data: [], error: null }, resolveSe
  * parallel queries (Promise.all) resolve independently with their own result.
  * Shared sinon stubs on the root object accumulate all calls for assertions.
  */
-function createTableAwareMock(tableResults = {}, defaultResult = { data: [], error: null }) {
+function createTableAwareMock(
+  tableResults = {},
+  defaultResult = { data: [], error: null },
+  rpcResults = {},
+) {
   // Declare stubs first so makeChain can close over them
   const stubs = {
     select: sinon.stub(),
@@ -84,6 +91,11 @@ function createTableAwareMock(tableResults = {}, defaultResult = { data: [], err
 
   // Declare fromStub first so makeChain can reference it without a forward-reference lint error.
   const fromStub = sinon.stub();
+
+  const rpcStub = sinon.stub().callsFake((fnName) => {
+    const result = rpcResults[fnName] ?? defaultResult;
+    return Promise.resolve(result);
+  });
 
   function makeChain(table) {
     const result = tableResults[table] ?? defaultResult;
@@ -141,7 +153,7 @@ function createTableAwareMock(tableResults = {}, defaultResult = { data: [], err
   }
 
   fromStub.callsFake((t) => makeChain(t));
-  return { from: fromStub, ...stubs };
+  return { from: fromStub, rpc: rpcStub, ...stubs };
 }
 
 describe('llmo-brand-presence', () => {
@@ -2052,6 +2064,578 @@ describe('llmo-brand-presence', () => {
       expect(body.weeklyTrends).to.have.lengthOf(1);
       expect(body.weeklyTrends[0].weekNumber).to.equal(0);
       expect(body.weeklyTrends[0].year).to.equal(0);
+    });
+  });
+
+  // ── volumeToPopularity ─────────────────────────────────────────────────────
+
+  describe('volumeToPopularity', () => {
+    it('returns N/A for null, undefined, and 0', () => {
+      expect(volumeToPopularity(null, 100)).to.equal('N/A');
+      expect(volumeToPopularity(undefined, 100)).to.equal('N/A');
+      expect(volumeToPopularity(0, 100)).to.equal('N/A');
+    });
+
+    it('maps imputed negative sentinel values', () => {
+      expect(volumeToPopularity(-30, 0)).to.equal('High');
+      expect(volumeToPopularity(-20, 0)).to.equal('Medium');
+      expect(volumeToPopularity(-10, 0)).to.equal('Low');
+    });
+
+    it('uses legacy percentile bucketing for positive values', () => {
+      expect(volumeToPopularity(10, 100)).to.equal('Low');
+      expect(volumeToPopularity(50, 100)).to.equal('Medium');
+      expect(volumeToPopularity(80, 100)).to.equal('High');
+    });
+
+    it('returns N/A for positive volume when avgPositiveVolume is 0', () => {
+      expect(volumeToPopularity(50, 0)).to.equal('N/A');
+    });
+  });
+
+  // ── aggregateShareOfVoice ──────────────────────────────────────────────────
+
+  describe('aggregateShareOfVoice', () => {
+    it('returns empty array for no rows', () => {
+      expect(aggregateShareOfVoice([], new Set(), 'BrandX')).to.deep.equal([]);
+    });
+
+    it('groups by topic, counts brand mentions and competitors', () => {
+      const rows = [
+        {
+          topic: 'EVs',
+          brand_mentions: 2,
+          competitor_name: 'Tesla',
+          competitor_mentions: 2,
+          volume: -30,
+        },
+        {
+          topic: 'EVs',
+          brand_mentions: 2,
+          competitor_name: 'Ford',
+          competitor_mentions: 2,
+          volume: -30,
+        },
+        {
+          topic: 'SUVs',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -20,
+        },
+      ];
+      const configured = new Set(['tesla']);
+      const result = aggregateShareOfVoice(rows, configured, 'BrandX');
+
+      expect(result).to.have.lengthOf(2);
+
+      const evs = result.find((r) => r.topic === 'EVs');
+      expect(evs.brandMentions).to.equal(2);
+      expect(evs.popularity).to.equal('High');
+      expect(evs.ranking).to.be.a('number');
+      expect(evs.topCompetitors).to.be.an('array');
+      expect(evs.allCompetitors).to.be.an('array');
+
+      const tesla = evs.allCompetitors.find((c) => c.name === 'tesla');
+      expect(tesla.source).to.equal('configured');
+      const ford = evs.allCompetitors.find((c) => c.name === 'ford');
+      expect(ford.source).to.equal('detected');
+
+      const suvs = result.find((r) => r.topic === 'SUVs');
+      expect(suvs.brandMentions).to.equal(1);
+      expect(suvs.popularity).to.equal('Medium');
+    });
+
+    it('sets shareOfVoice to null when brand has no mentions', () => {
+      const rows = [
+        {
+          topic: 'Topic1',
+          brand_mentions: 0,
+          competitor_name: 'CompA',
+          competitor_mentions: 3,
+          volume: -10,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'BrandX');
+      expect(result[0].shareOfVoice).to.equal(null);
+      expect(result[0].ranking).to.equal(null);
+    });
+
+    it('sorts by popularity desc then shareOfVoice desc', () => {
+      const rows = [
+        {
+          topic: 'LowTopic',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -10,
+        },
+        {
+          topic: 'HighTopic',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -30,
+        },
+        {
+          topic: 'MedTopic',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -20,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'BrandX');
+      expect(result[0].topic).to.equal('HighTopic');
+      expect(result[1].topic).to.equal('MedTopic');
+      expect(result[2].topic).to.equal('LowTopic');
+    });
+
+    it('limits topCompetitors to 5 entries', () => {
+      const rows = Array.from({ length: 8 }, (_, i) => ({
+        topic: 'T', brand_mentions: 1, competitor_name: `Comp${i}`, competitor_mentions: 10 - i, volume: -30,
+      }));
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      expect(result[0].topCompetitors.length).to.be.at.most(5);
+      expect(result[0].allCompetitors.length).to.equal(8);
+    });
+
+    it('includes brandShareOfVoice when brand has mentions', () => {
+      const rows = [
+        {
+          topic: 'T',
+          brand_mentions: 1,
+          competitor_name: 'Comp1',
+          competitor_mentions: 2,
+          volume: -20,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'MyBrand');
+      expect(result[0].brandShareOfVoice).to.deep.include({ name: 'MyBrand', mentions: 1 });
+    });
+
+    it('handles Unknown topic for rows without topic field', () => {
+      const rows = [
+        {
+          topic: null,
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -10,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      expect(result[0].topic).to.equal('Unknown');
+    });
+
+    it('accumulates mentions when same competitor appears in multiple rows', () => {
+      const rows = [
+        {
+          topic: 'T',
+          brand_mentions: 1,
+          competitor_name: 'Tesla',
+          competitor_mentions: 3,
+          volume: -30,
+        },
+        {
+          topic: 'T',
+          brand_mentions: 1,
+          competitor_name: 'Tesla',
+          competitor_mentions: 2,
+          volume: -30,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      const tesla = result[0].allCompetitors.find((c) => c.name === 'tesla');
+      expect(tesla.mentions).to.equal(5);
+    });
+
+    it('handles positive volume for percentile-based popularity', () => {
+      const rows = [
+        {
+          topic: 'HighVol',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: 900,
+        },
+        {
+          topic: 'LowVol',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: 100,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      expect(result).to.have.lengthOf(2);
+      const highVol = result.find((r) => r.topic === 'HighVol');
+      const lowVol = result.find((r) => r.topic === 'LowVol');
+      expect(highVol.popularity).to.equal('High');
+      expect(lowVol.popularity).to.equal('Low');
+    });
+
+    it('returns 0 sov for competitors when totalMentions is 0', () => {
+      const rows = [
+        {
+          topic: 'Empty',
+          brand_mentions: 0,
+          competitor_name: 'CompX',
+          competitor_mentions: 0,
+          volume: -10,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      expect(result[0].allCompetitors[0].shareOfVoice).to.equal(0);
+    });
+
+    it('falls back to "Our Brand" when brandName is falsy', () => {
+      const rows = [
+        {
+          topic: 'T',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -20,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), '');
+      expect(result[0].brandShareOfVoice.name).to.equal('Our Brand');
+    });
+
+    it('sorts brand after competitor when they share the same sov', () => {
+      const rows = [
+        {
+          topic: 'T',
+          brand_mentions: 1,
+          competitor_name: 'CompA',
+          competitor_mentions: 1,
+          volume: -30,
+        },
+        {
+          topic: 'T',
+          brand_mentions: 1,
+          competitor_name: 'CompB',
+          competitor_mentions: 1,
+          volume: -30,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      const entities = [
+        ...result[0].allCompetitors,
+        result[0].brandShareOfVoice,
+      ].filter(Boolean);
+      expect(entities).to.have.lengthOf(3);
+      expect(result[0].ranking).to.equal(1);
+    });
+
+    it('sorts topics with same popularity by shareOfVoice desc', () => {
+      const rows = [
+        {
+          topic: 'LowSov',
+          brand_mentions: 1,
+          competitor_name: 'C',
+          competitor_mentions: 10,
+          volume: -30,
+        },
+        {
+          topic: 'HighSov',
+          brand_mentions: 10,
+          competitor_name: 'C',
+          competitor_mentions: 1,
+          volume: -30,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      expect(result[0].topic).to.equal('HighSov');
+      expect(result[1].topic).to.equal('LowSov');
+    });
+
+    it('sorts by shareOfVoice when popularity matches and sov is null', () => {
+      const rows = [
+        {
+          topic: 'A',
+          brand_mentions: 0,
+          competitor_name: 'C1',
+          competitor_mentions: 5,
+          volume: -30,
+        },
+        {
+          topic: 'B',
+          brand_mentions: 0,
+          competitor_name: 'C2',
+          competitor_mentions: 3,
+          volume: -30,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      expect(result[0].shareOfVoice).to.equal(null);
+      expect(result[1].shareOfVoice).to.equal(null);
+    });
+
+    it('assigns priority 0 for N/A popularity in sort', () => {
+      const rows = [
+        {
+          topic: 'Normal',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -30,
+        },
+        {
+          topic: 'NoVol',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: 0,
+        },
+      ];
+      const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
+      expect(result[0].topic).to.equal('Normal');
+      expect(result[1].topic).to.equal('NoVol');
+      expect(result[1].popularity).to.equal('N/A');
+    });
+  });
+
+  // ── createShareOfVoiceHandler ──────────────────────────────────────────────
+
+  describe('createShareOfVoiceHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when RPC returns error', async () => {
+      const rpcError = { message: 'function rpc_share_of_voice does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          competitors: { data: [], error: null },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: null, error: rpcError } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns share-of-voice data for valid request', async () => {
+      const rpcRows = [
+        {
+          topic: 'EVs',
+          brand_mentions: 1,
+          competitor_name: 'Tesla',
+          competitor_mentions: 2,
+          volume: -30,
+        },
+        {
+          topic: 'EVs',
+          brand_mentions: 1,
+          competitor_name: 'Tesla Motors',
+          competitor_mentions: 1,
+          volume: -30,
+        },
+        {
+          topic: 'EVs',
+          brand_mentions: 1,
+          competitor_name: 'Ford',
+          competitor_mentions: 1,
+          volume: -30,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          competitors: {
+            data: [{ name: 'Tesla', aliases: ['tesla motors', 'tsla'] }],
+            error: null,
+          },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: rpcRows, error: null } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.shareOfVoiceData).to.be.an('array').with.lengthOf(1);
+      const evs = body.shareOfVoiceData[0];
+      expect(evs.topic).to.equal('EVs');
+      expect(evs.brandMentions).to.equal(1);
+      expect(evs.popularity).to.equal('High');
+      expect(evs.topCompetitors).to.be.an('array');
+
+      const teslaMotors = evs.allCompetitors
+        .find((c) => c.name === 'tesla motors');
+      expect(teslaMotors).to.exist;
+      expect(teslaMotors.source).to.equal('configured');
+    });
+
+    it('returns empty shareOfVoiceData when RPC returns no rows', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          competitors: { data: [], error: null },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: [], error: null } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.shareOfVoiceData).to.deep.equal([]);
+    });
+
+    it('resolves brand name when brandId is specified', async () => {
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000099';
+      const rpcRows = [
+        {
+          topic: 'T1',
+          brand_mentions: 1,
+          competitor_name: null,
+          competitor_mentions: 0,
+          volume: -20,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          competitors: { data: [], error: null },
+          brands: { data: [{ name: 'Chevrolet' }], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: rpcRows, error: null } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.shareOfVoiceData[0].brandShareOfVoice.name).to.equal('Chevrolet');
+    });
+
+    it('returns forbidden when siteId does not belong to org', async () => {
+      mockContext.data = { siteId: '0178a3f0-1234-7000-8000-000000000055' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          sites: { data: [], error: null },
+          competitors: { data: [], error: null },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: [], error: null } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('passes filter params to RPC when provided', async () => {
+      const siteId = 'cccdac43-1a22-4659-9086-b762f59b9928';
+      mockContext.data = {
+        siteId,
+        categoryId: '0178a3f0-1234-7000-8000-000000000099',
+        topicIds: '0178a3f0-aaaa-7000-8000-000000000001',
+        origin: 'ai',
+        regionCode: 'US',
+      };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          sites: {
+            data: [{ id: siteId }],
+            error: null,
+          },
+          competitors: { data: [], error: null },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: [], error: null } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns empty configured names when competitors query errors', async () => {
+      const rpcRows = [
+        {
+          topic: 'T',
+          brand_mentions: 1,
+          competitor_name: 'SomeComp',
+          competitor_mentions: 2,
+          volume: -20,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          competitors: { data: null, error: { message: 'query failed' } },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: rpcRows, error: null } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      const comp = body.shareOfVoiceData[0].allCompetitors[0];
+      expect(comp.source).to.equal('detected');
+    });
+
+    it('handles null RPC data gracefully', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {
+          competitors: { data: [], error: null },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: null, error: null } },
+      );
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.shareOfVoiceData).to.deep.equal([]);
     });
   });
 });

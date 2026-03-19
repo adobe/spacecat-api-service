@@ -482,6 +482,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends',
+      'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
       'POST /v2/orgs/:spaceCatId/llmo-customer-config',
       'GET /organizations/:organizationId/projects',

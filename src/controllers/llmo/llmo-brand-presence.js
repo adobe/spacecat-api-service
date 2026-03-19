@@ -807,6 +807,268 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
   );
 }
 
+// ── Share of Voice ───────────────────────────────────────────────────────────
+
+const TOP_COMPETITORS_DISPLAYED = 5;
+
+/**
+ * Maps the imputed volume integer to a popularity category.
+ * Negative sentinel values are canonical (set by the projector pipeline):
+ *   -30 → High, -20 → Medium, -10 → Low.
+ * Positive values use legacy percentile bucketing against the per-query average.
+ * Zero / null → 'N/A'.
+ * @internal Exported for testing
+ */
+export function volumeToPopularity(volume, avgPositiveVolume) {
+  if (volume == null || volume === 0) return 'N/A';
+  if (volume === -30) return 'High';
+  if (volume === -20) return 'Medium';
+  if (volume === -10) return 'Low';
+  if (volume > 0 && avgPositiveVolume > 0) {
+    const low = avgPositiveVolume * 0.33;
+    const med = avgPositiveVolume * 0.66;
+    if (volume <= low) return 'Low';
+    if (volume <= med) return 'Medium';
+    return 'High';
+  }
+  return 'N/A';
+}
+
+function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = params.model || 'chatgpt';
+
+  return client.rpc('rpc_share_of_voice', {
+    p_organization_id: organizationId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_model: model,
+    p_brand_id: filterByBrandId || null,
+    p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
+      ? params.categoryId : null,
+    p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
+    p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
+    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+  });
+}
+
+async function fetchConfiguredCompetitorNames(client, organizationId, filterByBrandId) {
+  let q = client
+    .from('competitors')
+    .select('name, aliases')
+    .eq('organization_id', organizationId);
+  if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+  const { data, error } = await q.limit(QUERY_LIMIT);
+  if (error || !data) return new Set();
+  const names = new Set();
+  data.forEach((c) => {
+    if (c.name) names.add(c.name.toLowerCase().trim());
+    if (Array.isArray(c.aliases)) {
+      c.aliases.forEach((a) => {
+        if (a) names.add(a.toLowerCase().trim());
+      });
+    }
+  });
+  return names;
+}
+
+/**
+ * Reshapes flat RPC rows (one per topic+competitor) into ShareOfVoiceData[].
+ * Each RPC row has: { topic, brand_mentions, competitor_name, competitor_mentions, volume }.
+ * competitor_name is NULL for topics with no competitors (LEFT JOIN).
+ * @internal Exported for testing
+ */
+export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
+  // Group RPC rows by topic
+  const topicMap = new Map();
+  rpcRows.forEach((r) => {
+    const topic = r.topic || 'Unknown';
+    if (!topicMap.has(topic)) {
+      topicMap.set(topic, {
+        brandMentions: Number(r.brand_mentions) || 0,
+        volume: r.volume,
+        competitors: new Map(),
+      });
+    }
+    const m = topicMap.get(topic);
+    if (r.competitor_name) {
+      const key = r.competitor_name.toLowerCase().trim();
+      m.competitors.set(key, (m.competitors.get(key) || 0) + (Number(r.competitor_mentions) || 0));
+    }
+  });
+
+  // Compute average positive volume for legacy percentile bucketing
+  const positiveVolumes = [];
+  topicMap.forEach((m) => {
+    if (m.volume > 0) positiveVolumes.push(m.volume);
+  });
+  const avgPositiveVolume = positiveVolumes.length > 0
+    ? positiveVolumes.reduce((s, v) => s + v, 0) / positiveVolumes.length
+    : 0;
+
+  const shareOfVoiceData = [];
+
+  topicMap.forEach((m, topic) => {
+    const totalCompetitorMentions = [...m.competitors.values()].reduce((s, c) => s + c, 0);
+    const totalMentions = m.brandMentions + totalCompetitorMentions;
+
+    const shareOfVoice = m.brandMentions > 0 && totalMentions > 0
+      ? (m.brandMentions / totalMentions) * 100
+      : null;
+
+    const allEntities = [];
+
+    m.competitors.forEach((mentions, name) => {
+      const sov = totalMentions > 0 ? (mentions / totalMentions) * 100 : 0;
+      allEntities.push({
+        name,
+        mentions,
+        shareOfVoice: sov,
+        isBrand: false,
+        source: configuredNames.size > 0 && configuredNames.has(name) ? 'configured' : 'detected',
+      });
+    });
+
+    if (m.brandMentions > 0) {
+      const brandSov = (m.brandMentions / totalMentions) * 100;
+      allEntities.push({
+        name: brandName || 'Our Brand',
+        mentions: m.brandMentions,
+        shareOfVoice: brandSov,
+        isBrand: true,
+        source: 'configured',
+      });
+    }
+
+    allEntities.sort((a, b) => {
+      const diff = b.shareOfVoice - a.shareOfVoice;
+      if (diff !== 0) return diff;
+      return Number(b.isBrand) - Number(a.isBrand);
+    });
+
+    const topEntities = allEntities.slice(0, TOP_COMPETITORS_DISPLAYED);
+    const brandEntity = topEntities.find((e) => e.isBrand);
+    const topCompetitors = topEntities
+      .filter((e) => !e.isBrand)
+      .map(({
+        name, mentions, shareOfVoice: sov, source,
+      }) => ({
+        name, mentions, shareOfVoice: sov, source,
+      }));
+    const allCompetitors = allEntities
+      .filter((e) => !e.isBrand)
+      .map(({
+        name, mentions, shareOfVoice: sov, source,
+      }) => ({
+        name, mentions, shareOfVoice: sov, source,
+      }));
+
+    const brandShareOfVoice = brandEntity ? {
+      name: brandEntity.name,
+      mentions: brandEntity.mentions,
+      shareOfVoice: brandEntity.shareOfVoice,
+    } : undefined;
+
+    let ranking = null;
+    if (brandEntity) {
+      ranking = allEntities.findIndex((e) => e.isBrand) + 1;
+    }
+
+    const popularity = volumeToPopularity(m.volume, avgPositiveVolume);
+
+    shareOfVoiceData.push({
+      id: `${topic}-${totalMentions}-${m.brandMentions}`,
+      topic,
+      popularity,
+      brandMentions: m.brandMentions,
+      totalMentions,
+      shareOfVoice,
+      ranking,
+      topCompetitors,
+      allCompetitors,
+      brandShareOfVoice,
+    });
+  });
+
+  const getPriorityValue = (p) => {
+    switch (p.toLowerCase()) {
+      case 'high': return 3;
+      case 'medium': return 2;
+      case 'low': return 1;
+      default: return 0;
+    }
+  };
+  shareOfVoiceData.sort((a, b) => {
+    const pDiff = getPriorityValue(b.popularity) - getPriorityValue(a.popularity);
+    if (pDiff !== 0) return pDiff;
+    return (b.shareOfVoice || 0) - (a.shareOfVoice || 0);
+  });
+
+  return shareOfVoiceData;
+}
+
+/**
+ * Creates the getShareOfVoice handler.
+ * Returns per-topic share-of-voice, ranking, popularity and competitor breakdown.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'share-of-voice',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const [rpcResult, configuredNames] = await Promise.all([
+        callShareOfVoiceRpc(client, organizationId, params, defaults, filterByBrandId),
+        fetchConfiguredCompetitorNames(client, organizationId, filterByBrandId),
+      ]);
+
+      if (rpcResult.error) {
+        ctx.log.error(`Share-of-voice RPC error: ${rpcResult.error.message}`);
+        return badRequest(rpcResult.error.message);
+      }
+
+      // Resolve brand name for display
+      let brandName = 'Our Brand';
+      if (filterByBrandId) {
+        const { data: brandData } = await client
+          .from('brands')
+          .select('name')
+          .eq('id', filterByBrandId)
+          .limit(1);
+        if (brandData?.[0]?.name) brandName = brandData[0].name;
+      }
+
+      const shareOfVoiceData = aggregateShareOfVoice(
+        rpcResult.data || [],
+        configuredNames,
+        brandName,
+      );
+
+      return ok({ shareOfVoiceData });
+    },
+  );
+}
+
 /**
  * Creates the getFilterDimensions handler.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
