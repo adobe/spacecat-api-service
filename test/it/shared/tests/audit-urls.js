@@ -66,11 +66,11 @@ function expectPaginated(res, expectedItemCount) {
  */
 export default function auditUrlTests(getHttpClient, resetData) {
   describe('Audit URLs (url-store)', () => {
+    before(() => resetData()); // shared seed for read-only blocks
+
     // ── List URLs ──
 
     describe('GET /sites/:siteId/url-store', () => {
-      before(() => resetData());
-
       it('user: returns customer URLs by default (byCustomer=true)', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/url-store`);
@@ -97,8 +97,6 @@ export default function auditUrlTests(getHttpClient, resetData) {
     // ── List by audit type ──
 
     describe('GET /sites/:siteId/url-store/by-audit/:auditType', () => {
-      before(() => resetData());
-
       it('user: returns URLs with matching audit type', async () => {
         const http = getHttpClient();
         // URL_1 (cwv+apex) and URL_3 (cwv) both have 'cwv'
@@ -122,8 +120,6 @@ export default function auditUrlTests(getHttpClient, resetData) {
     // ── Get URL by base64 ──
 
     describe('GET /sites/:siteId/url-store/:base64Url', () => {
-      before(() => resetData());
-
       it('user: returns specific URL via base64', async () => {
         const http = getHttpClient();
         const encoded = urlToBase64(AUDIT_URL_1);

@@ -56,11 +56,11 @@ function expectPaginated(res, expectedItemCount) {
  */
 export default function sentimentTopicTests(getHttpClient, resetData) {
   describe('Sentiment Topics', () => {
+    before(() => resetData()); // shared seed for read-only blocks
+
     // ── List topics ──
 
     describe('GET /sites/:siteId/sentiment/topics', () => {
-      before(() => resetData());
-
       it('user: returns all topics', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/sentiment/topics`);
@@ -91,8 +91,6 @@ export default function sentimentTopicTests(getHttpClient, resetData) {
     // ── Get topic ──
 
     describe('GET /sites/:siteId/sentiment/topics/:topicId', () => {
-      before(() => resetData());
-
       it('user: returns specific topic', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/sentiment/topics/${TOPIC_1_ID}`);
@@ -115,6 +113,27 @@ export default function sentimentTopicTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/sentiment/topics/${NON_EXISTENT_TOPIC_ID}`);
         expect(res.status).to.equal(404);
+      });
+    });
+
+    // ── Sentiment config (combined topics + guidelines) ──
+
+    describe('GET /sites/:siteId/sentiment/config', () => {
+      // no reset - read-only, uses shared seed
+
+      it('user: returns combined config with enabled items', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/sentiment/config`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object');
+        expect(res.body.topics).to.be.an('array').with.lengthOf(2);
+        expect(res.body.guidelines).to.be.an('array').with.lengthOf(2);
+      });
+
+      it('user: returns 403 for denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/sentiment/config`);
+        expect(res.status).to.equal(403);
       });
     });
 
@@ -265,27 +284,6 @@ export default function sentimentTopicTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.delete(`/sites/${SITE_1_ID}/sentiment/topics/${NON_EXISTENT_TOPIC_ID}`);
         expect(res.status).to.equal(404);
-      });
-    });
-
-    // ── Sentiment config (combined topics + guidelines) ──
-
-    describe('GET /sites/:siteId/sentiment/config', () => {
-      before(() => resetData());
-
-      it('user: returns combined config with enabled items', async () => {
-        const http = getHttpClient();
-        const res = await http.user.get(`/sites/${SITE_1_ID}/sentiment/config`);
-        expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('object');
-        expect(res.body.topics).to.be.an('array').with.lengthOf(2);
-        expect(res.body.guidelines).to.be.an('array').with.lengthOf(2);
-      });
-
-      it('user: returns 403 for denied site', async () => {
-        const http = getHttpClient();
-        const res = await http.user.get(`/sites/${SITE_3_ID}/sentiment/config`);
-        expect(res.status).to.equal(403);
       });
     });
   });

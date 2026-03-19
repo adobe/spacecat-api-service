@@ -41,11 +41,11 @@ function expectProjectDto(project) {
  */
 export default function projectTests(getHttpClient, resetData) {
   describe('Projects', () => {
+    before(() => resetData()); // shared seed for read-only blocks
+
     // ── Read endpoints ──
 
     describe('GET /projects (admin-only list)', () => {
-      before(() => resetData());
-
       it('admin: returns all projects', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/projects');
@@ -62,8 +62,6 @@ export default function projectTests(getHttpClient, resetData) {
     });
 
     describe('GET /projects/:projectId', () => {
-      before(() => resetData());
-
       it('user: returns accessible project', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/projects/${PROJECT_1_ID}`);

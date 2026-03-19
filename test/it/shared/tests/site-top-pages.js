@@ -31,9 +31,9 @@ const DENIED_BASE = `/sites/${SITE_3_ID}/top-pages`;
  */
 export default function siteTopPageTests(getHttpClient, resetData) {
   describe('SiteTopPages', () => {
-    describe('GET /sites/:siteId/top-pages', () => {
-      before(() => resetData());
+    before(() => resetData()); // shared seed for read-only blocks
 
+    describe('GET /sites/:siteId/top-pages', () => {
       it('user: returns all top pages for site', async () => {
         const http = getHttpClient();
         const res = await http.user.get(BASE);
@@ -49,8 +49,6 @@ export default function siteTopPageTests(getHttpClient, resetData) {
     });
 
     describe('GET /sites/:siteId/top-pages/:source', () => {
-      before(() => resetData());
-
       it('user: returns top pages filtered by source', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/ahrefs`);
@@ -73,8 +71,6 @@ export default function siteTopPageTests(getHttpClient, resetData) {
     });
 
     describe('GET /sites/:siteId/top-pages/:source/:geo', () => {
-      before(() => resetData());
-
       it('user: returns top pages filtered by source and geo', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/rum/us`);
@@ -91,8 +87,6 @@ export default function siteTopPageTests(getHttpClient, resetData) {
     });
 
     describe('GET /sites/:siteId/top-pages (error cases)', () => {
-      before(() => resetData());
-
       it('user: returns 404 for non-existent site', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${NON_EXISTENT_SITE_ID}/top-pages`);

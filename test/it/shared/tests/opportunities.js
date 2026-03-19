@@ -45,11 +45,11 @@ function expectOpportunityDto(oppty) {
  */
 export default function opportunityTests(getHttpClient, resetData) {
   describe('Opportunities', () => {
+    before(() => resetData()); // shared seed for read-only blocks
+
     // ── Read endpoints ──
 
     describe('GET /sites/:siteId/opportunities', () => {
-      before(() => resetData());
-
       it('user: returns opportunities for accessible site', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities`);
@@ -82,8 +82,6 @@ export default function opportunityTests(getHttpClient, resetData) {
     });
 
     describe('GET /sites/:siteId/opportunities/by-status/:status', () => {
-      before(() => resetData());
-
       it('user: returns opportunities filtered by status', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities/by-status/NEW`);
@@ -127,8 +125,6 @@ export default function opportunityTests(getHttpClient, resetData) {
     });
 
     describe('GET /sites/:siteId/opportunities/:opportunityId', () => {
-      before(() => resetData());
-
       it('user: returns specific opportunity', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities/${OPPTY_1_ID}`);

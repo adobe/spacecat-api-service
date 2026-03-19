@@ -32,6 +32,7 @@ export const audits = [
     full_audit_ref: 'https://audit-ref.example.com/site1-cwv-1',
     is_live: true,
     is_error: false,
+    invocation_id: null,
   },
   {
     id: 'aa222222-aa22-4a22-ba22-aa2222222222',
@@ -53,6 +54,7 @@ export const audits = [
     full_audit_ref: 'https://audit-ref.example.com/site1-apex-1',
     is_live: true,
     is_error: false,
+    invocation_id: null,
   },
   {
     id: 'aa444444-aa44-4a44-ba44-aa4444444444',
@@ -63,5 +65,6 @@ export const audits = [
     full_audit_ref: 'https://audit-ref.example.com/site3-cwv-1',
     is_live: true,
     is_error: false,
+    invocation_id: null,
   },
 ];

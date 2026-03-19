@@ -43,6 +43,7 @@ export const siteTopPages = [
     url: 'https://site3-denied.example.com/page1',
     traffic: 200,
     source: 'ahrefs',
+    top_keyword: null,
     geo: 'global',
     imported_at: '2025-01-20T10:00:00.000Z',
   },

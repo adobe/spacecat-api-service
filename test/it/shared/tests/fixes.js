@@ -51,11 +51,11 @@ function expectFixDto(fix) {
  */
 export default function fixTests(getHttpClient, resetData) {
   describe('FixEntities', () => {
+    before(() => resetData()); // shared seed for read-only blocks
+
     // ── Read endpoints ──
 
     describe('GET .../fixes', () => {
-      before(() => resetData());
-
       it('user: returns fixes for opportunity', async () => {
         const http = getHttpClient();
         const res = await http.user.get(BASE);
@@ -81,8 +81,6 @@ export default function fixTests(getHttpClient, resetData) {
     });
 
     describe('GET .../fixes?fixCreatedDate (date-filtered with suggestions)', () => {
-      before(() => resetData());
-
       it('user: returns fixes with attached suggestions for matching date', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}?fixCreatedDate=${FIX_1_CREATED_DATE}`);
@@ -112,8 +110,6 @@ export default function fixTests(getHttpClient, resetData) {
     });
 
     describe('GET .../fixes/by-status/:status', () => {
-      before(() => resetData());
-
       it('user: returns fixes filtered by status', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/by-status/PENDING`);
@@ -156,8 +152,6 @@ export default function fixTests(getHttpClient, resetData) {
     });
 
     describe('GET .../fixes/:fixId', () => {
-      before(() => resetData());
-
       it('user: returns specific fix', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${FIX_1_ID}`);
@@ -187,8 +181,6 @@ export default function fixTests(getHttpClient, resetData) {
     });
 
     describe('GET .../fixes/:fixId/suggestions', () => {
-      before(() => resetData());
-
       it('user: returns suggestions linked via junction', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${FIX_1_ID}/suggestions`);

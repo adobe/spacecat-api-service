@@ -37,6 +37,7 @@ export const suggestions = [
     rank: 2,
     status: 'APPROVED',
     data: { title: 'Fix redirect chain', from: '/old-page', to: '/new-page' },
+    kpi_deltas: null,
   },
   {
     id: 'bb333333-3333-4333-b333-333333333333',
@@ -45,5 +46,6 @@ export const suggestions = [
     rank: 3,
     status: 'NEW',
     data: { title: 'Lazy load images', from: 'eager', to: 'lazy' },
+    kpi_deltas: null,
   },
 ];

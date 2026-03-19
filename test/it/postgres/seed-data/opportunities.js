@@ -43,6 +43,7 @@ export const opportunities = [
     status: 'RESOLVED',
     data: { brokenLinks: 5 },
     runbook: 'https://wiki.example.com/runbooks/broken-backlinks',
+    guidance: null,
     tags: ['seo', 'backlinks'],
   },
   {
@@ -54,5 +55,8 @@ export const opportunities = [
     description: 'Opportunity on denied site',
     status: 'NEW',
     data: { cwvMetric: 'cls', currentScore: 0.25 },
+    runbook: null,
+    guidance: null,
+    tags: [],
   },
 ];

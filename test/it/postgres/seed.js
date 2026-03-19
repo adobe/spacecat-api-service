@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-disable no-await-in-loop */
 import { execSync } from 'child_process';
 
 import { organizations } from './seed-data/organizations.js';
@@ -37,25 +36,24 @@ const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
 
 /**
- * Inserts rows into a PostgREST table one at a time.
- * (Bulk inserts require uniform keys across all objects - PGRST102 - and seed
- * data has optional fields, so we insert individually but parallelize across tables.)
+ * Bulk-inserts rows into a PostgREST table (single HTTP request per table).
+ * All rows must have identical keys (PGRST102) - seed data is pre-normalized.
  */
 async function insertRows(table, rows) {
-  for (const row of rows) {
-    const res = await fetch(`${POSTGREST_URL}/${table}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify(row),
-    });
+  if (rows.length === 0) return;
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
-    }
+  const res = await fetch(`${POSTGREST_URL}/${table}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(rows),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to seed ${table}: ${res.status} ${text}`);
   }
 }
 

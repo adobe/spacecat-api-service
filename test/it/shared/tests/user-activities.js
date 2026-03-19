@@ -86,8 +86,8 @@ export default function userActivityTests(getHttpClient, resetData) {
     // ── Create activity ──
 
     describe('POST /sites/:siteId/user-activities', () => {
-      // POST mutates the seeded TrialUser (INVITED → REGISTERED), so reset before each group
-      beforeEach(() => resetData());
+      // POST mutates the seeded TrialUser (INVITED -> REGISTERED), so reset before each test
+      before(() => resetData());
 
       it('trialUser: creates activity', async () => {
         const http = getHttpClient();

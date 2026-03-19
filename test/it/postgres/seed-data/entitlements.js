@@ -32,5 +32,6 @@ export const entitlements = [
     organization_id: '11111111-1111-4111-b111-111111111111',
     product_code: 'ASO',
     tier: 'PAID',
+    quotas: null,
   },
 ];
