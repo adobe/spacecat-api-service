@@ -11,13 +11,12 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp, sortById } from '../helpers/assertions.js';
+import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
   ORG_2_ID,
   SITE_1_ID,
   SITE_1_BASE_URL,
-  SITE_2_ID,
   SITE_3_ID,
   SITE_3_BASE_URL,
   NON_EXISTENT_SITE_ID,
@@ -60,16 +59,15 @@ export default function siteTests(getHttpClient, resetData) {
     // ── Read-only assertions on baseline seed ──
 
     describe('GET /sites', () => {
-      it('admin: returns all sites', async () => {
+      it('admin: returns all sites (excluding default org)', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
-        const sorted = sortById(res.body);
-        sorted.forEach((site) => expectSiteDto(site));
-        expect(sorted[0].id).to.equal(SITE_1_ID);
-        expect(sorted[1].id).to.equal(SITE_2_ID);
-        expect(sorted[2].id).to.equal(SITE_3_ID);
+        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites
+        // Only SITE_3 (ORG_2) is returned
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expectSiteDto(res.body[0]);
+        expect(res.body[0].id).to.equal(SITE_3_ID);
       });
 
       it('user: returns 403', async () => {
