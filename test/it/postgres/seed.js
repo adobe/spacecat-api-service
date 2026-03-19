@@ -88,17 +88,19 @@ async function seed() {
   // Level 0: no dependencies
   await Promise.all([
     insertRows('organizations', organizations),
-    insertRows('trial_users', trialUsers),
     insertRows('async_jobs', asyncJobs),
     insertRows('consumers', consumers),
   ]);
 
-  // Level 1: depend on organizations
+  // Level 1a: depend on organizations
   await Promise.all([
     insertRows('projects', projects),
-    insertRows('sites', sites),
     insertRows('entitlements', entitlements),
+    insertRows('trial_users', trialUsers),
   ]);
+
+  // Level 1b: depend on projects
+  await insertRows('sites', sites);
 
   // Level 2: depend on sites
   await Promise.all([
