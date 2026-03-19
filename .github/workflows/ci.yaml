@@ -21,6 +21,7 @@ jobs:
     secrets: inherit
 
   it-postgres:
+    needs: ci
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.action != 'edited'
     timeout-minutes: 15

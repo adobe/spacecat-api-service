@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(wc:*)",
+      "mcp__github__pull_request_read",
+      "mcp__github-adobe__get_file_contents",
+      "mcp__github-enterprise__get_file_contents",
+      "mcp__github__search_repositories"
+    ]
+  }
+}
