@@ -1429,6 +1429,7 @@ describe('PlgOnboardingController', () => {
 
       expect(response.status).to.equal(200);
       expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(

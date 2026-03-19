@@ -281,65 +281,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
 
-    // Step 5b: Auto-resolve author URL and RUM host
-    let rumHost = null;
-    try {
-      const resolvedConfig = await autoResolveAuthorUrl(site, context);
-      rumHost = resolvedConfig?.host || null;
-
-      // Only update deliveryConfig if authorURL is not already set
-      const existingDeliveryConfig = site.getDeliveryConfig() || {};
-      if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
-        site.setDeliveryConfig({
-          ...existingDeliveryConfig,
-          authorURL: resolvedConfig.authorURL,
-          programId: resolvedConfig.programId,
-          environmentId: resolvedConfig.environmentId,
-          preferContentApi: true,
-          imsOrgId,
-        });
-        log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
-        steps.authorUrlResolved = true;
-      }
-    } catch (error) {
-      log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
-    }
-
-    // Step 5c: Resolve EDS code config and hlxConfig from RUM host
-    try {
-      await updateCodeConfig(site, rumHost, { say: () => {} }, log);
-      if (site.getCode()?.owner) {
-        steps.codeConfigResolved = true;
-      }
-    } catch (error) {
-      log.warn(`Failed to resolve code config for site ${site.getId()}: ${error.message}`);
-    }
-
-    // Step 5d: Set hlxConfig for EDS sites from RUM host
-    if (rumHost && !site.getHlxConfig()) {
-      const edsMatch = rumHost.match(EDS_HOST_PATTERN);
-      if (edsMatch) {
-        const [, ref, repo, owner, tld] = edsMatch;
-        site.setHlxConfig({
-          hlxVersion: 5,
-          rso: {
-            ref, site: repo, owner, tld,
-          },
-        });
-        log.info(`Set hlxConfig for site ${site.getId()}: ${ref}--${repo}--${owner}.${tld}`);
-        steps.hlxConfigSet = true;
-      }
-    }
-
-    // Step 6: Update configs
+    // Step 5b: Resolve canonical URL early so the RUM lookup uses the correct hostname
+    // (e.g. example.com may redirect to www.example.com which is what RUM is keyed on)
     const siteConfig = site.getConfig();
-
-    // Enable imports from PLG profile
-    const importDefs = Object.keys(profile.imports || {})
-      .map((type) => ({ type }));
-    await enableImports(siteConfig, importDefs, log);
-
-    // Resolve canonical URL for overrideBaseURL
     const currentFetchConfig = siteConfig.getFetchConfig() || {};
     if (!currentFetchConfig.overrideBaseURL) {
       try {
@@ -365,6 +309,63 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
         log.warn(`Failed to resolve canonical URL for ${baseURL}: ${error.message}`);
       }
     }
+
+    // Step 5c: Auto-resolve author URL and RUM host
+    let rumHost = null;
+    try {
+      const resolvedConfig = await autoResolveAuthorUrl(site, context);
+      rumHost = resolvedConfig?.host || null;
+
+      // Only update deliveryConfig if authorURL is not already set
+      const existingDeliveryConfig = site.getDeliveryConfig() || {};
+      if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+        site.setDeliveryConfig({
+          ...existingDeliveryConfig,
+          authorURL: resolvedConfig.authorURL,
+          programId: resolvedConfig.programId,
+          environmentId: resolvedConfig.environmentId,
+          preferContentApi: true,
+          imsOrgId,
+        });
+        log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
+        steps.authorUrlResolved = true;
+      }
+    } catch (error) {
+      log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
+    }
+
+    // Step 5d: Resolve EDS code config and hlxConfig from RUM host
+    try {
+      await updateCodeConfig(site, rumHost, { say: () => {} }, log);
+      if (site.getCode()?.owner) {
+        steps.codeConfigResolved = true;
+      }
+    } catch (error) {
+      log.warn(`Failed to resolve code config for site ${site.getId()}: ${error.message}`);
+    }
+
+    // Step 5e: Set hlxConfig for EDS sites from RUM host
+    if (rumHost && !site.getHlxConfig()) {
+      const edsMatch = rumHost.match(EDS_HOST_PATTERN);
+      if (edsMatch) {
+        const [, ref, repo, owner, tld] = edsMatch;
+        site.setHlxConfig({
+          hlxVersion: 5,
+          rso: {
+            ref, site: repo, owner, tld,
+          },
+        });
+        log.info(`Set hlxConfig for site ${site.getId()}: ${ref}--${repo}--${owner}.${tld}`);
+        steps.hlxConfigSet = true;
+      }
+    }
+
+    // Step 6: Update configs
+
+    // Enable imports from PLG profile
+    const importDefs = Object.keys(profile.imports || {})
+      .map((type) => ({ type }));
+    await enableImports(siteConfig, importDefs, log);
 
     // Detect and set locale
     if (!site.getLanguage() || !site.getRegion()) {
