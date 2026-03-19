@@ -1,3 +1,10 @@
+## [1.358.1](https://github.com/adobe/spacecat-api-service/compare/v1.358.0...v1.358.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* resolve canonical URL before RUM lookup during PLG onboarding ([#1970](https://github.com/adobe/spacecat-api-service/issues/1970)) ([e468ce2](https://github.com/adobe/spacecat-api-service/commit/e468ce2791d50257ba64912dc035002a6bfd6871))
+
 # [1.358.0](https://github.com/adobe/spacecat-api-service/compare/v1.357.2...v1.358.0) (2026-03-19)
 
 
