@@ -1,3 +1,10 @@
+# [1.357.0](https://github.com/adobe/spacecat-api-service/compare/v1.356.0...v1.357.0) (2026-03-19)
+
+
+### Features
+
+* add llmo brand presence stats api with trends support ([#1993](https://github.com/adobe/spacecat-api-service/issues/1993)) ([fee75cb](https://github.com/adobe/spacecat-api-service/commit/fee75cb8eefb1308b77d98c8012b31bb285a8dfc))
+
 # [1.356.0](https://github.com/adobe/spacecat-api-service/compare/v1.355.1...v1.356.0) (2026-03-19)
 
 
