@@ -1288,6 +1288,47 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- AEM site verification ---
+
+  describe('onboard - AEM site verification', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('waitlists domain when RUM check fails and delivery type is OTHER', async () => {
+      rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
+      findDeliveryTypeStub.resolves('other');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/not an AEM site/);
+      expect(mockOnboarding.save).to.have.been.called;
+      // Should NOT proceed to bot blocker or site creation
+      expect(detectBotBlockerStub).to.not.have.been.called;
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+    });
+
+    it('continues onboarding when RUM fails but delivery type is AEM', async () => {
+      rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
+      findDeliveryTypeStub.resolves('aem_edge');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // delivery type should NOT be fetched again at site creation (cached)
+      expect(findDeliveryTypeStub).to.have.been.calledOnce;
+    });
+  });
+
   // --- Entitlement ---
 
   describe('onboard - entitlement handling', () => {
