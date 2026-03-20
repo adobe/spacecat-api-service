@@ -400,6 +400,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': llmoMysticatController.getMarketTrackingTrends,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,
+    'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
 
