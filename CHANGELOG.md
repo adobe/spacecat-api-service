@@ -1,3 +1,10 @@
+# [1.359.0](https://github.com/adobe/spacecat-api-service/compare/v1.358.3...v1.359.0) (2026-03-20)
+
+
+### Features
+
+* SITES-40623 - token architecture in Spacecat ([#1819](https://github.com/adobe/spacecat-api-service/issues/1819)) ([c0c073c](https://github.com/adobe/spacecat-api-service/commit/c0c073c6fba7e84645fac5f786675d4ff23df56d))
+
 ## [1.358.3](https://github.com/adobe/spacecat-api-service/compare/v1.358.2...v1.358.3) (2026-03-20)
 
 
