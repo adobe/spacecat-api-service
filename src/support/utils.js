@@ -1212,11 +1212,7 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
-    // Guard: prevent re-onboarding a paid-profile site with a lower-tier profile
-    // unless the user explicitly passes force=true.
-    // Runs before locale detection and say() messages to avoid confusing output on block.
-    // lastOnboardProfile is stored in handlers.lastOnboardProfile (inside the serialized
-    // handlers field) because Config.toDynamoItem only persists known fields.
+    // Block re-onboarding a paid-profile site with a lower-tier profile unless force=true.
     if (!additionalParams.force && !PAID_PROFILES.includes(profileName)) {
       const { Site: SiteLookup } = dataAccess;
       const existingSite = await SiteLookup.findByBaseURL(baseURL);
@@ -1384,15 +1380,7 @@ export const onboardSingleSite = async (
       });
     }
 
-    // Record trigger time per audit type and the profile used for this onboard run.
-    // lastOnboardProfile is stored inside handlers (a serialized field in Config.toDynamoItem)
-    // so it survives DB round-trips. Top-level state fields are NOT persisted by toDynamoItem.
-    const profileAuditTypes = Object.keys(profile.audits);
-    const now = Date.now();
     const handlers = siteConfig.getHandlers() || {};
-    for (const auditType of profileAuditTypes) {
-      handlers[auditType] = { ...(handlers[auditType] || {}), lastAuditRunTime: now };
-    }
     handlers.lastOnboardProfile = profileName;
     siteConfig.state.handlers = handlers;
 
