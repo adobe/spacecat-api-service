@@ -39,7 +39,7 @@ function AddDelegateCommand(context) {
 
   const { dataAccess, log, imsClient } = context;
   const {
-    Site, Organization, SiteImsOrgAccess, AccessGrantLog,
+    Site, Organization, SiteImsOrgAccess, AccessGrantLog, Entitlement, SiteEnrollment,
   } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
@@ -90,6 +90,23 @@ function AddDelegateCommand(context) {
       const targetOrg = await site.getOrganization();
       if (!targetOrg) {
         await say(`:x: Site \`${site.getBaseURL()}\` has no owning organization.`);
+        return;
+      }
+
+      // Verify the target org is entitled to the product and the site is enrolled.
+      // Without this check, delegation would bypass the entitlement gate entirely.
+      const entitlement = await Entitlement.findByIndexKeys({
+        organizationId: targetOrg.getId(),
+        productCode,
+      });
+      if (!entitlement) {
+        await say(`:x: The owning organization *${targetOrg.getName() || targetOrg.getId()}* has no \`${productCode}\` entitlement. A grant can only be created for sites that are already enrolled.`);
+        return;
+      }
+      const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+      const isEnrolled = siteEnrollments.some((se) => se.getSiteId() === site.getId());
+      if (!isEnrolled) {
+        await say(`:x: Site \`${site.getBaseURL()}\` is not enrolled in \`${productCode}\` under the owning organization. Enroll it first before creating a delegate grant.`);
         return;
       }
 

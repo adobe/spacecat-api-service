@@ -200,7 +200,7 @@ function OrganizationsController(ctx, env) {
     }
 
     const ownSites = await Site.allByOrganizationId(organizationId);
-    const sites = [...ownSites]; // copy to avoid mutating the data-access return value
+    const delegatedSites = [];
 
     if (SiteImsOrgAccess) {
       try {
@@ -208,7 +208,7 @@ function OrganizationsController(ctx, env) {
           organizationId,
         );
         const now = new Date();
-        const ownSiteIds = new Set(sites.map((s) => s.getId()));
+        const ownSiteIds = new Set(ownSites.map((s) => s.getId()));
         for (const entry of delegatedEntries) {
           const notExpired = !entry.grant.getExpiresAt()
             || new Date(entry.grant.getExpiresAt()) > now;
@@ -218,7 +218,7 @@ function OrganizationsController(ctx, env) {
             && entry.site
             && !ownSiteIds.has(entry.site.getId())
           ) {
-            sites.push(entry.site);
+            delegatedSites.push(entry.site);
             ownSiteIds.add(entry.site.getId());
           }
         }
@@ -230,14 +230,16 @@ function OrganizationsController(ctx, env) {
       }
     }
 
+    // Delegated sites bypass the enrollment filter — they are enrolled under the
+    // target org's entitlement, not the delegate org's. Only own sites need the check.
     const filteredSites = await filterSitesForProductCode(
       context,
       organization,
-      sites,
+      ownSites,
       productCode,
     );
 
-    return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
+    return ok([...filteredSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
   };
 
   /**

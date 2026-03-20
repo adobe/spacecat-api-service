@@ -40,7 +40,7 @@ describe('AddDelegateCommand', () => {
     mockSite = {
       getId: () => SITE_ID,
       getBaseURL: () => 'https://example.com',
-      getOrganization: sinon.stub().resolves({ getId: () => TARGET_ORG_ID }),
+      getOrganization: sinon.stub().resolves({ getId: () => TARGET_ORG_ID, getName: () => 'Target Org' }),
     };
     mockDelegateOrg = {
       getId: () => ORG_ID,
@@ -65,6 +65,12 @@ describe('AddDelegateCommand', () => {
         Organization: {
           findByImsOrgId: sinon.stub().resolves(mockDelegateOrg),
           create: sinon.stub().resolves(mockDelegateOrg),
+        },
+        Entitlement: {
+          findByIndexKeys: sinon.stub().resolves({ getId: () => 'entitlement-001' }),
+        },
+        SiteEnrollment: {
+          allByEntitlementId: sinon.stub().resolves([{ getSiteId: () => SITE_ID }]),
         },
         SiteImsOrgAccess: {
           create: sinon.stub().resolves(mockGrant),
@@ -214,6 +220,31 @@ describe('AddDelegateCommand', () => {
       const cmd = AddDelegateCommand(context);
       await cmd.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
       expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
+    });
+
+    it('returns error when target org has no entitlement for the product', async () => {
+      context.dataAccess.Entitlement.findByIndexKeys.resolves(null);
+      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(slackContext.say.firstCall.args[0]).to.include(':x:');
+      expect(slackContext.say.firstCall.args[0]).to.include('no `LLMO` entitlement');
+      expect(context.dataAccess.SiteImsOrgAccess.create).not.to.have.been.called;
+    });
+
+    it('falls back to target org ID in no-entitlement message when org has no name', async () => {
+      context.dataAccess.Entitlement.findByIndexKeys.resolves(null);
+      mockSite.getOrganization.resolves({ getId: () => TARGET_ORG_ID, getName: () => null });
+      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(slackContext.say.firstCall.args[0]).to.include(TARGET_ORG_ID);
+    });
+
+    it('returns error when site is not enrolled in the product', async () => {
+      context.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'some-other-site-id' },
+      ]);
+      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(slackContext.say.firstCall.args[0]).to.include(':x:');
+      expect(slackContext.say.firstCall.args[0]).to.include('not enrolled');
+      expect(context.dataAccess.SiteImsOrgAccess.create).not.to.have.been.called;
     });
 
     it('shows info message on 409 conflict', async () => {
