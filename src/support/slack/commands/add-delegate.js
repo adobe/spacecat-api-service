@@ -37,7 +37,9 @@ function AddDelegateCommand(context) {
     usageText: `${PHRASES[0]} {baseURL|siteId} {imsOrgId} {productCode}`,
   });
 
-  const { dataAccess, log, imsClient } = context;
+  const {
+    dataAccess, log, imsClient, env,
+  } = context;
   const {
     Site, Organization, SiteImsOrgAccess, AccessGrantLog, Entitlement, SiteEnrollment,
   } = dataAccess;
@@ -50,6 +52,16 @@ function AddDelegateCommand(context) {
 
       if (!siteArg || !imsOrgId || !productCode) {
         await say(baseCommand.usage());
+        return;
+      }
+
+      // Allowlist check: only permitted Slack user IDs may run this command.
+      const allowedUsers = (env?.DELEGATE_ALLOWED_SLACK_USER_IDS || '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (allowedUsers.length > 0 && !allowedUsers.includes(userId)) {
+        await say(':x: You are not authorized to use this command.');
         return;
       }
 
