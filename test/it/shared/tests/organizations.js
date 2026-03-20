@@ -213,9 +213,9 @@ export default function organizationTests(getHttpClient, resetData) {
         expect(res.status).to.equal(403);
       });
 
-      it('delegatedUser: x-product=ASO, ORG_3 → 200 with 0 sites (ORG_3 has no ASO entitlement)', async () => {
-        // Delegation merge adds SITE_1 via ACCESS_3 (ASO) but filterSitesForProductCode
-        // finds no ASO entitlement for ORG_3 and returns empty array.
+      it('delegatedUser: x-product=ASO, ORG_3 → 200 with 0 sites (SITE_1 not enrolled under ORG_1 ASO)', async () => {
+        // ACCESS_3 (ASO) targets ORG_1 which has an ASO entitlement (ENT_2), but SITE_1
+        // is not enrolled under ENT_2. The retrieval-time enrollment check excludes it.
         const http = getHttpClient();
         const res = await http.delegatedUser.get(
           `/organizations/${ORG_3_ID}/sites`,

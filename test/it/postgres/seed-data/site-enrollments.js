@@ -23,8 +23,9 @@ export const siteEnrollments = [
     site_id: '33333333-3333-4333-b333-333333333333',
     entitlement_id: 'dd111111-1111-4111-b111-111111111111',
   },
-  // SITE_1 enrolled under ORG_3's LLMO entitlement — enables filterSitesForProductCode to pass
-  // when delegatedUser requests GET /organizations/ORG_3/sites with x-product: LLMO
+  // SITE_1 enrolled under ORG_3's LLMO entitlement.
+  // Note: SITE_1 appearing in ORG_3's delegated site list is now gated by the target org's
+  // enrollment check (ORG_1 LLMO, SE_1), not this entry. This enrollment remains valid data.
   {
     id: 'ee222222-2222-4222-a222-222222222222',
     site_id: '33333333-3333-4333-b333-333333333333',

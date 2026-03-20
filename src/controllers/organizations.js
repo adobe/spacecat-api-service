@@ -51,7 +51,7 @@ function OrganizationsController(ctx, env) {
   }
   const { SLACK_URL_WORKSPACE_EXTERNAL: slackExternalWorkspaceUrl } = env;
   const {
-    Organization, Project, Site, SiteImsOrgAccess,
+    Organization, Project, Site, SiteImsOrgAccess, Entitlement, SiteEnrollment,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -209,17 +209,50 @@ function OrganizationsController(ctx, env) {
         );
         const now = new Date();
         const ownSiteIds = new Set(ownSites.map((s) => s.getId()));
-        for (const entry of delegatedEntries) {
+
+        // First pass: filter to active grants that match the product code
+        const activeEntries = delegatedEntries.filter((entry) => {
           const notExpired = !entry.grant.getExpiresAt()
             || new Date(entry.grant.getExpiresAt()) > now;
-          if (
-            entry.grant.getProductCode() === productCode
+          return entry.grant.getProductCode() === productCode
             && notExpired
             && entry.site
-            && !ownSiteIds.has(entry.site.getId())
-          ) {
-            delegatedSites.push(entry.site);
-            ownSiteIds.add(entry.site.getId());
+            && !ownSiteIds.has(entry.site.getId());
+        });
+
+        if (activeEntries.length > 0 && Entitlement && SiteEnrollment) {
+          // Batch entitlement lookups by unique target org — one Promise.all round, not N+1
+          const uniqueTargetOrgIds = [...new Set(
+            activeEntries.map((e) => e.grant.getTargetOrganizationId()),
+          )];
+          const entitlementResults = await Promise.all(
+            uniqueTargetOrgIds.map((targetOrgId) => Entitlement.findByIndexKeys({
+              organizationId: targetOrgId,
+              productCode,
+            })),
+          );
+
+          // Batch enrollment lookups for all found entitlements — another Promise.all round
+          const enrolledByTargetOrg = new Map();
+          await Promise.all(
+            uniqueTargetOrgIds.map(async (targetOrgId, i) => {
+              const entitlement = entitlementResults[i];
+              if (entitlement) {
+                const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+                // eslint-disable-next-line max-len
+                enrolledByTargetOrg.set(targetOrgId, new Set(enrollments.map((e) => e.getSiteId())));
+              }
+            }),
+          );
+
+          // Only include delegated sites that are enrolled under the target org's entitlement.
+          // This ensures delegation cannot grant access to sites the target org is not entitled to.
+          for (const entry of activeEntries) {
+            const enrolledSiteIds = enrolledByTargetOrg.get(entry.grant.getTargetOrganizationId());
+            if (enrolledSiteIds?.has(entry.site.getId())) {
+              delegatedSites.push(entry.site);
+              ownSiteIds.add(entry.site.getId());
+            }
           }
         }
       } catch (err) {
@@ -230,8 +263,8 @@ function OrganizationsController(ctx, env) {
       }
     }
 
-    // Delegated sites bypass the enrollment filter — they are enrolled under the
-    // target org's entitlement, not the delegate org's. Only own sites need the check.
+    // Own sites go through the enrollment filter (delegate org's entitlement).
+    // Delegated sites have already been validated against the target org's entitlement above.
     const filteredSites = await filterSitesForProductCode(
       context,
       organization,

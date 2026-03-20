@@ -901,6 +901,9 @@ describe('Organizations Controller', () => {
 
   describe('getSitesForOrganization — delegated site merging', () => {
     const orgId2 = '9033554c-de8a-44ac-a356-09b51af8cc28';
+    const TARGET_ORG_ID = 'target-org-uuid';
+    const OWN_ENT_ID = 'entitlement-123'; // own org's entitlement (via TierClient)
+    const TARGET_ENT_ID = 'target-ent-123'; // target org's entitlement (delegation check)
     let mockSiteImsOrgAccess;
     let delegatedSite;
     let mockGrant;
@@ -937,6 +940,7 @@ describe('Organizations Controller', () => {
         getProductCode: () => 'abcd',
         getExpiresAt: () => undefined,
         getSiteId: () => 'delegated-site-1',
+        getTargetOrganizationId: () => TARGET_ORG_ID,
       };
 
       mockSiteImsOrgAccess = {
@@ -946,7 +950,7 @@ describe('Organizations Controller', () => {
       };
 
       mockEntitlement = {
-        getId: () => 'entitlement-123',
+        getId: () => OWN_ENT_ID,
         getProductCode: () => 'abcd',
         getTier: () => 'paid',
       };
@@ -957,6 +961,20 @@ describe('Organizations Controller', () => {
 
       sandbox.stub(TierClient, 'createForOrg').returns(mockTierClient);
 
+      // Target org's entitlement (used by the delegation retrieval-time enrollment check)
+      mockDataAccess.Entitlement = {
+        findByIndexKeys: sinon.stub().resolves({ getId: () => TARGET_ENT_ID }),
+      };
+
+      // allByEntitlementId is called by two paths:
+      //   OWN_ENT_ID  → from filterSitesForProductCode (own-org enrollment check)
+      //   TARGET_ENT_ID → from delegation check (target org's enrollment for the delegated site)
+      mockDataAccess.SiteEnrollment.allByEntitlementId = sinon.stub().callsFake((entId) => {
+        if (entId === OWN_ENT_ID) return Promise.resolve([{ getSiteId: () => 'site1' }]);
+        if (entId === TARGET_ENT_ID) return Promise.resolve([{ getSiteId: () => 'delegated-site-1' }]);
+        return Promise.resolve([]);
+      });
+
       mockDataAccess.SiteImsOrgAccess = mockSiteImsOrgAccess;
       // Recreate controller with SiteImsOrgAccess available
       organizationsController = OrganizationsController(context, env);
@@ -965,10 +983,6 @@ describe('Organizations Controller', () => {
     it('merges delegated sites alongside own-org sites', async () => {
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
-        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
-        { getSiteId: () => 'delegated-site-1', getEntitlementId: () => 'entitlement-123' },
-      ]);
 
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: orgId2 },
@@ -978,18 +992,55 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(mockSiteImsOrgAccess.allByOrganizationIdWithSites).to.have.been.calledWith(orgId2);
+      expect(mockDataAccess.Entitlement.findByIndexKeys).to.have.been.calledWith({
+        organizationId: TARGET_ORG_ID,
+        productCode: 'abcd',
+      });
       const ids = body.map((s) => s.id);
       expect(ids).to.include('site1');
       expect(ids).to.include('delegated-site-1');
+    });
+
+    it('excludes delegated site not enrolled under target org entitlement', async () => {
+      // Target org has an entitlement but the site is not enrolled under it
+      mockDataAccess.SiteEnrollment.allByEntitlementId = sinon.stub().callsFake((entId) => {
+        if (entId === OWN_ENT_ID) return Promise.resolve([{ getSiteId: () => 'site1' }]);
+        return Promise.resolve([]); // TARGET_ENT_ID → no enrollment for delegated-site-1
+      });
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id)).to.not.include('delegated-site-1');
+      expect(body.map((s) => s.id)).to.include('site1');
+    });
+
+    it('excludes delegated site when target org has no entitlement for product', async () => {
+      mockDataAccess.Entitlement.findByIndexKeys.resolves(null);
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id)).to.not.include('delegated-site-1');
     });
 
     it('excludes delegated grants with wrong product code', async () => {
       mockGrant.getProductCode = () => 'OTHER_PRODUCT';
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
-        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
-      ]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
 
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: orgId2 },
@@ -998,17 +1049,14 @@ describe('Organizations Controller', () => {
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      const ids = body.map((s) => s.id);
-      expect(ids).to.not.include('delegated-site-1');
+      expect(body.map((s) => s.id)).to.not.include('delegated-site-1');
     });
 
     it('excludes expired delegated grants', async () => {
       mockGrant.getExpiresAt = () => new Date(Date.now() - 1000).toISOString();
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
-        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
-      ]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
 
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: orgId2 },
@@ -1017,17 +1065,14 @@ describe('Organizations Controller', () => {
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      const ids = body.map((s) => s.id);
-      expect(ids).to.not.include('delegated-site-1');
+      expect(body.map((s) => s.id)).to.not.include('delegated-site-1');
     });
 
     it('warns and returns own-org sites on delegation DB error', async () => {
       mockSiteImsOrgAccess.allByOrganizationIdWithSites.rejects(new Error('DB error'));
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
-        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
-      ]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
 
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: orgId2 },
@@ -1046,9 +1091,7 @@ describe('Organizations Controller', () => {
       ]);
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
-        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
-      ]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
 
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: orgId2 },
@@ -1067,9 +1110,7 @@ describe('Organizations Controller', () => {
       ]);
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
-        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
-      ]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
 
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: orgId2 },
@@ -1078,8 +1119,7 @@ describe('Organizations Controller', () => {
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      const ids = body.map((s) => s.id);
-      expect(ids.filter((id) => id === 'site1')).to.have.lengthOf(1);
+      expect(body.map((s) => s.id).filter((id) => id === 'site1')).to.have.lengthOf(1);
     });
 
     it('returns own-org sites only when SiteImsOrgAccess absent from dataAccess', async () => {
@@ -1088,9 +1128,7 @@ describe('Organizations Controller', () => {
 
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
-        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
-      ]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
 
       const result = await organizationsController.getSitesForOrganization({
         params: { organizationId: orgId2 },
