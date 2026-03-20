@@ -15,7 +15,6 @@ import { AccessGrantLog as AccessGrantLogModel } from '@adobe/spacecat-shared-da
 
 import BaseCommand from './base.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
-import resolveSlackUsername from '../../../utils/slack/users.js';
 
 const PHRASES = ['remove delegate'];
 
@@ -39,7 +38,7 @@ function RemoveDelegateCommand(context) {
   } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
-    const { say, user: userId, client } = slackContext;
+    const { say, user: userId } = slackContext;
 
     try {
       const [siteArg, imsOrgId, productCode] = args;
@@ -79,10 +78,8 @@ function RemoveDelegateCommand(context) {
         return;
       }
 
-      // Use the Slack user ID directly for the audit trail — stable, unique, schema-valid.
-      // Resolve the display name separately for the human-readable Slack response.
+      // Use the Slack user ID directly — stable, unique, schema-valid (slack:<non-whitespace>).
       const performedBy = `slack:${userId}`;
-      const displayName = await resolveSlackUsername(client, userId);
 
       if (AccessGrantLog) {
         await AccessGrantLog.create({
@@ -99,7 +96,7 @@ function RemoveDelegateCommand(context) {
       await grant.remove();
 
       await say(
-        `:white_check_mark: *Delegate access revoked*\nSite: \`${site.getBaseURL()}\`\nDelegate org: *${delegateOrg.getName() || imsOrgId}* (\`${imsOrgId}\`)\nProduct: \`${productCode}\`\nRevoked by: ${displayName}`,
+        `:white_check_mark: *Delegate access revoked*\nSite: \`${site.getBaseURL()}\`\nDelegate org: *${delegateOrg.getName() || imsOrgId}* (\`${imsOrgId}\`)\nProduct: \`${productCode}\`\nRevoked by: \`${performedBy}\``,
       );
     } catch (error) {
       log.error('[RemoveDelegate] Error removing delegate:', error);

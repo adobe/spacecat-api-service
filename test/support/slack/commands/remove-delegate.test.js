@@ -30,7 +30,6 @@ describe('RemoveDelegateCommand', () => {
   let mockSite;
   let mockDelegateOrg;
   let mockGrant;
-  let mockClient;
 
   beforeEach(() => {
     mockGrant = {
@@ -46,14 +45,6 @@ describe('RemoveDelegateCommand', () => {
     mockDelegateOrg = {
       getId: () => ORG_ID,
       getName: () => 'Delegate Corp',
-    };
-
-    mockClient = {
-      users: {
-        info: sinon.stub().resolves({
-          user: { profile: { display_name: 'Test User' } },
-        }),
-      },
     };
 
     context = {
@@ -82,7 +73,6 @@ describe('RemoveDelegateCommand', () => {
     slackContext = {
       say: sinon.spy(),
       user: 'U12345',
-      client: mockClient,
     };
   });
 
@@ -152,45 +142,11 @@ describe('RemoveDelegateCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.include('Delegate access revoked');
     });
 
-    it('uses slack:userId for performedBy (audit), display name in message', async () => {
+    it('uses slack:userId directly for performedBy', async () => {
       await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      expect(mockClient.users.info).to.have.been.calledWith({ user: 'U12345' });
-      // audit field uses raw userId
       const logArgs = context.dataAccess.AccessGrantLog.create.firstCall.args[0];
       expect(logArgs.performedBy).to.equal('slack:U12345');
-      // message shows resolved display name
-      expect(slackContext.say.firstCall.args[0]).to.include('Test User');
-      expect(slackContext.say.firstCall.args[0]).to.not.include('slack:Test User');
-    });
-
-    it('falls back to real_name in message when display_name absent', async () => {
-      mockClient.users.info.resolves({ user: { profile: { real_name: 'Real Name' } } });
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      expect(slackContext.say.firstCall.args[0]).to.include('Real Name');
-    });
-
-    it('falls back to user.name in message when profile names absent', async () => {
-      mockClient.users.info.resolves({ user: { name: 'username', profile: {} } });
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      expect(slackContext.say.firstCall.args[0]).to.include('username');
-    });
-
-    it('falls back to userId in message when client.users.info throws', async () => {
-      mockClient.users.info.rejects(new Error('API error'));
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      expect(slackContext.say.firstCall.args[0]).to.include('U12345');
-    });
-
-    it('falls back to userId in message when client is missing', async () => {
-      slackContext.client = null;
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      expect(slackContext.say.firstCall.args[0]).to.include('U12345');
-    });
-
-    it('falls back to userId in message when API returns no usable name fields', async () => {
-      mockClient.users.info.resolves({ user: { profile: {} } });
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      expect(slackContext.say.firstCall.args[0]).to.include('U12345');
+      expect(slackContext.say.firstCall.args[0]).to.include('slack:U12345');
     });
 
     it('falls back to imsOrgId in success message when org has no name', async () => {
