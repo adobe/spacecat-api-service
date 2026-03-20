@@ -1,3 +1,10 @@
+# [1.363.0](https://github.com/adobe/spacecat-api-service/compare/v1.362.0...v1.363.0) (2026-03-20)
+
+
+### Features
+
+* **delegation:** restrict add-delegate Slack command via env allowlist ([#2004](https://github.com/adobe/spacecat-api-service/issues/2004)) ([e721232](https://github.com/adobe/spacecat-api-service/commit/e7212321a2027180125ad37f7a214a5d5c2b01cc))
+
 # [1.362.0](https://github.com/adobe/spacecat-api-service/compare/v1.361.1...v1.362.0) (2026-03-20)
 
 
