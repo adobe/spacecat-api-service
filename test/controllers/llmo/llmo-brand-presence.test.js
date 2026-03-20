@@ -26,7 +26,6 @@ import {
   createMarketTrackingTrendsHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
-  mapPopularity,
   dateToIsoWeek,
   getWeekDateRange,
   resolveSiteIds,
@@ -2200,14 +2199,6 @@ describe('llmo-brand-presence', () => {
       expect(body.weeklyTrends[0].weekNumber).to.equal(0);
       expect(body.weeklyTrends[0].year).to.equal(0);
     });
-  });
-
-  describe('mapPopularity', () => {
-    it('maps -30 to High', () => expect(mapPopularity(-30)).to.equal('High'));
-    it('maps -20 to Medium', () => expect(mapPopularity(-20)).to.equal('Medium'));
-    it('maps -10 to Low', () => expect(mapPopularity(-10)).to.equal('Low'));
-    it('maps null to N/A', () => expect(mapPopularity(null)).to.equal('N/A'));
-    it('maps 0 to N/A', () => expect(mapPopularity(0)).to.equal('N/A'));
   });
 
   describe('createSentimentMoversHandler', () => {

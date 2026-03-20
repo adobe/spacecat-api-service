@@ -1186,17 +1186,6 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
 }
 
 /**
- * Maps volume DB value to human-readable popularity string.
- * @internal Exported for testing
- */
-export function mapPopularity(volume) {
-  if (volume === -30) return 'High';
-  if (volume === -20) return 'Medium';
-  if (volume === -10) return 'Low';
-  return 'N/A';
-}
-
-/**
  * Creates the getSentimentMovers handler.
  * Calls rpc_sentiment_movers PostgreSQL function via PostgREST.
  * Returns top or bottom sentiment movers ranked by execution count.
