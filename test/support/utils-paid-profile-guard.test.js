@@ -22,7 +22,7 @@ use(sinonChai);
  * Unit tests for the paid-profile guard in onboardSingleSite (utils.js).
  *
  * The guard blocks re-onboarding a site that was previously onboarded with a
- * paid profile (paid/plg/aso_plg) using a lower-tier profile (e.g. demo/test),
+ * paid profile using a lower-tier profile (e.g. demo/test),
  * unless additionalParams.force === true.
  */
 describe('onboardSingleSite — paid profile guard', () => {
@@ -139,44 +139,6 @@ describe('onboardSingleSite — paid profile guard', () => {
       expect(result.errors).to.match(/Blocked.*paid/);
       expect(sayStub).to.have.been.calledWith(sinon.match(GUARD_WARNING_PATTERN));
     });
-
-    it('blocks re-onboarding a plg site with demo profile', async () => {
-      const context = makeContext(makeSiteWithProfile('plg'));
-
-      const result = await onboardSingleSite(
-        SITE_URL,
-        IMS_ORG_ID,
-        {},
-        minimalProfile,
-        300,
-        slackContext(),
-        context,
-        {},
-        { profileName: 'demo' },
-      );
-
-      expect(result.status).to.equal('Failed');
-      expect(sayStub).to.have.been.calledWith(sinon.match(/previously onboarded with the \*plg\* profile/));
-    });
-
-    it('blocks re-onboarding an aso_plg site with test profile', async () => {
-      const context = makeContext(makeSiteWithProfile('aso_plg'));
-
-      const result = await onboardSingleSite(
-        SITE_URL,
-        IMS_ORG_ID,
-        {},
-        minimalProfile,
-        300,
-        slackContext(),
-        context,
-        {},
-        { profileName: 'test' },
-      );
-
-      expect(result.status).to.equal('Failed');
-      expect(sayStub).to.have.been.calledWith(sinon.match(/previously onboarded with the \*aso_plg\* profile/));
-    });
   });
 
   describe('allowed scenarios', () => {
@@ -220,12 +182,7 @@ describe('onboardSingleSite — paid profile guard', () => {
     });
 
     it('allows re-onboarding with paid profile regardless of previous profile', async () => {
-      // New profile is paid → PAID_PROFILES.includes('paid') is true → guard is skipped
       await assertGuardNotTriggered(makeSiteWithProfile('paid'), 'paid');
-    });
-
-    it('allows re-onboarding with plg profile regardless of previous profile', async () => {
-      await assertGuardNotTriggered(makeSiteWithProfile('paid'), 'plg');
     });
   });
 });

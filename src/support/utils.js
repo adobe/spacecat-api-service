@@ -1153,7 +1153,7 @@ export const createEntitlementAndEnrollment = async (
  * Profiles that are considered "paid" and protected from accidental re-onboarding
  * with a lower-tier profile (e.g. demo/test).
  */
-const PAID_PROFILES = ['paid', 'plg', 'aso_plg'];
+const PAID_PROFILES = ['paid'];
 
 export const onboardSingleSite = async (
   baseURLInput,

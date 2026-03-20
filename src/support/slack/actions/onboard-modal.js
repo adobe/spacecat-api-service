@@ -448,7 +448,7 @@ export function startOnboarding(lambdaContext) {
                     },
                     description: {
                       type: 'plain_text',
-                      text: 'Check this to re-onboard a site that was previously onboarded with a paid profile (paid/plg).',
+                      text: 'Check this to re-onboard a site that was previously onboarded with a paid profile.',
                     },
                     value: 'force',
                   },
