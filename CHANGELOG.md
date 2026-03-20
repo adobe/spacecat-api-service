@@ -1,3 +1,10 @@
+# [1.361.0](https://github.com/adobe/spacecat-api-service/compare/v1.360.0...v1.361.0) (2026-03-20)
+
+
+### Features
+
+* **delegation:** cross-org delegation Phase 1 — access control, CRUD endpoints, Slack bot ([#2000](https://github.com/adobe/spacecat-api-service/issues/2000)) ([67cfa98](https://github.com/adobe/spacecat-api-service/commit/67cfa98d7336bda83d61621fed14ab4f3e15f541))
+
 # [1.360.0](https://github.com/adobe/spacecat-api-service/compare/v1.359.1...v1.360.0) (2026-03-20)
 
 
