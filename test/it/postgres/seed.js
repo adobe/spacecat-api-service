@@ -32,6 +32,7 @@ import { trialUserActivities } from './seed-data/trial-user-activities.js';
 import { asyncJobs } from './seed-data/async-jobs.js';
 import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
+import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -67,10 +68,17 @@ async function insertRows(table, rows) {
  * Strategy (from mysticat-data-service#176):
  * 1. Delete blocker tables (ON DELETE RESTRICT/SET NULL or standalone)
  * 2. Delete root table (organizations) - CASCADE handles all children
+ *
+ * site_ims_org_accesses.organization_id and target_organization_id reference
+ * organizations with ON DELETE RESTRICT, so grants must be cleared before
+ * deleting organizations. access_grant_logs uses TEXT columns (no FK) but
+ * is cleared for test isolation.
  */
 function clearData() {
   execSync(
     'docker exec spacecat-it-db psql -U postgres -d mysticat -c "'
+    + 'DELETE FROM access_grant_logs;'
+    + 'DELETE FROM site_ims_org_accesses;'
     + 'DELETE FROM plg_onboardings;'
     + 'DELETE FROM consumers;'
     + 'DELETE FROM async_jobs;'
@@ -112,6 +120,7 @@ async function seed() {
     insertRows('audits', audits),
     insertRows('opportunities', opportunities),
     insertRows('site_enrollments', siteEnrollments),
+    insertRows('site_ims_org_accesses', siteImsOrgAccesses),
     insertRows('experiments', experiments),
     insertRows('site_top_pages', siteTopPages),
     insertRows('plg_onboardings', plgOnboardings),

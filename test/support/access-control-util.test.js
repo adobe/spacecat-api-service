@@ -1466,6 +1466,7 @@ describe('Access Control Util', () => {
       const mockTrialUser = {};
       const mockIdentityProvider = {};
       const mockSiteEnrollment = {};
+      const mockSiteImsOrgAccess = {};
 
       const testContext = {
         log: {
@@ -1489,6 +1490,7 @@ describe('Access Control Util', () => {
           TrialUser: mockTrialUser,
           OrganizationIdentityProvider: mockIdentityProvider,
           SiteEnrollment: mockSiteEnrollment,
+          SiteImsOrgAccess: mockSiteImsOrgAccess,
         },
       };
 
@@ -1498,6 +1500,195 @@ describe('Access Control Util', () => {
       expect(util.TrialUser).to.equal(mockTrialUser);
       expect(util.IdentityProvider).to.equal(mockIdentityProvider);
       expect(util.SiteEnrollment).to.equal(mockSiteEnrollment);
+      expect(util.SiteImsOrgAccess).to.equal(mockSiteImsOrgAccess);
+    });
+  });
+
+  describe('canManageImsOrgAccess', () => {
+    function makeUtil(type, isAdmin) {
+      const authInfo = {
+        getType: () => type,
+        isAdmin: () => isAdmin,
+        getScopes: () => [],
+      };
+      return AccessControlUtil.fromContext({
+        log: { info: logSpy, error: logSpy, warn: logSpy },
+        pathInfo: { headers: {} },
+        attributes: { authInfo },
+        dataAccess: { Entitlement: {}, TrialUser: {}, OrganizationIdentityProvider: {} },
+      });
+    }
+
+    it('returns true for IMS admin', () => {
+      expect(makeUtil('ims', true).canManageImsOrgAccess()).to.be.true;
+    });
+
+    it('returns true for JWT admin', () => {
+      expect(makeUtil('jwt', true).canManageImsOrgAccess()).to.be.true;
+    });
+
+    it('returns false for non-admin IMS user', () => {
+      expect(makeUtil('ims', false).canManageImsOrgAccess()).to.be.false;
+    });
+
+    it('returns false for api_key type (even if admin flag set)', () => {
+      expect(makeUtil('api_key', true).canManageImsOrgAccess()).to.be.false;
+    });
+  });
+
+  describe('hasAccess — delegation fallthrough', () => {
+    let mockSiteImsOrgAccess;
+    let mockGrant;
+    let mockSite;
+    let mockOrg;
+    let mockAuthInfo;
+    let delegationContext;
+    let mockTierClient;
+
+    beforeEach(() => {
+      mockGrant = {
+        getId: () => 'grant-1',
+        getRole: () => 'agency',
+        getProductCode: () => 'llmo',
+        getTargetOrganizationId: () => 'target-org-uuid',
+        getExpiresAt: () => undefined,
+      };
+
+      mockSiteImsOrgAccess = {
+        findBySiteIdAndOrganizationIdAndProductCode: sinon.stub().resolves(mockGrant),
+      };
+
+      mockOrg = {
+        getId: () => 'target-org-uuid',
+        getImsOrgId: () => 'TARGET@AdobeOrg',
+      };
+
+      mockSite = {
+        getId: () => 'site-uuid',
+        getOrganization: async () => mockOrg,
+      };
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
+
+      mockAuthInfo = {
+        getType: () => 'jwt',
+        isAdmin: () => false,
+        getScopes: () => [],
+        hasOrganization: sinon.stub().returns(false),
+        hasScope: sinon.stub().returns(true),
+        isDelegatedTenantsComplete: sinon.stub().returns(true),
+        getDelegatedTenant: sinon.stub().returns({
+          id: 'TARGET@AdobeOrg',
+          sourceOrganizationId: 'delegate-org-uuid',
+        }),
+        getDelegatedTenants: sinon.stub().returns([{ sourceOrganizationId: 'delegate-org-uuid' }]),
+        getProfile: () => ({}),
+      };
+
+      mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: { getTier: () => 'paid' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      sandbox.stub(TierClient, 'createForSite').resolves(mockTierClient);
+
+      delegationContext = {
+        log: { info: logSpy, error: logSpy, warn: logSpy },
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: mockAuthInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+          SiteImsOrgAccess: mockSiteImsOrgAccess,
+        },
+      };
+    });
+
+    it('Path A: grant in JWT + active DB grant → allow', async () => {
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.have.been.calledWith('site-uuid', 'delegate-org-uuid', 'llmo');
+    });
+
+    it('Path A: org NOT in JWT → deny (zero DB calls)', async () => {
+      mockAuthInfo.getDelegatedTenant.returns(undefined);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path A: grant found but expired → deny', async () => {
+      mockGrant.getExpiresAt = () => new Date(Date.now() - 1000).toISOString();
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+    });
+
+    it('Path A: no grant in DB → deny', async () => {
+      mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode.resolves(null);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+    });
+
+    it('Path A: entity type gating — Organization → skip delegation', async () => {
+      const org = { getImsOrgId: () => 'OTHER@AdobeOrg' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(org, '', 'llmo');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path A: productCode missing → skip delegation entirely', async () => {
+      mockAuthInfo.hasOrganization.returns(false);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', '');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path A: isDelegatedAccess=true → subService check skipped', async () => {
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, 'some_subservice', 'llmo');
+      // delegated access: returns hasOrgAccess (true), ignores subService scope check
+      expect(result).to.be.true;
+      expect(mockAuthInfo.hasScope).to.not.have.been.called;
+    });
+
+    it('Path B: complete=false, sourceOrganizationId from delegatedTenants[0] → allow', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.have.been.calledWith('site-uuid', 'delegate-org-uuid', 'llmo');
+    });
+
+    it('Path B: complete=false, no sourceOrganizationId → warn + deny', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockAuthInfo.getDelegatedTenants.returns([]);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(logSpy).to.have.been.called;
+    });
+
+    it('SiteImsOrgAccess absent → delegation skipped', async () => {
+      delegationContext.dataAccess.SiteImsOrgAccess = undefined;
+      mockAuthInfo.hasOrganization.returns(false);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
     });
   });
 });

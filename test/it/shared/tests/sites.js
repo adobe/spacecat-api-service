@@ -19,6 +19,8 @@ import {
   SITE_1_BASE_URL,
   SITE_3_ID,
   SITE_3_BASE_URL,
+  SITE_4_ID,
+  SITE_4_BASE_URL,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
 } from '../seed-ids.js';
@@ -63,11 +65,13 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites
-        // Only SITE_3 (ORG_2) is returned
-        expect(res.body).to.be.an('array').with.lengthOf(1);
-        expectSiteDto(res.body[0]);
-        expect(res.body[0].id).to.equal(SITE_3_ID);
+        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
+        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3)
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((s) => expectSiteDto(s));
+        const ids = res.body.map((s) => s.id);
+        expect(ids).to.include(SITE_3_ID);
+        expect(ids).to.include(SITE_4_ID);
       });
 
       it('user: returns 403', async () => {
@@ -127,6 +131,31 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.admin.get('/sites/not-a-uuid');
         expect(res.status).to.equal(400);
       });
+
+      // ── Delegation persona smoke tests ──
+      // hasAccess(site) is called without productCode, so delegation does NOT trigger.
+      // delegatedUser has primary tenant ORG_3 only.
+
+      it('delegatedUser: returns SITE_4 (owned by primary org ORG_3)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_4_ID}`);
+        expect(res.status).to.equal(200);
+        expectSiteDto(res.body);
+        expect(res.body.id).to.equal(SITE_4_ID);
+        expect(res.body.baseURL).to.equal(SITE_4_BASE_URL);
+      });
+
+      it('delegatedUser: returns 403 for SITE_1 (owned by ORG_1, delegation does not apply without productCode)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_1_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('delegatedUser: returns 403 for SITE_3 (owned by ORG_2, not in any tenant)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_3_ID}`);
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /sites/by-base-url/:baseURL', () => {
@@ -166,8 +195,8 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/aem_edge');
         expect(res.status).to.equal(200);
-        // SITE_1 + SITE_3 are aem_edge; SITE_2 is aem_cs
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        // SITE_1, SITE_3, and SITE_4 are aem_edge; SITE_2 is aem_cs
+        expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -190,7 +219,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/AEM_EDGE');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -200,7 +229,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/Aem_Edge');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });

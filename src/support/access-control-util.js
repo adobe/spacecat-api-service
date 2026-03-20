@@ -58,6 +58,7 @@ export default class AccessControlUtil {
       this.SiteEnrollment = context.dataAccess.SiteEnrollment;
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
+      this.SiteImsOrgAccess = context.dataAccess.SiteImsOrgAccess;
       this.xProductHeader = pathInfo.headers[X_PRODUCT_HEADER];
     }
 
@@ -95,6 +96,11 @@ export default class AccessControlUtil {
 
   isLLMOAdministrator() {
     return this.authInfo.isLLMOAdministrator();
+  }
+
+  canManageImsOrgAccess() {
+    if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) return false;
+    return this.authInfo.isAdmin();
   }
 
   async validateEntitlement(org, site, productCode) {
@@ -166,7 +172,50 @@ export default class AccessControlUtil {
       imsOrgId = entity.getImsOrgId();
     }
 
-    const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+    let hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+    let isDelegatedAccess = false;
+
+    if (!hasOrgAccess && this.SiteImsOrgAccess && productCode) {
+      // Phase 1: Site entities only
+      if (entity.constructor.ENTITY_NAME === 'Site') {
+        const siteId = entity.getId();
+        let sourceOrganizationId;
+
+        if (authInfo.isDelegatedTenantsComplete()) {
+          // Path A: JWT list is complete — fast deny if org not listed
+          const delegatedTenant = authInfo.getDelegatedTenant(imsOrgId, productCode);
+          if (!delegatedTenant) {
+            return false; // zero DB calls
+          }
+          sourceOrganizationId = delegatedTenant.sourceOrganizationId;
+        } else {
+          // Path B: list was truncated — skip JWT gate, go DB-direct
+          sourceOrganizationId = authInfo.getDelegatedTenants()[0]?.sourceOrganizationId;
+        }
+
+        if (!sourceOrganizationId) {
+          this.log.warn('[AccessControl] Delegation fallthrough: missing sourceOrganizationId');
+          return false;
+        }
+
+        const grant = await this.SiteImsOrgAccess
+          .findBySiteIdAndOrganizationIdAndProductCode(siteId, sourceOrganizationId, productCode);
+
+        if (grant && (!grant.getExpiresAt() || new Date(grant.getExpiresAt()) > new Date())) {
+          this.log.info('[AccessControl] Delegated access granted', {
+            actorOrg: imsOrgId,
+            resourceOrg: grant.getTargetOrganizationId(),
+            grantId: grant.getId(),
+            role: grant.getRole(),
+            productCode,
+            siteId,
+          });
+          hasOrgAccess = true;
+          isDelegatedAccess = true;
+        }
+      }
+    }
+
     if (hasOrgAccess && productCode.length > 0) {
       let org;
       let site;
@@ -179,6 +228,7 @@ export default class AccessControlUtil {
       await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
+      if (isDelegatedAccess) return hasOrgAccess; // productCode scoping replaces subService check
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }
     return hasOrgAccess;

@@ -23,4 +23,17 @@ export const siteEnrollments = [
     site_id: '33333333-3333-4333-b333-333333333333',
     entitlement_id: 'dd111111-1111-4111-b111-111111111111',
   },
+  // SITE_1 enrolled under ORG_3's LLMO entitlement — enables filterSitesForProductCode to pass
+  // when delegatedUser requests GET /organizations/ORG_3/sites with x-product: LLMO
+  {
+    id: 'ee222222-2222-4222-a222-222222222222',
+    site_id: '33333333-3333-4333-b333-333333333333',
+    entitlement_id: 'dd333333-3333-4333-b333-333333333333',
+  },
+  // SITE_4 (ORG_3's own site) enrolled under ORG_3's LLMO entitlement
+  {
+    id: 'ee333333-3333-4333-b333-333333333333',
+    site_id: '44400000-4444-4444-b444-000000000444',
+    entitlement_id: 'dd333333-3333-4333-b333-333333333333',
+  },
 ];

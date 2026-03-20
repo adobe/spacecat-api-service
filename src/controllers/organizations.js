@@ -50,7 +50,9 @@ function OrganizationsController(ctx, env) {
     throw new Error('Environment object required');
   }
   const { SLACK_URL_WORKSPACE_EXTERNAL: slackExternalWorkspaceUrl } = env;
-  const { Organization, Project, Site } = dataAccess;
+  const {
+    Organization, Project, Site, SiteImsOrgAccess,
+  } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -198,6 +200,34 @@ function OrganizationsController(ctx, env) {
     }
 
     const sites = await Site.allByOrganizationId(organizationId);
+
+    if (SiteImsOrgAccess) {
+      try {
+        const delegatedEntries = await SiteImsOrgAccess.allByOrganizationIdWithSites(
+          organizationId,
+        );
+        const now = new Date();
+        const ownSiteIds = new Set(sites.map((s) => s.getId()));
+        for (const entry of delegatedEntries) {
+          const notExpired = !entry.grant.getExpiresAt()
+            || new Date(entry.grant.getExpiresAt()) > now;
+          if (
+            entry.grant.getProductCode() === productCode
+            && notExpired
+            && entry.site
+            && !ownSiteIds.has(entry.site.getId())
+          ) {
+            sites.push(entry.site);
+            ownSiteIds.add(entry.site.getId());
+          }
+        }
+      } catch (err) {
+        ctx.log.warn(
+          '[Organizations] Failed to load delegated sites, returning own-org sites only',
+          err,
+        );
+      }
+    }
 
     const filteredSites = await filterSitesForProductCode(
       context,

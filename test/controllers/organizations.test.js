@@ -26,6 +26,8 @@ import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.
 import ProjectSchema from '@adobe/spacecat-shared-data-access/src/models/project/project.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
+import TierClient from '@adobe/spacecat-shared-tier-client';
+
 import OrganizationsController from '../../src/controllers/organizations.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -894,6 +896,169 @@ describe('Organizations Controller', () => {
 
       expect(response.status).to.equal(403);
       expect(error.message).to.equal('Restricted Operation');
+    });
+  });
+
+  describe('getSitesForOrganization — delegated site merging', () => {
+    const orgId2 = '9033554c-de8a-44ac-a356-09b51af8cc28';
+    let mockSiteImsOrgAccess;
+    let delegatedSite;
+    let mockGrant;
+    let mockEntitlement;
+    let mockTierClient;
+
+    beforeEach(() => {
+      delegatedSite = {
+        getId: () => 'delegated-site-1',
+        getBaseURL: () => 'https://delegated.com',
+        getName: () => 'Delegated Site',
+        getHlxConfig: () => undefined,
+        getDeliveryType: () => 'aem_edge',
+        getAuthoringType: () => undefined,
+        getDeliveryConfig: () => undefined,
+        getGitHubURL: () => undefined,
+        getOrganizationId: () => 'other-org-uuid',
+        getIsLive: () => true,
+        getIsSandbox: () => false,
+        getIsLiveToggledAt: () => undefined,
+        getCreatedAt: () => '2025-01-01T00:00:00Z',
+        getUpdatedAt: () => '2025-01-01T00:00:00Z',
+        getConfig: () => Config({}),
+        getPageTypes: () => [],
+        getProjectId: () => undefined,
+        getIsPrimaryLocale: () => false,
+        getRegion: () => undefined,
+        getLanguage: () => undefined,
+        getCode: () => undefined,
+        getUpdatedBy: () => undefined,
+      };
+
+      mockGrant = {
+        getProductCode: () => 'abcd',
+        getExpiresAt: () => undefined,
+        getSiteId: () => 'delegated-site-1',
+      };
+
+      mockSiteImsOrgAccess = {
+        allByOrganizationIdWithSites: sinon.stub().resolves([
+          { grant: mockGrant, site: delegatedSite },
+        ]),
+      };
+
+      mockEntitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'abcd',
+        getTier: () => 'paid',
+      };
+
+      mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: mockEntitlement }),
+      };
+
+      sandbox.stub(TierClient, 'createForOrg').returns(mockTierClient);
+
+      mockDataAccess.SiteImsOrgAccess = mockSiteImsOrgAccess;
+      // Recreate controller with SiteImsOrgAccess available
+      organizationsController = OrganizationsController(context, env);
+    });
+
+    it('merges delegated sites alongside own-org sites', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
+        { getSiteId: () => 'delegated-site-1', getEntitlementId: () => 'entitlement-123' },
+      ]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockSiteImsOrgAccess.allByOrganizationIdWithSites).to.have.been.calledWith(orgId2);
+      const ids = body.map((s) => s.id);
+      expect(ids).to.include('site1');
+      expect(ids).to.include('delegated-site-1');
+    });
+
+    it('excludes delegated grants with wrong product code', async () => {
+      mockGrant.getProductCode = () => 'OTHER_PRODUCT';
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
+      ]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      const ids = body.map((s) => s.id);
+      expect(ids).to.not.include('delegated-site-1');
+    });
+
+    it('excludes expired delegated grants', async () => {
+      mockGrant.getExpiresAt = () => new Date(Date.now() - 1000).toISOString();
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
+      ]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      const ids = body.map((s) => s.id);
+      expect(ids).to.not.include('delegated-site-1');
+    });
+
+    it('warns and returns own-org sites on delegation DB error', async () => {
+      mockSiteImsOrgAccess.allByOrganizationIdWithSites.rejects(new Error('DB error'));
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
+      ]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(context.log.warn).to.have.been.called;
+      expect(body.map((s) => s.id)).to.not.include('delegated-site-1');
+    });
+
+    it('returns own-org sites only when SiteImsOrgAccess absent from dataAccess', async () => {
+      delete mockDataAccess.SiteImsOrgAccess;
+      organizationsController = OrganizationsController(context, env);
+
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
+      ]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockSiteImsOrgAccess.allByOrganizationIdWithSites).to.not.have.been.called;
+      expect(body.map((s) => s.id)).to.deep.equal(['site1']);
     });
   });
 });

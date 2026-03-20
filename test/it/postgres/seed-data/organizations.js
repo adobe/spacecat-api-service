@@ -37,4 +37,13 @@ export const organizations = [
     name: 'Test Org Denied',
     ims_org_id: 'DDDDDDDDEEEEEEEEFFFFFFFF@AdobeOrg',
   },
+  {
+    id: '33330000-3333-4333-b333-000000000333',
+    name: 'Delegate Agency Org',
+    ims_org_id: 'GGGGGGGGHHHHHHHHIIIIIIII@AdobeOrg',
+    config: {
+      handlers: {},
+      slack: { channel: 'C0FAKE0ORG3', workspace: 'WORKSPACE_TEST' },
+    },
+  },
 ];

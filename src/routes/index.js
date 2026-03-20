@@ -88,6 +88,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
+ * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -132,6 +133,7 @@ export default function getRouteHandlers(
   sentimentController,
   consumersController,
   plgOnboardingController,
+  imsOrgAccessController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -455,6 +457,12 @@ export default function getRouteHandlers(
     'POST /consumers/register': consumersController.register,
     'PATCH /consumers/:consumerId': consumersController.update,
     'POST /consumers/:consumerId/revoke': consumersController.revoke,
+
+    // IMS Org Access (cross-org delegation grants)
+    'POST /sites/:siteId/ims-org-access': imsOrgAccessController.createGrant,
+    'GET /sites/:siteId/ims-org-access': imsOrgAccessController.listGrants,
+    'GET /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.getGrant,
+    'DELETE /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.revokeGrant,
   };
 
   // Initialization of static and dynamic routes
