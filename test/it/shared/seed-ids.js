@@ -60,6 +60,15 @@ export const SUGG_1_ID = 'bb111111-1111-4111-b111-111111111111'; // CODE_CHANGE,
 export const SUGG_2_ID = 'bb222222-2222-4222-a222-222222222222'; // REDIRECT_UPDATE, APPROVED
 export const SUGG_3_ID = 'bb333333-3333-4333-b333-333333333333'; // CODE_CHANGE, NEW
 
+// ── Tokens (postgres-only, under SITE_1) ──
+
+export const TOKEN_1_ID = 'f1111111-1111-4111-b111-111111111111'; // grant_cwv, cycle 2025-01
+
+// ── SuggestionGrants (postgres-only, SUGG_1 granted) ──
+
+export const GRANT_1_ID = 'f2222222-2222-4222-a222-222222222222'; // grant record ID
+export const GRANT_1_GRANT_ID = 'f3333333-3333-4333-b333-333333333333'; // grant_id (batch identifier)
+
 // ── FixEntities (all under OPPTY_1) ──
 
 export const FIX_1_ID = 'cc111111-1111-4111-b111-111111111111'; // CODE_CHANGE, PENDING
