@@ -199,7 +199,8 @@ function OrganizationsController(ctx, env) {
       return forbidden('Only users belonging to the organization can view its sites');
     }
 
-    const sites = await Site.allByOrganizationId(organizationId);
+    const ownSites = await Site.allByOrganizationId(organizationId);
+    const sites = [...ownSites]; // copy to avoid mutating the data-access return value
 
     if (SiteImsOrgAccess) {
       try {

@@ -22,27 +22,6 @@ import { postErrorMessage } from '../../../utils/slack/base.js';
 const PHRASES = ['add delegate'];
 
 /**
- * Resolves a Slack user ID to a display name using the Bolt client.
- * Falls back to the raw user ID if the lookup fails.
- *
- * @param {object} client - Bolt Slack client
- * @param {string} userId - Slack user ID
- * @returns {Promise<string>} Display name or userId
- */
-async function resolveSlackUsername(client, userId) {
-  if (!client || !userId) return userId;
-  try {
-    const result = await client.users.info({ user: userId });
-    return result.user?.profile?.display_name
-      || result.user?.profile?.real_name
-      || result.user?.name
-      || userId;
-  } catch {
-    return userId;
-  }
-}
-
-/**
  * Slack command: add delegate <site> <imsOrgId> <productCode>
  *
  * Grants cross-org delegation access. Resolves the IMS org → Organization record,
@@ -64,7 +43,7 @@ function AddDelegateCommand(context) {
   } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
-    const { say, user: userId, client } = slackContext;
+    const { say, user: userId } = slackContext;
 
     try {
       const [siteArg, imsOrgId, productCode] = args;
@@ -113,8 +92,8 @@ function AddDelegateCommand(context) {
         return;
       }
 
-      const username = await resolveSlackUsername(client, userId);
-      const performedBy = `slack:${username}`;
+      // Use the Slack user ID directly — stable, unique, schema-valid (slack:<non-whitespace>).
+      const performedBy = `slack:${userId}`;
 
       const grant = await SiteImsOrgAccess.create({
         siteId: site.getId(),
@@ -130,11 +109,12 @@ function AddDelegateCommand(context) {
         await AccessGrantLog.create({
           siteId: site.getId(),
           organizationId: delegateOrg.getId(),
+          targetOrganizationId: targetOrg.getId(),
           productCode,
           action: AccessGrantLogModel.GRANT_ACTIONS.GRANT,
           role: grant.getRole(),
           performedBy,
-        }).catch((err) => log.warn('[AddDelegate] Failed to write access grant log', err));
+        }).catch((err) => log.error('[AddDelegate] Failed to write access grant log', err));
       }
 
       await say(

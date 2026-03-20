@@ -15,29 +15,9 @@ import { AccessGrantLog as AccessGrantLogModel } from '@adobe/spacecat-shared-da
 
 import BaseCommand from './base.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
+import resolveSlackUsername from '../../../utils/slack/users.js';
 
 const PHRASES = ['remove delegate'];
-
-/**
- * Resolves a Slack user ID to a display name using the Bolt client.
- * Falls back to the raw user ID if the lookup fails.
- *
- * @param {object} client - Bolt Slack client
- * @param {string} userId - Slack user ID
- * @returns {Promise<string>} Display name or userId
- */
-async function resolveSlackUsername(client, userId) {
-  if (!client || !userId) return userId;
-  try {
-    const result = await client.users.info({ user: userId });
-    return result.user?.profile?.display_name
-      || result.user?.profile?.real_name
-      || result.user?.name
-      || userId;
-  } catch {
-    return userId;
-  }
-}
 
 /**
  * Slack command: remove delegate <site> <imsOrgId> <productCode>
@@ -99,24 +79,27 @@ function RemoveDelegateCommand(context) {
         return;
       }
 
-      const username = await resolveSlackUsername(client, userId);
-      const performedBy = `slack:${username}`;
+      // Use the Slack user ID directly for the audit trail — stable, unique, schema-valid.
+      // Resolve the display name separately for the human-readable Slack response.
+      const performedBy = `slack:${userId}`;
+      const displayName = await resolveSlackUsername(client, userId);
 
       if (AccessGrantLog) {
         await AccessGrantLog.create({
           siteId: site.getId(),
           organizationId: delegateOrg.getId(),
+          targetOrganizationId: grant.getTargetOrganizationId(),
           productCode,
           action: AccessGrantLogModel.GRANT_ACTIONS.REVOKE,
           role: grant.getRole(),
           performedBy,
-        }).catch((err) => log.warn('[RemoveDelegate] Failed to write access grant log', err));
+        }).catch((err) => log.error('[RemoveDelegate] Failed to write access grant log', err));
       }
 
       await grant.remove();
 
       await say(
-        `:white_check_mark: *Delegate access revoked*\nSite: \`${site.getBaseURL()}\`\nDelegate org: *${delegateOrg.getName() || imsOrgId}* (\`${imsOrgId}\`)\nProduct: \`${productCode}\`\nRevoked by: \`${performedBy}\``,
+        `:white_check_mark: *Delegate access revoked*\nSite: \`${site.getBaseURL()}\`\nDelegate org: *${delegateOrg.getName() || imsOrgId}* (\`${imsOrgId}\`)\nProduct: \`${productCode}\`\nRevoked by: ${displayName}`,
       );
     } catch (error) {
       log.error('[RemoveDelegate] Error removing delegate:', error);

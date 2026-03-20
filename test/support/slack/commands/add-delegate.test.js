@@ -172,46 +172,12 @@ describe('AddDelegateCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.include('no owning organization');
     });
 
-    it('resolves Slack username via client.users.info', async () => {
+    it('uses slack:userId directly for grantedBy — never calls client.users.info', async () => {
       await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      expect(mockClient.users.info).to.have.been.calledWith({ user: 'U12345' });
-      const createArgs = context.dataAccess.SiteImsOrgAccess.create.firstCall.args[0];
-      expect(createArgs.grantedBy).to.equal('slack:Test User');
-    });
-
-    it('falls back to real_name when display_name absent', async () => {
-      mockClient.users.info.resolves({ user: { profile: { real_name: 'Real Name' } } });
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      const createArgs = context.dataAccess.SiteImsOrgAccess.create.firstCall.args[0];
-      expect(createArgs.grantedBy).to.equal('slack:Real Name');
-    });
-
-    it('falls back to user.name when profile names absent', async () => {
-      mockClient.users.info.resolves({ user: { name: 'username', profile: {} } });
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      const createArgs = context.dataAccess.SiteImsOrgAccess.create.firstCall.args[0];
-      expect(createArgs.grantedBy).to.equal('slack:username');
-    });
-
-    it('falls back to userId when client.users.info throws', async () => {
-      mockClient.users.info.rejects(new Error('API error'));
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(mockClient.users.info).to.not.have.been.called;
       const createArgs = context.dataAccess.SiteImsOrgAccess.create.firstCall.args[0];
       expect(createArgs.grantedBy).to.equal('slack:U12345');
-    });
-
-    it('falls back to userId when client is missing', async () => {
-      slackContext.client = null;
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      const createArgs = context.dataAccess.SiteImsOrgAccess.create.firstCall.args[0];
-      expect(createArgs.grantedBy).to.equal('slack:U12345');
-    });
-
-    it('falls back to userId when API returns no usable name fields', async () => {
-      mockClient.users.info.resolves({ user: { profile: {} } });
-      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
-      const createArgs = context.dataAccess.SiteImsOrgAccess.create.firstCall.args[0];
-      expect(createArgs.grantedBy).to.equal('slack:U12345');
+      expect(createArgs.updatedBy).to.equal('slack:U12345');
     });
 
     it('falls back to imsOrgId in success message when org has no name', async () => {
@@ -220,18 +186,21 @@ describe('AddDelegateCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.include(IMS_ORG_ID);
     });
 
-    it('writes AccessGrantLog after creating grant', async () => {
+    it('writes AccessGrantLog with all required fields', async () => {
       await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
       expect(context.dataAccess.AccessGrantLog.create).to.have.been.calledOnce;
       const logArgs = context.dataAccess.AccessGrantLog.create.firstCall.args[0];
       expect(logArgs.action).to.equal('grant');
       expect(logArgs.role).to.equal('agency');
+      expect(logArgs.targetOrganizationId).to.equal(TARGET_ORG_ID);
+      expect(logArgs.performedBy).to.equal('slack:U12345');
     });
 
-    it('does not throw when AccessGrantLog.create fails', async () => {
+    it('logs error when AccessGrantLog.create fails', async () => {
       context.dataAccess.AccessGrantLog.create.rejects(new Error('log fail'));
       await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
       expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
+      expect(context.log.error).to.have.been.called;
     });
 
     it('skips AccessGrantLog when not available', async () => {

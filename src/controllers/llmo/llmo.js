@@ -32,6 +32,7 @@ import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { UnauthorizedProductError } from '../../support/errors.js';
 import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
@@ -92,7 +93,7 @@ function LlmoController(ctx) {
       // Product-code mismatch is an auth denial → 403. All other errors (e.g. entitlement
       // validation failures like "emailId is required") are business errors → rethrow so
       // callers' catch blocks return 400.
-      if (e.message === '[Error] Unauthorized request') {
+      if (e instanceof UnauthorizedProductError) {
         return forbidden(e.message);
       }
       throw e;

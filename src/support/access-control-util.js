@@ -18,6 +18,7 @@ import {
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { UnauthorizedProductError } from './errors.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -158,7 +159,7 @@ export default class AccessControlUtil {
     // For non-admin users, validate x-product header
     if (hasText(productCode) && this.xProductHeader !== productCode) {
       this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
-      throw new Error('[Error] Unauthorized request');
+      throw new UnauthorizedProductError('[Error] Unauthorized request');
     }
 
     let imsOrgId;
@@ -180,6 +181,7 @@ export default class AccessControlUtil {
       if (entity.constructor.ENTITY_NAME === 'Site') {
         const siteId = entity.getId();
         let sourceOrganizationId;
+        let grant;
 
         if (authInfo.isDelegatedTenantsComplete()) {
           // Path A: JWT list is complete — fast deny if org not listed
@@ -188,23 +190,38 @@ export default class AccessControlUtil {
             return false; // zero DB calls
           }
           sourceOrganizationId = delegatedTenant.sourceOrganizationId;
+          if (!sourceOrganizationId) {
+            this.log.warn('[AccessControl] Path A: missing sourceOrganizationId in delegatedTenant');
+            return false;
+          }
+          grant = await this.SiteImsOrgAccess
+            .findBySiteIdAndOrganizationIdAndProductCode(siteId, sourceOrganizationId, productCode);
         } else {
-          // Path B: list was truncated — skip JWT gate, go DB-direct
-          sourceOrganizationId = authInfo.getDelegatedTenants()[0]?.sourceOrganizationId;
+          // Path B: JWT list was truncated — query all site grants and match against any of
+          // the user's source org IDs (one DB call avoids N queries for multi-org users).
+          const tenantOrgIds = new Set(
+            authInfo.getDelegatedTenants().map((t) => t.sourceOrganizationId).filter(Boolean),
+          );
+          if (tenantOrgIds.size === 0) {
+            this.log.warn('[AccessControl] Path B: no sourceOrganizationId in delegatedTenants');
+            return false;
+          }
+          const now = new Date();
+          const siteGrants = await this.SiteImsOrgAccess.allBySiteId(siteId);
+          grant = siteGrants.find(
+            (g) => g.getProductCode() === productCode
+              && tenantOrgIds.has(g.getOrganizationId())
+              && (!g.getExpiresAt() || new Date(g.getExpiresAt()) > now),
+          );
+          if (grant) {
+            sourceOrganizationId = grant.getOrganizationId();
+          }
         }
-
-        if (!sourceOrganizationId) {
-          this.log.warn('[AccessControl] Delegation fallthrough: missing sourceOrganizationId');
-          return false;
-        }
-
-        const grant = await this.SiteImsOrgAccess
-          .findBySiteIdAndOrganizationIdAndProductCode(siteId, sourceOrganizationId, productCode);
 
         if (grant && (!grant.getExpiresAt() || new Date(grant.getExpiresAt()) > new Date())) {
           this.log.info('[AccessControl] Delegated access granted', {
-            actorOrg: imsOrgId,
-            resourceOrg: grant.getTargetOrganizationId(),
+            actorOrg: sourceOrganizationId,
+            resourceOrg: imsOrgId,
             grantId: grant.getId(),
             role: grant.getRole(),
             productCode,

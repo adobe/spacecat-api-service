@@ -113,7 +113,7 @@ function ImsOrgAccessController(ctx) {
           action: AccessGrantLogModel.GRANT_ACTIONS.GRANT,
           role: grant.getRole(),
           performedBy: grantedBy,
-        }).catch((err) => ctx.log.warn('[ImsOrgAccess] Failed to write access grant log', err));
+        }).catch((err) => ctx.log.error('[ImsOrgAccess] Failed to write access grant log', err));
       }
 
       return createResponse(ImsOrgAccessDto.toJSON(grant), 201);
@@ -219,7 +219,7 @@ function ImsOrgAccessController(ctx) {
           action: AccessGrantLogModel.GRANT_ACTIONS.REVOKE,
           role: grant.getRole(),
           performedBy,
-        }).catch((err) => ctx.log.warn('[ImsOrgAccess] Failed to write access revoke log', err));
+        }).catch((err) => ctx.log.error('[ImsOrgAccess] Failed to write access revoke log', err));
       }
 
       await grant.remove();

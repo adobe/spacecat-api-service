@@ -1040,6 +1040,48 @@ describe('Organizations Controller', () => {
       expect(body.map((s) => s.id)).to.not.include('delegated-site-1');
     });
 
+    it('excludes null site entries from delegated results', async () => {
+      mockSiteImsOrgAccess.allByOrganizationIdWithSites.resolves([
+        { grant: mockGrant, site: null },
+      ]);
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
+      ]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id)).to.deep.equal(['site1']);
+    });
+
+    it('deduplicates sites that appear in both own-org and delegated results', async () => {
+      // Same site returned by both allByOrganizationId and allByOrganizationIdWithSites
+      mockSiteImsOrgAccess.allByOrganizationIdWithSites.resolves([
+        { grant: mockGrant, site: sites[0] }, // sites[0].getId() === 'site1', already in own-org
+      ]);
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site1', getEntitlementId: () => 'entitlement-123' },
+      ]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      const ids = body.map((s) => s.id);
+      expect(ids.filter((id) => id === 'site1')).to.have.lengthOf(1);
+    });
+
     it('returns own-org sites only when SiteImsOrgAccess absent from dataAccess', async () => {
       delete mockDataAccess.SiteImsOrgAccess;
       organizationsController = OrganizationsController(context, env);

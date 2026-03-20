@@ -18,6 +18,7 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
 
@@ -281,7 +282,9 @@ describe('LlmoController', () => {
         default: {
           fromContext() {
             return {
-              async hasAccess() { throw new Error('[Error] Unauthorized request'); },
+              async hasAccess() {
+                throw new UnauthorizedProductError('[Error] Unauthorized request');
+              },
               hasAdminAccess() { return true; },
               isLLMOAdministrator() { return true; },
               async isOwnerOfSite() { return true; },

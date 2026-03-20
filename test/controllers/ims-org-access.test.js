@@ -239,6 +239,17 @@ describe('ImsOrgAccess Controller', () => {
       expect(mockDataAccess.AccessGrantLog.create).not.to.have.been.called;
     });
 
+    it('logs error and still returns 201 when AccessGrantLog.create fails', async () => {
+      mockDataAccess.AccessGrantLog.create.rejects(new Error('log error'));
+      const response = await controller.createGrant({
+        params: { siteId: SITE_ID },
+        data: { organizationId: ORG_ID, targetOrganizationId: TARGET_ORG_ID, productCode: 'LLMO' },
+        ...context,
+      });
+      expect(response.status).to.equal(201);
+      expect(context.log.error).to.have.been.called;
+    });
+
     it('returns 409 when 50-delegate limit exceeded', async () => {
       const limitError = new Error('Cannot add delegate: limit reached');
       limitError.status = 409;

@@ -1550,12 +1550,14 @@ describe('Access Control Util', () => {
         getId: () => 'grant-1',
         getRole: () => 'agency',
         getProductCode: () => 'llmo',
+        getOrganizationId: () => 'delegate-org-uuid',
         getTargetOrganizationId: () => 'target-org-uuid',
         getExpiresAt: () => undefined,
       };
 
       mockSiteImsOrgAccess = {
         findBySiteIdAndOrganizationIdAndProductCode: sinon.stub().resolves(mockGrant),
+        allBySiteId: sinon.stub().resolves([mockGrant]),
       };
 
       mockOrg = {
@@ -1613,6 +1615,16 @@ describe('Access Control Util', () => {
         .to.have.been.calledWith('site-uuid', 'delegate-org-uuid', 'llmo');
     });
 
+    it('Path A: delegatedTenant has no sourceOrganizationId → warn + deny', async () => {
+      mockAuthInfo.getDelegatedTenant.returns({ id: 'TARGET@AdobeOrg', sourceOrganizationId: undefined });
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(logSpy).to.have.been.called;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
     it('Path A: org NOT in JWT → deny (zero DB calls)', async () => {
       mockAuthInfo.getDelegatedTenant.returns(undefined);
       const util = AccessControlUtil.fromContext(delegationContext);
@@ -1663,13 +1675,36 @@ describe('Access Control Util', () => {
       expect(mockAuthInfo.hasScope).to.not.have.been.called;
     });
 
-    it('Path B: complete=false, sourceOrganizationId from delegatedTenants[0] → allow', async () => {
+    it('Path A: log fields — actorOrg is agency org, resourceOrg is site-owner IMS org', async () => {
+      const util = AccessControlUtil.fromContext(delegationContext);
+      await util.hasAccess(mockSite, '', 'llmo');
+      const logCall = logSpy.args.find((a) => a[0] === '[AccessControl] Delegated access granted');
+      expect(logCall).to.exist;
+      const fields = logCall[1];
+      expect(fields.actorOrg).to.equal('delegate-org-uuid'); // agency org UUID
+      expect(fields.resourceOrg).to.equal('TARGET@AdobeOrg'); // site-owner IMS org ID
+    });
+
+    it('Path B: complete=false, uses allBySiteId to find matching grant → allow', async () => {
       mockAuthInfo.isDelegatedTenantsComplete.returns(false);
       const util = AccessControlUtil.fromContext(delegationContext);
       const result = await util.hasAccess(mockSite, '', 'llmo');
       expect(result).to.be.true;
+      expect(mockSiteImsOrgAccess.allBySiteId).to.have.been.calledWith('site-uuid');
       expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
-        .to.have.been.calledWith('site-uuid', 'delegate-org-uuid', 'llmo');
+        .to.not.have.been.called;
+    });
+
+    it('Path B: multi-org user — finds grant matching second sourceOrganizationId', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockAuthInfo.getDelegatedTenants.returns([
+        { sourceOrganizationId: 'other-org-uuid' }, // no matching grant
+        { sourceOrganizationId: 'delegate-org-uuid' }, // matches mockGrant.getOrganizationId()
+      ]);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+      expect(mockSiteImsOrgAccess.allBySiteId).to.have.been.calledWith('site-uuid');
     });
 
     it('Path B: complete=false, no sourceOrganizationId → warn + deny', async () => {
@@ -1679,6 +1714,22 @@ describe('Access Control Util', () => {
       const result = await util.hasAccess(mockSite, '', 'llmo');
       expect(result).to.be.false;
       expect(logSpy).to.have.been.called;
+    });
+
+    it('Path B: grant with future expiresAt → allow', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockGrant.getExpiresAt = () => new Date(Date.now() + 86400000).toISOString();
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+    });
+
+    it('Path B: no matching grant in allBySiteId → deny', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockSiteImsOrgAccess.allBySiteId.resolves([]);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
     });
 
     it('SiteImsOrgAccess absent → delegation skipped', async () => {
