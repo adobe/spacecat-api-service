@@ -271,7 +271,6 @@ describe('getRouteHandlers', () => {
     patchLlmoCustomerIntent: () => null,
     patchLlmoCdnLogsFilter: () => null,
     patchLlmoCdnBucketConfig: () => null,
-    patchLlmoCountryCodeIgnoreList: () => null,
     onboardCustomer: () => null,
     offboardCustomer: () => null,
     queryFiles: () => null,
@@ -690,7 +689,6 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
       'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
-      'PATCH /sites/:siteId/llmo/country-code-ignore-list',
       'GET /sites/:siteId/llmo/global-sheet-data/:configName',
       'GET /sites/:siteId/llmo/rationale',
       'GET /sites/:siteId/llmo/brand-claims',
@@ -938,8 +936,6 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].handler).to.equal(mockLlmoController.patchLlmoCdnBucketConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].paramNames).to.deep.equal(['siteId']);
-    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/country-code-ignore-list'].handler).to.equal(mockLlmoController.patchLlmoCountryCodeIgnoreList);
-    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/country-code-ignore-list'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].handler).to.equal(mockLlmoController.getLlmoGlobalSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].paramNames).to.deep.equal(['siteId', 'configName']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/rationale'].handler).to.equal(mockLlmoController.getLlmoRationale);
