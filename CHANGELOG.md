@@ -1,3 +1,10 @@
+## [1.359.1](https://github.com/adobe/spacecat-api-service/compare/v1.359.0...v1.359.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* grant suggestions in getAllForOpportunities ([#2002](https://github.com/adobe/spacecat-api-service/issues/2002)) ([40856d7](https://github.com/adobe/spacecat-api-service/commit/40856d75fb0a47e7c35319cc478e2534b490df13))
+
 # [1.359.0](https://github.com/adobe/spacecat-api-service/compare/v1.358.3...v1.359.0) (2026-03-20)
 
 
