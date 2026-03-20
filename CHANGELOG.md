@@ -1,3 +1,10 @@
+# [1.360.0](https://github.com/adobe/spacecat-api-service/compare/v1.359.1...v1.360.0) (2026-03-20)
+
+
+### Features
+
+* add Slack command for per-site country code ignore list ([#1981](https://github.com/adobe/spacecat-api-service/issues/1981)) ([ef69029](https://github.com/adobe/spacecat-api-service/commit/ef69029839779c5a7cfa8816e33ad6c5a66d78d2))
+
 ## [1.359.1](https://github.com/adobe/spacecat-api-service/compare/v1.359.0...v1.359.1) (2026-03-20)
 
 
