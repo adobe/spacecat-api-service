@@ -14,7 +14,7 @@ import { isValidUUID } from '@adobe/spacecat-shared-utils';
 import { AccessGrantLog as AccessGrantLogModel } from '@adobe/spacecat-shared-data-access';
 
 import BaseCommand from './base.js';
-import { postErrorMessage } from '../../../utils/slack/base.js';
+import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['remove delegate'];
 
@@ -49,9 +49,10 @@ function RemoveDelegateCommand(context) {
       }
 
       // Resolve site
-      const site = isValidUUID(siteArg)
-        ? await Site.findById(siteArg)
-        : await Site.findByBaseURL(siteArg);
+      const resolvedSiteArg = isValidUUID(siteArg) ? siteArg : extractURLFromSlackInput(siteArg);
+      const site = isValidUUID(resolvedSiteArg)
+        ? await Site.findById(resolvedSiteArg)
+        : await Site.findByBaseURL(resolvedSiteArg);
 
       if (!site) {
         await say(`:x: Site not found: \`${siteArg}\``);

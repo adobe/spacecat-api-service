@@ -120,6 +120,12 @@ describe('RemoveDelegateCommand', () => {
       expect(context.dataAccess.Site.findById).to.have.been.calledWith(SITE_ID);
     });
 
+    it('normalizes bare domain (example.com) to https://example.com before lookup', async () => {
+      await command.handleExecution(['example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(context.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
+    });
+
     it('returns error when delegate org not found', async () => {
       context.dataAccess.Organization.findByImsOrgId.resolves(null);
       await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);

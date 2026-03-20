@@ -135,6 +135,12 @@ describe('AddDelegateCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
     });
 
+    it('normalizes bare domain (example.com) to https://example.com before lookup', async () => {
+      await command.handleExecution(['example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(context.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
+    });
+
     it('grants access when delegate org already exists', async () => {
       await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
       expect(context.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith(IMS_ORG_ID);
