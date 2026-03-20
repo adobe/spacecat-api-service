@@ -1,3 +1,17 @@
+## [1.358.3](https://github.com/adobe/spacecat-api-service/compare/v1.358.2...v1.358.3) (2026-03-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.24.0 ([#1999](https://github.com/adobe/spacecat-api-service/issues/1999)) ([d9cd8aa](https://github.com/adobe/spacecat-api-service/commit/d9cd8aaf30e84400753bcd46c5a9707e61050d93))
+
+## [1.358.2](https://github.com/adobe/spacecat-api-service/compare/v1.358.1...v1.358.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* **ci:** restore integration tests removed in [#1841](https://github.com/adobe/spacecat-api-service/issues/1841) ([#1996](https://github.com/adobe/spacecat-api-service/issues/1996)) ([ca2d192](https://github.com/adobe/spacecat-api-service/commit/ca2d192eb0e6d95166b1566bc014b54254a90c2e))
+
 ## [1.358.1](https://github.com/adobe/spacecat-api-service/compare/v1.358.0...v1.358.1) (2026-03-19)
 
 

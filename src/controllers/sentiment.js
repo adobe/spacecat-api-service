@@ -253,12 +253,10 @@ function SentimentController(ctx, log) {
       batchNames.add(normalizedName);
 
       try {
-        const urls = isArray(topicData.urls) ? topicData.urls : [];
         const newTopic = await SentimentTopic.create({
           siteId,
           name: topicData.name,
           description: topicData.description,
-          urls,
           enabled: topicData.enabled !== false,
           createdBy: userId,
           updatedBy: userId,
@@ -348,7 +346,6 @@ function SentimentController(ctx, log) {
 
       if (hasText(updates.name)) topic.setName(updates.name);
       if (updates.description !== undefined) topic.setDescription(updates.description);
-      if (isArray(updates.urls)) topic.setUrls(updates.urls);
       if (typeof updates.enabled === 'boolean') topic.setEnabled(updates.enabled);
 
       topic.setUpdatedBy(userId);

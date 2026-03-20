@@ -39,7 +39,9 @@ const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
 
 /**
- * Inserts rows into a PostgREST table.
+ * Inserts rows into a PostgREST table one at a time.
+ * (Bulk inserts require uniform keys across all objects - PGRST102 - and seed
+ * data has optional fields, so we insert individually but parallelize across tables.)
  */
 async function insertRows(table, rows) {
   for (const row of rows) {
@@ -60,29 +62,74 @@ async function insertRows(table, rows) {
 }
 
 /**
- * Truncates all data tables in the public schema via psql.
- * Uses CASCADE to handle foreign key dependencies.
- * Skips schema_migrations (used by dbmate).
+ * Clears all test data via targeted DELETEs instead of TRUNCATE.
+ * TRUNCATE acquires ACCESS EXCLUSIVE locks on every table even when empty (~1.4s).
+ * DELETE from root tables with ON DELETE CASCADE is <1ms.
+ *
+ * Strategy (from mysticat-data-service#176):
+ * 1. Delete blocker tables (ON DELETE RESTRICT/SET NULL or standalone)
+ * 2. Delete root table (organizations) - CASCADE handles all children
  */
-function truncate() {
+function clearData() {
   execSync(
-    'docker exec spacecat-it-db psql -U postgres -d mysticat -c '
-    + '"DO \\$\\$ DECLARE r RECORD; BEGIN '
-    + "FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename != 'schema_migrations') LOOP "
-    + "EXECUTE 'TRUNCATE TABLE public.' || quote_ident(r.tablename) || ' CASCADE'; "
-    + 'END LOOP; END \\$\\$;"',
+    'docker exec spacecat-it-db psql -U postgres -d mysticat -c "'
+    + 'DELETE FROM plg_onboardings;'
+    + 'DELETE FROM consumers;'
+    + 'DELETE FROM async_jobs;'
+    + 'DELETE FROM organizations;'
+    + '"',
     { stdio: 'pipe', timeout: 10_000 },
   );
 }
 
+/**
+ * Seeds all tables, parallelizing inserts within each FK dependency level.
+ *
+ * Level 0: no FK deps
+ * Level 1: depend on organizations
+ * Level 2: depend on sites
+ * Level 3: depend on opportunities, audits, topics, trial_users
+ * Level 4: depend on fix_entities + suggestions
+ */
 async function seed() {
-  await insertRows('organizations', organizations);
-  await insertRows('projects', projects);
+  // Level 0: no dependencies
+  await Promise.all([
+    insertRows('organizations', organizations),
+    insertRows('async_jobs', asyncJobs),
+    insertRows('consumers', consumers),
+  ]);
+
+  // Level 1a: depend on organizations
+  await Promise.all([
+    insertRows('projects', projects),
+    insertRows('entitlements', entitlements),
+    insertRows('trial_users', trialUsers),
+  ]);
+
+  // Level 1b: depend on projects
   await insertRows('sites', sites);
-  await insertRows('audits', audits);
-  await insertRows('opportunities', opportunities);
-  await insertRows('suggestions', suggestions);
-  await insertRows('fix_entities', fixes);
+
+  // Level 2: depend on sites
+  await Promise.all([
+    insertRows('audits', audits),
+    insertRows('opportunities', opportunities),
+    insertRows('site_enrollments', siteEnrollments),
+    insertRows('experiments', experiments),
+    insertRows('site_top_pages', siteTopPages),
+    insertRows('plg_onboardings', plgOnboardings),
+    insertRows('trial_user_activities', trialUserActivities),
+    insertRows('sentiment_topics', sentimentTopics),
+  ]);
+
+  // Level 3: depend on opportunities, audits, topics
+  await Promise.all([
+    insertRows('suggestions', suggestions),
+    insertRows('fix_entities', fixes),
+    insertRows('audit_urls', auditUrls),
+    insertRows('sentiment_guidelines', sentimentGuidelines),
+  ]);
+
+  // Level 4: depend on fix_entities + suggestions
   await insertRows('fix_entity_suggestions', fixEntitySuggestions);
   await insertRows('entitlements', entitlements);
   await insertRows('site_enrollments', siteEnrollments);
@@ -105,6 +152,6 @@ async function seed() {
  * Called by each test suite in before() for full isolation.
  */
 export async function resetPostgres() {
-  truncate();
+  clearData();
   await seed();
 }
