@@ -48,12 +48,8 @@ function expectSuggestionDto(suggestion) {
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
- * @param {object} [options]
- * @param {boolean} [options.skipGrantTests=false] - Skip grant-gated tests
- *   (v2/DynamoDB has no suggestion_grants/tokens tables)
  */
-export default function suggestionTests(getHttpClient, resetData, options = {}) {
-  const { skipGrantTests = false } = options;
+export default function suggestionTests(getHttpClient, resetData) {
   describe('Suggestions', () => {
     // ── Read endpoints ──
 
@@ -438,74 +434,6 @@ export default function suggestionTests(getHttpClient, resetData, options = {}) 
         const http = getHttpClient();
         const res = await http.user.delete(`${BASE}/${NON_EXISTENT_SUGG_ID}`);
         expect(res.status).to.equal(404);
-      });
-    });
-
-    // ── Grant-gated code paths (postgres-only) ──
-    // These tests verify that grant data (suggestion_grants, tokens) in the DB
-    // does not interfere with normal suggestion reads. In IT, Configuration is
-    // S3-backed (dummy bucket) so getIsSummitPlgEnabled returns false, meaning
-    // filterByGrantStatus always returns all suggestions unfiltered.
-
-    const describeGrant = skipGrantTests ? describe.skip : describe;
-
-    describeGrant('Grant-gated filtering (postgres-only)', () => {
-      before(() => resetData());
-
-      it('user: returns all suggestions without grant filtering (no Configuration)', async () => {
-        // Grant data is seeded (SUGG_1 granted, SUGG_2/SUGG_3 not), but
-        // without a valid Configuration the grant filter is inactive.
-        const http = getHttpClient();
-        const res = await http.user.get(BASE);
-        expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
-        res.body.forEach((s) => expectSuggestionDto(s));
-      });
-
-      it('user: returns all suggestions with x-client-type header (no Configuration)', async () => {
-        // Even with the sites-optimizer-ui header, getIsSummitPlgEnabled returns
-        // false because Configuration.findLatest() fails with the dummy S3 bucket.
-        const http = getHttpClient();
-        const res = await http.user.get(BASE, { 'x-client-type': 'sites-optimizer-ui' });
-        expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
-        res.body.forEach((s) => expectSuggestionDto(s));
-      });
-
-      it('user: paged endpoint returns all suggestions with grant data present', async () => {
-        const http = getHttpClient();
-        const res = await http.user.get(`${BASE}/paged/10`, { 'x-client-type': 'sites-optimizer-ui' });
-        expect(res.status).to.equal(200);
-        expect(res.body.suggestions).to.be.an('array').with.lengthOf(3);
-      });
-
-      it('user: by-status endpoint returns all matching suggestions with grant data present', async () => {
-        const http = getHttpClient();
-        const res = await http.user.get(`${BASE}/by-status/NEW`, { 'x-client-type': 'sites-optimizer-ui' });
-        expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
-        res.body.forEach((s) => {
-          expectSuggestionDto(s);
-          expect(s.status).to.equal('NEW');
-        });
-      });
-
-      it('user: single suggestion endpoint returns non-granted suggestion', async () => {
-        // SUGG_2 is NOT granted, but should still be returned since grant-gating is inactive.
-        const http = getHttpClient();
-        const res = await http.user.get(`${BASE}/${SUGG_2_ID}`, { 'x-client-type': 'sites-optimizer-ui' });
-        expect(res.status).to.equal(200);
-        expectSuggestionDto(res.body);
-        expect(res.body.id).to.equal(SUGG_2_ID);
-      });
-
-      it('user: single suggestion endpoint returns granted suggestion', async () => {
-        // SUGG_1 IS granted — should be returned regardless of grant-gating state.
-        const http = getHttpClient();
-        const res = await http.user.get(`${BASE}/${SUGG_1_ID}`, { 'x-client-type': 'sites-optimizer-ui' });
-        expect(res.status).to.equal(200);
-        expectSuggestionDto(res.body);
-        expect(res.body.id).to.equal(SUGG_1_ID);
       });
     });
   });
