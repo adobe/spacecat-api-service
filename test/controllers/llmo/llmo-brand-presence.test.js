@@ -21,6 +21,8 @@ import {
   createFilterDimensionsHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
+  createSentimentMoversHandler,
+  mapPopularity,
   dateToIsoWeek,
   getWeekDateRange,
   resolveSiteIds,
@@ -2052,6 +2054,194 @@ describe('llmo-brand-presence', () => {
       expect(body.weeklyTrends).to.have.lengthOf(1);
       expect(body.weeklyTrends[0].weekNumber).to.equal(0);
       expect(body.weeklyTrends[0].year).to.equal(0);
+    });
+  });
+
+  describe('mapPopularity', () => {
+    it('maps -30 to High', () => expect(mapPopularity(-30)).to.equal('High'));
+    it('maps -20 to Medium', () => expect(mapPopularity(-20)).to.equal('Medium'));
+    it('maps -10 to Low', () => expect(mapPopularity(-10)).to.equal('Low'));
+    it('maps null to N/A', () => expect(mapPopularity(null)).to.equal('N/A'));
+    it('maps 0 to N/A', () => expect(mapPopularity(0)).to.equal('N/A'));
+  });
+
+  describe('createSentimentMoversHandler', () => {
+    function createRpcMock(rpcResult = { data: [], error: null }) {
+      const rpcStub = sinon.stub().resolves(rpcResult);
+      const chainMock = createChainableMock();
+      chainMock.rpc = rpcStub;
+      return chainMock;
+    }
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = createRpcMock();
+      getOrgAndValidateAccess.rejects(
+        new Error('Only users belonging to the organization can view brand presence data'),
+      );
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest for invalid type parameter', async () => {
+      mockContext.data = { type: 'invalid' };
+      mockContext.dataAccess.Site.postgrestService = createRpcMock();
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.text();
+      expect(body).to.include('Invalid type parameter');
+    });
+
+    it('returns ok with movers for valid data', async () => {
+      const rpcData = {
+        data: [
+          {
+            prompt: 'best pdf editor',
+            topic: 'Acrobat',
+            category: 'PDF',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
+            from_sentiment: 'neutral',
+            to_sentiment: 'positive',
+            from_date: '2026-02-23',
+            to_date: '2026-03-09',
+            execution_count: 48,
+          },
+        ],
+        error: null,
+      };
+      mockContext.data = { type: 'top' };
+      mockContext.dataAccess.Site.postgrestService = createRpcMock(rpcData);
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.movers).to.be.an('array').with.lengthOf(1);
+      expect(body.movers[0]).to.deep.include({
+        prompt: 'best pdf editor',
+        topic: 'Acrobat',
+        fromSentiment: 'neutral',
+        toSentiment: 'positive',
+        executionCount: 48,
+      });
+    });
+
+    it('defaults type to "top" when not provided', async () => {
+      const rpcMock = createRpcMock();
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(rpcMock.rpc).to.have.been.calledOnce;
+      const rpcArgs = rpcMock.rpc.firstCall.args;
+      expect(rpcArgs[0]).to.equal('rpc_sentiment_movers');
+      expect(rpcArgs[1].p_type).to.equal('top');
+    });
+
+    it('returns empty movers when no data', async () => {
+      mockContext.dataAccess.Site.postgrestService = createRpcMock({ data: [], error: null });
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.movers).to.deep.equal([]);
+    });
+
+    it('handles data: null gracefully', async () => {
+      mockContext.dataAccess.Site.postgrestService = createRpcMock({ data: null, error: null });
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.movers).to.deep.equal([]);
+    });
+
+    it('returns badRequest when RPC returns an error', async () => {
+      const rpcError = { message: 'function does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createRpcMock({ data: null, error: rpcError });
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence sentiment-movers PostgREST error: function does not exist',
+      );
+    });
+
+    it('passes optional filters to RPC', async () => {
+      const rpcMock = createRpcMock();
+      mockContext.data = {
+        type: 'bottom',
+        startDate: '2026-02-01',
+        endDate: '2026-03-01',
+        model: 'gemini',
+        categoryId: 'Acrobat',
+        topicIds: '0178a3f0-1234-7000-8000-0000000000aa',
+        region: 'US',
+        origin: 'human',
+      };
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(rpcMock.rpc).to.have.been.calledOnce;
+      const rpcArgs = rpcMock.rpc.firstCall.args;
+      expect(rpcArgs[1].p_type).to.equal('bottom');
+      expect(rpcArgs[1].p_start_date).to.equal('2026-02-01');
+      expect(rpcArgs[1].p_end_date).to.equal('2026-03-01');
+      expect(rpcArgs[1].p_model).to.equal('gemini');
+      expect(rpcArgs[1].p_origin).to.equal('human');
+      expect(rpcArgs[1].p_region_code).to.equal('US');
+      expect(rpcArgs[1].p_topic_ids).to.deep.equal(['0178a3f0-1234-7000-8000-0000000000aa']);
+    });
+
+    it('passes brandId when not "all"', async () => {
+      const rpcMock = createRpcMock();
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const rpcArgs = rpcMock.rpc.firstCall.args;
+      expect(rpcArgs[1].p_brand_id).to.equal('0178a3f0-1234-7000-8000-000000000002');
+    });
+
+    it('returns 403 when siteId does not belong to organization', async () => {
+      const rpcMock = createRpcMock();
+      const sitesValidation = { data: [], error: null };
+      rpcMock.limit = sinon.stub().resolves(sitesValidation);
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
     });
   });
 });
