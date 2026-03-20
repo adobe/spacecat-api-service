@@ -108,6 +108,11 @@ describe('ListDelegatesCommand', () => {
       expect(context.dataAccess.Site.findById).to.have.been.calledWith(SITE_ID);
     });
 
+    it('normalizes bare domain (example.com) to https://example.com before lookup', async () => {
+      await command.handleExecution(['example.com'], slackContext);
+      expect(context.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+    });
+
     it('shows info message when no grants found', async () => {
       context.dataAccess.SiteImsOrgAccess.allBySiteId.resolves([]);
       await command.handleExecution(['https://example.com'], slackContext);
