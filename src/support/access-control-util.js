@@ -194,8 +194,15 @@ export default class AccessControlUtil {
             this.log.warn('[AccessControl] Path A: missing sourceOrganizationId in delegatedTenant');
             return false;
           }
-          grant = await this.SiteImsOrgAccess
+          const now = new Date();
+          const candidate = await this.SiteImsOrgAccess
             .findBySiteIdAndOrganizationIdAndProductCode(siteId, sourceOrganizationId, productCode);
+          // Expiry checked here so the outer if(grant) is unconditional for both paths
+          const notExpired = !candidate?.getExpiresAt()
+            || new Date(candidate.getExpiresAt()) > now;
+          if (candidate && notExpired) {
+            grant = candidate;
+          }
         } else {
           // Path B: JWT list was truncated — query all site grants and match against any of
           // the user's source org IDs (one DB call avoids N queries for multi-org users).
@@ -218,7 +225,8 @@ export default class AccessControlUtil {
           }
         }
 
-        if (grant && (!grant.getExpiresAt() || new Date(grant.getExpiresAt()) > new Date())) {
+        // grant is either null or an already-verified active grant from either path
+        if (grant) {
           this.log.info('[AccessControl] Delegated access granted', {
             actorOrg: sourceOrganizationId,
             resourceOrg: imsOrgId,
