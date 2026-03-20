@@ -36,7 +36,7 @@ export const sites = [
         sources: ['ahrefs'], type: 'organic-traffic', enabled: true, destinations: ['default'],
       }],
       slack: { channel: 'C0FAKE0IT01', workspace: 'WORKSPACE_TEST' },
-      llmo: { dataFolder: '/test/llmo' },
+      llmo: { dataFolder: '/test/llmo', brand: 'site1-test-brand' },
     },
     is_sandbox: false,
     authoring_type: 'documentauthoring',
@@ -62,7 +62,7 @@ export const sites = [
     },
     external_owner_id: 'p50513',
     external_site_id: 'e440257',
-    config: { llmo: { dataFolder: '/test/llmo' } },
+    config: { llmo: { dataFolder: '/test/llmo', brand: 'site2-test-brand' } },
   },
   {
     id: '55555555-5555-4555-9555-555555555555',
@@ -70,7 +70,7 @@ export const sites = [
     organization_id: '22222222-2222-4222-a222-222222222222',
     delivery_type: 'aem_edge',
     is_live: true,
-    config: { llmo: { dataFolder: '/test/llmo' } },
+    config: { llmo: { dataFolder: '/test/llmo', brand: 'site3-test-brand' } },
   },
   {
     id: '44400000-4444-4444-b444-000000000444',

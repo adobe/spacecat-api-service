@@ -108,6 +108,7 @@ function ImsOrgAccessController(ctx) {
         await AccessGrantLog.create({
           siteId,
           organizationId,
+          targetOrganizationId,
           productCode,
           action: AccessGrantLogModel.GRANT_ACTIONS.GRANT,
           role: grant.getRole(),
@@ -213,6 +214,7 @@ function ImsOrgAccessController(ctx) {
         await AccessGrantLog.create({
           siteId,
           organizationId: grant.getOrganizationId(),
+          targetOrganizationId: grant.getTargetOrganizationId(),
           productCode: grant.getProductCode(),
           action: AccessGrantLogModel.GRANT_ACTIONS.REVOKE,
           role: grant.getRole(),

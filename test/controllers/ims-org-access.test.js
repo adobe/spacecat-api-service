@@ -124,6 +124,8 @@ describe('ImsOrgAccess Controller', () => {
       const createArgs = mockDataAccess.SiteImsOrgAccess.create.firstCall.args[0];
       expect(createArgs.grantedBy).to.equal('ims:test-admin@adobe.com');
       expect(createArgs.updatedBy).to.equal('ims:test-admin@adobe.com');
+      const logArgs = mockDataAccess.AccessGrantLog.create.firstCall.args[0];
+      expect(logArgs.targetOrganizationId).to.equal(TARGET_ORG_ID);
     });
 
     it('returns 403 when not admin', async () => {
@@ -391,6 +393,7 @@ describe('ImsOrgAccess Controller', () => {
       // performedBy is derived from profile.sub, not the request body
       const logArgs = mockDataAccess.AccessGrantLog.create.firstCall.args[0];
       expect(logArgs.performedBy).to.equal('ims:test-admin@adobe.com');
+      expect(logArgs.targetOrganizationId).to.equal(TARGET_ORG_ID);
     });
 
     it('returns 403 for non-admin', async () => {
