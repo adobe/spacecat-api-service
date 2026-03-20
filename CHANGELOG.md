@@ -1,3 +1,94 @@
+## [1.361.1](https://github.com/adobe/spacecat-api-service/compare/v1.361.0...v1.361.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* **list-delegates:** normalize bare domain input via extractURLFromSlackInput ([17b22e9](https://github.com/adobe/spacecat-api-service/commit/17b22e990308e0ef850287bbd70fe6b26cbf214e))
+
+# [1.361.0](https://github.com/adobe/spacecat-api-service/compare/v1.360.0...v1.361.0) (2026-03-20)
+
+
+### Features
+
+* **delegation:** cross-org delegation Phase 1 — access control, CRUD endpoints, Slack bot ([#2000](https://github.com/adobe/spacecat-api-service/issues/2000)) ([67cfa98](https://github.com/adobe/spacecat-api-service/commit/67cfa98d7336bda83d61621fed14ab4f3e15f541))
+
+# [1.360.0](https://github.com/adobe/spacecat-api-service/compare/v1.359.1...v1.360.0) (2026-03-20)
+
+
+### Features
+
+* add Slack command for per-site country code ignore list ([#1981](https://github.com/adobe/spacecat-api-service/issues/1981)) ([ef69029](https://github.com/adobe/spacecat-api-service/commit/ef69029839779c5a7cfa8816e33ad6c5a66d78d2))
+
+## [1.359.1](https://github.com/adobe/spacecat-api-service/compare/v1.359.0...v1.359.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* grant suggestions in getAllForOpportunities ([#2002](https://github.com/adobe/spacecat-api-service/issues/2002)) ([40856d7](https://github.com/adobe/spacecat-api-service/commit/40856d75fb0a47e7c35319cc478e2534b490df13))
+
+# [1.359.0](https://github.com/adobe/spacecat-api-service/compare/v1.358.3...v1.359.0) (2026-03-20)
+
+
+### Features
+
+* SITES-40623 - token architecture in Spacecat ([#1819](https://github.com/adobe/spacecat-api-service/issues/1819)) ([c0c073c](https://github.com/adobe/spacecat-api-service/commit/c0c073c6fba7e84645fac5f786675d4ff23df56d))
+
+## [1.358.3](https://github.com/adobe/spacecat-api-service/compare/v1.358.2...v1.358.3) (2026-03-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.24.0 ([#1999](https://github.com/adobe/spacecat-api-service/issues/1999)) ([d9cd8aa](https://github.com/adobe/spacecat-api-service/commit/d9cd8aaf30e84400753bcd46c5a9707e61050d93))
+
+## [1.358.2](https://github.com/adobe/spacecat-api-service/compare/v1.358.1...v1.358.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* **ci:** restore integration tests removed in [#1841](https://github.com/adobe/spacecat-api-service/issues/1841) ([#1996](https://github.com/adobe/spacecat-api-service/issues/1996)) ([ca2d192](https://github.com/adobe/spacecat-api-service/commit/ca2d192eb0e6d95166b1566bc014b54254a90c2e))
+
+## [1.358.1](https://github.com/adobe/spacecat-api-service/compare/v1.358.0...v1.358.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* resolve canonical URL before RUM lookup during PLG onboarding ([#1970](https://github.com/adobe/spacecat-api-service/issues/1970)) ([e468ce2](https://github.com/adobe/spacecat-api-service/commit/e468ce2791d50257ba64912dc035002a6bfd6871))
+
+# [1.358.0](https://github.com/adobe/spacecat-api-service/compare/v1.357.2...v1.358.0) (2026-03-19)
+
+
+### Features
+
+* **plg:** allow admin callers to bypass tenant check in get status call ([#1995](https://github.com/adobe/spacecat-api-service/issues/1995)) ([8683d80](https://github.com/adobe/spacecat-api-service/commit/8683d80de81ee1a1247d40d42c86dfb68c07abee))
+
+## [1.357.2](https://github.com/adobe/spacecat-api-service/compare/v1.357.1...v1.357.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1992](https://github.com/adobe/spacecat-api-service/issues/1992)) ([d7e2452](https://github.com/adobe/spacecat-api-service/commit/d7e245264fa6aced35375faa1ef142f2968de747))
+
+## [1.357.1](https://github.com/adobe/spacecat-api-service/compare/v1.357.0...v1.357.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* multiple topic filtering follow up | LLMO-3605 ([#1984](https://github.com/adobe/spacecat-api-service/issues/1984)) ([4459f19](https://github.com/adobe/spacecat-api-service/commit/4459f19f7d1accf7289a84cc7db7a2cc1dadc7d4))
+
+# [1.357.0](https://github.com/adobe/spacecat-api-service/compare/v1.356.0...v1.357.0) (2026-03-19)
+
+
+### Features
+
+* add llmo brand presence stats api with trends support ([#1993](https://github.com/adobe/spacecat-api-service/issues/1993)) ([fee75cb](https://github.com/adobe/spacecat-api-service/commit/fee75cb8eefb1308b77d98c8012b31bb285a8dfc))
+
+# [1.356.0](https://github.com/adobe/spacecat-api-service/compare/v1.355.1...v1.356.0) (2026-03-19)
+
+
+### Features
+
+* **ci:** migrate to centralized mysticat-ci workflow ([#1990](https://github.com/adobe/spacecat-api-service/issues/1990)) ([9f92daf](https://github.com/adobe/spacecat-api-service/commit/9f92daf1545c9ac9203084a043050ed402d1f2ce))
+
 ## [1.355.1](https://github.com/adobe/spacecat-api-service/compare/v1.355.0...v1.355.1) (2026-03-19)
 
 
