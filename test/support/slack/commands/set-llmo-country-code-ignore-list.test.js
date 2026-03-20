@@ -15,8 +15,7 @@
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-
-import SetLlmoCountryCodeIgnoreListCommand from '../../../../src/support/slack/commands/set-llmo-country-code-ignore-list.js';
+import esmock from 'esmock';
 
 use(sinonChai);
 
@@ -24,8 +23,21 @@ describe('SetLlmoCountryCodeIgnoreListCommand', () => {
   let context;
   let slackContext;
   let dataAccessStub;
+  let SetLlmoCountryCodeIgnoreListCommand;
+  let toDynamoItemStub;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    toDynamoItemStub = sinon.stub().returns({ llmo: { countryCodeIgnoreList: [] } });
+
+    SetLlmoCountryCodeIgnoreListCommand = await esmock(
+      '../../../../src/support/slack/commands/set-llmo-country-code-ignore-list.js',
+      {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: toDynamoItemStub },
+        },
+      },
+    );
+
     dataAccessStub = {
       Site: {
         findByBaseURL: sinon.stub(),
@@ -53,6 +65,7 @@ describe('SetLlmoCountryCodeIgnoreListCommand', () => {
       const mockSite = {
         getBaseURL: sinon.stub().returns('https://example.com'),
         getConfig: sinon.stub().returns(mockConfig),
+        setConfig: sinon.stub(),
         save: sinon.stub(),
       };
       dataAccessStub.Site.findByBaseURL.resolves(mockSite);
@@ -63,6 +76,8 @@ describe('SetLlmoCountryCodeIgnoreListCommand', () => {
 
       expect(dataAccessStub.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockConfig.updateLlmoCountryCodeIgnoreList).to.have.been.calledWith(['PS', 'AD']);
+      expect(toDynamoItemStub).to.have.been.calledWith(mockConfig);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
       expect(mockSite.save).to.have.been.calledOnce;
       expect(slackContext.say).to.have.been.calledWithMatch(/Updated country code ignore list/);
     });
@@ -74,6 +89,7 @@ describe('SetLlmoCountryCodeIgnoreListCommand', () => {
       const mockSite = {
         getBaseURL: sinon.stub().returns('https://example.com'),
         getConfig: sinon.stub().returns(mockConfig),
+        setConfig: sinon.stub(),
         save: sinon.stub(),
       };
       dataAccessStub.Site.findByBaseURL.resolves(mockSite);
@@ -101,6 +117,7 @@ describe('SetLlmoCountryCodeIgnoreListCommand', () => {
       const mockSite = {
         getBaseURL: sinon.stub().returns('https://example.com'),
         getConfig: sinon.stub().returns(mockConfig),
+        setConfig: sinon.stub(),
         save: sinon.stub(),
       };
       dataAccessStub.Site.findById.resolves(mockSite);
@@ -128,6 +145,7 @@ describe('SetLlmoCountryCodeIgnoreListCommand', () => {
       const mockSite = {
         getBaseURL: sinon.stub().returns('https://example.com'),
         getConfig: sinon.stub(),
+        setConfig: sinon.stub(),
         save: sinon.stub(),
       };
       dataAccessStub.Site.findByBaseURL.resolves(mockSite);

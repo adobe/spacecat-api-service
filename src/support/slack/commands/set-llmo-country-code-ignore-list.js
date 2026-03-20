@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import BaseCommand from './base.js';
 
 import {
@@ -80,6 +81,7 @@ function SetLlmoCountryCodeIgnoreListCommand(context) {
 
       const config = site.getConfig();
       config.updateLlmoCountryCodeIgnoreList(countryCodeIgnoreList);
+      site.setConfig(Config.toDynamoItem(config));
       await site.save();
 
       const listDisplay = countryCodeIgnoreList.length > 0
