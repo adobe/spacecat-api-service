@@ -1,3 +1,10 @@
+## [1.361.1](https://github.com/adobe/spacecat-api-service/compare/v1.361.0...v1.361.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* **list-delegates:** normalize bare domain input via extractURLFromSlackInput ([17b22e9](https://github.com/adobe/spacecat-api-service/commit/17b22e990308e0ef850287bbd70fe6b26cbf214e))
+
 # [1.361.0](https://github.com/adobe/spacecat-api-service/compare/v1.360.0...v1.361.0) (2026-03-20)
 
 
