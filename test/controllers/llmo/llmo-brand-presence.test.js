@@ -2376,6 +2376,45 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(403);
     });
+
+    it('defaults type to "top" when ctx.data is null', async () => {
+      const rpcMock = createRpcMock();
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(rpcMock.rpc).to.have.been.calledOnce;
+      expect(rpcMock.rpc.firstCall.args[1].p_type).to.equal('top');
+    });
+
+    it('passes p_site_id when siteId belongs to org', async () => {
+      const siteId = '0178a3f0-1234-7000-8000-0000000000aa';
+      const rpcMock = createRpcMock();
+      rpcMock.limit = sinon.stub().resolves({ data: [{ id: siteId }], error: null });
+      mockContext.data = { siteId };
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(rpcMock.rpc).to.have.been.calledOnce;
+      expect(rpcMock.rpc.firstCall.args[1].p_site_id).to.equal(siteId);
+    });
+
+    it('passes p_category_id when categoryId is a valid UUID', async () => {
+      const categoryUUID = '0178a3f0-1234-7000-8000-0000000000bb';
+      const rpcMock = createRpcMock();
+      mockContext.data = { categoryId: categoryUUID };
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(rpcMock.rpc).to.have.been.calledOnce;
+      expect(rpcMock.rpc.firstCall.args[1].p_category_id).to.equal(categoryUUID);
+    });
   });
 
   describe('createBrandPresenceStatsHandler', () => {
