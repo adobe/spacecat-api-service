@@ -47,6 +47,10 @@ export const INTERNAL_ROUTES = [
   'POST /consent-banner',
   'GET /consent-banner/:jobId',
 
+  // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
+  'GET /org/:spaceCatId/brands/all/brand-presence/stats',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'POST /llmo/onboard',
@@ -72,6 +76,12 @@ export const INTERNAL_ROUTES = [
 
   // Entitlement write - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
+
+  // IMS org access (delegation grants) - admin-only, cross-org grant management
+  'POST /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access/:accessId',
+  'DELETE /sites/:siteId/ims-org-access/:accessId',
 
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
