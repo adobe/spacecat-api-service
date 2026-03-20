@@ -358,6 +358,13 @@ describe('getRouteHandlers', () => {
     getStatus: sinon.stub(),
   };
 
+  const mockImsOrgAccessController = {
+    createGrant: sinon.stub(),
+    listGrants: sinon.stub(),
+    getGrant: sinon.stub(),
+    revokeGrant: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -401,6 +408,7 @@ describe('getRouteHandlers', () => {
       mockSentimentController,
       mockConsumersController,
       mockPlgOnboardingController,
+      mockImsOrgAccessController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -717,6 +725,10 @@ describe('getRouteHandlers', () => {
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
       'GET /plg/onboard/status/:imsOrgId',
+      'POST /sites/:siteId/ims-org-access',
+      'GET /sites/:siteId/ims-org-access',
+      'GET /sites/:siteId/ims-org-access/:accessId',
+      'DELETE /sites/:siteId/ims-org-access/:accessId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

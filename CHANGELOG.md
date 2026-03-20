@@ -1,3 +1,38 @@
+## [1.361.1](https://github.com/adobe/spacecat-api-service/compare/v1.361.0...v1.361.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* **list-delegates:** normalize bare domain input via extractURLFromSlackInput ([17b22e9](https://github.com/adobe/spacecat-api-service/commit/17b22e990308e0ef850287bbd70fe6b26cbf214e))
+
+# [1.361.0](https://github.com/adobe/spacecat-api-service/compare/v1.360.0...v1.361.0) (2026-03-20)
+
+
+### Features
+
+* **delegation:** cross-org delegation Phase 1 — access control, CRUD endpoints, Slack bot ([#2000](https://github.com/adobe/spacecat-api-service/issues/2000)) ([67cfa98](https://github.com/adobe/spacecat-api-service/commit/67cfa98d7336bda83d61621fed14ab4f3e15f541))
+
+# [1.360.0](https://github.com/adobe/spacecat-api-service/compare/v1.359.1...v1.360.0) (2026-03-20)
+
+
+### Features
+
+* add Slack command for per-site country code ignore list ([#1981](https://github.com/adobe/spacecat-api-service/issues/1981)) ([ef69029](https://github.com/adobe/spacecat-api-service/commit/ef69029839779c5a7cfa8816e33ad6c5a66d78d2))
+
+## [1.359.1](https://github.com/adobe/spacecat-api-service/compare/v1.359.0...v1.359.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* grant suggestions in getAllForOpportunities ([#2002](https://github.com/adobe/spacecat-api-service/issues/2002)) ([40856d7](https://github.com/adobe/spacecat-api-service/commit/40856d75fb0a47e7c35319cc478e2534b490df13))
+
+# [1.359.0](https://github.com/adobe/spacecat-api-service/compare/v1.358.3...v1.359.0) (2026-03-20)
+
+
+### Features
+
+* SITES-40623 - token architecture in Spacecat ([#1819](https://github.com/adobe/spacecat-api-service/issues/1819)) ([c0c073c](https://github.com/adobe/spacecat-api-service/commit/c0c073c6fba7e84645fac5f786675d4ff23df56d))
+
 ## [1.358.3](https://github.com/adobe/spacecat-api-service/compare/v1.358.2...v1.358.3) (2026-03-20)
 
 
