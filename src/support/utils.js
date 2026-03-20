@@ -1148,6 +1148,13 @@ export const createEntitlementAndEnrollment = async (
  * @param {string} options.profileName - The profile name for logging and reporting
  * @returns {Promise<Object>} Report line object
  */
+
+/**
+ * Profiles that are considered "paid" and protected from accidental re-onboarding
+ * with a lower-tier profile (e.g. demo/test).
+ */
+const PAID_PROFILES = ['paid', 'plg', 'aso_plg'];
+
 export const onboardSingleSite = async (
   baseURLInput,
   imsOrganizationID,
@@ -1171,9 +1178,6 @@ export const onboardSingleSite = async (
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
-
-  await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
-  await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
     site: baseURL,
@@ -1207,6 +1211,29 @@ export const onboardSingleSite = async (
       await say(`:x: Invalid IMS Org ID: ${imsOrgID}`);
       return reportLine;
     }
+
+    // Guard: prevent re-onboarding a paid-profile site with a lower-tier profile
+    // unless the user explicitly passes force=true.
+    // Runs before locale detection and say() messages to avoid confusing output on block.
+    // lastOnboardProfile is stored in handlers.lastOnboardProfile (inside the serialized
+    // handlers field) because Config.toDynamoItem only persists known fields.
+    if (!additionalParams.force && !PAID_PROFILES.includes(profileName)) {
+      const { Site: SiteLookup } = dataAccess;
+      const existingSite = await SiteLookup.findByBaseURL(baseURL);
+      const previousProfile = existingSite?.getConfig()?.getHandlers()?.lastOnboardProfile;
+      if (previousProfile && PAID_PROFILES.includes(previousProfile)) {
+        const msg = `:warning: Site \`${baseURL}\` was previously onboarded with the *${previousProfile}* profile. `
+          + `Re-onboarding with *${profileName}* is blocked to protect the paid configuration.\n`
+          + 'If this is intentional, select *Force Onboard* in the modal and resubmit.';
+        await say(msg);
+        reportLine.errors = `Blocked: site already onboarded with paid profile "${previousProfile}"`;
+        reportLine.status = 'Failed';
+        return reportLine;
+      }
+    }
+
+    await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
+    await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
     let language = additionalParams.language?.toLowerCase();
     let region = additionalParams.region?.toUpperCase();
@@ -1356,6 +1383,18 @@ export const onboardSingleSite = async (
         overrideBaseURL,
       });
     }
+
+    // Record trigger time per audit type and the profile used for this onboard run.
+    // lastOnboardProfile is stored inside handlers (a serialized field in Config.toDynamoItem)
+    // so it survives DB round-trips. Top-level state fields are NOT persisted by toDynamoItem.
+    const profileAuditTypes = Object.keys(profile.audits);
+    const now = Date.now();
+    const handlers = siteConfig.getHandlers() || {};
+    for (const auditType of profileAuditTypes) {
+      handlers[auditType] = { ...(handlers[auditType] || {}), lastAuditRunTime: now };
+    }
+    handlers.lastOnboardProfile = profileName;
+    siteConfig.state.handlers = handlers;
 
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
