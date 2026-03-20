@@ -82,6 +82,7 @@ describe('AddDelegateCommand', () => {
       imsClient: {
         getImsOrganizationDetails: sinon.stub().resolves({ orgName: 'Delegate Corp' }),
       },
+      env: {},
       log: {
         info: sinon.stub(),
         error: sinon.stub(),
@@ -126,6 +127,37 @@ describe('AddDelegateCommand', () => {
     it('shows usage when productCode is missing', async () => {
       await command.handleExecution(['https://example.com', IMS_ORG_ID], slackContext);
       expect(slackContext.say).to.have.been.calledOnce;
+    });
+
+    it('rejects non-allowlisted user when DELEGATE_ALLOWED_SLACK_USER_IDS is set', async () => {
+      context.env.DELEGATE_ALLOWED_SLACK_USER_IDS = 'U99999,U88888';
+      command = AddDelegateCommand(context);
+      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(slackContext.say.firstCall.args[0]).to.include(':x:');
+      expect(slackContext.say.firstCall.args[0]).to.include('not authorized');
+      expect(context.log.warn).to.have.been.calledWith(sinon.match(/Unauthorized attempt/));
+      expect(context.dataAccess.SiteImsOrgAccess.create).not.to.have.been.called;
+    });
+
+    it('allows allowlisted user when DELEGATE_ALLOWED_SLACK_USER_IDS is set', async () => {
+      context.env.DELEGATE_ALLOWED_SLACK_USER_IDS = 'U99999,U12345';
+      command = AddDelegateCommand(context);
+      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
+    });
+
+    it('allows any user when DELEGATE_ALLOWED_SLACK_USER_IDS is not set', async () => {
+      delete context.env.DELEGATE_ALLOWED_SLACK_USER_IDS;
+      command = AddDelegateCommand(context);
+      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
+    });
+
+    it('allows any user when DELEGATE_ALLOWED_SLACK_USER_IDS is empty string', async () => {
+      context.env.DELEGATE_ALLOWED_SLACK_USER_IDS = '  ';
+      command = AddDelegateCommand(context);
+      await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
     });
 
     it('returns error when site not found by URL', async () => {
