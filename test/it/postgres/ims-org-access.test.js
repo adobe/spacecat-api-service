@@ -10,13 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-import { ORG_1_ID, TRIAL_USER_1_ID, TRIAL_USER_1_EMAIL } from '../../shared/seed-ids.js';
+import { ctx } from './harness.js';
+import { resetPostgres } from './seed.js';
+import imsOrgAccessTests from '../shared/tests/ims-org-access.js';
 
-export const trialUsers = [
-  {
-    trialUserId: TRIAL_USER_1_ID,
-    emailId: TRIAL_USER_1_EMAIL,
-    organizationId: ORG_1_ID,
-    status: 'INVITED',
-  },
-];
+imsOrgAccessTests(() => ctx.httpClient, resetPostgres);

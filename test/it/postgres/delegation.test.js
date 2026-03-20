@@ -11,7 +11,7 @@
  */
 
 import { ctx } from './harness.js';
-import { resetDynamo } from './seed.js';
-import organizationTests from '../shared/tests/organizations.js';
+import { resetPostgres } from './seed.js';
+import delegationTests from '../shared/tests/delegation.js';
 
-organizationTests(() => ctx.httpClient, resetDynamo);
+delegationTests(() => ctx.httpClient, resetPostgres);
