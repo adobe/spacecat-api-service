@@ -48,20 +48,25 @@ function AddDelegateCommand(context) {
     const { say, user: userId } = slackContext;
 
     try {
-      const [siteArg, imsOrgId, productCode] = args;
-
-      if (!siteArg || !imsOrgId || !productCode) {
-        await say(baseCommand.usage());
-        return;
-      }
-
-      // Allowlist check: only permitted Slack user IDs may run this command.
+      // Allowlist check first — unauthorized users should not see usage hints or
+      // learn anything about command arguments.
+      // Fail-open when env var is unset: intentional backwards-compatible default
+      // so existing deployments are not broken on upgrade. Flip to deny-by-default
+      // once the env var is confirmed deployed everywhere.
       const allowedUsers = (env?.DELEGATE_ALLOWED_SLACK_USER_IDS || '')
         .split(',')
         .map((id) => id.trim())
         .filter(Boolean);
       if (allowedUsers.length > 0 && !allowedUsers.includes(userId)) {
+        log.warn(`[AddDelegate] Unauthorized attempt by slack user ${userId}`);
         await say(':x: You are not authorized to use this command.');
+        return;
+      }
+
+      const [siteArg, imsOrgId, productCode] = args;
+
+      if (!siteArg || !imsOrgId || !productCode) {
+        await say(baseCommand.usage());
         return;
       }
 

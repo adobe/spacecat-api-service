@@ -135,6 +135,7 @@ describe('AddDelegateCommand', () => {
       await command.handleExecution(['https://example.com', IMS_ORG_ID, 'LLMO'], slackContext);
       expect(slackContext.say.firstCall.args[0]).to.include(':x:');
       expect(slackContext.say.firstCall.args[0]).to.include('not authorized');
+      expect(context.log.warn).to.have.been.calledWith(sinon.match(/Unauthorized attempt/));
       expect(context.dataAccess.SiteImsOrgAccess.create).not.to.have.been.called;
     });
 
