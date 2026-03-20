@@ -669,6 +669,120 @@ describe('Suggestions Controller', () => {
     mockSite.findById.withArgs(SITE_ID).resolves(site);
   });
 
+  it('calls grantSuggestionsForOpportunity when summit-plg is enabled in getAllForOpportunity', async () => {
+    const grantStub = sandbox.stub().resolves();
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(grantStub).to.have.been.calledOnce;
+    expect(grantStub).to.have.been.calledWith(mockSuggestionDataAccess, site, sinon.match.object);
+  });
+
+  it('does not call grantSuggestionsForOpportunity when summit-plg is not enabled', async () => {
+    const grantStub = sandbox.stub().resolves();
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => false,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(grantStub).to.not.have.been.called;
+  });
+
+  it('does not call grantSuggestionsForOpportunity when no suggestions exist', async () => {
+    const grantStub = sandbox.stub().resolves();
+    mockSuggestion.allByOpportunityId.resolves([]);
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(grantStub).to.not.have.been.called;
+  });
+
+  it('continues returning suggestions when grantSuggestionsForOpportunity throws', async () => {
+    const grantStub = sandbox.stub().rejects(new Error('grant failure'));
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const mockLog = { warn: sandbox.stub(), info: sandbox.stub(), error: sandbox.stub() };
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      log: mockLog,
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(mockLog.warn).to.have.been.calledOnce;
+    expect(mockLog.warn).to.have.been.calledWith('Grant suggestions handler failed', 'grant failure');
+  });
+
   it('gets all suggestions for an opportunity and a site for non belonging to the organization', async () => {
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
