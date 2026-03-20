@@ -587,16 +587,10 @@ export async function resolveWwwUrl(site, context) {
  * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
  * @param {Object} site - Site entity
  * @param {Object} context - Request context with dataAccess, log
- * @param {Object} [requestContext] - Optional per-request context; when provided, the check
- *   is gated on the x-client-type header being 'sites-optimizer-ui'.
  * @returns {Promise<boolean>}
  */
-export async function getIsSummitPlgEnabled(site, context, requestContext) {
+export async function getIsSummitPlgEnabled(site, context) {
   try {
-    if (requestContext) {
-      const clientType = requestContext.pathInfo?.headers?.['x-client-type'];
-      if (clientType !== 'sites-optimizer-ui') return false;
-    }
     const { Configuration, Entitlement } = context.dataAccess || {};
     if (!Configuration) return false;
     const configuration = await Configuration.findLatest();
