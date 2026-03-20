@@ -858,8 +858,8 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
 
 // ── Share of Voice ───────────────────────────────────────────────────────────
 
-const TOP_COMPETITORS_DISPLAYED = 5;
-const DEFAULT_MAX_COMPETITORS = 5;
+const TOP_COMPETITORS_DISPLAYED = 5; // max entities (brand + competitors) in the response slice
+const DEFAULT_MAX_COMPETITORS = 5; // max competitors the RPC returns from the DB
 
 /**
  * Maps the imputed volume integer to a popularity category.
@@ -1094,14 +1094,12 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
         fetchConfiguredCompetitorNames(client, organizationId, filterByBrandId),
       ]);
 
-      const rpcRows = rpcResult.data || [];
-      const rpcSizeKB = Math.round(JSON.stringify(rpcRows).length / 1024);
-      ctx.log.info(`[SOV] RPC returned ${rpcRows.length} rows (~${rpcSizeKB} KB), configuredNames: ${configuredNames.size}`);
-
       if (rpcResult.error) {
         ctx.log.error(`Share-of-voice RPC error: ${rpcResult.error.message}`);
         return badRequest(rpcResult.error.message);
       }
+
+      const rpcRows = rpcResult.data || [];
 
       // Resolve brand name for display
       let brandName = 'Our Brand';
@@ -1119,9 +1117,6 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
         configuredNames,
         brandName,
       );
-
-      const responseSizeKB = Math.round(JSON.stringify(shareOfVoiceData).length / 1024);
-      ctx.log.info(`[SOV] Response: ${shareOfVoiceData.length} topics (~${responseSizeKB} KB)`);
 
       return ok({ shareOfVoiceData });
     },
