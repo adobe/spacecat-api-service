@@ -1,3 +1,10 @@
+# [1.362.0](https://github.com/adobe/spacecat-api-service/compare/v1.361.1...v1.362.0) (2026-03-20)
+
+
+### Features
+
+* SOV endpoints for LLMO | LLMO-3605 ([#1994](https://github.com/adobe/spacecat-api-service/issues/1994)) ([d315ec4](https://github.com/adobe/spacecat-api-service/commit/d315ec4687048ee99bc06a3053253443baf91288))
+
 ## [1.361.1](https://github.com/adobe/spacecat-api-service/compare/v1.361.0...v1.361.1) (2026-03-20)
 
 
