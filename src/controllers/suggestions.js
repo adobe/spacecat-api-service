@@ -40,6 +40,7 @@ import {
   getIsSummitPlgEnabled,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -257,6 +258,15 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+      try {
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+      /* c8 ignore next 3 */
+      } catch (err) {
+        ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
+      }
+    }
+
     // Filter by status in memory if validated statuses provided
     if (statuses.length > 0) {
       suggestionEntities = suggestionEntities.filter(
