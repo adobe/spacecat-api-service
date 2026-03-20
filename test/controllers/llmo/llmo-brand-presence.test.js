@@ -2070,10 +2070,10 @@ describe('llmo-brand-presence', () => {
   // ── volumeToPopularity ─────────────────────────────────────────────────────
 
   describe('volumeToPopularity', () => {
-    it('returns N/A for null, undefined, and 0', () => {
-      expect(volumeToPopularity(null, 100)).to.equal('N/A');
-      expect(volumeToPopularity(undefined, 100)).to.equal('N/A');
-      expect(volumeToPopularity(0, 100)).to.equal('N/A');
+    it('returns Low for null, undefined, and 0', () => {
+      expect(volumeToPopularity(null, 100)).to.equal('Low');
+      expect(volumeToPopularity(undefined, 100)).to.equal('Low');
+      expect(volumeToPopularity(0, 100)).to.equal('Low');
     });
 
     it('maps imputed negative sentinel values', () => {
@@ -2088,8 +2088,8 @@ describe('llmo-brand-presence', () => {
       expect(volumeToPopularity(80, 100)).to.equal('High');
     });
 
-    it('returns N/A for positive volume when avgPositiveVolume is 0', () => {
-      expect(volumeToPopularity(50, 0)).to.equal('N/A');
+    it('returns Low for positive volume when avgPositiveVolume is 0', () => {
+      expect(volumeToPopularity(50, 0)).to.equal('Low');
     });
   });
 
@@ -2373,7 +2373,7 @@ describe('llmo-brand-presence', () => {
       expect(result[1].shareOfVoice).to.equal(null);
     });
 
-    it('assigns priority 0 for N/A popularity in sort', () => {
+    it('sorts Low-popularity topics after High-popularity ones', () => {
       const rows = [
         {
           topic: 'Normal',
@@ -2393,7 +2393,7 @@ describe('llmo-brand-presence', () => {
       const result = aggregateShareOfVoice(rows, new Set(), 'Brand');
       expect(result[0].topic).to.equal('Normal');
       expect(result[1].topic).to.equal('NoVol');
-      expect(result[1].popularity).to.equal('N/A');
+      expect(result[1].popularity).to.equal('Low');
     });
   });
 
@@ -2618,6 +2618,47 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       const comp = body.shareOfVoiceData[0].allCompetitors[0];
       expect(comp.source).to.equal('detected');
+    });
+
+    it('passes default p_max_competitors=5 to RPC', async () => {
+      const mock = createTableAwareMock(
+        {
+          competitors: { data: [], error: null },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: [], error: null } },
+      );
+      mockContext.dataAccess.Site.postgrestService = mock;
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(mock.rpc).to.have.been.calledWith(
+        'rpc_share_of_voice',
+        sinon.match({ p_max_competitors: 5 }),
+      );
+    });
+
+    it('passes custom maxCompetitors to RPC when provided', async () => {
+      mockContext.data = { maxCompetitors: '50' };
+      const mock = createTableAwareMock(
+        {
+          competitors: { data: [], error: null },
+          brands: { data: [], error: null },
+        },
+        { data: [], error: null },
+        { rpc_share_of_voice: { data: [], error: null } },
+      );
+      mockContext.dataAccess.Site.postgrestService = mock;
+
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(mock.rpc).to.have.been.calledWith(
+        'rpc_share_of_voice',
+        sinon.match({ p_max_competitors: 50 }),
+      );
     });
 
     it('handles null RPC data gracefully', async () => {

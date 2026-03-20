@@ -114,6 +114,7 @@ function parseFilterDimensionsParams(context) {
     origin: q.origin,
     user_intent: q.user_intent || q.userIntent,
     branding: q.branding || q.promptBranding || q.prompt_branding,
+    maxCompetitors: q.maxCompetitors || q.max_competitors,
   };
 }
 
@@ -810,17 +811,17 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
 // ── Share of Voice ───────────────────────────────────────────────────────────
 
 const TOP_COMPETITORS_DISPLAYED = 5;
+const DEFAULT_MAX_COMPETITORS = 5;
 
 /**
  * Maps the imputed volume integer to a popularity category.
  * Negative sentinel values are canonical (set by the projector pipeline):
  *   -30 → High, -20 → Medium, -10 → Low.
  * Positive values use legacy percentile bucketing against the per-query average.
- * Zero / null → 'N/A'.
+ * Zero / null → 'Low'.
  * @internal Exported for testing
  */
 export function volumeToPopularity(volume, avgPositiveVolume) {
-  if (volume == null || volume === 0) return 'N/A';
   if (volume === -30) return 'High';
   if (volume === -20) return 'Medium';
   if (volume === -10) return 'Low';
@@ -831,7 +832,7 @@ export function volumeToPopularity(volume, avgPositiveVolume) {
     if (volume <= med) return 'Medium';
     return 'High';
   }
-  return 'N/A';
+  return 'Low';
 }
 
 function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByBrandId) {
@@ -851,6 +852,8 @@ function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByB
     p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
     p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
     p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_max_competitors: params.maxCompetitors
+      ? Number(params.maxCompetitors) : DEFAULT_MAX_COMPETITORS,
   });
 }
 
@@ -997,6 +1000,7 @@ export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
       case 'high': return 3;
       case 'medium': return 2;
       case 'low': return 1;
+      /* c8 ignore next */ // volumeToPopularity always returns High/Medium/Low
       default: return 0;
     }
   };
@@ -1042,6 +1046,10 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
         fetchConfiguredCompetitorNames(client, organizationId, filterByBrandId),
       ]);
 
+      const rpcRows = rpcResult.data || [];
+      const rpcSizeKB = Math.round(JSON.stringify(rpcRows).length / 1024);
+      ctx.log.info(`[SOV] RPC returned ${rpcRows.length} rows (~${rpcSizeKB} KB), configuredNames: ${configuredNames.size}`);
+
       if (rpcResult.error) {
         ctx.log.error(`Share-of-voice RPC error: ${rpcResult.error.message}`);
         return badRequest(rpcResult.error.message);
@@ -1059,10 +1067,13 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
       }
 
       const shareOfVoiceData = aggregateShareOfVoice(
-        rpcResult.data || [],
+        rpcRows,
         configuredNames,
         brandName,
       );
+
+      const responseSizeKB = Math.round(JSON.stringify(shareOfVoiceData).length / 1024);
+      ctx.log.info(`[SOV] Response: ${shareOfVoiceData.length} topics (~${responseSizeKB} KB)`);
 
       return ok({ shareOfVoiceData });
     },

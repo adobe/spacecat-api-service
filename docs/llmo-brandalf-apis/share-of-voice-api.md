@@ -29,6 +29,7 @@ Returns per-topic share-of-voice data including brand mentions, competitor break
 | `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated, or repeated param. Non-UUID values are ignored. |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
 | `origin` | — | string | — | Filter by origin (case-insensitive; e.g. `human`, `ai`) |
+| `maxCompetitors` | `max_competitors` | integer | `5` | Max competitors returned per topic. Set higher (e.g. `50`) for detailed views. |
 
 ---
 
@@ -73,6 +74,7 @@ client.rpc('rpc_share_of_voice', {
   p_topic_ids: topicIds || null,
   p_origin: origin || null,
   p_region_code: regionCode || null,
+  p_max_competitors: maxCompetitors || 5,
 });
 ```
 
@@ -90,7 +92,8 @@ client.rpc('rpc_share_of_voice', {
 1. **filtered** CTE — filters `brand_presence_executions` by org, date range, model, and optional dimensions
 2. **topic_brand** CTE — groups by topic, counts brand mentions (`mentions = TRUE`), takes `MIN(volume)`
 3. **topic_competitors** CTE — uses `regexp_split_to_table` to parse semicolon-separated `business_competitors`, counts per competitor per topic
-4. **Final SELECT** — LEFT JOINs `topic_brand` with `topic_competitors`, ordered by topic then competitor mentions descending
+4. **ranked_competitors** CTE — assigns `ROW_NUMBER()` partitioned by topic, ordered by `comp_mentions DESC`
+5. **Final SELECT** — LEFT JOINs `topic_brand` with `ranked_competitors` where `rn <= p_max_competitors` (or all when NULL), ordered by topic then competitor mentions descending
 
 ### Configured Competitors (parallel query)
 
