@@ -29,6 +29,7 @@ import {
   createMarketTrackingTrendsHandler,
   createTopicsHandler,
   createTopicPromptsHandler,
+  createSearchHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   dateToIsoWeek,
@@ -4547,6 +4548,246 @@ describe('llmo-brand-presence', () => {
         'brand_id',
         '0178a3f0-1234-7000-8000-000000000001',
       );
+    });
+  });
+
+  describe('createSearchHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      mockContext.data = { query: 'pdf' };
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden when org access check fails', async () => {
+      getOrgAndValidateAccess.rejects(
+        new Error(
+          'Only users belonging to the organization can view brand presence data',
+        ),
+      );
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns empty results when query is empty', async () => {
+      mockContext.data = { query: '' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.deep.equal([]);
+      expect(body.totalCount).to.equal(0);
+    });
+
+    it('returns empty results when query is missing', async () => {
+      mockContext.data = {};
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.deep.equal([]);
+      expect(body.totalCount).to.equal(0);
+    });
+
+    it('returns badRequest when query returns error', async () => {
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: null,
+        error: { message: 'table not found' },
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns ok with matching topics and matchType=topic', async () => {
+      const rows = [
+        {
+          topics: 'PDF Editing',
+          prompt: 'best pdf editor',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          volume: 100,
+          origin: 'human',
+          category_name: 'Docs',
+          execution_date: '2026-03-01',
+          url: 'https://x.com',
+          error_code: null,
+        },
+      ];
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(1);
+      expect(body.topicDetails[0].topic).to.equal('PDF Editing');
+      expect(body.topicDetails[0].matchType).to.equal('topic');
+      expect(body.totalCount).to.equal(1);
+    });
+
+    it('returns matchType=prompt when only prompt matches', async () => {
+      const rows = [
+        {
+          topics: 'Image Tools',
+          prompt: 'convert pdf to image',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 70,
+          position: '3',
+          sentiment: 'Neutral',
+          volume: 50,
+          origin: 'ai',
+          category_name: 'Creative',
+          execution_date: '2026-03-01',
+          url: 'https://y.com',
+          error_code: null,
+        },
+      ];
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(1);
+      expect(body.topicDetails[0].topic).to.equal('Image Tools');
+      expect(body.topicDetails[0].matchType).to.equal('prompt');
+    });
+
+    it('uses .or() for PostgREST query', async () => {
+      const client = createChainableMock();
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.or).to.have.been.calledWith(
+        'topics.ilike.%pdf%,prompt.ilike.%pdf%',
+      );
+    });
+
+    it('validates site belongs to org when siteId is provided', async () => {
+      mockContext.data = {
+        query: 'pdf',
+        siteId: '0178a3f0-1234-7000-8000-000000000099',
+      };
+      const client = createChainableMock(
+        { data: [], error: null },
+        [
+          { data: [], error: null },
+          { data: [], error: null },
+        ],
+      );
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('applies optional filters: category, region, origin', async () => {
+      const client = createChainableMock();
+      mockContext.data = {
+        query: 'pdf',
+        categoryId: 'Acrobat',
+        region: 'US',
+        origin: 'human',
+      };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('category_name', 'Acrobat');
+      expect(client.eq).to.have.been.calledWith('region_code', 'US');
+      expect(client.ilike).to.have.been.calledWith('origin', 'human');
+    });
+
+    it('filters by brand_id when brandId is a UUID', async () => {
+      const client = createChainableMock({
+        data: [],
+        error: null,
+      });
+      mockContext.data = { query: 'pdf' };
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000001';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith(
+        'brand_id',
+        '0178a3f0-1234-7000-8000-000000000001',
+      );
+    });
+
+    it('paginates with default pageSize=100', async () => {
+      const rows = [];
+      for (let i = 0; i < 105; i += 1) {
+        rows.push({
+          topics: `Topic${i}`,
+          prompt: `pdf question ${i}`,
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 50,
+          position: '5',
+          sentiment: 'Neutral',
+          volume: 10,
+          origin: 'human',
+          category_name: 'Cat',
+          execution_date: '2026-03-01',
+          url: '',
+          error_code: null,
+        });
+      }
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(100);
+      expect(body.totalCount).to.equal(105);
     });
   });
 });

@@ -1234,6 +1234,119 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
   );
 }
 
+// ── Search ──────────────────────────────────────────────────────────────────
+
+function parseSearchPaginationParams(context) {
+  const q = context.data || {};
+  return {
+    sortBy: q.sortBy || 'name',
+    sortOrder: q.sortOrder || 'asc',
+    page: Number.parseInt(q.page, 10) || 0,
+    pageSize: Number.parseInt(q.pageSize, 10) || 100,
+  };
+}
+
+/**
+ * Creates the search handler.
+ * Full-text search across topics and prompts; returns matching
+ * topic summaries with a `matchType` field indicating whether
+ * the match was on the topic name or a prompt within the topic.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createSearchHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'search',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const pagination = parseSearchPaginationParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all'
+        ? brandId : null;
+
+      const query = (ctx.data?.query ?? '').trim();
+      if (!query) {
+        return ok({ topicDetails: [], totalCount: 0 });
+      }
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      const pattern = `%${query}%`;
+
+      let q = client
+        .from('brand_presence_executions')
+        .select(TOPICS_SELECT)
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model)
+        .or(`topics.ilike.${pattern},prompt.ilike.${pattern}`);
+
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
+      }
+      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (shouldApplyFilter(params.categoryId)) {
+        q = isValidUUID(params.categoryId)
+          ? q.eq('category_id', params.categoryId)
+          : q.eq('category_name', params.categoryId);
+      }
+      if (params.topicIds?.length > 0) {
+        q = q.in('topic_id', params.topicIds);
+      }
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
+      }
+      if (shouldApplyFilter(params.origin)) {
+        q = q.ilike('origin', params.origin);
+      }
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(
+          `Brand presence search PostgREST error: ${error.message}`,
+        );
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden(
+            'Site does not belong to the organization',
+          );
+        }
+      }
+
+      const topicDetails = aggregateTopicData(data || []);
+      const queryLower = query.toLowerCase();
+      topicDetails.forEach((td) => {
+        // eslint-disable-next-line no-param-reassign
+        td.matchType = td.topic.toLowerCase().includes(queryLower)
+          ? 'topic' : 'prompt';
+      });
+
+      sortTopicDetails(topicDetails, pagination.sortBy, pagination.sortOrder);
+
+      const totalCount = topicDetails.length;
+      const start = pagination.page * pagination.pageSize;
+      const paged = topicDetails.slice(start, start + pagination.pageSize);
+
+      return ok({ topicDetails: paged, totalCount });
+    },
+  );
+}
+
 // ── Share of Voice ───────────────────────────────────────────────────────────
 
 const TOP_COMPETITORS_DISPLAYED = 5; // max entities (brand + competitors) in the response slice
