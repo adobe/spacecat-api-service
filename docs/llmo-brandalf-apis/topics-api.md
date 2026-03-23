@@ -153,6 +153,12 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 | `errorCode` | string | Error code if the execution failed, empty otherwise |
 | `origin` | string | Origin of the prompt (e.g. `"human"`, `"ai"`) |
 
+### Optional Search Filtering
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | — | When provided, filters returned prompts to only those whose `prompt` text contains the query (case-insensitive substring match). Used by the UI to show only matching prompts when a topic was found via prompt-level search. |
+
 ### Deduplication
 
 Prompts are deduplicated by `prompt|region_code` — when multiple executions exist for the same prompt+region combination, only the row with the latest `execution_date` is kept.

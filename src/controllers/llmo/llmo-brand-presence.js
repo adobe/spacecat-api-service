@@ -1017,14 +1017,21 @@ export function buildPromptDetails(rows) {
   rows.forEach((row) => {
     const key = buildTopicPromptKey(row);
     const existing = promptMap.get(key);
-    if (!existing || (row.execution_date > existing.execution_date)) {
-      promptMap.set(key, row);
+    if (!existing) {
+      promptMap.set(key, {
+        latestRow: row,
+        totalMentions: 0,
+        totalCitations: 0,
+      });
+    } else if (row.execution_date > existing.latestRow.execution_date) {
+      existing.latestRow = row;
     }
+    const entry = promptMap.get(key);
+    if (row.mentions === true || row.mentions === 'true') entry.totalMentions += 1;
+    if (row.citations === true || row.citations === 'true') entry.totalCitations += 1;
   });
 
-  return [...promptMap.values()].map((r) => {
-    const mentioned = r.mentions === true || r.mentions === 'true';
-    const cited = r.citations === true || r.citations === 'true';
+  return [...promptMap.values()].map(({ latestRow: r, totalMentions, totalCitations }) => {
     const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
 
     return {
@@ -1036,8 +1043,8 @@ export function buildPromptDetails(rows) {
       answer: '',
       sources: '',
       relatedURL: r.url || '',
-      citationsCount: cited ? 1 : 0,
-      mentionsCount: mentioned ? 1 : 0,
+      citationsCount: totalCitations,
+      mentionsCount: totalMentions,
       isAnswered: !(r.error_code),
       visibilityScore: Number.isNaN(vs) ? 0 : vs,
       position: r.position ? String(r.position) : '',
@@ -1048,13 +1055,16 @@ export function buildPromptDetails(rows) {
   });
 }
 
-function parsePaginationParams(context) {
+function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
   const q = context.data || {};
   return {
     sortBy: q.sortBy || 'name',
     sortOrder: q.sortOrder || 'asc',
-    page: Number.parseInt(q.page, 10) || 0,
-    pageSize: Number.parseInt(q.pageSize, 10) || 20,
+    page: Math.max(0, Number.parseInt(q.page, 10) || 0),
+    pageSize: Math.min(
+      Math.max(1, Number.parseInt(q.pageSize, 10) || defaultPageSize),
+      1000,
+    ),
   };
 }
 
@@ -1223,13 +1233,170 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const items = buildPromptDetails(data || []);
+      let items = buildPromptDetails(data || []);
+
+      // When a search query is provided, filter to only prompts whose text
+      // matches — mirroring the original brand presence client-side behaviour
+      // where prompt-matched topics show only matching prompts on expansion.
+      const searchQuery = (ctx.data?.query ?? '').trim();
+      if (searchQuery) {
+        const searchLower = searchQuery.toLowerCase();
+        items = items.filter(
+          (item) => item.prompt.toLowerCase().includes(searchLower),
+        );
+      }
 
       const totalCount = items.length;
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
       return ok({ items: paged, totalCount });
+    },
+  );
+}
+
+// ── Search ──────────────────────────────────────────────────────────────────
+
+const MAX_SEARCH_QUERY_LENGTH = 500;
+const MIN_SEARCH_QUERY_LENGTH = 2;
+
+/**
+ * Builds a PostgREST-safe ILIKE pattern from a raw search query.
+ * Escapes SQL ILIKE metacharacters (%, _) and wraps in PostgREST
+ * double-quotes to prevent filter injection via commas/dots/parens.
+ * @internal Exported for testing
+ */
+export function buildSearchPattern(raw) {
+  const ilikeEscaped = raw.replace(/%/g, '\\%').replace(/_/g, '\\_');
+  const pattern = `%${ilikeEscaped}%`;
+  const pgrstEscaped = pattern.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${pgrstEscaped}"`;
+}
+
+/**
+ * Creates the search handler.
+ * Full-text search across topics and prompts; returns matching
+ * topic summaries with a `matchType` field indicating whether
+ * the match was on the topic name or a prompt within the topic.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createSearchHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'search',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const pagination = parsePaginationParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all'
+        ? brandId : null;
+
+      const query = (ctx.data?.query ?? '').trim();
+      if (!query) {
+        return ok({ topicDetails: [], totalCount: 0 });
+      }
+
+      if (query.length < MIN_SEARCH_QUERY_LENGTH) {
+        return badRequest(`Search query must be at least ${MIN_SEARCH_QUERY_LENGTH} characters`);
+      }
+
+      const bounded = query.slice(0, MAX_SEARCH_QUERY_LENGTH);
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      const pattern = buildSearchPattern(bounded);
+
+      let q = client
+        .from('brand_presence_executions')
+        .select(TOPICS_SELECT)
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model)
+        .or(`topics.ilike.${pattern},prompt.ilike.${pattern}`);
+
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
+      }
+      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (shouldApplyFilter(params.categoryId)) {
+        q = isValidUUID(params.categoryId)
+          ? q.eq('category_id', params.categoryId)
+          : q.eq('category_name', params.categoryId);
+      }
+      if (params.topicIds?.length > 0) {
+        q = q.in('topic_id', params.topicIds);
+      }
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
+      }
+      if (shouldApplyFilter(params.origin)) {
+        q = q.ilike('origin', params.origin);
+      }
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error('Brand presence search PostgREST error', {
+          organizationId, query: bounded, model, error: error.message,
+        });
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden(
+            'Site does not belong to the organization',
+          );
+        }
+      }
+
+      const queryLower = bounded.toLowerCase();
+      const rows = data || [];
+
+      // Pre-compute per-topic count of unique prompts that match the query.
+      // Used below to set promptCount for prompt-matched topics so the UI
+      // mirrors the original brand presence behaviour (showing only matching
+      // prompts when the topic name itself didn't match).
+      const matchingPromptCounts = new Map();
+      rows.forEach((row) => {
+        const topicName = row.topics || 'Unknown';
+        const promptText = (row.prompt || '').toLowerCase();
+        if (promptText.includes(queryLower)) {
+          if (!matchingPromptCounts.has(topicName)) {
+            matchingPromptCounts.set(topicName, new Set());
+          }
+          matchingPromptCounts.get(topicName).add(buildTopicPromptKey(row));
+        }
+      });
+
+      const topicDetails = aggregateTopicData(rows).map((td) => {
+        const isTopicMatch = td.topic.toLowerCase().includes(queryLower);
+        return {
+          ...td,
+          matchType: isTopicMatch ? 'topic' : 'prompt',
+          promptCount: isTopicMatch
+            ? td.promptCount
+            : matchingPromptCounts.get(td.topic).size,
+        };
+      });
+
+      sortTopicDetails(topicDetails, pagination.sortBy, pagination.sortOrder);
+
+      const totalCount = topicDetails.length;
+      const start = pagination.page * pagination.pageSize;
+      const paged = topicDetails.slice(start, start + pagination.pageSize);
+
+      return ok({ topicDetails: paged, totalCount });
     },
   );
 }
