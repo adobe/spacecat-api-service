@@ -3872,6 +3872,45 @@ describe('llmo-brand-presence', () => {
       expect(result[0].origin).to.equal('');
     });
 
+    it('aggregates mentions and citations across all execution rows per prompt', () => {
+      const rows = [
+        {
+          topics: 'PDF',
+          prompt: 'best pdf editor',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 80,
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'PDF',
+          prompt: 'best pdf editor',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 70,
+          execution_date: '2026-03-08',
+        },
+        {
+          topics: 'PDF',
+          prompt: 'best pdf editor',
+          region_code: 'US',
+          mentions: false,
+          citations: true,
+          visibility_score: 90,
+          execution_date: '2026-03-15',
+        },
+      ];
+      const result = buildPromptDetails(rows);
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].mentionsCount).to.equal(2);
+      expect(result[0].citationsCount).to.equal(2);
+      // Latest execution's metadata is used
+      expect(result[0].executionDate).to.equal('2026-03-15');
+      expect(result[0].visibilityScore).to.equal(90);
+    });
+
     it('uses "Unknown" for null topics and counts citations correctly', () => {
       const rows = [
         {
