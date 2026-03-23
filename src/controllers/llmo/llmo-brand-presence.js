@@ -1281,7 +1281,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
-      const pagination = parsePaginationParams(ctx, { defaultPageSize: 100 });
+      const pagination = parsePaginationParams(ctx);
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all'

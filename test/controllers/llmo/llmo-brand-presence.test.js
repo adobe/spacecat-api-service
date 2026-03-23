@@ -5054,9 +5054,9 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('paginates with default pageSize=100', async () => {
+    it('paginates with default pageSize=20', async () => {
       const rows = [];
-      for (let i = 0; i < 105; i += 1) {
+      for (let i = 0; i < 25; i += 1) {
         rows.push({
           topics: `Topic${i}`,
           prompt: `pdf question ${i}`,
@@ -5084,13 +5084,13 @@ describe('llmo-brand-presence', () => {
       const result = await handler(mockContext);
 
       const body = await result.json();
-      expect(body.topicDetails).to.have.lengthOf(100);
-      expect(body.totalCount).to.equal(105);
+      expect(body.topicDetails).to.have.lengthOf(20);
+      expect(body.totalCount).to.equal(25);
     });
 
     it('returns page 1 with remaining items', async () => {
       const rows = [];
-      for (let i = 0; i < 105; i += 1) {
+      for (let i = 0; i < 25; i += 1) {
         rows.push({
           topics: `Topic${i}`,
           prompt: `pdf question ${i}`,
@@ -5119,7 +5119,7 @@ describe('llmo-brand-presence', () => {
 
       const body = await result.json();
       expect(body.topicDetails).to.have.lengthOf(5);
-      expect(body.totalCount).to.equal(105);
+      expect(body.totalCount).to.equal(25);
     });
 
     it('sorts by visibility descending when requested', async () => {

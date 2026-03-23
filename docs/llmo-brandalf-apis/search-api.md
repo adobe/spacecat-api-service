@@ -31,7 +31,7 @@ Full-text search across topics and prompts in the Data Insights table. Returns m
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, JP) |
 | `origin` | — | string | — | Filter by origin (case-insensitive; e.g. `human`, `ai`) |
 | `page` | — | integer | `0` | Zero-based page index |
-| `pageSize` | — | integer | `100` | Number of items per page |
+| `pageSize` | — | integer | `20` | Number of items per page |
 | `sortBy` | — | string | `name` | Sort field: `name`, `visibility`, `mentions`, `citations`, `sentiment`, `popularity`, `position` |
 | `sortOrder` | — | string | `asc` | Sort direction: `asc` or `desc` |
 
@@ -40,7 +40,7 @@ Full-text search across topics and prompts in the Data Insights table. Returns m
 ## Sample URL
 
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?query=pdf&startDate=2026-02-09&endDate=2026-03-09&model=chatgpt&page=0&pageSize=100
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?query=pdf&startDate=2026-02-09&endDate=2026-03-09&model=chatgpt&page=0&pageSize=20
 ```
 
 ---
@@ -103,7 +103,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 3. **matchType tagging**: After aggregation, each topic is tagged:
    - `"topic"` — topic name contains the query string (case-insensitive). `promptCount` includes all unique prompts.
    - `"prompt"` — topic name does NOT match, but at least one prompt within it does. `promptCount` is adjusted to only count unique prompts whose text matched the query.
-4. **Sort and paginate** server-side (default `pageSize=100`)
+4. **Sort and paginate** server-side (default `pageSize=20`)
 
 This mirrors the original brand presence client-side search behaviour where prompt-matched topics only show matching prompts. The companion topic-prompts endpoint also supports a `query` parameter to filter expanded prompts server-side.
 
