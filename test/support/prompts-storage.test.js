@@ -46,9 +46,13 @@ describe('prompts-storage', () => {
       ilike: () => chain,
       or: () => chain,
       contains: () => chain,
+      in: () => chain,
+      upsert: () => chain,
       insert: () => ({ select: () => thenable(result) }),
       range: () => thenable(result),
       maybeSingle: () => thenable(result),
+      single: () => thenable(result),
+      then: (resolve) => resolve(result),
     };
     return chain;
   }
@@ -194,6 +198,18 @@ describe('prompts-storage', () => {
       expect(result.total).to.equal(1);
       expect(result.limit).to.equal(100);
       expect(result.page).to.equal(1);
+    });
+
+    it('throws when limit exceeds maximum', async () => {
+      const client = { from: () => makeChain({ data: { id: BRAND_UUID }, error: null }) };
+      await expect(
+        listPrompts({
+          organizationId: ORG_ID,
+          brandId: BRAND_UUID,
+          limit: 10000,
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('Limit must be between 1 and 5000');
     });
 
     it('applies status filter when provided', async () => {
@@ -465,17 +481,21 @@ describe('prompts-storage', () => {
     });
 
     it('updates existing prompts by id', async () => {
+      const existingData = {
+        data: [{
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
+        }],
+        error: null,
+      };
       const client = {
         from: (table) => {
           if (table === 'prompts') {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => thenable({
-                    data: [{
-                      id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
-                    }],
-                    error: null,
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
                   }),
                 }),
               }),
@@ -520,17 +540,21 @@ describe('prompts-storage', () => {
     });
 
     it('throws on update error', async () => {
+      const existingData = {
+        data: [{
+          id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
+        }],
+        error: null,
+      };
       const client = {
         from: (table) => {
           if (table === 'prompts') {
             return {
               select: () => ({
                 eq: () => ({
-                  eq: () => thenable({
-                    data: [{
-                      id: 'row-id', prompt_id: 'p1', text: 'old', regions: [],
-                    }],
-                    error: null,
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
                   }),
                 }),
               }),
@@ -583,8 +607,8 @@ describe('prompts-storage', () => {
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
           }
-          if (table === 'categories') return makeChain({ data: { id: 'cat-uuid' }, error: null });
-          if (table === 'topics') return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          if (table === 'categories') return makeChain({ data: [{ id: 'cat-uuid', category_id: 'photoshop' }], error: null });
+          if (table === 'topics') return makeChain({ data: [{ id: 'topic-uuid', topic_id: 'editing' }], error: null });
           return makeChain({});
         },
       };
@@ -599,6 +623,98 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(1);
       expect(result.prompts[0].categoryId).to.equal('photoshop');
       expect(result.prompts[0].topicId).to.equal('editing');
+    });
+
+    it('auto-creates missing categories and topics via ensureLookupEntries', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          // buildLookupMaps returns empty arrays → maps will be empty
+          // ensureLookupEntries will upsert the missing entries
+          if (table === 'categories') {
+            return makeChain({
+              data: [{ id: 'new-cat-uuid', category_id: 'new-cat' }],
+              error: null,
+            });
+          }
+          if (table === 'topics') {
+            return makeChain({
+              data: [{ id: 'new-topic-uuid', topic_id: 'new-topic' }],
+              error: null,
+            });
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          prompt: 'New prompt', regions: ['us'], categoryId: 'new-cat', topicId: 'new-topic',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.prompts[0].categoryId).to.equal('new-cat');
+      expect(result.prompts[0].topicId).to.equal('new-topic');
+    });
+
+    it('throws when auto-creating categories fails', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'categories') {
+            return makeChain({ data: null, error: { message: 'constraint violation' } });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await expect(
+        upsertPrompts({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          prompts: [{ prompt: 'X', regions: [], categoryId: 'bad-cat' }],
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('Failed to auto-create categories');
+    });
+
+    it('throws when auto-creating topics fails', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            return makeChain({ data: null, error: { message: 'constraint violation' } });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await expect(
+        upsertPrompts({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          prompts: [{ prompt: 'X', regions: [], topicId: 'bad-topic' }],
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('Failed to auto-create topics');
     });
   });
 
@@ -1025,6 +1141,24 @@ describe('prompts-storage', () => {
       expect(result.metadata.success).to.equal(0);
       expect(result.metadata.failure).to.equal(1);
       expect(result.failures[0].reason).to.equal('DB error');
+    });
+
+    it('catches thrown exceptions as failures', async () => {
+      const client = {
+        from: () => {
+          throw new Error('Connection lost');
+        },
+      };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1'],
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(1);
+      expect(result.metadata.success).to.equal(0);
+      expect(result.metadata.failure).to.equal(1);
+      expect(result.failures[0].reason).to.equal('Connection lost');
     });
 
     it('handles mix of success and failure', async () => {

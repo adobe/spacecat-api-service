@@ -85,6 +85,47 @@ describe('topics-storage', () => {
         organizationId: ORG_ID, topic: {}, postgrestClient: { from: () => { } },
       })).to.be.rejectedWith('Topic name is required');
     });
+
+    it('creates a topic and returns mapped result', async () => {
+      const dbRow = {
+        id: 'uuid-new',
+        topic_id: 'my-new-topic',
+        name: 'My New Topic',
+        description: 'A description',
+        status: 'active',
+        brand_id: 'brand-uuid',
+        updated_at: '2026-03-01',
+        updated_by: 'user@test.com',
+      };
+
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'My New Topic', description: 'A description', brandId: 'brand-uuid' },
+        postgrestClient,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result.id).to.equal('my-new-topic');
+      expect(result.uuid).to.equal('uuid-new');
+      expect(result.name).to.equal('My New Topic');
+      expect(result.description).to.equal('A description');
+      expect(result.brandId).to.equal('brand-uuid');
+      expect(result.status).to.equal('active');
+    });
+
+    it('throws on database error during create', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'unique violation' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Duplicate Topic' },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to create topic');
+    });
   });
 
   describe('updateTopic', () => {
@@ -93,6 +134,62 @@ describe('topics-storage', () => {
         organizationId: ORG_ID, topicId: 'test', updates: {}, postgrestClient: null,
       })).to.be.rejectedWith('PostgREST client is required');
     });
+
+    it('updates a topic and returns the mapped result', async () => {
+      const dbRow = {
+        id: 'uuid-upd',
+        topic_id: 'test',
+        name: 'Updated',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        updated_at: '2026-03-15',
+        updated_by: 'editor@test.com',
+      };
+
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await updateTopic({
+        organizationId: ORG_ID,
+        topicId: 'test',
+        updates: { name: 'Updated', status: 'active' },
+        postgrestClient,
+        updatedBy: 'editor@test.com',
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.id).to.equal('test');
+      expect(result.uuid).to.equal('uuid-upd');
+      expect(result.name).to.equal('Updated');
+      expect(result.status).to.equal('active');
+    });
+
+    it('returns null when topic is not found', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await updateTopic({
+        organizationId: ORG_ID,
+        topicId: 'nonexistent',
+        updates: { name: 'Ghost' },
+        postgrestClient,
+      });
+
+      expect(result).to.be.null;
+    });
+
+    it('throws on database error during update', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'connection timeout' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(updateTopic({
+        organizationId: ORG_ID,
+        topicId: 'test',
+        updates: { name: 'Will Fail' },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to update topic');
+    });
   });
 
   describe('deleteTopic', () => {
@@ -100,6 +197,85 @@ describe('topics-storage', () => {
       await expect(deleteTopic({
         organizationId: ORG_ID, topicId: 'test', postgrestClient: null,
       })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('returns true when topic is found and soft-deleted', async () => {
+      const query = createChainableQuery({ data: { id: 'uuid-del' }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await deleteTopic({
+        organizationId: ORG_ID,
+        topicId: 'test',
+        postgrestClient,
+        updatedBy: 'admin@test.com',
+      });
+
+      expect(result).to.be.true;
+    });
+
+    it('returns false when topic is not found', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await deleteTopic({
+        organizationId: ORG_ID,
+        topicId: 'nonexistent',
+        postgrestClient,
+      });
+
+      expect(result).to.be.false;
+    });
+
+    it('throws on database error during delete', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'permission denied' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(deleteTopic({
+        organizationId: ORG_ID,
+        topicId: 'test',
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to delete topic');
+    });
+  });
+
+  describe('listTopics - filter variants', () => {
+    const dbRow = {
+      id: 'uuid-f',
+      topic_id: 'filtered-topic',
+      name: 'Filtered Topic',
+      description: null,
+      status: 'active',
+      brand_id: 'brand-abc',
+      updated_at: '2026-02-01',
+      updated_by: 'system',
+    };
+
+    it('filters by status when provided', async () => {
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({
+        organizationId: ORG_ID,
+        postgrestClient,
+        status: 'active',
+      });
+
+      expect(result).to.have.length(1);
+      expect(result[0].status).to.equal('active');
+    });
+
+    it('filters by brandId when provided', async () => {
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({
+        organizationId: ORG_ID,
+        postgrestClient,
+        brandId: 'brand-abc',
+      });
+
+      expect(result).to.have.length(1);
+      expect(result[0].brandId).to.equal('brand-abc');
     });
   });
 });

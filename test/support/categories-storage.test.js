@@ -64,6 +64,25 @@ describe('categories-storage', () => {
       expect(result[0].name).to.equal('Brand Awareness');
     });
 
+    it('applies status filter when provided', async () => {
+      const dbRow = {
+        id: 'uuid-1',
+        category_id: 'brand-awareness',
+        name: 'Brand Awareness',
+        status: 'pending',
+        origin: 'human',
+        updated_at: '2026-01-01',
+        updated_by: 'user@test.com',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listCategories({ organizationId: ORG_ID, postgrestClient, status: 'pending' });
+      expect(result).to.have.length(1);
+      expect(result[0].status).to.equal('pending');
+    });
+
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
       const postgrestClient = { from: sinon.stub().returns(query) };

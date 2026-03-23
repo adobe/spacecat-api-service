@@ -196,6 +196,7 @@ function mapRowToPrompt(row) {
     topicId: topic?.topic_id ?? null,
     status: row.status || 'active',
     origin: row.origin || 'human',
+    source: row.source || 'config',
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
     brandId: brand?.id ?? null,
@@ -421,14 +422,14 @@ export async function upsertPrompts({
     .map((p) => p.id || p.prompt_id)
     .filter(hasText);
 
-  const existingQuery = postgrestClient
+  let existingQuery = postgrestClient
     .from('prompts')
     .select('id,prompt_id,text,regions')
     .eq('organization_id', organizationId)
     .eq('brand_id', brandUuid);
 
   if (incomingIds.length > 0) {
-    existingQuery.in('prompt_id', incomingIds);
+    existingQuery = existingQuery.in('prompt_id', incomingIds);
   }
 
   const [{ data: existing }, lookups] = await Promise.all([
@@ -479,6 +480,7 @@ export async function upsertPrompts({
       topic_id: topicUuid,
       status: p.status || 'active',
       origin: p.origin || 'human',
+      source: p.source || 'config',
       updated_by: updatedBy,
     };
 
@@ -520,6 +522,7 @@ export async function upsertPrompts({
     topicId: r.topicId,
     status: r.status,
     origin: r.origin,
+    source: r.source,
     updatedBy: r.updated_by,
     updatedAt: r.updated_at,
   }));
