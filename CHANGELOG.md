@@ -1,3 +1,10 @@
+# [1.364.0](https://github.com/adobe/spacecat-api-service/compare/v1.363.2...v1.364.0) (2026-03-23)
+
+
+### Features
+
+* llmo sentiment movers api ([#2006](https://github.com/adobe/spacecat-api-service/issues/2006)) ([95cec54](https://github.com/adobe/spacecat-api-service/commit/95cec54a91f390b9982a8d6663e464fb4fac8aae))
+
 ## [1.363.2](https://github.com/adobe/spacecat-api-service/compare/v1.363.1...v1.363.2) (2026-03-22)
 
 
