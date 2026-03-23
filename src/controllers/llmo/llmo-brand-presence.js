@@ -904,88 +904,97 @@ function volumeToCategory(volumeSum, volumeCount) {
  * (those are loaded separately via the /topics/:topicId/prompts endpoint).
  *
  * @param {Array<Object>} rows - Raw brand_presence_executions rows
+ *   (with embedded brand_presence_sources)
  * @returns {Array<Object>} TopicDetail-compatible objects (without items)
  * @internal Exported for testing
  */
 export function aggregateTopicData(rows) {
-  const topicMap = new Map();
+  // First pass: group ALL rows by topic and accumulate counts from every
+  // execution (matching the original UI which counts across all dates).
+  const topicAgg = new Map();
 
   rows.forEach((row) => {
     const topicName = row.topics || 'Unknown';
-    if (!topicMap.has(topicName)) {
-      topicMap.set(topicName, new Map());
+    if (!topicAgg.has(topicName)) {
+      topicAgg.set(topicName, {
+        promptMap: new Map(),
+        totalMentions: 0,
+        totalCitations: 0,
+        uniqueSourceUrlIds: new Set(),
+        visibilitySum: 0,
+        visibilityCount: 0,
+        positionSum: 0,
+        positionCount: 0,
+        sentimentSum: 0,
+        sentimentCount: 0,
+        volumeSum: 0,
+        volumeCount: 0,
+      });
     }
-    const promptMap = topicMap.get(topicName);
-    const key = buildTopicPromptKey(row);
+    const agg = topicAgg.get(topicName);
 
-    const existing = promptMap.get(key);
+    // Dedup prompts (keep latest execution) — used only for promptCount
+    const key = buildTopicPromptKey(row);
+    const existing = agg.promptMap.get(key);
     if (!existing || (row.execution_date > existing.execution_date)) {
-      promptMap.set(key, row);
+      agg.promptMap.set(key, row);
+    }
+
+    // Count mentions/citations from EVERY execution row
+    if (row.mentions === true || row.mentions === 'true') agg.totalMentions += 1;
+    if (row.citations === true || row.citations === 'true') agg.totalCitations += 1;
+
+    if (Array.isArray(row.brand_presence_sources)) {
+      row.brand_presence_sources.forEach((s) => {
+        if (s.url_id) agg.uniqueSourceUrlIds.add(s.url_id);
+      });
+    }
+
+    const vs = row.visibility_score != null ? Number(row.visibility_score) : NaN;
+    if (!Number.isNaN(vs)) {
+      agg.visibilitySum += vs;
+      agg.visibilityCount += 1;
+    }
+
+    const pos = row.position;
+    if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
+      agg.positionSum += Number(pos);
+      agg.positionCount += 1;
+    }
+
+    const sentiment = (row.sentiment || '').toLowerCase().trim();
+    if (sentiment === 'positive') {
+      agg.sentimentSum += 100;
+      agg.sentimentCount += 1;
+    } else if (sentiment === 'neutral') {
+      agg.sentimentSum += 50;
+      agg.sentimentCount += 1;
+    } else if (sentiment === 'negative') {
+      agg.sentimentCount += 1;
+    }
+
+    const vol = row.volume != null ? Number(row.volume) : NaN;
+    if (!Number.isNaN(vol)) {
+      agg.volumeSum += vol;
+      agg.volumeCount += 1;
     }
   });
 
-  return [...topicMap.entries()].map(([topicName, promptMap]) => {
-    const prompts = [...promptMap.values()];
-    let totalMentions = 0;
-    let totalCitations = 0;
-    let visibilitySum = 0;
-    let visibilityCount = 0;
-    let positionSum = 0;
-    let positionCount = 0;
-    let sentimentSum = 0;
-    let sentimentCount = 0;
-    let volumeSum = 0;
-    let volumeCount = 0;
-
-    prompts.forEach((r) => {
-      const mentioned = r.mentions === true || r.mentions === 'true';
-      const cited = r.citations === true || r.citations === 'true';
-      if (mentioned) totalMentions += 1;
-      if (cited) totalCitations += 1;
-
-      const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-      if (!Number.isNaN(vs)) {
-        visibilitySum += vs;
-        visibilityCount += 1;
-      }
-
-      const pos = r.position;
-      if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
-        positionSum += Number(pos);
-        positionCount += 1;
-      }
-
-      const sentiment = (r.sentiment || '').toLowerCase().trim();
-      if (sentiment === 'positive') {
-        sentimentSum += 100;
-        sentimentCount += 1;
-      } else if (sentiment === 'neutral') {
-        sentimentSum += 50;
-        sentimentCount += 1;
-      } else if (sentiment === 'negative') {
-        sentimentCount += 1;
-      }
-
-      const vol = r.volume != null ? Number(r.volume) : NaN;
-      if (!Number.isNaN(vol)) {
-        volumeSum += vol;
-        volumeCount += 1;
-      }
-    });
-
-    const avgVisibility = visibilityCount > 0
-      ? Math.round((visibilitySum / visibilityCount) * 100) / 100 : 0;
-    const avgPosition = positionCount > 0
-      ? Math.round((positionSum / positionCount) * 100) / 100 : 0;
-    const avgSentiment = sentimentCount > 0
-      ? Math.round(sentimentSum / sentimentCount) : -1;
-    const avgVolume = volumeToCategory(volumeSum, volumeCount);
+  return [...topicAgg.entries()].map(([topicName, agg]) => {
+    const avgVisibility = agg.visibilityCount > 0
+      ? Math.round((agg.visibilitySum / agg.visibilityCount) * 100) / 100 : 0;
+    const avgPosition = agg.positionCount > 0
+      ? Math.round((agg.positionSum / agg.positionCount) * 100) / 100 : 0;
+    const avgSentiment = agg.sentimentCount > 0
+      ? Math.round(agg.sentimentSum / agg.sentimentCount) : -1;
+    const avgVolume = volumeToCategory(agg.volumeSum, agg.volumeCount);
 
     return {
       topic: topicName,
-      promptCount: prompts.length,
-      brandMentions: totalMentions,
-      brandCitations: totalCitations,
+      promptCount: agg.promptMap.size,
+      brandMentions: agg.totalMentions,
+      brandCitations: agg.totalCitations,
+      sourceCount: agg.uniqueSourceUrlIds.size,
       popularityVolume: avgVolume,
       averageVisibilityScore: avgVisibility,
       averagePosition: avgPosition,
@@ -1064,7 +1073,7 @@ function sortTopicDetails(topicDetails, sortBy, sortOrder) {
 }
 
 // eslint-disable-next-line max-len
-const TOPICS_SELECT = 'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+const TOPICS_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
 
 /**
  * Creates the getTopics handler.

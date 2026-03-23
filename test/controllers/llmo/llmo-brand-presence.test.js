@@ -3498,6 +3498,7 @@ describe('llmo-brand-presence', () => {
     it('computes correct topic-level aggregate metrics', () => {
       const rows = [
         {
+          id: 'exec-1',
           topics: 'PDF',
           prompt: 'q1',
           region_code: 'US',
@@ -3508,8 +3509,10 @@ describe('llmo-brand-presence', () => {
           sentiment: 'Positive',
           volume: 100,
           execution_date: '2026-03-01',
+          brand_presence_sources: [{ url_id: 'url-a' }, { url_id: 'url-b' }],
         },
         {
+          id: 'exec-2',
           topics: 'PDF',
           prompt: 'q2',
           region_code: 'US',
@@ -3520,15 +3523,67 @@ describe('llmo-brand-presence', () => {
           sentiment: 'Negative',
           volume: 200,
           execution_date: '2026-03-02',
+          brand_presence_sources: [{ url_id: 'url-b' }, { url_id: 'url-c' }],
         },
       ];
       const result = aggregateTopicData(rows);
+      expect(result[0].promptCount).to.equal(2);
       expect(result[0].brandMentions).to.equal(1);
       expect(result[0].brandCitations).to.equal(1);
+      expect(result[0].sourceCount).to.equal(3);
       expect(result[0].averageVisibilityScore).to.equal(70);
       expect(result[0].averagePosition).to.equal(4);
       expect(result[0].averageSentiment).to.equal(50);
       expect(result[0].popularityVolume).to.equal('N/A');
+    });
+
+    it('counts mentions across all executions, not just deduplicated', () => {
+      const rows = [
+        {
+          topics: 'PDF',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'PDF',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          execution_date: '2026-03-02',
+        },
+        {
+          topics: 'PDF',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          execution_date: '2026-03-03',
+        },
+      ];
+      const result = aggregateTopicData(rows);
+      expect(result[0].promptCount).to.equal(1);
+      expect(result[0].brandMentions).to.equal(3);
+      expect(result[0].brandCitations).to.equal(2);
+    });
+
+    it('returns sourceCount 0 when no brand_presence_sources on rows', () => {
+      const rows = [
+        {
+          id: 'exec-1',
+          topics: 'PDF',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          execution_date: '2026-03-01',
+        },
+      ];
+      const result = aggregateTopicData(rows);
+      expect(result[0].sourceCount).to.equal(0);
     });
 
     it('uses "Unknown" for rows with null topics', () => {
@@ -3677,7 +3732,7 @@ describe('llmo-brand-presence', () => {
       expect(aggregateTopicData(lowRows)[0].popularityVolume).to.equal('Low');
     });
 
-    it('keeps the latest execution when deduplicating (uses latest for aggregates)', () => {
+    it('deduplicates for promptCount but aggregates metrics across all executions', () => {
       const rows = [
         {
           topics: 'T',
@@ -3686,6 +3741,7 @@ describe('llmo-brand-presence', () => {
           execution_date: '2026-03-10',
           sentiment: 'Positive',
           visibility_score: 90,
+          mentions: true,
         },
         {
           topics: 'T',
@@ -3694,12 +3750,14 @@ describe('llmo-brand-presence', () => {
           execution_date: '2026-03-01',
           sentiment: 'Negative',
           visibility_score: 50,
+          mentions: true,
         },
       ];
       const result = aggregateTopicData(rows);
       expect(result[0].promptCount).to.equal(1);
-      expect(result[0].averageVisibilityScore).to.equal(90);
-      expect(result[0].averageSentiment).to.equal(100);
+      expect(result[0].averageVisibilityScore).to.equal(70);
+      expect(result[0].averageSentiment).to.equal(50);
+      expect(result[0].brandMentions).to.equal(2);
     });
   });
 
@@ -4026,7 +4084,7 @@ describe('llmo-brand-presence', () => {
       expect(client.from).to.have.been.calledWith('brand_presence_executions');
       expect(client.select).to.have.been.calledWith(
         // eslint-disable-next-line max-len
-        'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code',
+        'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)',
       );
     });
 
