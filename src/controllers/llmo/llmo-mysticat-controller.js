@@ -16,6 +16,8 @@ import {
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler, createTopicsHandler,
   createTopicPromptsHandler,
+  createTopicDetailHandler,
+  createPromptDetailHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
@@ -49,6 +51,8 @@ function LlmoMysticatController(ctx) {
   const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
   const getTopics = createTopicsHandler(getOrgAndValidateAccess);
   const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
+  const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
@@ -60,6 +64,8 @@ function LlmoMysticatController(ctx) {
     getSentimentOverview,
     getTopics,
     getTopicPrompts,
+    getTopicDetail,
+    getPromptDetail,
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
