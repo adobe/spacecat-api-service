@@ -57,6 +57,8 @@ tags:
     description: APIs for taking and retrieving webpage screenshots, specifically for consent banner analysis
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: url-inspector
+    description: URL Inspector citation analytics (brand presence data via PostgREST)
   - name: entitlements
     description: Entitlement management operations
   - name: site-enrollments
@@ -496,6 +498,20 @@ paths:
     $ref: './guidelines-api.yaml#/guideline-audits-unlink'
   /sites/{siteId}/sentiment/config:
     $ref: './guidelines-api.yaml#/sentiment-config'
+  /org/{spaceCatId}/brands/{brandId}/url-inspector/stats:
+    $ref: './url-inspector-api.yaml#/url-inspector-stats'
+  /org/{spaceCatId}/brands/{brandId}/url-inspector/owned-urls:
+    $ref: './url-inspector-api.yaml#/url-inspector-owned-urls'
+  /org/{spaceCatId}/brands/{brandId}/url-inspector/trending-urls:
+    $ref: './url-inspector-api.yaml#/url-inspector-trending-urls'
+  /org/{spaceCatId}/brands/{brandId}/url-inspector/cited-domains:
+    $ref: './url-inspector-api.yaml#/url-inspector-cited-domains'
+  /org/{spaceCatId}/brands/{brandId}/url-inspector/url-details:
+    $ref: './url-inspector-api.yaml#/url-inspector-url-details'
+  /org/{spaceCatId}/brands/{brandId}/url-inspector/domain-details:
+    $ref: './url-inspector-api.yaml#/url-inspector-domain-details'
+  /org/{spaceCatId}/brands/{brandId}/url-inspector/filter-options:
+    $ref: './url-inspector-api.yaml#/url-inspector-filter-options'
   /plg/onboard:
     $ref: './plg-onboarding-api.yaml#/plg-onboard'
   /plg/onboard/status/{imsOrgId}:

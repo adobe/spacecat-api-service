@@ -6579,3 +6579,284 @@ PlgOnboarding:
       $ref: '#/DateTime'
     updatedAt:
       $ref: '#/DateTime'
+
+# ============================================================================
+# URL Inspector — response schemas (stubs, refined when endpoints are implemented)
+# ============================================================================
+
+UrlInspectorWeeklyStatsTrend:
+  type: object
+  properties:
+    week:
+      type: string
+      example: '2026-W10'
+    weekNumber:
+      type: integer
+    year:
+      type: integer
+    totalPromptsCited:
+      type: integer
+    totalPrompts:
+      type: integer
+    uniqueUrls:
+      type: integer
+    totalCitations:
+      type: integer
+
+UrlInspectorStatsResponse:
+  type: object
+  properties:
+    totalPromptsCited:
+      type: integer
+    totalPrompts:
+      type: integer
+    uniqueUrls:
+      type: integer
+    totalCitations:
+      type: integer
+    weeklyTrends:
+      type: array
+      items:
+        $ref: '#/UrlInspectorWeeklyStatsTrend'
+
+UrlInspectorTrendIndicator:
+  type: object
+  properties:
+    direction:
+      type: string
+      enum: [up, down, neutral]
+    hasValidComparison:
+      type: boolean
+    weeklyValues:
+      type: array
+      items:
+        type: object
+        properties:
+          week:
+            type: string
+          value:
+            type: number
+
+UrlInspectorOwnedUrlRow:
+  type: object
+  properties:
+    url:
+      type: string
+    citations:
+      type: integer
+    promptsCited:
+      type: integer
+    products:
+      type: array
+      items:
+        type: string
+    regions:
+      type: array
+      items:
+        type: string
+    contentType:
+      type: string
+    citationsTrend:
+      $ref: '#/UrlInspectorTrendIndicator'
+    promptsCitedTrend:
+      $ref: '#/UrlInspectorTrendIndicator'
+
+UrlInspectorOwnedUrlsResponse:
+  type: object
+  properties:
+    urls:
+      type: array
+      items:
+        $ref: '#/UrlInspectorOwnedUrlRow'
+
+UrlInspectorPromptCitation:
+  type: object
+  properties:
+    prompt:
+      type: string
+    count:
+      type: integer
+    id:
+      type: string
+    products:
+      type: array
+      items:
+        type: string
+    topics:
+      type: string
+    region:
+      type: string
+    executionCount:
+      type: integer
+
+UrlInspectorTrendingUrlRow:
+  type: object
+  properties:
+    url:
+      type: string
+    contentType:
+      type: string
+    citations:
+      type: integer
+    promptsCited:
+      type: integer
+    products:
+      type: array
+      items:
+        type: string
+    regions:
+      type: array
+      items:
+        type: string
+    promptCitations:
+      type: array
+      items:
+        $ref: '#/UrlInspectorPromptCitation'
+
+UrlInspectorTrendingUrlsResponse:
+  type: object
+  properties:
+    totalNonOwnedUrls:
+      type: integer
+    urls:
+      type: array
+      items:
+        $ref: '#/UrlInspectorTrendingUrlRow'
+
+UrlInspectorCitedDomainRow:
+  type: object
+  properties:
+    domain:
+      type: string
+    totalCitations:
+      type: integer
+    totalUrls:
+      type: integer
+    promptsCited:
+      type: integer
+    contentType:
+      type: string
+    categories:
+      type: string
+    regions:
+      type: string
+
+UrlInspectorCitedDomainsResponse:
+  type: object
+  properties:
+    totalDomains:
+      type: integer
+    topDomains:
+      type: array
+      items:
+        $ref: '#/UrlInspectorCitedDomainRow'
+    allDomains:
+      type: array
+      items:
+        $ref: '#/UrlInspectorCitedDomainRow'
+
+UrlInspectorUrlDetailsResponse:
+  type: object
+  properties:
+    url:
+      type: string
+    isOwned:
+      type: boolean
+    totalCitations:
+      type: integer
+    promptsCited:
+      type: integer
+    products:
+      type: array
+      items:
+        type: string
+    regions:
+      type: array
+      items:
+        type: string
+    promptCitations:
+      type: array
+      items:
+        $ref: '#/UrlInspectorPromptCitation'
+    weeklyTrends:
+      type: array
+      items:
+        $ref: '#/UrlInspectorWeeklyStatsTrend'
+
+UrlInspectorDomainDetailsResponse:
+  type: object
+  properties:
+    domain:
+      type: string
+    totalCitations:
+      type: integer
+    totalUrls:
+      type: integer
+    promptsCited:
+      type: integer
+    contentType:
+      type: string
+    urls:
+      type: array
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+          citations:
+            type: integer
+          promptsCited:
+            type: integer
+          regions:
+            type: array
+            items:
+              type: string
+          categories:
+            type: array
+            items:
+              type: string
+    totalUrlCount:
+      type: integer
+    weeklyTrends:
+      type: object
+      properties:
+        weeklyDates:
+          type: array
+          items:
+            type: string
+        totalCitations:
+          type: array
+          items:
+            type: integer
+        uniqueUrls:
+          type: array
+          items:
+            type: integer
+        promptsCited:
+          type: array
+          items:
+            type: integer
+        citationsPerUrl:
+          type: array
+          items:
+            type: number
+    urlPaths:
+      type: array
+      items:
+        type: string
+
+UrlInspectorFilterOptionsResponse:
+  type: object
+  properties:
+    regions:
+      type: array
+      items:
+        type: string
+    categories:
+      type: array
+      items:
+        type: string
+    channels:
+      type: array
+      items:
+        type: string

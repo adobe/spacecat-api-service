@@ -51,6 +51,22 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
 
+  // URL Inspector - org-scoped, LLMO product; not yet required by S2S consumers
+  'GET /org/:spaceCatId/brands/all/url-inspector/stats',
+  'GET /org/:spaceCatId/brands/:brandId/url-inspector/stats',
+  'GET /org/:spaceCatId/brands/all/url-inspector/owned-urls',
+  'GET /org/:spaceCatId/brands/:brandId/url-inspector/owned-urls',
+  'GET /org/:spaceCatId/brands/all/url-inspector/trending-urls',
+  'GET /org/:spaceCatId/brands/:brandId/url-inspector/trending-urls',
+  'GET /org/:spaceCatId/brands/all/url-inspector/cited-domains',
+  'GET /org/:spaceCatId/brands/:brandId/url-inspector/cited-domains',
+  'GET /org/:spaceCatId/brands/all/url-inspector/url-details',
+  'GET /org/:spaceCatId/brands/:brandId/url-inspector/url-details',
+  'GET /org/:spaceCatId/brands/all/url-inspector/domain-details',
+  'GET /org/:spaceCatId/brands/:brandId/url-inspector/domain-details',
+  'GET /org/:spaceCatId/brands/all/url-inspector/filter-options',
+  'GET /org/:spaceCatId/brands/:brandId/url-inspector/filter-options',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'POST /llmo/onboard',

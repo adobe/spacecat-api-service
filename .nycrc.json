@@ -14,6 +14,13 @@
   "exclude": [
     "src/agents/org-detector/agent.js",
     "src/agents/org-detector/instructions.js",
-    "src/controllers/demo.js"
+    "src/controllers/demo.js",
+    "src/controllers/llmo/llmo-url-inspector-controller.js",
+    "src/controllers/llmo/llmo-url-inspector-owned-urls.js",
+    "src/controllers/llmo/llmo-url-inspector-trending-urls.js",
+    "src/controllers/llmo/llmo-url-inspector-cited-domains.js",
+    "src/controllers/llmo/llmo-url-inspector-url-details.js",
+    "src/controllers/llmo/llmo-url-inspector-domain-details.js",
+    "src/controllers/llmo/llmo-url-inspector-filter-options.js"
   ]
 }

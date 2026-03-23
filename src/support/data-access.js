@@ -12,6 +12,10 @@
 
 import dataAccessV2 from '@adobe/spacecat-shared-data-access-v2';
 import dataAccessV3 from '@adobe/spacecat-shared-data-access';
+// TEMP: Local DB routing - import for creating a second PostgREST client
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { PostgrestClient } from '@supabase/postgrest-js';
+// END TEMP
 
 /**
  * Data access middleware wrapper that selects between v2 (DynamoDB) and v3 (Postgres)
@@ -31,7 +35,26 @@ export default function dataAccess(fn) {
           'DATA_SERVICE_PROVIDER is set to "postgres" but POSTGREST_URL is not configured',
         );
       }
-      return dataAccessV3(fn)(request, context);
+
+      // TEMP: Local DB routing - Wrap fn to inject a local PostgREST client for URL Inspector
+      const wrappedFn = async (req, ctx) => {
+        if (env.POSTGREST_URL_LOCAL) {
+          ctx.localPostgrestClient = new PostgrestClient(env.POSTGREST_URL_LOCAL, {
+            schema: env.POSTGREST_SCHEMA || 'public',
+            headers: {
+              ...(env.POSTGREST_API_KEY_LOCAL ? {
+                apikey: env.POSTGREST_API_KEY_LOCAL,
+                Authorization: `Bearer ${env.POSTGREST_API_KEY_LOCAL}`,
+              } : {}),
+            },
+          });
+          ctx.log.info('TEMP: Local PostgREST client initialized for URL Inspector');
+        }
+        return fn(req, ctx);
+      };
+      // END TEMP
+
+      return dataAccessV3(wrappedFn)(request, context);
     }
     return dataAccessV2(fn)(request, context);
   };
