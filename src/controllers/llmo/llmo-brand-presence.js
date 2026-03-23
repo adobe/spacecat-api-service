@@ -1176,7 +1176,12 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const endDate = params.endDate || defaults.endDate;
       const model = params.model || 'chatgpt';
 
-      const topicName = decodeURIComponent(topicId);
+      let topicName;
+      try {
+        topicName = decodeURIComponent(topicId);
+      } catch {
+        return badRequest('Invalid topic ID encoding');
+      }
 
       let q = client
         .from('brand_presence_executions')

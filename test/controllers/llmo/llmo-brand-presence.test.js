@@ -4370,6 +4370,19 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(403);
     });
 
+    it('returns badRequest for malformed percent-encoded topicId', async () => {
+      mockContext.params.topicId = '%GG';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: [],
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
     it('returns ok with items and totalCount for valid data', async () => {
       const rows = [
         {
