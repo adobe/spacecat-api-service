@@ -3851,7 +3851,7 @@ describe('LlmoController', () => {
 
       const commandArg = mockGetSignedUrl.getCall(0).args[1];
       expect(commandArg.params.Key).to.equal(
-        'workspace/llmo/opportunity-workspace/demo/summit-demo-brand-presence.json',
+        'workspace/llmo/demo/summit-demo-brand-presence.json',
       );
     });
 
@@ -3913,7 +3913,7 @@ describe('LlmoController', () => {
 
       const commandArg = mockGetSignedUrl.getCall(0).args[1];
       expect(commandArg.params.Key).to.equal(
-        'workspace/llmo/opportunity-workspace/demo/summit-demo-recommendations.json',
+        'workspace/llmo/demo/summit-demo-recommendations.json',
       );
     });
 
