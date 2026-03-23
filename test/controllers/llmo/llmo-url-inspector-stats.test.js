@@ -401,6 +401,21 @@ describe('llmo-url-inspector-stats', () => {
       expect(mockContext.log.error).to.have.been.called;
     });
 
+    it('handles missing context.params gracefully (defaults brandId to null)', async () => {
+      const rpcMock = createRpcMock({ data: [aggRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.params = undefined;
+
+      const handler = createStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(rpcMock.rpc).to.have.been.calledOnceWith(
+        'rpc_url_inspector_stats',
+        sinon.match({ p_brand_id: null }),
+      );
+    });
+
     it('handles null context.data gracefully', async () => {
       const rpcMock = createRpcMock({ data: [], error: null });
       mockContext.dataAccess.Site.postgrestService = rpcMock;
