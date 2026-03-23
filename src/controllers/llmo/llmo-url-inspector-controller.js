@@ -11,24 +11,25 @@
  */
 
 import AccessControlUtil from '../../support/access-control-util.js';
-import {
-  createStatsHandler,
-  createOwnedUrlsHandler,
-  createTrendingUrlsHandler,
-  createCitedDomainsHandler,
-  createUrlDetailsHandler,
-  createDomainDetailsHandler,
-  createFilterOptionsHandler,
-} from './llmo-url-inspector.js';
+import { createStatsHandler } from './llmo-url-inspector-stats.js';
+import { createOwnedUrlsHandler } from './llmo-url-inspector-owned-urls.js';
+import { createTrendingUrlsHandler } from './llmo-url-inspector-trending-urls.js';
+import { createCitedDomainsHandler } from './llmo-url-inspector-cited-domains.js';
+import { createUrlDetailsHandler } from './llmo-url-inspector-url-details.js';
+import { createDomainDetailsHandler } from './llmo-url-inspector-domain-details.js';
+import { createFilterOptionsHandler } from './llmo-url-inspector-filter-options.js';
 
 /**
  * Controller for URL Inspector org-scoped endpoints.
  * Queries brand_presence citation data via PostgREST.
  *
- * Route pattern: GET /org/:spaceCatId/url-inspector/<resource>?siteId=...
+ * Route pattern:
+ *   GET /org/:spaceCatId/brands/all/url-inspector/<resource>?siteId=...
+ *   GET /org/:spaceCatId/brands/:brandId/url-inspector/<resource>?siteId=...
  *
- * Mirrors LlmoMysticatController: validates org membership + LLMO entitlement,
- * then delegates to per-resource handler factories in llmo-url-inspector.js.
+ * Each handler lives in its own file (llmo-url-inspector-<feature>.js) to allow
+ * parallel implementation without merge conflicts. Shared utilities are in
+ * llmo-url-inspector.js.
  */
 function LlmoUrlInspectorController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);

@@ -406,14 +406,22 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
 
     // URL Inspector (PostgREST/brand_presence citation data)
-    // spaceCatId = organization_id. siteId passed as query parameter.
-    'GET /org/:spaceCatId/url-inspector/stats': llmoUrlInspectorController.getStats,
-    'GET /org/:spaceCatId/url-inspector/owned-urls': llmoUrlInspectorController.getOwnedUrls,
-    'GET /org/:spaceCatId/url-inspector/trending-urls': llmoUrlInspectorController.getTrendingUrls,
-    'GET /org/:spaceCatId/url-inspector/cited-domains': llmoUrlInspectorController.getCitedDomains,
-    'GET /org/:spaceCatId/url-inspector/url-details': llmoUrlInspectorController.getUrlDetails,
-    'GET /org/:spaceCatId/url-inspector/domain-details': llmoUrlInspectorController.getDomainDetails,
-    'GET /org/:spaceCatId/url-inspector/filter-options': llmoUrlInspectorController.getFilterOptions,
+    // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
+    // siteId passed as query parameter.
+    'GET /org/:spaceCatId/brands/all/url-inspector/stats': llmoUrlInspectorController.getStats,
+    'GET /org/:spaceCatId/brands/:brandId/url-inspector/stats': llmoUrlInspectorController.getStats,
+    'GET /org/:spaceCatId/brands/all/url-inspector/owned-urls': llmoUrlInspectorController.getOwnedUrls,
+    'GET /org/:spaceCatId/brands/:brandId/url-inspector/owned-urls': llmoUrlInspectorController.getOwnedUrls,
+    'GET /org/:spaceCatId/brands/all/url-inspector/trending-urls': llmoUrlInspectorController.getTrendingUrls,
+    'GET /org/:spaceCatId/brands/:brandId/url-inspector/trending-urls': llmoUrlInspectorController.getTrendingUrls,
+    'GET /org/:spaceCatId/brands/all/url-inspector/cited-domains': llmoUrlInspectorController.getCitedDomains,
+    'GET /org/:spaceCatId/brands/:brandId/url-inspector/cited-domains': llmoUrlInspectorController.getCitedDomains,
+    'GET /org/:spaceCatId/brands/all/url-inspector/url-details': llmoUrlInspectorController.getUrlDetails,
+    'GET /org/:spaceCatId/brands/:brandId/url-inspector/url-details': llmoUrlInspectorController.getUrlDetails,
+    'GET /org/:spaceCatId/brands/all/url-inspector/domain-details': llmoUrlInspectorController.getDomainDetails,
+    'GET /org/:spaceCatId/brands/:brandId/url-inspector/domain-details': llmoUrlInspectorController.getDomainDetails,
+    'GET /org/:spaceCatId/brands/all/url-inspector/filter-options': llmoUrlInspectorController.getFilterOptions,
+    'GET /org/:spaceCatId/brands/:brandId/url-inspector/filter-options': llmoUrlInspectorController.getFilterOptions,
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,

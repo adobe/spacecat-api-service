@@ -1,6 +1,7 @@
-# URL Inspector API — org-scoped endpoints for brand presence citation data.
-# Route pattern: GET /org/{spaceCatId}/url-inspector/<resource>?siteId=...
-# All endpoints are currently stubs returning HTTP 501.
+# URL Inspector API — org+brand scoped endpoints for brand presence citation data.
+# Route pattern:
+#   GET /org/{spaceCatId}/brands/all/url-inspector/<resource>?siteId=...
+#   GET /org/{spaceCatId}/brands/{brandId}/url-inspector/<resource>?siteId=...
 
 url-inspector-stats:
   parameters:
@@ -11,13 +12,19 @@ url-inspector-stats:
       schema:
         type: string
         format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID) or literal "all" for all brands
+      schema:
+        type: string
   get:
     tags:
       - llmo
       - url-inspector
-    summary: Not implemented yet — URL Inspector aggregate stats
+    summary: URL Inspector aggregate stats
     description: |
-      Not implemented yet. Returns aggregate citation statistics and weekly sparkline
+      Returns aggregate citation statistics and weekly sparkline
       trends for the URL Inspector dashboard stats cards.
       Query parameters: siteId (required), startDate, endDate, category, region, channel, platform.
     operationId: getUrlInspectorStats
@@ -73,8 +80,6 @@ url-inspector-stats:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
-      '501':
-        description: Not implemented yet
     security:
       - ims_key: []
 
@@ -87,14 +92,22 @@ url-inspector-owned-urls:
       schema:
         type: string
         format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID) or literal "all" for all brands
+      schema:
+        type: string
   get:
     tags:
       - llmo
       - url-inspector
-    summary: Not implemented yet — Owned URLs citation data
+    summary: Owned URLs citation data
     description: |
-      Not implemented yet. Returns owned URL citation data with per-URL WoW trend indicators
-      for the Owned URLs table tab.
+      Returns owned URL citation data with per-URL WoW trend indicators
+      for the Owned URLs table tab. Each URL includes total citations,
+      distinct prompts cited, product/region arrays, and weekly trend
+      breakdowns comparing the last two weeks (up/down/neutral).
     operationId: getUrlInspectorOwnedUrls
     parameters:
       - name: siteId
@@ -141,8 +154,6 @@ url-inspector-owned-urls:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
-      '501':
-        description: Not implemented yet
     security:
       - ims_key: []
 
@@ -155,14 +166,23 @@ url-inspector-trending-urls:
       schema:
         type: string
         format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID) or literal "all" for all brands
+      schema:
+        type: string
   get:
     tags:
       - llmo
       - url-inspector
-    summary: Not implemented yet — Third-party (trending) URLs
+    summary: Third-party (trending) URLs by citation count
     description: |
-      Not implemented yet. Returns non-owned URL citations sorted by citation count
-      for the Trending URLs table tab.
+      Returns non-owned URL citations sorted by citation count for the Trending URLs
+      table tab. Each URL includes aggregate metrics (total citations, unique prompts
+      cited, categories, regions) and a per-prompt breakdown with execution counts.
+      Results are capped by the `limit` parameter (default 2000). The response also
+      includes `totalNonOwnedUrls` — the full distinct URL count before the limit.
     operationId: getUrlInspectorTrendingUrls
     parameters:
       - name: siteId
@@ -215,8 +235,6 @@ url-inspector-trending-urls:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
-      '501':
-        description: Not implemented yet
     security:
       - ims_key: []
 
@@ -229,14 +247,22 @@ url-inspector-cited-domains:
       schema:
         type: string
         format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID) or literal "all" for all brands
+      schema:
+        type: string
   get:
     tags:
       - llmo
       - url-inspector
-    summary: Not implemented yet — Cited domains aggregation
+    summary: Cited domains aggregation
     description: |
-      Not implemented yet. Returns domain-level citation aggregations
-      for the Cited Domains table tab.
+      Returns domain-level citation aggregations for the Cited Domains table tab.
+      Groups brand_presence_sources by domain hostname, returning total citations,
+      distinct URLs, distinct prompts, dominant content type, and comma-separated
+      categories/regions. Supports optional filters and a limit parameter.
     operationId: getUrlInspectorCitedDomains
     parameters:
       - name: siteId
@@ -295,8 +321,6 @@ url-inspector-cited-domains:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
-      '501':
-        description: Not implemented yet
     security:
       - ims_key: []
 
@@ -309,14 +333,22 @@ url-inspector-url-details:
       schema:
         type: string
         format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID) or literal "all" for all brands
+      schema:
+        type: string
   get:
     tags:
       - llmo
       - url-inspector
-    summary: Not implemented yet — Single URL detail view
+    summary: Single URL detail view
     description: |
-      Not implemented yet. Returns detailed citation data for a single URL including
-      prompt citations breakdown and weekly trends.
+      Returns detailed citation data for a single URL including summary stats
+      (isOwned, totalCitations, promptsCited, products, regions), a prompt
+      citations breakdown sorted by count descending, and weekly trend data.
+      Filters (category, region, channel) narrow the aggregated results.
     operationId: getUrlInspectorUrlDetails
     parameters:
       - name: siteId
@@ -365,8 +397,6 @@ url-inspector-url-details:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
-      '501':
-        description: Not implemented yet
     security:
       - ims_key: []
 
@@ -379,14 +409,23 @@ url-inspector-domain-details:
       schema:
         type: string
         format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID) or literal "all" for all brands
+      schema:
+        type: string
   get:
     tags:
       - llmo
       - url-inspector
-    summary: Not implemented yet — Single domain detail view
+    summary: Single domain detail view
     description: |
-      Not implemented yet. Returns domain-level aggregate data including URLs under
+      Returns domain-level aggregate data including URLs under
       the domain, weekly trends, and normalized URL paths for agentic/referral filtering.
+      Filters (category, region, channel) narrow the aggregated results client-side.
+      The `urlLimit` parameter caps the `urls` array while `totalUrlCount` reflects the
+      full distinct URL count before the limit.
     operationId: getUrlInspectorDomainDetails
     parameters:
       - name: siteId
@@ -441,8 +480,6 @@ url-inspector-domain-details:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
-      '501':
-        description: Not implemented yet
     security:
       - ims_key: []
 
@@ -455,14 +492,25 @@ url-inspector-filter-options:
       schema:
         type: string
         format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID) or literal "all" for all brands
+      schema:
+        type: string
   get:
     tags:
       - llmo
       - url-inspector
-    summary: Not implemented yet — Filter dropdown options
+    summary: Filter dropdown options
     description: |
-      Not implemented yet. Returns distinct filter values (regions, categories, channels)
+      Returns distinct filter values (regions, categories, channels)
       derived from the citation data for populating filter dropdowns.
+      Queries brand_presence_executions for distinct category and region values,
+      and brand_presence_sources for distinct content_type (channel) values.
+      Only siteId, date range, and platform filters are applied — category, region,
+      and channel filters are not used here since this endpoint provides the
+      available options for those filters.
     operationId: getUrlInspectorFilterOptions
     parameters:
       - name: siteId
@@ -497,7 +545,5 @@ url-inspector-filter-options:
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
-      '501':
-        description: Not implemented yet
     security:
       - ims_key: []

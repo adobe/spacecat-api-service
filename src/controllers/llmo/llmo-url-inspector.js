@@ -16,12 +16,15 @@ import {
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
- * URL Inspector handlers for org-scoped routes.
- * Queries brand_presence data via PostgREST to serve URL citation metrics.
- * Route pattern: /org/:spaceCatId/url-inspector/<resource>?siteId=...
+ * URL Inspector — shared utilities for org+brand scoped PostgREST handlers.
+ * Route pattern:
+ *   /org/:spaceCatId/brands/all/url-inspector/<resource>?siteId=...
+ *   /org/:spaceCatId/brands/:brandId/url-inspector/<resource>?siteId=...
  *
- * Each handler follows the same factory pattern as llmo-brand-presence.js:
- *   createXxxHandler(getOrgAndValidateAccess) → (context) => Response
+ * Individual handler factories live in their own files:
+ *   llmo-url-inspector-stats.js, llmo-url-inspector-owned-urls.js, etc.
+ *
+ * All handlers import the helpers below.
  */
 
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
@@ -37,11 +40,16 @@ const ERR_NOT_FOUND = 'not found';
  * @param {Function} handlerFn - Async (context, client) => Response
  * @returns {Promise<Response>}
  */
-async function withUrlInspectorAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
+// eslint-disable-next-line max-len
+export async function withUrlInspectorAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
   const { log, dataAccess } = context;
   const { Site } = dataAccess;
 
-  if (!Site?.postgrestService) {
+  // TEMP: Local DB routing - Use local PostgREST if available for testing
+  const client = context.localPostgrestClient || Site?.postgrestService;
+  // END TEMP
+
+  if (!client) {
     log.error('URL Inspector APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
     return badRequest('URL Inspector data is not available. PostgreSQL data service is required.');
   }
@@ -60,7 +68,7 @@ async function withUrlInspectorAuth(context, getOrgAndValidateAccess, handlerNam
   }
 
   try {
-    return await handlerFn(context, Site.postgrestService);
+    return await handlerFn(context, client);
   } catch (error) {
     log.error(`URL Inspector ${handlerName} unexpected error: ${error.message}`);
     return internalServerError(`URL Inspector ${handlerName} failed`);
@@ -75,12 +83,15 @@ export function shouldApplyFilter(value) {
 }
 
 /**
- * Parses the common URL Inspector query parameters from context.data.
+ * Parses the common URL Inspector parameters.
+ * brandId comes from context.params (path); everything else from context.data (query).
  * Supports both camelCase (frontend) and snake_case (PostgREST convention).
  */
 export function parseUrlInspectorParams(context) {
   const q = context.data || {};
+  const { brandId } = context.params || {};
   return {
+    brandId: brandId && brandId !== 'all' ? brandId : null,
     siteId: q.siteId || q.site_id,
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
@@ -103,151 +114,4 @@ export function requireSiteId(params) {
     return badRequest('siteId query parameter is required');
   }
   return null;
-}
-
-// ============================================================================
-// Handler Factories — each returns 501 until the real implementation lands
-// ============================================================================
-
-const NOT_IMPLEMENTED = (name) => ({ status: 501, body: { error: `Not implemented yet: url-inspector/${name}` } });
-
-/**
- * GET /org/:spaceCatId/url-inspector/stats
- * @see docs/api-specs/01-stats-cards.md (elmo-ui)
- */
-export function createStatsHandler(getOrgAndValidateAccess) {
-  return (context) => withUrlInspectorAuth(
-    context,
-    getOrgAndValidateAccess,
-    'stats',
-    async (ctx) => {
-      const params = parseUrlInspectorParams(ctx);
-      const siteError = requireSiteId(params);
-      if (siteError) return siteError;
-
-      return NOT_IMPLEMENTED('stats');
-    },
-  );
-}
-
-/**
- * GET /org/:spaceCatId/url-inspector/owned-urls
- * @see docs/api-specs/02-owned-urls-table.md (elmo-ui)
- */
-export function createOwnedUrlsHandler(getOrgAndValidateAccess) {
-  return (context) => withUrlInspectorAuth(
-    context,
-    getOrgAndValidateAccess,
-    'owned-urls',
-    async (ctx) => {
-      const params = parseUrlInspectorParams(ctx);
-      const siteError = requireSiteId(params);
-      if (siteError) return siteError;
-
-      return NOT_IMPLEMENTED('owned-urls');
-    },
-  );
-}
-
-/**
- * GET /org/:spaceCatId/url-inspector/trending-urls
- * @see docs/api-specs/03-trending-urls-table.md (elmo-ui)
- */
-export function createTrendingUrlsHandler(getOrgAndValidateAccess) {
-  return (context) => withUrlInspectorAuth(
-    context,
-    getOrgAndValidateAccess,
-    'trending-urls',
-    async (ctx) => {
-      const params = parseUrlInspectorParams(ctx);
-      const siteError = requireSiteId(params);
-      if (siteError) return siteError;
-
-      return NOT_IMPLEMENTED('trending-urls');
-    },
-  );
-}
-
-/**
- * GET /org/:spaceCatId/url-inspector/cited-domains
- * @see docs/api-specs/04-cited-domains-table.md (elmo-ui)
- */
-export function createCitedDomainsHandler(getOrgAndValidateAccess) {
-  return (context) => withUrlInspectorAuth(
-    context,
-    getOrgAndValidateAccess,
-    'cited-domains',
-    async (ctx) => {
-      const params = parseUrlInspectorParams(ctx);
-      const siteError = requireSiteId(params);
-      if (siteError) return siteError;
-
-      return NOT_IMPLEMENTED('cited-domains');
-    },
-  );
-}
-
-/**
- * GET /org/:spaceCatId/url-inspector/url-details
- * @see docs/api-specs/05-url-details-dialog.md (elmo-ui)
- */
-export function createUrlDetailsHandler(getOrgAndValidateAccess) {
-  return (context) => withUrlInspectorAuth(
-    context,
-    getOrgAndValidateAccess,
-    'url-details',
-    async (ctx) => {
-      const params = parseUrlInspectorParams(ctx);
-      const siteError = requireSiteId(params);
-      if (siteError) return siteError;
-
-      if (!hasText(params.url)) {
-        return badRequest('url query parameter is required');
-      }
-
-      return NOT_IMPLEMENTED('url-details');
-    },
-  );
-}
-
-/**
- * GET /org/:spaceCatId/url-inspector/domain-details
- * @see docs/api-specs/06-domain-details-dialog.md (elmo-ui)
- */
-export function createDomainDetailsHandler(getOrgAndValidateAccess) {
-  return (context) => withUrlInspectorAuth(
-    context,
-    getOrgAndValidateAccess,
-    'domain-details',
-    async (ctx) => {
-      const params = parseUrlInspectorParams(ctx);
-      const siteError = requireSiteId(params);
-      if (siteError) return siteError;
-
-      if (!hasText(params.domain)) {
-        return badRequest('domain query parameter is required');
-      }
-
-      return NOT_IMPLEMENTED('domain-details');
-    },
-  );
-}
-
-/**
- * GET /org/:spaceCatId/url-inspector/filter-options
- * @see docs/api-specs/07-filter-options.md (elmo-ui)
- */
-export function createFilterOptionsHandler(getOrgAndValidateAccess) {
-  return (context) => withUrlInspectorAuth(
-    context,
-    getOrgAndValidateAccess,
-    'filter-options',
-    async (ctx) => {
-      const params = parseUrlInspectorParams(ctx);
-      const siteError = requireSiteId(params);
-      if (siteError) return siteError;
-
-      return NOT_IMPLEMENTED('filter-options');
-    },
-  );
 }
