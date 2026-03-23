@@ -257,6 +257,16 @@ describe('getRouteHandlers', () => {
     getFilterDimensions: () => null,
   };
 
+  const mockLlmoUrlInspectorController = {
+    getStats: () => null,
+    getOwnedUrls: () => null,
+    getTrendingUrls: () => null,
+    getCitedDomains: () => null,
+    getUrlDetails: () => null,
+    getDomainDetails: () => null,
+    getFilterOptions: () => null,
+  };
+
   const mockLlmoController = {
     getLlmoSheetData: () => null,
     getLlmoGlobalSheetData: () => null,
@@ -394,6 +404,7 @@ describe('getRouteHandlers', () => {
       mockFixesController,
       mockLlmoController,
       mockLlmoMysticatController,
+      mockLlmoUrlInspectorController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -494,6 +505,13 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
       'GET /org/:spaceCatId/brands/all/brand-presence/stats',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+      'GET /org/:spaceCatId/url-inspector/stats',
+      'GET /org/:spaceCatId/url-inspector/owned-urls',
+      'GET /org/:spaceCatId/url-inspector/trending-urls',
+      'GET /org/:spaceCatId/url-inspector/cited-domains',
+      'GET /org/:spaceCatId/url-inspector/url-details',
+      'GET /org/:spaceCatId/url-inspector/domain-details',
+      'GET /org/:spaceCatId/url-inspector/filter-options',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
       'POST /v2/orgs/:spaceCatId/llmo-customer-config',
       'GET /organizations/:organizationId/projects',

@@ -74,6 +74,7 @@ function isStaticRoute(routePattern) {
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
+ * @param {Object} llmoUrlInspectorController - The LLMO URL Inspector controller (citation APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
@@ -119,6 +120,7 @@ export default function getRouteHandlers(
   fixesController,
   llmoController,
   llmoMysticatController,
+  llmoUrlInspectorController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -402,6 +404,16 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
+
+    // URL Inspector (PostgREST/brand_presence citation data)
+    // spaceCatId = organization_id. siteId passed as query parameter.
+    'GET /org/:spaceCatId/url-inspector/stats': llmoUrlInspectorController.getStats,
+    'GET /org/:spaceCatId/url-inspector/owned-urls': llmoUrlInspectorController.getOwnedUrls,
+    'GET /org/:spaceCatId/url-inspector/trending-urls': llmoUrlInspectorController.getTrendingUrls,
+    'GET /org/:spaceCatId/url-inspector/cited-domains': llmoUrlInspectorController.getCitedDomains,
+    'GET /org/:spaceCatId/url-inspector/url-details': llmoUrlInspectorController.getUrlDetails,
+    'GET /org/:spaceCatId/url-inspector/domain-details': llmoUrlInspectorController.getDomainDetails,
+    'GET /org/:spaceCatId/url-inspector/filter-options': llmoUrlInspectorController.getFilterOptions,
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,

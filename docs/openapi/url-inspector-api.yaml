@@ -1,0 +1,503 @@
+# URL Inspector API — org-scoped endpoints for brand presence citation data.
+# Route pattern: GET /org/{spaceCatId}/url-inspector/<resource>?siteId=...
+# All endpoints are currently stubs returning HTTP 501.
+
+url-inspector-stats:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - llmo
+      - url-inspector
+    summary: Not implemented yet — URL Inspector aggregate stats
+    description: |
+      Not implemented yet. Returns aggregate citation statistics and weekly sparkline
+      trends for the URL Inspector dashboard stats cards.
+      Query parameters: siteId (required), startDate, endDate, category, region, channel, platform.
+    operationId: getUrlInspectorStats
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Customer site ID
+      - name: startDate
+        in: query
+        schema:
+          type: string
+          format: date
+        description: Start date (YYYY-MM-DD)
+      - name: endDate
+        in: query
+        schema:
+          type: string
+          format: date
+        description: End date (YYYY-MM-DD)
+      - name: category
+        in: query
+        schema:
+          type: string
+        description: Filter by category
+      - name: region
+        in: query
+        schema:
+          type: string
+        description: Filter by region
+      - name: channel
+        in: query
+        schema:
+          type: string
+        description: Filter by content type / channel
+      - name: platform
+        in: query
+        schema:
+          type: string
+        description: Platform filter
+    responses:
+      '200':
+        description: Aggregate stats with weekly sparkline data
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorStatsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '501':
+        description: Not implemented yet
+    security:
+      - ims_key: []
+
+url-inspector-owned-urls:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - llmo
+      - url-inspector
+    summary: Not implemented yet — Owned URLs citation data
+    description: |
+      Not implemented yet. Returns owned URL citation data with per-URL WoW trend indicators
+      for the Owned URLs table tab.
+    operationId: getUrlInspectorOwnedUrls
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: startDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: region
+        in: query
+        schema:
+          type: string
+      - name: channel
+        in: query
+        schema:
+          type: string
+      - name: platform
+        in: query
+        schema:
+          type: string
+    responses:
+      '200':
+        description: List of owned URLs with citation metrics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorOwnedUrlsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '501':
+        description: Not implemented yet
+    security:
+      - ims_key: []
+
+url-inspector-trending-urls:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - llmo
+      - url-inspector
+    summary: Not implemented yet — Third-party (trending) URLs
+    description: |
+      Not implemented yet. Returns non-owned URL citations sorted by citation count
+      for the Trending URLs table tab.
+    operationId: getUrlInspectorTrendingUrls
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: startDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: region
+        in: query
+        schema:
+          type: string
+      - name: channel
+        in: query
+        schema:
+          type: string
+      - name: platform
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 2000
+        description: Max URLs to return
+    responses:
+      '200':
+        description: List of non-owned URLs with citation data
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorTrendingUrlsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '501':
+        description: Not implemented yet
+    security:
+      - ims_key: []
+
+url-inspector-cited-domains:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - llmo
+      - url-inspector
+    summary: Not implemented yet — Cited domains aggregation
+    description: |
+      Not implemented yet. Returns domain-level citation aggregations
+      for the Cited Domains table tab.
+    operationId: getUrlInspectorCitedDomains
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: startDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: region
+        in: query
+        schema:
+          type: string
+      - name: channel
+        in: query
+        schema:
+          type: string
+      - name: platform
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 200
+        description: Max domains for display
+      - name: includeAll
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: If true, return all domains (for CSV export)
+    responses:
+      '200':
+        description: Domain-level citation aggregations
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorCitedDomainsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '501':
+        description: Not implemented yet
+    security:
+      - ims_key: []
+
+url-inspector-url-details:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - llmo
+      - url-inspector
+    summary: Not implemented yet — Single URL detail view
+    description: |
+      Not implemented yet. Returns detailed citation data for a single URL including
+      prompt citations breakdown and weekly trends.
+    operationId: getUrlInspectorUrlDetails
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: url
+        in: query
+        required: true
+        schema:
+          type: string
+        description: The URL to get details for
+      - name: startDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: region
+        in: query
+        schema:
+          type: string
+      - name: channel
+        in: query
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Detailed URL citation data
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorUrlDetailsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '501':
+        description: Not implemented yet
+    security:
+      - ims_key: []
+
+url-inspector-domain-details:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - llmo
+      - url-inspector
+    summary: Not implemented yet — Single domain detail view
+    description: |
+      Not implemented yet. Returns domain-level aggregate data including URLs under
+      the domain, weekly trends, and normalized URL paths for agentic/referral filtering.
+    operationId: getUrlInspectorDomainDetails
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: domain
+        in: query
+        required: true
+        schema:
+          type: string
+        description: The domain hostname to get details for
+      - name: startDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: region
+        in: query
+        schema:
+          type: string
+      - name: channel
+        in: query
+        schema:
+          type: string
+      - name: urlLimit
+        in: query
+        schema:
+          type: integer
+          default: 200
+        description: Max URLs to return for this domain
+    responses:
+      '200':
+        description: Domain detail data with URLs and weekly trends
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorDomainDetailsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '501':
+        description: Not implemented yet
+    security:
+      - ims_key: []
+
+url-inspector-filter-options:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - llmo
+      - url-inspector
+    summary: Not implemented yet — Filter dropdown options
+    description: |
+      Not implemented yet. Returns distinct filter values (regions, categories, channels)
+      derived from the citation data for populating filter dropdowns.
+    operationId: getUrlInspectorFilterOptions
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: startDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: platform
+        in: query
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Available filter options
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorFilterOptionsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '501':
+        description: Not implemented yet
+    security:
+      - ims_key: []
