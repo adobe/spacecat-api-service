@@ -856,6 +856,384 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
   );
 }
 
+// ── Topics (Data Insights Table) ────────────────────────────────────────────
+
+const SORT_FIELD_MAP = {
+  name: 'topic',
+  visibility: 'averageVisibilityScore',
+  mentions: 'brandMentions',
+  citations: 'brandCitations',
+  sentiment: 'averageSentiment',
+  popularity: 'popularityVolume',
+  position: 'averagePosition',
+};
+
+/**
+ * Builds a deduplication key for prompts within a single topic.
+ * Since all rows in the group already share the same topic name,
+ * the dedup key is prompt|region_code (not including topics).
+ * @internal Exported for testing
+ */
+export function buildTopicPromptKey(row) {
+  const prompt = row.prompt || '';
+  const region = row.region_code || 'Unknown';
+  return `${prompt}|${region}`;
+}
+
+/**
+ * Converts the average of imputed volume values to a categorical label.
+ * Backend encoding: -30 = High, -20 = Medium, -10 = Low.
+ * @param {number} volumeSum - Sum of volume values
+ * @param {number} volumeCount - Number of volume values
+ * @returns {string} 'High', 'Medium', 'Low', or 'N/A'
+ */
+function volumeToCategory(volumeSum, volumeCount) {
+  if (volumeCount === 0) return 'N/A';
+  const avg = volumeSum / volumeCount;
+  if (avg <= -25) return 'High';
+  if (avg <= -15) return 'Medium';
+  if (avg < 0) return 'Low';
+  return 'N/A';
+}
+
+/**
+ * Aggregates raw execution rows into topic-level summary objects.
+ * Groups by topic name, deduplicates prompts by prompt|region_code within
+ * each topic, keeps the latest execution per unique prompt, and computes
+ * topic-level aggregate metrics. Does NOT return individual prompt items
+ * (those are loaded separately via the /topics/:topicId/prompts endpoint).
+ *
+ * @param {Array<Object>} rows - Raw brand_presence_executions rows
+ *   (with embedded brand_presence_sources)
+ * @returns {Array<Object>} TopicDetail-compatible objects (without items)
+ * @internal Exported for testing
+ */
+export function aggregateTopicData(rows) {
+  // First pass: group ALL rows by topic and accumulate counts from every
+  // execution (matching the original UI which counts across all dates).
+  const topicAgg = new Map();
+
+  rows.forEach((row) => {
+    const topicName = row.topics || 'Unknown';
+    if (!topicAgg.has(topicName)) {
+      topicAgg.set(topicName, {
+        promptMap: new Map(),
+        totalMentions: 0,
+        totalCitations: 0,
+        uniqueSourceUrlIds: new Set(),
+        visibilitySum: 0,
+        visibilityCount: 0,
+        positionSum: 0,
+        positionCount: 0,
+        sentimentSum: 0,
+        sentimentCount: 0,
+        volumeSum: 0,
+        volumeCount: 0,
+      });
+    }
+    const agg = topicAgg.get(topicName);
+
+    // Dedup prompts (keep latest execution) — used only for promptCount
+    const key = buildTopicPromptKey(row);
+    const existing = agg.promptMap.get(key);
+    if (!existing || (row.execution_date > existing.execution_date)) {
+      agg.promptMap.set(key, row);
+    }
+
+    // Count mentions/citations from EVERY execution row
+    if (row.mentions === true || row.mentions === 'true') agg.totalMentions += 1;
+    if (row.citations === true || row.citations === 'true') agg.totalCitations += 1;
+
+    if (Array.isArray(row.brand_presence_sources)) {
+      row.brand_presence_sources.forEach((s) => {
+        if (s.url_id) agg.uniqueSourceUrlIds.add(s.url_id);
+      });
+    }
+
+    const vs = row.visibility_score != null ? Number(row.visibility_score) : NaN;
+    if (!Number.isNaN(vs)) {
+      agg.visibilitySum += vs;
+      agg.visibilityCount += 1;
+    }
+
+    const pos = row.position;
+    if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
+      agg.positionSum += Number(pos);
+      agg.positionCount += 1;
+    }
+
+    const sentiment = (row.sentiment || '').toLowerCase().trim();
+    if (sentiment === 'positive') {
+      agg.sentimentSum += 100;
+      agg.sentimentCount += 1;
+    } else if (sentiment === 'neutral') {
+      agg.sentimentSum += 50;
+      agg.sentimentCount += 1;
+    } else if (sentiment === 'negative') {
+      agg.sentimentCount += 1;
+    }
+
+    const vol = row.volume != null ? Number(row.volume) : NaN;
+    if (!Number.isNaN(vol)) {
+      agg.volumeSum += vol;
+      agg.volumeCount += 1;
+    }
+  });
+
+  return [...topicAgg.entries()].map(([topicName, agg]) => {
+    const avgVisibility = agg.visibilityCount > 0
+      ? Math.round((agg.visibilitySum / agg.visibilityCount) * 100) / 100 : 0;
+    const avgPosition = agg.positionCount > 0
+      ? Math.round((agg.positionSum / agg.positionCount) * 100) / 100 : 0;
+    const avgSentiment = agg.sentimentCount > 0
+      ? Math.round(agg.sentimentSum / agg.sentimentCount) : -1;
+    const avgVolume = volumeToCategory(agg.volumeSum, agg.volumeCount);
+
+    return {
+      topic: topicName,
+      promptCount: agg.promptMap.size,
+      brandMentions: agg.totalMentions,
+      brandCitations: agg.totalCitations,
+      sourceCount: agg.uniqueSourceUrlIds.size,
+      popularityVolume: avgVolume,
+      averageVisibilityScore: avgVisibility,
+      averagePosition: avgPosition,
+      averageSentiment: avgSentiment,
+    };
+  });
+}
+
+/**
+ * Builds PromptDetail items from raw execution rows for a specific topic.
+ * Deduplicates by prompt|region_code, keeping the latest execution.
+ *
+ * @param {Array<Object>} rows - Raw brand_presence_executions rows (pre-filtered by topic)
+ * @returns {Array<Object>} PromptDetail-compatible objects
+ * @internal Exported for testing
+ */
+export function buildPromptDetails(rows) {
+  const promptMap = new Map();
+
+  rows.forEach((row) => {
+    const key = buildTopicPromptKey(row);
+    const existing = promptMap.get(key);
+    if (!existing || (row.execution_date > existing.execution_date)) {
+      promptMap.set(key, row);
+    }
+  });
+
+  return [...promptMap.values()].map((r) => {
+    const mentioned = r.mentions === true || r.mentions === 'true';
+    const cited = r.citations === true || r.citations === 'true';
+    const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+
+    return {
+      topic: r.topics || 'Unknown',
+      prompt: r.prompt || '',
+      region: r.region_code || '',
+      category: r.category_name || '',
+      executionDate: r.execution_date || '',
+      answer: '',
+      sources: '',
+      relatedURL: r.url || '',
+      citationsCount: cited ? 1 : 0,
+      mentionsCount: mentioned ? 1 : 0,
+      isAnswered: !(r.error_code),
+      visibilityScore: Number.isNaN(vs) ? 0 : vs,
+      position: r.position ? String(r.position) : '',
+      sentiment: r.sentiment || '',
+      errorCode: r.error_code || '',
+      origin: r.origin || '',
+    };
+  });
+}
+
+function parsePaginationParams(context) {
+  const q = context.data || {};
+  return {
+    sortBy: q.sortBy || 'name',
+    sortOrder: q.sortOrder || 'asc',
+    page: Number.parseInt(q.page, 10) || 0,
+    pageSize: Number.parseInt(q.pageSize, 10) || 20,
+  };
+}
+
+function sortTopicDetails(topicDetails, sortBy, sortOrder) {
+  const field = SORT_FIELD_MAP[sortBy] || 'topic';
+  const dir = sortOrder === 'desc' ? -1 : 1;
+
+  return topicDetails.sort((a, b) => {
+    const va = a[field];
+    const vb = b[field];
+    if (typeof va === 'string' && typeof vb === 'string') {
+      return dir * va.localeCompare(vb);
+    }
+    return dir * ((Number(va) || 0) - (Number(vb) || 0));
+  });
+}
+
+// eslint-disable-next-line max-len
+const TOPICS_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
+
+/**
+ * Creates the getTopics handler.
+ * Returns topic-level aggregated data (without individual prompts) for the
+ * Data Insights table. Supports pagination, sorting, and filtering.
+ * Prompts are loaded separately via the /topics/:topicId/prompts endpoint.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createTopicsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'topics',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const pagination = parsePaginationParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      let q = client
+        .from('brand_presence_executions')
+        .select(TOPICS_SELECT)
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model);
+
+      if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
+      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (shouldApplyFilter(params.categoryId)) {
+        q = isValidUUID(params.categoryId)
+          ? q.eq('category_id', params.categoryId)
+          : q.eq('category_name', params.categoryId);
+      }
+      if (shouldApplyFilter(params.topic)) q = q.eq('topics', params.topic);
+      if (params.topicIds?.length > 0) q = q.in('topic_id', params.topicIds);
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
+      }
+      if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence topics PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const topicDetails = aggregateTopicData(data || []);
+      sortTopicDetails(topicDetails, pagination.sortBy, pagination.sortOrder);
+
+      const totalCount = topicDetails.length;
+      const start = pagination.page * pagination.pageSize;
+      const paged = topicDetails.slice(start, start + pagination.pageSize);
+
+      return ok({ topicDetails: paged, totalCount });
+    },
+  );
+}
+
+// eslint-disable-next-line max-len
+const PROMPTS_SELECT = 'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+
+/**
+ * Creates the getTopicPrompts handler.
+ * Returns prompt-level data for a single topic (loaded on expansion).
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createTopicPromptsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'topic-prompts',
+    async (ctx, client) => {
+      const { spaceCatId, brandId, topicId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const pagination = parsePaginationParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      let topicName;
+      try {
+        topicName = decodeURIComponent(topicId);
+      } catch {
+        return badRequest('Invalid topic ID encoding');
+      }
+
+      let q = client
+        .from('brand_presence_executions')
+        .select(PROMPTS_SELECT)
+        .eq('organization_id', organizationId)
+        .eq('topics', topicName)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model);
+
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
+      }
+      if (filterByBrandId) {
+        q = q.eq('brand_id', filterByBrandId);
+      }
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
+      }
+      if (shouldApplyFilter(params.origin)) {
+        q = q.ilike('origin', params.origin);
+      }
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence topic-prompts PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const items = buildPromptDetails(data || []);
+
+      const totalCount = items.length;
+      const start = pagination.page * pagination.pageSize;
+      const paged = items.slice(start, start + pagination.pageSize);
+
+      return ok({ items: paged, totalCount });
+    },
+  );
+}
+
 // ── Share of Voice ───────────────────────────────────────────────────────────
 
 const TOP_COMPETITORS_DISPLAYED = 5; // max entities (brand + competitors) in the response slice
@@ -1181,6 +1559,93 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         regions,
         page_intents: pageIntents,
       });
+    },
+  );
+}
+
+/**
+ * Creates the getSentimentMovers handler.
+ * Calls rpc_sentiment_movers PostgreSQL function via PostgREST.
+ * Returns top or bottom sentiment movers ranked by execution count.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createSentimentMoversHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'sentiment-movers',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      const q = ctx.data || {};
+      const type = (q.type || 'top').toLowerCase();
+      if (type !== 'top' && type !== 'bottom') {
+        return badRequest('Invalid type parameter. Must be "top" or "bottom".');
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const rpcParams = {
+        p_organization_id: organizationId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_model: model,
+        p_type: type,
+      };
+
+      if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
+      if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
+      if (shouldApplyFilter(params.categoryId)) {
+        rpcParams.p_category_id = isValidUUID(params.categoryId)
+          ? params.categoryId
+          : undefined;
+      }
+      if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
+      if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
+      if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
+
+      const { data, error } = await client.rpc('rpc_sentiment_movers', rpcParams);
+
+      if (error) {
+        ctx.log.error(`Brand presence sentiment-movers PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const movers = (data || []).map((row) => ({
+        promptId: row.prompt_id,
+        prompt: row.prompt,
+        topicId: row.topic_id,
+        topic: row.topic,
+        categoryId: row.category_id,
+        category: row.category,
+        region: row.region,
+        origin: row.origin,
+        popularity: row.popularity,
+        fromSentiment: row.from_sentiment,
+        toSentiment: row.to_sentiment,
+        fromDate: row.from_date,
+        toDate: row.to_date,
+        executionCount: row.execution_count,
+      }));
+
+      return ok({ movers });
     },
   );
 }
