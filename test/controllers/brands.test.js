@@ -1045,6 +1045,420 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(500);
     });
+
+    // --- listPromptsByBrand: params undefined & org not found ---
+
+    it('listPromptsByBrand returns 400 when params is undefined', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('listPromptsByBrand returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('listPromptsByBrand returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- getPromptByBrandAndId: validation, org not found, postgrest ---
+
+    it('getPromptByBrandAndId returns 400 when params is undefined', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when brandId is missing', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when promptId is missing', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('getPromptByBrandAndId returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('getPromptByBrandAndId returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent', promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- createPromptsByBrand: validation, org not found, postgrest ---
+
+    it('createPromptsByBrand returns 400 when params is undefined', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: undefined,
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when brandId is missing', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('createPromptsByBrand returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('createPromptsByBrand returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent' },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- updatePromptByBrandAndId: validation, org not found, postgrest ---
+
+    it('updatePromptByBrandAndId returns 400 when params is undefined', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: undefined,
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when brandId is missing', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when promptId is missing', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('updatePromptByBrandAndId returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('updatePromptByBrandAndId returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent', promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- deletePromptByBrandAndId: validation, org not found, postgrest ---
+
+    it('deletePromptByBrandAndId returns 400 when params is undefined', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when brandId is missing', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when promptId is missing', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('deletePromptByBrandAndId returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('deletePromptByBrandAndId returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent', promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
   });
 
   describe('bulkDeletePromptsByBrand', () => {
@@ -1108,6 +1522,39 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: undefined,
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
     });
 
     it('returns 400 when spaceCatId is missing', async () => {
@@ -1228,6 +1675,16 @@ describe('Brands Controller', () => {
       });
       expect(response.status).to.equal(500);
     });
+
+    it('returns 400 when both params and data are undefined', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: undefined,
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
   });
 
   describe('listBrandsForOrg', () => {
@@ -1267,6 +1724,37 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(404);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
     });
 
     it('returns 400 when spaceCatId is missing', async () => {
@@ -1342,6 +1830,15 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
     });
 
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 400 when spaceCatId is missing', async () => {
       const response = await brandsController.listCategoriesForOrg({
         ...context,
@@ -1349,6 +1846,41 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
     });
 
     it('returns 403 when user lacks access', async () => {
@@ -1450,10 +1982,10 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 400 when spaceCatId is missing', async () => {
+    it('returns 400 when params is undefined', async () => {
       const response = await brandsController.createCategoryForOrg({
         ...context,
-        params: {},
+        params: undefined,
         data: { name: 'Test' },
         dataAccess: mockDataAccess,
       });
@@ -1468,6 +2000,19 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Test' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
     });
 
     it('returns 403 when user lacks access', async () => {
@@ -1559,6 +2104,26 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body).to.have.property('name', 'Updated Category');
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: undefined,
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
     });
 
     it('returns 400 when categoryId is missing', async () => {
@@ -1688,6 +2253,24 @@ describe('Brands Controller', () => {
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
         params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when categoryId is missing', async () => {
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);

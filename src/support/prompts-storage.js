@@ -145,7 +145,7 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .select('id,category_id')
         .then(({ data, error }) => {
           if (error) throw new Error(`Failed to auto-create categories: ${error.message}`);
-          (data || []).forEach((c) => categoryMap.set(c.category_id, c.id));
+          data.forEach((c) => categoryMap.set(c.category_id, c.id));
         }),
     );
   }
@@ -166,7 +166,7 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .select('id,topic_id')
         .then(({ data, error }) => {
           if (error) throw new Error(`Failed to auto-create topics: ${error.message}`);
-          (data || []).forEach((t) => topicMap.set(t.topic_id, t.id));
+          data.forEach((t) => topicMap.set(t.topic_id, t.id));
         }),
     );
   }
@@ -517,7 +517,7 @@ export async function upsertPrompts({
   const promptsOut = processed.map((r) => ({
     id: r.prompt_id,
     prompt: r.text,
-    regions: r.regions || [],
+    regions: r.regions,
     categoryId: r.categoryId,
     topicId: r.topicId,
     status: r.status,

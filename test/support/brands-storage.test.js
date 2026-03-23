@@ -78,6 +78,43 @@ describe('brands-storage', () => {
       expect(result[0].urls).to.deep.equal([{ value: 'https://test.com' }]);
     });
 
+    it('handles null arrays and defaults status in brand rows', async () => {
+      const dbRow = {
+        id: BRAND_ID,
+        name: 'MinBrand',
+        status: null,
+        origin: 'human',
+        description: null,
+        vertical: null,
+        regions: [],
+        owned_urls: [],
+        social: [],
+        earned_sources: [],
+        brand_aliases: null,
+        competitors: null,
+        brand_sites: null,
+        updated_at: '2026-01-01',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].status).to.equal('active');
+      expect(result[0].brandAliases).to.deep.equal([]);
+      expect(result[0].competitors).to.deep.equal([]);
+      expect(result[0].siteIds).to.deep.equal([]);
+    });
+
+    it('returns empty array when data is null', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result).to.deep.equal([]);
+    });
+
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -520,6 +557,45 @@ describe('brands-storage', () => {
       expect(result.earnedContent).to.deep.equal([{ url: 'https://blog.com' }]);
       expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test' }]);
     });
+
+    it('handles alternative input shapes: handle-only social, string urls, non-string region', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        origin: 'human',
+        description: null,
+        vertical: null,
+        regions: ['US'],
+        owned_urls: ['https://example.com'],
+        social: ['@handle'],
+        earned_sources: ['SourceName'],
+        brand_aliases: [],
+        competitors: [],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          region: [42],
+          urls: ['https://example.com'],
+          socialAccounts: [{ handle: '@handle' }],
+          earnedContent: [{ name: 'SourceName' }],
+        },
+        postgrestClient,
+      });
+
+      expect(result).to.include({ name: 'Test' });
+    });
   });
 
   describe('updateBrand', () => {
@@ -668,6 +744,37 @@ describe('brands-storage', () => {
       expect(result.brandAliases).to.deep.equal(['TB']);
     });
 
+    it('skips syncBrandSites when all urls filter to empty', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        regions: [],
+        owned_urls: [],
+        social: [],
+        earned_sources: [],
+        brand_aliases: [],
+        competitors: [],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { urls: [{ value: '' }, { value: null }] },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([]);
+    });
+
     it('handles null region in updates', async () => {
       const fullBrandRow = {
         id: BRAND_ID,
@@ -695,8 +802,37 @@ describe('brands-storage', () => {
         updates: { region: null },
         postgrestClient,
       });
-
       expect(result.region).to.deep.equal([]);
+    });
+
+    it('handles non-string region values in updates', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        regions: ['42'],
+        owned_urls: [],
+        social: [],
+        earned_sources: [],
+        brand_aliases: [],
+        competitors: [],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { region: [42] },
+        postgrestClient,
+      });
+      expect(result.region).to.deep.equal(['42']);
     });
 
     it('handles socialAccounts with handle-only objects', async () => {
