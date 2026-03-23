@@ -29,7 +29,6 @@ function expectTopicDto(topic) {
   expect(topic.siteId).to.be.a('string');
   expect(topic.topicId).to.be.a('string');
   expect(topic.name).to.be.a('string');
-  expect(topic.urls).to.be.an('array');
   expect(topic.enabled).to.be.a('boolean');
   expectISOTimestamp(topic.createdAt, 'createdAt');
   expectISOTimestamp(topic.updatedAt, 'updatedAt');
@@ -101,7 +100,6 @@ export default function sentimentTopicTests(getHttpClient, resetData) {
         expect(res.body.topicId).to.equal(TOPIC_1_ID);
         expect(res.body.siteId).to.equal(SITE_1_ID);
         expect(res.body.name).to.equal('Product Quality');
-        expect(res.body.urls).to.be.an('array').with.lengthOf(2);
         expect(res.body.enabled).to.be.true;
       });
 
@@ -171,22 +169,6 @@ export default function sentimentTopicTests(getHttpClient, resetData) {
         expect(res.body.metadata.success).to.equal(0);
         expect(res.body.metadata.failure).to.equal(1);
         expect(res.body.failures[0].reason).to.include('already exists');
-      });
-
-      it('user: creates topic with urls', async () => {
-        const http = getHttpClient();
-        const urls = [{
-          url: 'https://example.com/page',
-          timesCited: 7,
-          category: 'tech',
-          subPrompts: ['How is quality?'],
-        }];
-        const res = await http.user.post(`/sites/${SITE_1_ID}/sentiment/topics`, [
-          { name: 'URL Topic', urls },
-        ]);
-        expectBatch201(res, 1);
-        expect(res.body.metadata.success).to.equal(1);
-        expect(res.body.items[0].urls).to.deep.equal(urls);
       });
     });
 

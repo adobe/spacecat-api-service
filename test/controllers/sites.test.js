@@ -4081,6 +4081,11 @@ describe('Sites Controller', () => {
           isHandlerEnabledForSite: sandbox.stub().returns(true),
         }),
       };
+      mockDataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({
+          getTier: () => 'FREE_TRIAL',
+        }),
+      };
     });
 
     afterEach(() => {

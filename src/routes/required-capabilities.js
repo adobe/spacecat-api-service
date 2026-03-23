@@ -47,6 +47,10 @@ export const INTERNAL_ROUTES = [
   'POST /consent-banner',
   'GET /consent-banner/:jobId',
 
+  // Brand Presence stats - org-scoped, LLMO product; not yet required by S2S consumers
+  'GET /org/:spaceCatId/brands/all/brand-presence/stats',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'POST /llmo/onboard',
@@ -72,6 +76,12 @@ export const INTERNAL_ROUTES = [
 
   // Entitlement write - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
+
+  // IMS org access (delegation grants) - admin-only, cross-org grant management
+  'POST /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access/:accessId',
+  'DELETE /sites/:siteId/ims-org-access/:accessId',
 
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
@@ -135,6 +145,22 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
+  'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/llmo-prompts': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
   'GET /organizations/:organizationId/projects': 'project:read',
   'GET /organizations/:organizationId/projects/:projectId/sites': 'site:read',
   'GET /organizations/:organizationId/by-project-name/:projectName/sites': 'site:read',
@@ -199,7 +225,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fix:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
@@ -317,14 +343,15 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fix:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': 'suggestion:read',
-  'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'opportunity:write',
-  'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
-  'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
+  'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'fixEntity:write',
+  'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:write',
 
   // LLMO
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',

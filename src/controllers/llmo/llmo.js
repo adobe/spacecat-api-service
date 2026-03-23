@@ -32,6 +32,7 @@ import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { UnauthorizedProductError } from '../../support/errors.js';
 import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
@@ -81,13 +82,24 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    const hasAccessToElmo = await accessControlUtil.hasAccess(
-      site,
-      '',
-      EntitlementModel.PRODUCT_CODES.LLMO,
-    );
+    let hasAccessToElmo;
+    try {
+      hasAccessToElmo = await accessControlUtil.hasAccess(
+        site,
+        '',
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+    } catch (e) {
+      // Product-code mismatch is an auth denial → 403. All other errors (e.g. entitlement
+      // validation failures like "emailId is required") are business errors → rethrow so
+      // callers' catch blocks return 400.
+      if (e instanceof UnauthorizedProductError) {
+        return forbidden(e.message);
+      }
+      throw e;
+    }
     if (!hasAccessToElmo) {
-      throw new Error('Only users belonging to the organization can view its sites');
+      return forbidden('Only users belonging to the organization can view its sites');
     }
     return { site, config, llmoConfig };
   };
@@ -646,9 +658,6 @@ function LlmoController(ctx) {
       const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -698,9 +707,6 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -725,9 +731,6 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -762,9 +765,6 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -1557,10 +1557,6 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().tags || []);
     } catch (error) {
       log.error(`Error marking opportunities as reviewed: ${error.message}`);
-
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };

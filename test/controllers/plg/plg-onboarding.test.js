@@ -43,6 +43,8 @@ describe('PlgOnboardingController', () => {
   let enableAuditsStub;
   let enableImportsStub;
   let triggerAuditsStub;
+  let autoResolveAuthorUrlStub;
+  let updateCodeConfigStub;
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
   let loadProfileConfigStub;
@@ -87,6 +89,12 @@ describe('PlgOnboardingController', () => {
       setLanguage: sandbox.stub(),
       getRegion: sandbox.stub().returns(overrides.region || null),
       setRegion: sandbox.stub(),
+      getDeliveryConfig: sandbox.stub().returns(overrides.deliveryConfig || {}),
+      setDeliveryConfig: sandbox.stub(),
+      getCode: sandbox.stub().returns(overrides.code || null),
+      setCode: sandbox.stub(),
+      getHlxConfig: sandbox.stub().returns(overrides.hlxConfig || null),
+      setHlxConfig: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
       save: sandbox.stub().resolves(),
@@ -160,6 +168,8 @@ describe('PlgOnboardingController', () => {
     triggerAuditsStub = sandbox.stub().resolves();
 
     // Support utils stubs
+    autoResolveAuthorUrlStub = sandbox.stub().resolves(null);
+    updateCodeConfigStub = sandbox.stub().resolves();
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
 
@@ -205,6 +215,7 @@ describe('PlgOnboardingController', () => {
     mockDataAccess = {
       Site: {
         findByBaseURL: sandbox.stub().resolves(null),
+        findById: sandbox.stub().resolves(null),
         create: sandbox.stub().resolves(mockSite),
       },
       Organization: {
@@ -282,6 +293,7 @@ describe('PlgOnboardingController', () => {
             STATUSES: {
               IN_PROGRESS: 'IN_PROGRESS',
               ONBOARDED: 'ONBOARDED',
+              PRE_ONBOARDING: 'PRE_ONBOARDING',
               ERROR: 'ERROR',
               WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
               WAITLISTED: 'WAITLISTED',
@@ -296,6 +308,8 @@ describe('PlgOnboardingController', () => {
           ASO_DEMO_ORG: DEMO_ORG_ID,
         },
         '../../../src/support/utils.js': {
+          autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+          updateCodeConfig: updateCodeConfigStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
         },
@@ -304,6 +318,11 @@ describe('PlgOnboardingController', () => {
         },
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+        },
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({ hasAdminAccess: () => false }),
+          },
         },
       },
     )).default;
@@ -820,6 +839,257 @@ describe('PlgOnboardingController', () => {
 
       expect(mockSite.setProjectId).to.not.have.been.called;
     });
+
+    it('auto-resolves author URL and sets deliveryConfig with preferContentApi and imsOrgId', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(autoResolveAuthorUrlStub).to.have.been.calledWith(mockSite, context);
+      expect(mockSite.setDeliveryConfig).to.have.been.calledWith({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        preferContentApi: true,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+    });
+
+    it('handles null deliveryConfig when resolving author URL', async () => {
+      mockSite = createMockSite({ deliveryConfig: null });
+      mockSite.getDeliveryConfig.returns(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setDeliveryConfig).to.have.been.calledWith({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        preferContentApi: true,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+    });
+
+    it('skips setting deliveryConfig when authorURL already set but still resolves RUM host', async () => {
+      mockSite = createMockSite({
+        deliveryConfig: { authorURL: 'https://existing-author.adobeaemcloud.com' },
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.aem.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(autoResolveAuthorUrlStub).to.have.been.called;
+      expect(mockSite.setDeliveryConfig).to.not.have.been.called;
+      // But RUM host is still passed to updateCodeConfig
+      expect(updateCodeConfigStub).to.have.been.calledWith(
+        mockSite,
+        'main--my-site--adobe.aem.live',
+        sinon.match.object,
+        sinon.match.object,
+      );
+    });
+
+    it('continues onboarding when author URL resolution fails', async () => {
+      autoResolveAuthorUrlStub.rejects(new Error('RUM service down'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to auto-resolve author URL/);
+    });
+
+    it('skips setting deliveryConfig when autoResolveAuthorUrl returns null', async () => {
+      autoResolveAuthorUrlStub.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setDeliveryConfig).to.not.have.been.called;
+    });
+
+    it('skips setting deliveryConfig when autoResolveAuthorUrl returns no authorURL', async () => {
+      autoResolveAuthorUrlStub.resolves({ host: 'some-host.net' });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setDeliveryConfig).to.not.have.been.called;
+    });
+
+    it('calls updateCodeConfig with RUM host from autoResolveAuthorUrl', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      await controller.onboard(context);
+
+      expect(updateCodeConfigStub).to.have.been.calledWith(
+        mockSite,
+        'publish-p123-e456.adobeaemcloud.net',
+        sinon.match({ say: sinon.match.func }),
+        sinon.match.object,
+      );
+    });
+
+    it('passes null host to updateCodeConfig when autoResolveAuthorUrl returns null', async () => {
+      autoResolveAuthorUrlStub.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      await controller.onboard(context);
+
+      expect(updateCodeConfigStub).to.have.been.calledWith(
+        mockSite,
+        null,
+        sinon.match({ say: sinon.match.func }),
+        sinon.match.object,
+      );
+    });
+
+    it('sets codeConfigResolved step when code config is resolved', async () => {
+      mockSite.getCode.returns({ owner: 'adobe', repo: 'my-site', ref: 'main' });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      await controller.onboard(context);
+
+      const stepsCall = mockOnboarding.setSteps.lastCall.args[0];
+      expect(stepsCall.codeConfigResolved).to.be.true;
+    });
+
+    it('continues onboarding when updateCodeConfig fails', async () => {
+      updateCodeConfigStub.rejects(new Error('pattern match failed'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to resolve code config/);
+    });
+
+    it('sets hlxConfig for EDS sites from RUM host', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.aem.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.have.been.calledWith({
+        hlxVersion: 5,
+        rso: {
+          ref: 'main', site: 'my-site', owner: 'adobe', tld: 'aem.live',
+        },
+      });
+    });
+
+    it('sets hlxConfig for hlx.live hosts', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.hlx.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.have.been.calledWith({
+        hlxVersion: 5,
+        rso: {
+          ref: 'main', site: 'my-site', owner: 'adobe', tld: 'hlx.live',
+        },
+      });
+    });
+
+    it('skips hlxConfig when already set', async () => {
+      mockSite = createMockSite({
+        hlxConfig: {
+          hlxVersion: 5,
+          rso: {
+            ref: 'main', site: 'existing', owner: 'org', tld: 'aem.live',
+          },
+        },
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.aem.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.not.have.been.called;
+    });
+
+    it('skips hlxConfig when RUM host is not EDS pattern', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.not.have.been.called;
+    });
+
+    it('skips hlxConfig when no RUM host available', async () => {
+      autoResolveAuthorUrlStub.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.not.have.been.called;
+    });
   });
 
   // --- Bot blocker ---
@@ -1089,7 +1359,7 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enroll site in summit-plg/);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enroll site in config handlers/);
     });
   });
 
@@ -1133,6 +1403,97 @@ describe('PlgOnboardingController', () => {
       expect(detectLocaleStub).to.not.have.been.called;
       expect(mockSite.setLanguage).to.not.have.been.called;
       expect(mockSite.setRegion).to.not.have.been.called;
+    });
+  });
+
+  // --- Fast path for preonboarded sites ---
+
+  describe('onboard - preonboarding fast path', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('fast-tracks preonboarded site: adds enrollment and sets ONBOARDED', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        steps: { orgResolved: true, siteResolved: true, configUpdated: true },
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(triggerAuditsStub).to.not.have.been.called;
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match({
+          orgResolved: true,
+          siteResolved: true,
+          configUpdated: true,
+          entitlementCreated: true,
+        }),
+      );
+      // Should NOT run full onboarding steps
+      expect(createOrFindOrganizationStub).to.not.have.been.called;
+      expect(detectBotBlockerStub).to.not.have.been.called;
+    });
+
+    it('fast-tracks preonboarded site with null steps', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        steps: null,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ entitlementCreated: true });
+    });
+
+    it('falls through to full onboarding when preonboarded site not found', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: 'missing-site-id',
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      // Falls through to full onboarding which succeeds
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
+    });
+
+    it('falls through to full onboarding when PRE_ONBOARDING but no siteId', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: null,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      // Falls through to full onboarding
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
     });
   });
 
@@ -1257,6 +1618,137 @@ describe('PlgOnboardingController', () => {
       expect(res.value[0].domain).to.equal('example1.com');
       expect(res.value[1].id).to.equal('rec-2');
       expect(res.value[1].domain).to.equal('example2.com');
+    });
+  });
+
+  // --- getStatus: admin / API key bypass ---
+
+  describe('getStatus - admin bypass', () => {
+    let AdminPlgOnboardingController;
+
+    beforeEach(async () => {
+      AdminPlgOnboardingController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({
+                retrieveDomainkey: rumRetrieveDomainkeyStub,
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: { createForSite: tierClientCreateForSiteStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+            ASO_DEMO_ORG: DEMO_ORG_ID,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+          },
+          '../../../src/support/access-control-util.js': {
+            default: {
+              fromContext: () => ({ hasAdminAccess: () => true }),
+            },
+          },
+        },
+      )).default;
+    });
+
+    it('allows admin to access any org without tenant match', async () => {
+      const record = createMockOnboarding({ status: 'ONBOARDED' });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record]);
+
+      const res = await AdminPlgOnboardingController({ log: mockLog }).getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: 'COMPLETELY_DIFFERENT@AdobeOrg' },
+        attributes: {
+          authInfo: {
+            getProfile: sandbox.stub().returns({ tenants: [{ id: 'ADMIN_TENANT' }] }),
+          },
+        },
+      });
+
+      expect(res.status).to.equal(200);
+      expect(res.value).to.be.an('array').with.length(1);
+    });
+
+    it('allows admin even when authInfo has no profile tenants', async () => {
+      const record = createMockOnboarding({ status: 'ONBOARDED' });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record]);
+
+      const res = await AdminPlgOnboardingController({ log: mockLog }).getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: TEST_IMS_ORG_ID },
+        attributes: {
+          authInfo: {
+            getProfile: sandbox.stub().returns(null),
+          },
+        },
+      });
+
+      expect(res.status).to.equal(200);
+    });
+
+    it('still returns 400 for missing authInfo even as admin path', async () => {
+      const res = await AdminPlgOnboardingController({ log: mockLog }).getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: TEST_IMS_ORG_ID },
+        attributes: {},
+      });
+
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Authentication information is required');
     });
   });
 });
