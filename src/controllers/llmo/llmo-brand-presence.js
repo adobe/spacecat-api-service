@@ -1493,6 +1493,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
             brandMentions: 0,
             brandCitations: 0,
             promptCount: 0,
+            sourceCount: 0,
           },
           weeklyStats: [],
           executions: [],
@@ -1634,7 +1635,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
           stats: {
             visibilityScore: 0,
             position: '',
-            sentiment: '',
+            sentiment: -1,
             mentions: 0,
             citations: 0,
           },

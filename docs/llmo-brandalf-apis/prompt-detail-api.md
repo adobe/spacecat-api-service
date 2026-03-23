@@ -23,7 +23,7 @@ Returns all execution rows, weekly aggregated statistics, and citation sources f
 | Parameter | Aliases | Type | Default | Description |
 |-----------|---------|------|---------|-------------|
 | `prompt` | — | string | **(required)** | The prompt text to look up |
-| `region` | `regionCode`, `region_code` | string | — | Region code to scope the prompt (e.g. US, DE) |
+| `promptRegion` | `prompt_region` | string | — | Region code to scope the prompt (e.g. US, DE) |
 | `startDate` | `start_date` | string (YYYY-MM-DD) | 28 days ago | Start of date range |
 | `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
 | `model` | `platform` | string | `chatgpt` | LLM model (e.g. chatgpt, google-ai-mode, copilot) |
@@ -35,7 +35,7 @@ Returns all execution rows, weekly aggregated statistics, and citation sources f
 ## Sample URL
 
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/PDF%20Editing/prompt-detail?prompt=best%20pdf%20editor%20for%20mac&region=US&startDate=2026-02-09&endDate=2026-03-09&model=chatgpt
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/PDF%20Editing/prompt-detail?prompt=best%20pdf%20editor%20for%20mac&promptRegion=US&startDate=2026-02-09&endDate=2026-03-09&model=chatgpt
 ```
 
 ---
