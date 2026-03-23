@@ -422,19 +422,34 @@ describe('llmo-url-inspector-url-details', () => {
     });
 
     it('returns 200 with correct shape for owned URL', async () => {
-      const citationRows = [
+      const sourceRows = [
         {
-          content_type: 'owned', prompt: 'best tools', citation_count: 10, category: 'Software', region: 'US', topics: 'project management', week: '2026-W09',
+          content_type: 'owned',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://example.com/product/page', hostname: 'example.com' },
+          brand_presence_executions: {
+            prompt: 'best tools', category_name: 'Software', region_code: 'US', topics: 'project management',
+          },
         },
         {
-          content_type: 'owned', prompt: 'best tools', citation_count: 8, category: 'Software', region: 'US', topics: 'project management', week: '2026-W10',
+          content_type: 'owned',
+          execution_date: '2026-03-09',
+          source_urls: { url: 'https://example.com/product/page', hostname: 'example.com' },
+          brand_presence_executions: {
+            prompt: 'best tools', category_name: 'Software', region_code: 'US', topics: 'project management',
+          },
         },
         {
-          content_type: 'owned', prompt: 'top software', citation_count: 5, category: 'AI Tools', region: 'UK', topics: 'ai', week: '2026-W09',
+          content_type: 'owned',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://example.com/product/page', hostname: 'example.com' },
+          brand_presence_executions: {
+            prompt: 'top software', category_name: 'AI Tools', region_code: 'UK', topics: 'ai',
+          },
         },
       ];
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: citationRows,
+        data: sourceRows,
         error: null,
       });
 
@@ -446,7 +461,7 @@ describe('llmo-url-inspector-url-details', () => {
 
       expect(body.url).to.equal('https://example.com/product/page');
       expect(body.isOwned).to.equal(true);
-      expect(body.totalCitations).to.equal(23);
+      expect(body.totalCitations).to.equal(3);
       expect(body.promptsCited).to.equal(2);
       expect(body.products).to.include.members(['Software', 'AI Tools']);
       expect(body.regions).to.include.members(['US', 'UK']);
@@ -456,13 +471,18 @@ describe('llmo-url-inspector-url-details', () => {
     });
 
     it('returns 200 with isOwned=false for non-owned URL', async () => {
-      const citationRows = [
+      const sourceRows = [
         {
-          content_type: 'earned', prompt: 'p1', citation_count: 3, category: 'A', region: 'US', topics: 't', week: '2026-W09',
+          content_type: 'earned',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://example.com/product/page', hostname: 'example.com' },
+          brand_presence_executions: {
+            prompt: 'p1', category_name: 'A', region_code: 'US', topics: 't',
+          },
         },
       ];
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: citationRows,
+        data: sourceRows,
         error: null,
       });
 
@@ -504,7 +524,7 @@ describe('llmo-url-inspector-url-details', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('applies date range filters as week conversions', async () => {
+    it('applies date range filters to execution_date', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.data = {
         siteId: 'site-001',
@@ -517,8 +537,8 @@ describe('llmo-url-inspector-url-details', () => {
       const handler = createUrlDetailsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.gte).to.have.been.calledWith('week', '2026-W10');
-      expect(chainMock.lte).to.have.been.calledWith('week', '2026-W11');
+      expect(chainMock.gte).to.have.been.calledWith('execution_date', '2026-03-02');
+      expect(chainMock.lte).to.have.been.calledWith('execution_date', '2026-03-15');
     });
 
     it('queries the correct table and columns', async () => {
@@ -528,12 +548,12 @@ describe('llmo-url-inspector-url-details', () => {
       const handler = createUrlDetailsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.from).to.have.been.calledWith('brand_presence_citations');
+      expect(chainMock.from).to.have.been.calledWith('brand_presence_sources');
       expect(chainMock.select).to.have.been.calledWith(
-        'content_type, prompt, citation_count, category, region, topics, week',
+        'content_type,execution_date,source_urls!inner(url,hostname),brand_presence_executions!inner(prompt,category_name,region_code,topics)',
       );
       expect(chainMock.eq).to.have.been.calledWith('site_id', 'site-001');
-      expect(chainMock.eq).to.have.been.calledWith('url', 'https://example.com/product/page');
+      expect(chainMock.eq).to.have.been.calledWith('source_urls.url', 'https://example.com/product/page');
     });
 
     it('filters by brandId on the PostgREST query when a specific UUID is provided', async () => {

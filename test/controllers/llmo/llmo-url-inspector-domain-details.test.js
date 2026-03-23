@@ -389,13 +389,34 @@ describe('llmo-url-inspector-domain-details', () => {
     });
 
     it('returns 200 with correct shape on happy path', async () => {
-      const citationRows = [
-        makeRow('https://competitor.com/review', 'best tools', 10, 'Software', 'US', 'pm', '2026-W09', 'competitor', '/review'),
-        makeRow('https://competitor.com/review', 'best tools', 8, 'Software', 'US', 'pm', '2026-W10', 'competitor', '/review'),
-        makeRow('https://competitor.com/pricing', 'pricing compare', 5, 'AI', 'UK', 'ai', '2026-W09', 'competitor', '/pricing'),
+      const sourceRows = [
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://competitor.com/review', hostname: 'competitor.com' },
+          brand_presence_executions: {
+            prompt: 'best tools', category_name: 'Software', region_code: 'US', topics: 'pm',
+          },
+        },
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-09',
+          source_urls: { url: 'https://competitor.com/review', hostname: 'competitor.com' },
+          brand_presence_executions: {
+            prompt: 'best tools', category_name: 'Software', region_code: 'US', topics: 'pm',
+          },
+        },
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://competitor.com/pricing', hostname: 'competitor.com' },
+          brand_presence_executions: {
+            prompt: 'pricing compare', category_name: 'AI', region_code: 'UK', topics: 'ai',
+          },
+        },
       ];
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: citationRows,
+        data: sourceRows,
         error: null,
       });
 
@@ -406,7 +427,7 @@ describe('llmo-url-inspector-domain-details', () => {
       const body = await result.json();
 
       expect(body.domain).to.equal('competitor.com');
-      expect(body.totalCitations).to.equal(23);
+      expect(body.totalCitations).to.equal(3);
       expect(body.totalUrls).to.equal(2);
       expect(body.promptsCited).to.equal(2);
       expect(body.contentType).to.equal('competitor');
@@ -453,13 +474,34 @@ describe('llmo-url-inspector-domain-details', () => {
     });
 
     it('respects urlLimit query parameter', async () => {
-      const citationRows = [
-        makeRow('https://d.com/a', 'p1', 10, 'A', 'US', 't', '2026-W09'),
-        makeRow('https://d.com/b', 'p2', 5, 'B', 'UK', 't', '2026-W09'),
-        makeRow('https://d.com/c', 'p3', 3, 'C', 'DE', 't', '2026-W09'),
+      const sourceRows = [
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://d.com/a', hostname: 'd.com' },
+          brand_presence_executions: {
+            prompt: 'p1', category_name: 'A', region_code: 'US', topics: 't',
+          },
+        },
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://d.com/b', hostname: 'd.com' },
+          brand_presence_executions: {
+            prompt: 'p2', category_name: 'B', region_code: 'UK', topics: 't',
+          },
+        },
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://d.com/c', hostname: 'd.com' },
+          brand_presence_executions: {
+            prompt: 'p3', category_name: 'C', region_code: 'DE', topics: 't',
+          },
+        },
       ];
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: citationRows,
+        data: sourceRows,
         error: null,
       });
       mockContext.data = { siteId: 'site-001', domain: 'competitor.com', urlLimit: '2' };
@@ -474,13 +516,34 @@ describe('llmo-url-inspector-domain-details', () => {
     });
 
     it('falls back to limit param when urlLimit not set', async () => {
-      const citationRows = [
-        makeRow('https://d.com/a', 'p1', 10, 'A', 'US', 't', '2026-W09'),
-        makeRow('https://d.com/b', 'p2', 5, 'B', 'UK', 't', '2026-W09'),
-        makeRow('https://d.com/c', 'p3', 3, 'C', 'DE', 't', '2026-W09'),
+      const sourceRows = [
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://d.com/a', hostname: 'd.com' },
+          brand_presence_executions: {
+            prompt: 'p1', category_name: 'A', region_code: 'US', topics: 't',
+          },
+        },
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://d.com/b', hostname: 'd.com' },
+          brand_presence_executions: {
+            prompt: 'p2', category_name: 'B', region_code: 'UK', topics: 't',
+          },
+        },
+        {
+          content_type: 'competitor',
+          execution_date: '2026-03-02',
+          source_urls: { url: 'https://d.com/c', hostname: 'd.com' },
+          brand_presence_executions: {
+            prompt: 'p3', category_name: 'C', region_code: 'DE', topics: 't',
+          },
+        },
       ];
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: citationRows,
+        data: sourceRows,
         error: null,
       });
       mockContext.data = { siteId: 'site-001', domain: 'competitor.com', limit: '1' };
@@ -501,15 +564,15 @@ describe('llmo-url-inspector-domain-details', () => {
       const handler = createDomainDetailsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.from).to.have.been.calledWith('brand_presence_citations');
+      expect(chainMock.from).to.have.been.calledWith('brand_presence_sources');
       expect(chainMock.select).to.have.been.calledWith(
-        'url, content_type, prompt, citation_count, category, region, topics, week, normalized_url_path',
+        'content_type,execution_date,source_urls!inner(url,hostname),brand_presence_executions!inner(prompt,category_name,region_code,topics)',
       );
       expect(chainMock.eq).to.have.been.calledWith('site_id', 'site-001');
-      expect(chainMock.eq).to.have.been.calledWith('domain', 'competitor.com');
+      expect(chainMock.eq).to.have.been.calledWith('source_urls.hostname', 'competitor.com');
     });
 
-    it('applies date range filters as week conversions', async () => {
+    it('applies date range filters to execution_date', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.data = {
         siteId: 'site-001',
@@ -522,8 +585,8 @@ describe('llmo-url-inspector-domain-details', () => {
       const handler = createDomainDetailsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.gte).to.have.been.calledWith('week', '2026-W10');
-      expect(chainMock.lte).to.have.been.calledWith('week', '2026-W11');
+      expect(chainMock.gte).to.have.been.calledWith('execution_date', '2026-03-02');
+      expect(chainMock.lte).to.have.been.calledWith('execution_date', '2026-03-15');
     });
 
     it('returns 500 when handler throws unexpectedly', async () => {
