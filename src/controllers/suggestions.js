@@ -27,7 +27,6 @@ import {
   isValidUUID,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
-
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
@@ -38,8 +37,10 @@ import {
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
+  getIsSummitPlgEnabled,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -174,7 +175,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, Site, Configuration,
+    Opportunity, Suggestion, SuggestionGrant, Site, Configuration,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -186,6 +187,29 @@ function SuggestionsController(ctx, sqs, env) {
   }
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Filters suggestions to only granted ones when summit-plg is enabled for the site
+   * and the request originates from the sites-optimizer-ui client.
+   * Returns all suggestions unchanged when either condition is not met.
+   * @param {Object} site - Site entity.
+   * @param {Array} suggestions - Suggestion entities to filter.
+   * @param {Object} context - Request context.
+   * @returns {Promise<Array>} Filtered suggestion entities.
+   */
+  const filterByGrantStatus = async (site, suggestions, context) => {
+    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
+      return suggestions;
+    }
+    try {
+      const ids = suggestions.map((s) => s.getId());
+      const { grantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(ids);
+      return suggestions.filter((s) => grantedIds.includes(s.getId()));
+    } catch (err) {
+      ctx.log?.error?.('Failed to filter suggestions by grant status', err?.message ?? err);
+      return suggestions;
+    }
+  };
 
   /**
    * Gets all suggestions for a given site and opportunity
@@ -227,13 +251,19 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Fetch all suggestions (single DB call)
     let suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
-
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
       if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
+      }
+    }
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+      try {
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+      /* c8 ignore next 3 */
+      } catch (err) {
+        ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
       }
     }
 
@@ -243,8 +273,8 @@ function SuggestionsController(ctx, sqs, env) {
         (sugg) => statuses.includes(sugg.getStatus()),
       );
     }
-
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -295,7 +325,6 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestionEntities = results.data || [];
     const newCursor = results.cursor || null;
 
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
@@ -303,8 +332,8 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
 
@@ -352,7 +381,6 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
@@ -360,7 +388,8 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -411,7 +440,6 @@ function SuggestionsController(ctx, sqs, env) {
       returnCursor: true,
     });
     const { data: suggestionEntities = [], cursor: newCursor = null } = results;
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
@@ -419,7 +447,8 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok({
@@ -474,6 +503,10 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunity = await suggestion.getOpportunity();
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context)
+      && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
+      return notFound('Suggestion not found');
     }
     return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
   };

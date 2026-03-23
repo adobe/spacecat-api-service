@@ -18,4 +18,5 @@ jobs:
       service-name: api-service
       validate-pr-title: true
       docs-lint: true
+      it-postgres: true
     secrets: inherit

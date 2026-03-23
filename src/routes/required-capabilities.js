@@ -77,6 +77,12 @@ export const INTERNAL_ROUTES = [
   // Entitlement write - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
 
+  // IMS org access (delegation grants) - admin-only, cross-org grant management
+  'POST /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access/:accessId',
+  'DELETE /sites/:siteId/ims-org-access/:accessId',
+
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
   'GET /consumers/by-client-id/:clientId',
@@ -137,6 +143,10 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': 'brand:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',

@@ -114,6 +114,7 @@ function parseFilterDimensionsParams(context) {
     origin: q.origin,
     user_intent: q.user_intent || q.userIntent,
     branding: q.branding || q.promptBranding || q.prompt_branding,
+    maxCompetitors: q.maxCompetitors || q.max_competitors,
   };
 }
 
@@ -1219,6 +1220,273 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
   );
 }
 
+// ── Share of Voice ───────────────────────────────────────────────────────────
+
+const TOP_COMPETITORS_DISPLAYED = 5; // max entities (brand + competitors) in the response slice
+const DEFAULT_MAX_COMPETITORS = 5; // max competitors the RPC returns from the DB
+
+/**
+ * Maps the imputed volume integer to a popularity category.
+ * Negative sentinel values are canonical (set by the projector pipeline):
+ *   -30 → High, -20 → Medium, -10 → Low.
+ * Positive values use legacy percentile bucketing against the per-query average.
+ * Zero / null → 'Low'.
+ * @internal Exported for testing
+ */
+export function volumeToPopularity(volume, avgPositiveVolume) {
+  if (volume === -30) return 'High';
+  if (volume === -20) return 'Medium';
+  if (volume === -10) return 'Low';
+  if (volume > 0 && avgPositiveVolume > 0) {
+    const low = avgPositiveVolume * 0.33;
+    const med = avgPositiveVolume * 0.66;
+    if (volume <= low) return 'Low';
+    if (volume <= med) return 'Medium';
+    return 'High';
+  }
+  return 'Low';
+}
+
+function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = params.model || 'chatgpt';
+
+  return client.rpc('rpc_share_of_voice', {
+    p_organization_id: organizationId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_model: model,
+    p_brand_id: filterByBrandId || null,
+    p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
+      ? params.categoryId : null,
+    p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
+    p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
+    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_max_competitors: params.maxCompetitors
+      ? Number(params.maxCompetitors) : DEFAULT_MAX_COMPETITORS,
+  });
+}
+
+async function fetchConfiguredCompetitorNames(client, organizationId, filterByBrandId) {
+  let q = client
+    .from('competitors')
+    .select('name, aliases')
+    .eq('organization_id', organizationId);
+  if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+  const { data, error } = await q.limit(QUERY_LIMIT);
+  if (error || !data) return new Set();
+  const names = new Set();
+  data.forEach((c) => {
+    if (c.name) names.add(c.name.toLowerCase().trim());
+    if (Array.isArray(c.aliases)) {
+      c.aliases.forEach((a) => {
+        if (a) names.add(a.toLowerCase().trim());
+      });
+    }
+  });
+  return names;
+}
+
+/**
+ * Reshapes flat RPC rows (one per topic+competitor) into ShareOfVoiceData[].
+ * Each RPC row has: { topic, brand_mentions, competitor_name, competitor_mentions, volume }.
+ * competitor_name is NULL for topics with no competitors (LEFT JOIN).
+ * @internal Exported for testing
+ */
+export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
+  // Group RPC rows by topic
+  const topicMap = new Map();
+  rpcRows.forEach((r) => {
+    const topic = r.topic || 'Unknown';
+    if (!topicMap.has(topic)) {
+      topicMap.set(topic, {
+        brandMentions: Number(r.brand_mentions) || 0,
+        volume: r.volume,
+        competitors: new Map(),
+      });
+    }
+    const m = topicMap.get(topic);
+    if (r.competitor_name) {
+      const key = r.competitor_name.toLowerCase().trim();
+      m.competitors.set(key, (m.competitors.get(key) || 0) + (Number(r.competitor_mentions) || 0));
+    }
+  });
+
+  // Compute average positive volume for legacy percentile bucketing
+  const positiveVolumes = [];
+  topicMap.forEach((m) => {
+    if (m.volume > 0) positiveVolumes.push(m.volume);
+  });
+  const avgPositiveVolume = positiveVolumes.length > 0
+    ? positiveVolumes.reduce((s, v) => s + v, 0) / positiveVolumes.length
+    : 0;
+
+  const shareOfVoiceData = [];
+
+  topicMap.forEach((m, topic) => {
+    const totalCompetitorMentions = [...m.competitors.values()].reduce((s, c) => s + c, 0);
+    const totalMentions = m.brandMentions + totalCompetitorMentions;
+
+    const shareOfVoice = m.brandMentions > 0 && totalMentions > 0
+      ? (m.brandMentions / totalMentions) * 100
+      : null;
+
+    const allEntities = [];
+
+    m.competitors.forEach((mentions, name) => {
+      const sov = totalMentions > 0 ? (mentions / totalMentions) * 100 : 0;
+      allEntities.push({
+        name,
+        mentions,
+        shareOfVoice: sov,
+        isBrand: false,
+        source: configuredNames.size > 0 && configuredNames.has(name) ? 'configured' : 'detected',
+      });
+    });
+
+    if (m.brandMentions > 0) {
+      const brandSov = (m.brandMentions / totalMentions) * 100;
+      allEntities.push({
+        name: brandName || 'Our Brand',
+        mentions: m.brandMentions,
+        shareOfVoice: brandSov,
+        isBrand: true,
+        source: 'configured',
+      });
+    }
+
+    allEntities.sort((a, b) => {
+      const diff = b.shareOfVoice - a.shareOfVoice;
+      if (diff !== 0) return diff;
+      return Number(b.isBrand) - Number(a.isBrand);
+    });
+
+    const topEntities = allEntities.slice(0, TOP_COMPETITORS_DISPLAYED);
+    const brandEntity = topEntities.find((e) => e.isBrand);
+    const topCompetitors = topEntities
+      .filter((e) => !e.isBrand)
+      .map(({
+        name, mentions, shareOfVoice: sov, source,
+      }) => ({
+        name, mentions, shareOfVoice: sov, source,
+      }));
+    const allCompetitors = allEntities
+      .filter((e) => !e.isBrand)
+      .map(({
+        name, mentions, shareOfVoice: sov, source,
+      }) => ({
+        name, mentions, shareOfVoice: sov, source,
+      }));
+
+    const brandShareOfVoice = brandEntity ? {
+      name: brandEntity.name,
+      mentions: brandEntity.mentions,
+      shareOfVoice: brandEntity.shareOfVoice,
+    } : undefined;
+
+    let ranking = null;
+    if (brandEntity) {
+      ranking = allEntities.findIndex((e) => e.isBrand) + 1;
+    }
+
+    const popularity = volumeToPopularity(m.volume, avgPositiveVolume);
+
+    shareOfVoiceData.push({
+      id: `${topic}-${totalMentions}-${m.brandMentions}`,
+      topic,
+      popularity,
+      brandMentions: m.brandMentions,
+      totalMentions,
+      shareOfVoice,
+      ranking,
+      topCompetitors,
+      allCompetitors,
+      brandShareOfVoice,
+    });
+  });
+
+  const getPriorityValue = (p) => {
+    switch (p.toLowerCase()) {
+      case 'high': return 3;
+      case 'medium': return 2;
+      case 'low': return 1;
+      /* c8 ignore next */ // volumeToPopularity always returns High/Medium/Low
+      default: return 0;
+    }
+  };
+  shareOfVoiceData.sort((a, b) => {
+    const pDiff = getPriorityValue(b.popularity) - getPriorityValue(a.popularity);
+    if (pDiff !== 0) return pDiff;
+    return (b.shareOfVoice || 0) - (a.shareOfVoice || 0);
+  });
+
+  return shareOfVoiceData;
+}
+
+/**
+ * Creates the getShareOfVoice handler.
+ * Returns per-topic share-of-voice, ranking, popularity and competitor breakdown.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'share-of-voice',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const [rpcResult, configuredNames] = await Promise.all([
+        callShareOfVoiceRpc(client, organizationId, params, defaults, filterByBrandId),
+        fetchConfiguredCompetitorNames(client, organizationId, filterByBrandId),
+      ]);
+
+      if (rpcResult.error) {
+        ctx.log.error(`Share-of-voice RPC error: ${rpcResult.error.message}`);
+        return badRequest(rpcResult.error.message);
+      }
+
+      const rpcRows = rpcResult.data || [];
+
+      // Resolve brand name for display
+      let brandName = 'Our Brand';
+      if (filterByBrandId) {
+        const { data: brandData } = await client
+          .from('brands')
+          .select('name')
+          .eq('id', filterByBrandId)
+          .limit(1);
+        if (brandData?.[0]?.name) brandName = brandData[0].name;
+      }
+
+      const shareOfVoiceData = aggregateShareOfVoice(
+        rpcRows,
+        configuredNames,
+        brandName,
+      );
+
+      return ok({ shareOfVoiceData });
+    },
+  );
+}
+
 /**
  * Creates the getFilterDimensions handler.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
@@ -1277,6 +1545,93 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         regions,
         page_intents: pageIntents,
       });
+    },
+  );
+}
+
+/**
+ * Creates the getSentimentMovers handler.
+ * Calls rpc_sentiment_movers PostgreSQL function via PostgREST.
+ * Returns top or bottom sentiment movers ranked by execution count.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createSentimentMoversHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'sentiment-movers',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      const q = ctx.data || {};
+      const type = (q.type || 'top').toLowerCase();
+      if (type !== 'top' && type !== 'bottom') {
+        return badRequest('Invalid type parameter. Must be "top" or "bottom".');
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const rpcParams = {
+        p_organization_id: organizationId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_model: model,
+        p_type: type,
+      };
+
+      if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
+      if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
+      if (shouldApplyFilter(params.categoryId)) {
+        rpcParams.p_category_id = isValidUUID(params.categoryId)
+          ? params.categoryId
+          : undefined;
+      }
+      if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
+      if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
+      if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
+
+      const { data, error } = await client.rpc('rpc_sentiment_movers', rpcParams);
+
+      if (error) {
+        ctx.log.error(`Brand presence sentiment-movers PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const movers = (data || []).map((row) => ({
+        promptId: row.prompt_id,
+        prompt: row.prompt,
+        topicId: row.topic_id,
+        topic: row.topic,
+        categoryId: row.category_id,
+        category: row.category,
+        region: row.region,
+        origin: row.origin,
+        popularity: row.popularity,
+        fromSentiment: row.from_sentiment,
+        toSentiment: row.to_sentiment,
+        fromDate: row.from_date,
+        toDate: row.to_date,
+        executionCount: row.execution_count,
+      }));
+
+      return ok({ movers });
     },
   );
 }

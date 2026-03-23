@@ -11,11 +11,13 @@
  */
 
 /**
- * Creates an HTTP client with three pre-configured auth personas.
+ * Creates an HTTP client with pre-configured auth personas.
  *
  * @param {string} baseUrl - The dev server base URL (e.g., http://localhost:3002)
- * @param {{ admin: string, user: string, trialUser: string }} tokens - JWT tokens
- * @returns {{ admin: object, user: object, trialUser: object }}
+ * @param {{ admin: string, user: string, trialUser: string, delegatedUser: string,
+ *   delegatedUserTruncated: string, delegatedUserNoSource: string }} tokens - JWT tokens
+ * @returns {{ admin: object, user: object, trialUser: object, delegatedUser: object,
+ *   delegatedUserTruncated: object, delegatedUserNoSource: object }}
  */
 export function createHttpClient(baseUrl, tokens) {
   async function request(method, path, body, token, extraHeaders = {}) {
@@ -68,5 +70,8 @@ export function createHttpClient(baseUrl, tokens) {
     admin: makeMethods(tokens.admin),
     user: makeMethods(tokens.user),
     trialUser: makeMethods(tokens.trialUser),
+    delegatedUser: makeMethods(tokens.delegatedUser),
+    delegatedUserTruncated: makeMethods(tokens.delegatedUserTruncated),
+    delegatedUserNoSource: makeMethods(tokens.delegatedUserNoSource),
   };
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Adobe. All rights reserved.
+ * Copyright 2026 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -10,8 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-import { ctx } from './harness.js';
-import { resetDynamo } from './seed.js';
-import auditUrlTests from '../shared/tests/audit-urls.js';
-
-auditUrlTests(() => ctx.httpClient, resetDynamo);
+/**
+ * Thrown when a request targets a product code that does not match the x-product header.
+ * Caught in controller helpers to return a 403 instead of a 400.
+ */
+export class UnauthorizedProductError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'UnauthorizedProductError';
+  }
+}
