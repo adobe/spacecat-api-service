@@ -200,6 +200,35 @@ describe('prompts-storage', () => {
       expect(result.page).to.equal(1);
     });
 
+    it('falls back to prompts.length when count is null', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Prompt',
+        regions: ['us'],
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [row], error: null, count: null });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(1);
+      expect(result.total).to.equal(1);
+    });
+
     it('throws when limit exceeds maximum', async () => {
       const client = { from: () => makeChain({ data: { id: BRAND_UUID }, error: null }) };
       await expect(
@@ -715,6 +744,35 @@ describe('prompts-storage', () => {
           postgrestClient: client,
         }),
       ).to.be.rejectedWith('Failed to auto-create topics');
+    });
+
+    it('handles null existing data from database', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: null, error: null }),
+                    in: () => thenable({ data: null, error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'Hello', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
     });
 
     it('handles prompts without regions, categoryId, topicId, name, or text', async () => {

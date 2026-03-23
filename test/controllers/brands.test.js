@@ -1571,6 +1571,32 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
     it('returns 404 when category not found', async () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -1658,13 +1684,37 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(204);
     });
 
-    it('returns 400 when categoryId is missing', async () => {
+    it('returns 400 when params is undefined', async () => {
       const response = await brandsController.deleteCategoryForOrg({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
+        params: undefined,
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
     });
 
     it('returns 404 when category not found', async () => {
@@ -1892,14 +1942,27 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 400 when spaceCatId is missing', async () => {
+    it('returns 400 when params is undefined', async () => {
       const response = await brandsController.createBrandForOrg({
         ...context,
-        params: {},
+        params: undefined,
         data: { name: 'New Brand' },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
     });
 
     it('returns 400 when spaceCatId is not a valid UUID', async () => {
