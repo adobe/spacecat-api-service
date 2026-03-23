@@ -490,6 +490,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends',
+      'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers',
       'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
       'GET /org/:spaceCatId/brands/all/brand-presence/stats',

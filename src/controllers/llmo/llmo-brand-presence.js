@@ -1185,6 +1185,93 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
   );
 }
 
+/**
+ * Creates the getSentimentMovers handler.
+ * Calls rpc_sentiment_movers PostgreSQL function via PostgREST.
+ * Returns top or bottom sentiment movers ranked by execution count.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createSentimentMoversHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'sentiment-movers',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      const q = ctx.data || {};
+      const type = (q.type || 'top').toLowerCase();
+      if (type !== 'top' && type !== 'bottom') {
+        return badRequest('Invalid type parameter. Must be "top" or "bottom".');
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const rpcParams = {
+        p_organization_id: organizationId,
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_model: model,
+        p_type: type,
+      };
+
+      if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
+      if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
+      if (shouldApplyFilter(params.categoryId)) {
+        rpcParams.p_category_id = isValidUUID(params.categoryId)
+          ? params.categoryId
+          : undefined;
+      }
+      if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
+      if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
+      if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
+
+      const { data, error } = await client.rpc('rpc_sentiment_movers', rpcParams);
+
+      if (error) {
+        ctx.log.error(`Brand presence sentiment-movers PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const movers = (data || []).map((row) => ({
+        promptId: row.prompt_id,
+        prompt: row.prompt,
+        topicId: row.topic_id,
+        topic: row.topic,
+        categoryId: row.category_id,
+        category: row.category,
+        region: row.region,
+        origin: row.origin,
+        popularity: row.popularity,
+        fromSentiment: row.from_sentiment,
+        toSentiment: row.to_sentiment,
+        fromDate: row.from_date,
+        toDate: row.to_date,
+        executionCount: row.execution_count,
+      }));
+
+      return ok({ movers });
+    },
+  );
+}
+
 function parseShowTrends(q) {
   const v = q?.showTrends ?? q?.show_trends;
   if (v === true || v === 1) return true;
