@@ -1,3 +1,17 @@
+# [1.365.0](https://github.com/adobe/spacecat-api-service/compare/v1.364.0...v1.365.0) (2026-03-23)
+
+
+### Features
+
+* add topics endpoint for brand presence Data Insights table | LLMO-3605 ([#1985](https://github.com/adobe/spacecat-api-service/issues/1985)) ([666b0bd](https://github.com/adobe/spacecat-api-service/commit/666b0bd7be116ba84e76d1fef3b91f3cd4c41d0a))
+
+# [1.364.0](https://github.com/adobe/spacecat-api-service/compare/v1.363.2...v1.364.0) (2026-03-23)
+
+
+### Features
+
+* llmo sentiment movers api ([#2006](https://github.com/adobe/spacecat-api-service/issues/2006)) ([95cec54](https://github.com/adobe/spacecat-api-service/commit/95cec54a91f390b9982a8d6663e464fb4fac8aae))
+
 ## [1.363.2](https://github.com/adobe/spacecat-api-service/compare/v1.363.1...v1.363.2) (2026-03-22)
 
 
