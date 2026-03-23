@@ -902,7 +902,7 @@ describe('onboard-llmo-modal', () => {
       );
     });
 
-    it('should not require HLX_ADMIN_TOKEN for async publish enqueue path', async () => {
+    it('should not require HLX_ONBOARDING_TOKEN for async publish enqueue path', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -917,8 +917,8 @@ describe('onboard-llmo-modal', () => {
       const slackCtx = createDefaultMockSlackCtx(sandbox);
 
       // Store and clear token to verify onboarding still succeeds
-      const originalToken = process.env.HLX_ADMIN_TOKEN;
-      delete process.env.HLX_ADMIN_TOKEN;
+      const originalToken = process.env.HLX_ONBOARDING_TOKEN;
+      delete process.env.HLX_ONBOARDING_TOKEN;
       try {
         await onboardSite(input, lambdaCtx, slackCtx);
 
@@ -934,9 +934,9 @@ describe('onboard-llmo-modal', () => {
         );
       } finally {
         if (originalToken !== undefined) {
-          process.env.HLX_ADMIN_TOKEN = originalToken;
+          process.env.HLX_ONBOARDING_TOKEN = originalToken;
         } else {
-          delete process.env.HLX_ADMIN_TOKEN;
+          delete process.env.HLX_ONBOARDING_TOKEN;
         }
       }
     });
