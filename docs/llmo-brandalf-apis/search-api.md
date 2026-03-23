@@ -21,7 +21,7 @@ Full-text search across topics and prompts in the Data Insights table. Returns m
 
 | Parameter | Aliases | Type | Default | Description |
 |-----------|---------|------|---------|-------------|
-| `query` | — | string | — | **Required.** Search string matched against `topics` and `prompt` columns (case-insensitive substring match via `ILIKE`) |
+| `query` | — | string | — | **Required.** Search string (2–500 chars) matched against `topics` and `prompt` columns (case-insensitive substring match via `ILIKE`). Special characters (`%`, `_`, `,`, `.`, `(`, `)`, `"`) are escaped automatically. |
 | `startDate` | `start_date` | string (YYYY-MM-DD) | 28 days ago | Start of date range |
 | `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
 | `model` | `platform` | string | `chatgpt` | LLM model (e.g. chatgpt, google-ai-mode, copilot) |
@@ -98,7 +98,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 
 ## Search Logic
 
-1. **PostgREST query**: Uses `.or('topics.ilike.%query%,prompt.ilike.%query%')` for case-insensitive substring matching on both topic name and prompt text
+1. **PostgREST query**: Uses `.or()` with double-quoted, escaped ILIKE patterns for case-insensitive substring matching on both topic name and prompt text. SQL ILIKE metacharacters (`%`, `_`) and PostgREST filter syntax characters (`,`, `.`, `(`, `)`, `"`) are escaped to prevent injection.
 2. **Aggregation**: Reuses the same `aggregateTopicData()` function as the topics endpoint (counts mentions/citations/sources from all execution rows, deduplicates prompts for `promptCount`)
 3. **matchType tagging**: After aggregation, each topic is tagged:
    - `"topic"` — topic name contains the query string (case-insensitive)
@@ -107,9 +107,11 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 
 ---
 
-## Empty Query Behavior
+## Query Validation
 
-When `query` is empty or missing, the endpoint returns `{ topicDetails: [], totalCount: 0 }` immediately without querying the database.
+- When `query` is empty or missing, the endpoint returns `{ topicDetails: [], totalCount: 0 }` immediately without querying the database.
+- When `query` is shorter than 2 characters, the endpoint returns `400 Bad Request`.
+- Queries longer than 500 characters are silently truncated to 500.
 
 ---
 
@@ -119,6 +121,7 @@ When `query` is empty or missing, the endpoint returns `{ topicDetails: [], tota
 |--------|-----------|
 | 400 | PostgREST not configured (DATA_SERVICE_PROVIDER ≠ postgres) |
 | 400 | Organization not found |
+| 400 | Search query shorter than 2 characters |
 | 400 | PostgREST/PostgreSQL query error |
 | 403 | User does not belong to the organization |
 | 403 | Site does not belong to the organization |

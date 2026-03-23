@@ -1048,13 +1048,16 @@ export function buildPromptDetails(rows) {
   });
 }
 
-function parsePaginationParams(context) {
+function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
   const q = context.data || {};
   return {
     sortBy: q.sortBy || 'name',
     sortOrder: q.sortOrder || 'asc',
-    page: Number.parseInt(q.page, 10) || 0,
-    pageSize: Number.parseInt(q.pageSize, 10) || 20,
+    page: Math.max(0, Number.parseInt(q.page, 10) || 0),
+    pageSize: Math.min(
+      Math.max(1, Number.parseInt(q.pageSize, 10) || defaultPageSize),
+      1000,
+    ),
   };
 }
 
@@ -1236,14 +1239,20 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
 
 // ── Search ──────────────────────────────────────────────────────────────────
 
-function parseSearchPaginationParams(context) {
-  const q = context.data || {};
-  return {
-    sortBy: q.sortBy || 'name',
-    sortOrder: q.sortOrder || 'asc',
-    page: Number.parseInt(q.page, 10) || 0,
-    pageSize: Number.parseInt(q.pageSize, 10) || 100,
-  };
+const MAX_SEARCH_QUERY_LENGTH = 500;
+const MIN_SEARCH_QUERY_LENGTH = 2;
+
+/**
+ * Builds a PostgREST-safe ILIKE pattern from a raw search query.
+ * Escapes SQL ILIKE metacharacters (%, _) and wraps in PostgREST
+ * double-quotes to prevent filter injection via commas/dots/parens.
+ * @internal Exported for testing
+ */
+export function buildSearchPattern(raw) {
+  const ilikeEscaped = raw.replace(/%/g, '\\%').replace(/_/g, '\\_');
+  const pattern = `%${ilikeEscaped}%`;
+  const pgrstEscaped = pattern.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${pgrstEscaped}"`;
 }
 
 /**
@@ -1261,7 +1270,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
-      const pagination = parseSearchPaginationParams(ctx);
+      const pagination = parsePaginationParams(ctx, { defaultPageSize: 100 });
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all'
@@ -1272,11 +1281,16 @@ export function createSearchHandler(getOrgAndValidateAccess) {
         return ok({ topicDetails: [], totalCount: 0 });
       }
 
+      if (query.length < MIN_SEARCH_QUERY_LENGTH) {
+        return badRequest(`Search query must be at least ${MIN_SEARCH_QUERY_LENGTH} characters`);
+      }
+
+      const bounded = query.slice(0, MAX_SEARCH_QUERY_LENGTH);
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
       const model = params.model || 'chatgpt';
 
-      const pattern = `%${query}%`;
+      const pattern = buildSearchPattern(bounded);
 
       let q = client
         .from('brand_presence_executions')
@@ -1309,9 +1323,9 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
 
       if (error) {
-        ctx.log.error(
-          `Brand presence search PostgREST error: ${error.message}`,
-        );
+        ctx.log.error('Brand presence search PostgREST error', {
+          organizationId, query: bounded, model, error: error.message,
+        });
         return badRequest(error.message);
       }
 
@@ -1328,13 +1342,12 @@ export function createSearchHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const topicDetails = aggregateTopicData(data || []);
-      const queryLower = query.toLowerCase();
-      topicDetails.forEach((td) => {
-        // eslint-disable-next-line no-param-reassign
-        td.matchType = td.topic.toLowerCase().includes(queryLower)
-          ? 'topic' : 'prompt';
-      });
+      const queryLower = bounded.toLowerCase();
+      const topicDetails = aggregateTopicData(data || []).map((td) => ({
+        ...td,
+        matchType: td.topic.toLowerCase().includes(queryLower)
+          ? 'topic' : 'prompt',
+      }));
 
       sortTopicDetails(topicDetails, pagination.sortBy, pagination.sortOrder);
 

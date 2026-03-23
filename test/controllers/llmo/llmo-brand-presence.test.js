@@ -30,6 +30,7 @@ import {
   createTopicsHandler,
   createTopicPromptsHandler,
   createSearchHandler,
+  buildSearchPattern,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   dateToIsoWeek,
@@ -4700,7 +4701,7 @@ describe('llmo-brand-presence', () => {
       expect(body.topicDetails[0].matchType).to.equal('prompt');
     });
 
-    it('uses .or() for PostgREST query', async () => {
+    it('uses .or() for PostgREST query with escaped pattern', async () => {
       const client = createChainableMock();
       mockContext.data = { query: 'pdf' };
       mockContext.dataAccess.Site.postgrestService = client;
@@ -4708,8 +4709,9 @@ describe('llmo-brand-presence', () => {
       const handler = createSearchHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
+      const expected = buildSearchPattern('pdf');
       expect(client.or).to.have.been.calledWith(
-        'topics.ilike.%pdf%,prompt.ilike.%pdf%',
+        `topics.ilike.${expected},prompt.ilike.${expected}`,
       );
     });
 
@@ -4834,6 +4836,187 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topicDetails).to.have.lengthOf(100);
       expect(body.totalCount).to.equal(105);
+    });
+
+    it('returns page 1 with remaining items', async () => {
+      const rows = [];
+      for (let i = 0; i < 105; i += 1) {
+        rows.push({
+          topics: `Topic${i}`,
+          prompt: `pdf question ${i}`,
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 50,
+          position: '5',
+          sentiment: 'Neutral',
+          volume: 10,
+          origin: 'human',
+          category_name: 'Cat',
+          execution_date: '2026-03-01',
+          url: '',
+          error_code: null,
+        });
+      }
+      mockContext.data = { query: 'pdf', page: '1' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(5);
+      expect(body.totalCount).to.equal(105);
+    });
+
+    it('sorts by visibility descending when requested', async () => {
+      const rows = [
+        {
+          topics: 'LowVis',
+          prompt: 'pdf low',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 20,
+          position: '5',
+          sentiment: 'Neutral',
+          volume: 10,
+          origin: 'human',
+          category_name: 'Cat',
+          execution_date: '2026-03-01',
+          url: '',
+          error_code: null,
+        },
+        {
+          topics: 'HighVis',
+          prompt: 'pdf high',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 90,
+          position: '1',
+          sentiment: 'Positive',
+          volume: 50,
+          origin: 'human',
+          category_name: 'Cat',
+          execution_date: '2026-03-01',
+          url: '',
+          error_code: null,
+        },
+      ];
+      mockContext.data = { query: 'pdf', sortBy: 'visibility', sortOrder: 'desc' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(2);
+      expect(body.topicDetails[0].topic).to.equal('HighVis');
+      expect(body.topicDetails[1].topic).to.equal('LowVis');
+    });
+
+    it('returns empty results when query is only whitespace', async () => {
+      mockContext.data = { query: '   ' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.deep.equal([]);
+      expect(body.totalCount).to.equal(0);
+    });
+
+    it('returns badRequest when query is a single character', async () => {
+      mockContext.data = { query: 'a' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('escapes ILIKE metacharacters in query', async () => {
+      const client = createChainableMock();
+      mockContext.data = { query: 'test%_val' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const expected = buildSearchPattern('test%_val');
+      expect(client.or).to.have.been.calledWith(
+        `topics.ilike.${expected},prompt.ilike.${expected}`,
+      );
+    });
+
+    it('escapes PostgREST special characters (commas, dots, parens) in query', async () => {
+      const client = createChainableMock();
+      mockContext.data = { query: 'pdf,prompt.eq.hack(test)' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const expected = buildSearchPattern('pdf,prompt.eq.hack(test)');
+      expect(client.or).to.have.been.calledWith(
+        `topics.ilike.${expected},prompt.ilike.${expected}`,
+      );
+    });
+
+    it('does not filter by brand_id when brandId is "all"', async () => {
+      const client = createChainableMock({
+        data: [],
+        error: null,
+      });
+      mockContext.data = { query: 'pdf' };
+      mockContext.params.brandId = 'all';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const brandIdCalls = client.eq.getCalls()
+        .filter((call) => call.args[0] === 'brand_id');
+      expect(brandIdCalls).to.have.lengthOf(0);
+    });
+  });
+
+  describe('buildSearchPattern', () => {
+    it('wraps a plain query in ILIKE wildcards and PostgREST double-quotes', () => {
+      expect(buildSearchPattern('pdf')).to.equal('"%pdf%"');
+    });
+
+    it('escapes percent signs', () => {
+      expect(buildSearchPattern('100%')).to.equal('"%100\\\\%%"');
+    });
+
+    it('escapes underscores', () => {
+      expect(buildSearchPattern('foo_bar')).to.equal('"%foo\\\\_bar%"');
+    });
+
+    it('escapes commas (PostgREST condition separator)', () => {
+      expect(buildSearchPattern('a,b')).to.equal('"%a,b%"');
+    });
+
+    it('escapes double quotes', () => {
+      expect(buildSearchPattern('say "hello"')).to.equal('"%say \\"hello\\"%"');
+    });
+
+    it('handles combined special characters', () => {
+      const result = buildSearchPattern('100%_test,"quoted"');
+      expect(result).to.be.a('string');
+      expect(result.startsWith('"')).to.be.true;
+      expect(result.endsWith('"')).to.be.true;
     });
   });
 });
