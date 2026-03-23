@@ -2017,17 +2017,53 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 400 when spaceCatId is missing', async () => {
+    it('returns 400 when params is undefined', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,
-        params: {},
+        params: undefined,
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
         data: { name: 'Updated Brand' },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(400);
     });
 
-    it('returns 404 when brand not found', async () => {
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand not found during resolve', async () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
@@ -2046,6 +2082,39 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         data: { name: 'Updated Brand' },
         dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when updateBrand returns null', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // First call: resolveBrandUuid succeeds
+      maybeSingleStub.onFirstCall().resolves({
+        data: { id: BRAND_UUID },
+        error: null,
+      });
+      // Second call: updateBrand returns null (brand update returns no data)
+      maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(404);
     });
@@ -2118,6 +2187,24 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(204);
     });
 
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 400 when brandId is missing', async () => {
       const response = await brandsController.deleteBrandForOrg({
         ...context,
@@ -2127,7 +2214,31 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 404 when brand not found', async () => {
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand not found during resolve', async () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
@@ -2145,6 +2256,35 @@ describe('Brands Controller', () => {
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when deleteBrand returns false', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // First call: resolveBrandUuid succeeds
+      maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // Second call: deleteBrand returns null (not found)
+      maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(404);
     });

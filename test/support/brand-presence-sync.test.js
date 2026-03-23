@@ -334,6 +334,33 @@ describe('brand-presence-sync', () => {
       expect(rows[0].category_id).to.equal('valid');
     });
 
+    it('logs (no id) for categories without id and returns early when all filtered out', async () => {
+      const log = {
+        debug: sinon.stub(), info: sinon.stub(), error: sinon.stub(),
+      };
+      const fromStub = sinon.stub();
+
+      await syncCategoriesConfig({
+        customerConfig: {
+          customer: {
+            categories: [
+              { name: 'Has name but no id' },
+              { name: '' },
+            ],
+          },
+        },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+      });
+
+      expect(log.error).to.have.been.calledWith(
+        `Category(ies) without name skipped for organization ${ORG_ID}:`,
+        ['(no id)'],
+      );
+      expect(fromStub).to.not.have.been.called;
+    });
+
     it('throws on PostgREST error', async () => {
       const log = {
         debug: sinon.stub(), info: sinon.stub(), error: sinon.stub(),
@@ -434,6 +461,33 @@ describe('brand-presence-sync', () => {
       const [rows] = upsertStub.firstCall.args;
       expect(rows).to.have.lengthOf(1);
       expect(rows[0].topic_id).to.equal('valid');
+    });
+
+    it('logs (no id) for topics without id and returns early when all filtered out', async () => {
+      const log = {
+        debug: sinon.stub(), info: sinon.stub(), error: sinon.stub(),
+      };
+      const fromStub = sinon.stub();
+
+      await syncTopicsConfig({
+        customerConfig: {
+          customer: {
+            topics: [
+              { name: 'Has name but no id' },
+              { name: '' },
+            ],
+          },
+        },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+      });
+
+      expect(log.error).to.have.been.calledWith(
+        `Topic(s) without name skipped for organization ${ORG_ID}:`,
+        ['(no id)'],
+      );
+      expect(fromStub).to.not.have.been.called;
     });
 
     it('throws on PostgREST error', async () => {

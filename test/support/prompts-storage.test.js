@@ -716,6 +716,39 @@ describe('prompts-storage', () => {
         }),
       ).to.be.rejectedWith('Failed to auto-create topics');
     });
+
+    it('handles prompts without regions, categoryId, topicId, name, or text', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: () => thenable({ data: [], error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'gen-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'my-id' }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      expect(result.prompts).to.have.lengthOf(1);
+      expect(result.prompts[0].regions).to.deep.equal([]);
+      expect(result.prompts[0].categoryId).to.be.undefined;
+      expect(result.prompts[0].topicId).to.be.undefined;
+    });
   });
 
   describe('updatePromptById', () => {

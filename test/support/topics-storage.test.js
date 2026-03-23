@@ -64,6 +64,33 @@ describe('topics-storage', () => {
       expect(result[0].name).to.equal('SEO Best Practices');
     });
 
+    it('returns empty array and defaults status when data is null', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result).to.deep.equal([]);
+    });
+
+    it('defaults status to active when row status is falsy', async () => {
+      const dbRow = {
+        id: 'uuid-1',
+        topic_id: 'no-status',
+        name: 'No Status',
+        description: null,
+        status: null,
+        brand_id: null,
+        updated_at: '2026-01-01',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result[0].status).to.equal('active');
+    });
+
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -163,6 +190,34 @@ describe('topics-storage', () => {
       expect(result.uuid).to.equal('uuid-upd');
       expect(result.name).to.equal('Updated');
       expect(result.status).to.equal('active');
+    });
+
+    it('updates a topic with description and brandId fields', async () => {
+      const dbRow = {
+        id: 'uuid-upd2',
+        topic_id: 'test2',
+        name: 'Test',
+        description: 'New desc',
+        status: 'active',
+        brand_id: 'brand-uuid',
+        updated_at: '2026-03-15',
+        updated_by: 'editor@test.com',
+      };
+
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await updateTopic({
+        organizationId: ORG_ID,
+        topicId: 'test2',
+        updates: { description: 'New desc', brandId: 'brand-uuid' },
+        postgrestClient,
+        updatedBy: 'editor@test.com',
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.description).to.equal('New desc');
+      expect(result.brandId).to.equal('brand-uuid');
     });
 
     it('returns null when topic is not found', async () => {

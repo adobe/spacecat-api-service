@@ -187,6 +187,14 @@ describe('brands-storage', () => {
       expect(postgrestClient.from).to.have.been.calledWith('regions');
     });
 
+    it('returns empty array when data is null', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listRegions(postgrestClient);
+      expect(result).to.deep.equal([]);
+    });
+
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -616,6 +624,156 @@ describe('brands-storage', () => {
       });
 
       expect(result.brandAliases).to.deep.equal(['TB']);
+    });
+
+    it('handles socialAccounts with handle-only objects', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        regions: [],
+        owned_urls: [],
+        social: ['@handle'],
+        earned_sources: [],
+        brand_aliases: [],
+        competitors: [],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { socialAccounts: [{ handle: '@handle' }] },
+        postgrestClient,
+      });
+
+      expect(result.socialAccounts).to.deep.equal([{ url: '@handle' }]);
+    });
+
+    it('handles null brandAliases and null competitors in updates', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        brand_aliases: [],
+        competitors: [],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { brandAliases: null, competitors: null },
+        postgrestClient,
+      });
+
+      expect(result.brandAliases).to.deep.equal([]);
+      expect(result.competitors).to.deep.equal([]);
+    });
+
+    it('handles earnedContent with name-only objects', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        regions: [],
+        owned_urls: [],
+        social: [],
+        earned_sources: ['SourceName'],
+        brand_aliases: [],
+        competitors: [],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { earnedContent: [{ name: 'SourceName' }] },
+        postgrestClient,
+      });
+
+      expect(result.earnedContent).to.deep.equal([{ url: 'SourceName' }]);
+    });
+
+    it('handles object aliases in brandAliases', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        brand_aliases: [{ alias: 'ObjAlias' }],
+        competitors: [],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        brand_aliases: { data: null, error: null },
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { brandAliases: [{ name: 'ObjAlias' }] },
+        postgrestClient,
+      });
+
+      expect(result.brandAliases).to.deep.equal(['ObjAlias']);
+    });
+
+    it('handles object competitors', async () => {
+      const fullBrandRow = {
+        id: BRAND_ID,
+        name: 'Test',
+        status: 'active',
+        regions: [],
+        owned_urls: [],
+        social: [],
+        earned_sources: [],
+        brand_aliases: [],
+        competitors: [{ name: 'ObjRival' }],
+        brand_sites: [],
+      };
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        competitors: { data: null, error: null },
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { competitors: [{ name: 'ObjRival' }] },
+        postgrestClient,
+      });
+
+      expect(result.competitors).to.deep.equal(['ObjRival']);
     });
 
     it('throws when alias sync fails during updateBrand', async () => {
