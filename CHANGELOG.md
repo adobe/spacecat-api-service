@@ -1,3 +1,10 @@
+# [1.368.0](https://github.com/adobe/spacecat-api-service/compare/v1.367.0...v1.368.0) (2026-03-23)
+
+
+### Features
+
+* prompts CRUD ([#1953](https://github.com/adobe/spacecat-api-service/issues/1953)) ([44e7019](https://github.com/adobe/spacecat-api-service/commit/44e7019a4452c47195b69d8acef887dd66b84926))
+
 # [1.367.0](https://github.com/adobe/spacecat-api-service/compare/v1.366.0...v1.367.0) (2026-03-23)
 
 
