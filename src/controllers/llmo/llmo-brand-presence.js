@@ -1017,14 +1017,21 @@ export function buildPromptDetails(rows) {
   rows.forEach((row) => {
     const key = buildTopicPromptKey(row);
     const existing = promptMap.get(key);
-    if (!existing || (row.execution_date > existing.execution_date)) {
-      promptMap.set(key, row);
+    if (!existing) {
+      promptMap.set(key, {
+        latestRow: row,
+        totalMentions: 0,
+        totalCitations: 0,
+      });
+    } else if (row.execution_date > existing.latestRow.execution_date) {
+      existing.latestRow = row;
     }
+    const entry = promptMap.get(key);
+    if (row.mentions === true || row.mentions === 'true') entry.totalMentions += 1;
+    if (row.citations === true || row.citations === 'true') entry.totalCitations += 1;
   });
 
-  return [...promptMap.values()].map((r) => {
-    const mentioned = r.mentions === true || r.mentions === 'true';
-    const cited = r.citations === true || r.citations === 'true';
+  return [...promptMap.values()].map(({ latestRow: r, totalMentions, totalCitations }) => {
     const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
 
     return {
@@ -1036,8 +1043,8 @@ export function buildPromptDetails(rows) {
       answer: '',
       sources: '',
       relatedURL: r.url || '',
-      citationsCount: cited ? 1 : 0,
-      mentionsCount: mentioned ? 1 : 0,
+      citationsCount: totalCitations,
+      mentionsCount: totalMentions,
       isAnswered: !(r.error_code),
       visibilityScore: Number.isNaN(vs) ? 0 : vs,
       position: r.position ? String(r.position) : '',
