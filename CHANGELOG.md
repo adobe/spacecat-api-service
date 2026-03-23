@@ -1,3 +1,10 @@
+# [1.366.0](https://github.com/adobe/spacecat-api-service/compare/v1.365.1...v1.366.0) (2026-03-23)
+
+
+### Features
+
+* add search endpoint for brand presence Data Insights table | LLMO-3605 ([#2013](https://github.com/adobe/spacecat-api-service/issues/2013)) ([f79cd3b](https://github.com/adobe/spacecat-api-service/commit/f79cd3bf5bf39e6d9488547c47171fe415dfcbbf))
+
 ## [1.365.1](https://github.com/adobe/spacecat-api-service/compare/v1.365.0...v1.365.1) (2026-03-23)
 
 
