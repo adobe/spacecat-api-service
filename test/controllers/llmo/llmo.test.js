@@ -3819,6 +3819,128 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('getDemoBrandPresence', () => {
+    let demoContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      demoContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {},
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should return presigned URL for demo brand presence fixture', async () => {
+      const result = await controller.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(
+        'workspace/llmo/opportunity-workspace/demo/summit-demo-brand-presence.json',
+      );
+    });
+
+    it('should return 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 400 when S3 is not configured', async () => {
+      const result = await controller.getDemoBrandPresence({ ...demoContext, s3: null });
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    });
+
+    it('should return 400 when LLMO is not enabled for site', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const result = await controller.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+    });
+  });
+
+  describe('getDemoRecommendations', () => {
+    let demoContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      demoContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {},
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should return presigned URL for demo recommendations fixture', async () => {
+      const result = await controller.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(
+        'workspace/llmo/opportunity-workspace/demo/summit-demo-recommendations.json',
+      );
+    });
+
+    it('should return 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 400 when S3 is not configured', async () => {
+      const result = await controller.getDemoRecommendations({ ...demoContext, s3: null });
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('should return 400 when LLMO is not enabled for site', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const result = await controller.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+    });
+  });
+
   describe('createOrUpdateEdgeConfig', () => {
     let edgeConfigContext;
 

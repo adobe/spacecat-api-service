@@ -57,6 +57,7 @@ import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
+import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -1017,6 +1018,36 @@ function LlmoController(ctx) {
     }
   };
 
+  // Handles requests for the summit demo brand presence fixture (presigned S3 URL)
+  const getDemoBrandPresence = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      return await handleDemoBrandPresence(context);
+    } catch (error) {
+      log.error(`Error getting demo brand presence for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  // Handles requests for the summit demo recommendations fixture (presigned S3 URL)
+  const getDemoRecommendations = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      return await handleDemoRecommendations(context);
+    } catch (error) {
+      log.error(`Error getting demo recommendations for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-config
    * Creates or updates Tokowaka edge optimization configuration
@@ -1704,6 +1735,8 @@ function LlmoController(ctx) {
     queryFiles,
     getLlmoRationale,
     getBrandClaims,
+    getDemoBrandPresence,
+    getDemoRecommendations,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
     createOrUpdateStageEdgeConfig,
