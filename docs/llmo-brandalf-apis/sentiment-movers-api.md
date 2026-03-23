@@ -65,8 +65,11 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 {
   "movers": [
     {
+      "promptId": "019cb903-1184-7f92-8325-f9d1176af316",
       "prompt": "best pdf merge tool for mac",
+      "topicId": "019cb903-2295-7f92-8325-a8c2045bf427",
       "topic": "Merge PDF",
+      "categoryId": "019cb903-3306-7f92-8325-b7d3156cg538",
       "category": "Acrobat",
       "region": "GB",
       "origin": "HUMAN",
@@ -85,8 +88,11 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `promptId` | string (UUID) | Unique identifier of the prompt |
 | `prompt` | string | The prompt text |
+| `topicId` | string (UUID) | Unique identifier of the topic |
 | `topic` | string | Topic/keyword the prompt belongs to |
+| `categoryId` | string (UUID) | Unique identifier of the category |
 | `category` | string | Content category |
 | `region` | string | Geographic region code |
 | `origin` | string | AI platform (e.g. "HUMAN", "AI") |

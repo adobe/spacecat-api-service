@@ -1251,8 +1251,11 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
       }
 
       const movers = (data || []).map((row) => ({
+        promptId: row.prompt_id,
         prompt: row.prompt,
+        topicId: row.topic_id,
         topic: row.topic,
+        categoryId: row.category_id,
         category: row.category,
         region: row.region,
         origin: row.origin,

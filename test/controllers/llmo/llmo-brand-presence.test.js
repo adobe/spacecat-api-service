@@ -2246,8 +2246,11 @@ describe('llmo-brand-presence', () => {
       const rpcData = {
         data: [
           {
+            prompt_id: '0178a3f0-1234-7000-8000-000000000011',
             prompt: 'best pdf editor',
+            topic_id: '0178a3f0-1234-7000-8000-000000000022',
             topic: 'Acrobat',
+            category_id: '0178a3f0-1234-7000-8000-000000000033',
             category: 'PDF',
             region: 'US',
             origin: 'HUMAN',
@@ -2271,8 +2274,11 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.movers).to.be.an('array').with.lengthOf(1);
       expect(body.movers[0]).to.deep.include({
+        promptId: '0178a3f0-1234-7000-8000-000000000011',
         prompt: 'best pdf editor',
+        topicId: '0178a3f0-1234-7000-8000-000000000022',
         topic: 'Acrobat',
+        categoryId: '0178a3f0-1234-7000-8000-000000000033',
         fromSentiment: 'neutral',
         toSentiment: 'positive',
         executionCount: 48,
