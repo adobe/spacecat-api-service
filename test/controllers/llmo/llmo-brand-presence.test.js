@@ -16,8 +16,10 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
   addDaysToDate,
+  aggregateDetailSources,
   aggregateSentimentByWeek,
   aggregateTopicData,
+  aggregateWeeklyDetailStats,
   buildPromptDetails,
   aggregateShareOfVoice,
   buildPromptKey,
@@ -25,8 +27,10 @@ import {
   createBrandPresenceStatsHandler,
   createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
+  createPromptDetailHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
+  createTopicDetailHandler,
   createTopicsHandler,
   createTopicPromptsHandler,
   createSearchHandler,
@@ -5306,6 +5310,936 @@ describe('llmo-brand-presence', () => {
       expect(result).to.be.a('string');
       expect(result.startsWith('"')).to.be.true;
       expect(result.endsWith('"')).to.be.true;
+    });
+  });
+
+  // ── aggregateWeeklyDetailStats ──────────────────────────────────────────────
+  describe('aggregateWeeklyDetailStats', () => {
+    it('returns empty array for empty input', () => {
+      expect(aggregateWeeklyDetailStats([])).to.deep.equal([]);
+    });
+
+    it('buckets rows by ISO week and sorts chronologically', () => {
+      const rows = [
+        { execution_date: '2026-03-09', visibility_score: null },
+        { execution_date: '2026-03-02', visibility_score: null },
+      ];
+      const result = aggregateWeeklyDetailStats(rows);
+      expect(result).to.have.lengthOf(2);
+      expect(result[0].week).to.equal('2026-W10');
+      expect(result[1].week).to.equal('2026-W11');
+    });
+
+    it('averages visibility score per week', () => {
+      const rows = [
+        { execution_date: '2026-03-02', visibility_score: 60 },
+        { execution_date: '2026-03-03', visibility_score: 40 },
+      ];
+      const [entry] = aggregateWeeklyDetailStats(rows);
+      expect(entry.visibilityScore).to.equal(50);
+    });
+
+    it('returns 0 visibilityScore when all scores are null', () => {
+      const rows = [{ execution_date: '2026-03-02', visibility_score: null }];
+      const [entry] = aggregateWeeklyDetailStats(rows);
+      expect(entry.visibilityScore).to.equal(0);
+    });
+
+    it('averages numeric position values and excludes "Not Mentioned"', () => {
+      const rows = [
+        { execution_date: '2026-03-02', position: '2' },
+        { execution_date: '2026-03-03', position: 'Not Mentioned' },
+        { execution_date: '2026-03-04', position: '4' },
+      ];
+      const [entry] = aggregateWeeklyDetailStats(rows);
+      expect(entry.position).to.equal(3);
+    });
+
+    it('counts mentions and citations', () => {
+      const rows = [
+        { execution_date: '2026-03-02', mentions: true, citations: true },
+        { execution_date: '2026-03-03', mentions: 'true', citations: false },
+        { execution_date: '2026-03-04', mentions: false, citations: 'true' },
+      ];
+      const [entry] = aggregateWeeklyDetailStats(rows);
+      expect(entry.mentions).to.equal(2);
+      expect(entry.citations).to.equal(2);
+    });
+
+    it('computes sentiment score (positive=100, neutral=50, negative counted at 0)', () => {
+      const rows = [
+        { execution_date: '2026-03-02', sentiment: 'Positive' },
+        { execution_date: '2026-03-03', sentiment: 'Neutral' },
+        { execution_date: '2026-03-04', sentiment: 'Negative' },
+      ];
+      const [entry] = aggregateWeeklyDetailStats(rows);
+      // (100 + 50 + 0) / 3 = 50
+      expect(entry.sentiment).to.equal(50);
+    });
+
+    it('returns -1 sentiment when no sentiment rows', () => {
+      const rows = [{ execution_date: '2026-03-02', sentiment: '' }];
+      const [entry] = aggregateWeeklyDetailStats(rows);
+      expect(entry.sentiment).to.equal(-1);
+    });
+
+    it('accumulates execution count per week', () => {
+      const rows = [
+        { execution_date: '2026-03-02' },
+        { execution_date: '2026-03-03' },
+      ];
+      // Both in 2026-W10
+      const result = aggregateWeeklyDetailStats(rows);
+      expect(result).to.have.lengthOf(1);
+    });
+  });
+
+  // ── aggregateDetailSources ──────────────────────────────────────────────────
+  describe('aggregateDetailSources', () => {
+    it('returns empty array for empty input', () => {
+      expect(aggregateDetailSources([])).to.deep.equal([]);
+    });
+
+    it('skips rows with empty URLs', () => {
+      const rows = [{ url: '', hostname: 'example.com', content_type: 'web' }];
+      expect(aggregateDetailSources(rows)).to.deep.equal([]);
+    });
+
+    it('deduplicates rows by URL and counts citations', () => {
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-03', prompt: 'q2',
+        },
+      ];
+      const result = aggregateDetailSources(rows);
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].citationCount).to.equal(2);
+    });
+
+    it('accumulates unique weeks across rows for same URL', () => {
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-09', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.weeks).to.have.lengthOf(2);
+    });
+
+    it('accumulates prompts with counts', () => {
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-03', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-09', prompt: 'q2',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.prompts).to.deep.include({ prompt: 'q1', count: 2 });
+      expect(entry.prompts).to.deep.include({ prompt: 'q2', count: 1 });
+    });
+
+    it('returns separate entries for distinct URLs', () => {
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://b.com', hostname: 'b.com', content_type: 'pdf', execution_date: '2026-03-02', prompt: 'q2',
+        },
+      ];
+      expect(aggregateDetailSources(rows)).to.have.lengthOf(2);
+    });
+  });
+
+  // ── createTopicDetailHandler ────────────────────────────────────────────────
+  describe('createTopicDetailHandler', () => {
+    beforeEach(() => {
+      mockContext.params.topicId = 'AI%20Overview';
+    });
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden when org access check fails', async () => {
+      getOrgAndValidateAccess.rejects(
+        new Error('Only users belonging to the organization can view brand presence data'),
+      );
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest for malformed percent-encoded topicId', async () => {
+      mockContext.params.topicId = '%GG';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns ok with zeroed stats and empty arrays when no rows', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal('AI Overview');
+      expect(body.weeklyStats).to.deep.equal([]);
+      expect(body.executions).to.deep.equal([]);
+      expect(body.sources).to.deep.equal([]);
+      expect(body.stats.averageVisibilityScore).to.equal(0);
+    });
+
+    it('returns ok with zeroed stats when data is null', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: null, error: null,
+      });
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns badRequest when query returns error', async () => {
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: null,
+        error: { message: 'db error' },
+      });
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('filters by topics column using decoded topicId', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'AI%20Overview';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('topics', 'AI Overview');
+    });
+
+    it('filters by brand_id when brandId is a UUID', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000001';
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000001');
+    });
+
+    it('returns executions sorted newest first and includes all mapped fields', async () => {
+      const rows = [
+        {
+          id: 'exec-1',
+          topics: 'AI Overview',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          // null values exercise the || '' and ternary fallback branches
+          visibility_score: null,
+          position: null,
+          sentiment: null,
+          volume: null,
+          origin: null,
+          category_name: null,
+          execution_date: '2026-03-01',
+          answer: 'Some answer',
+          url: 'https://a.com',
+          error_code: null,
+        },
+        {
+          id: 'exec-2',
+          topics: 'AI Overview',
+          prompt: 'q2',
+          region_code: 'US',
+          mentions: false,
+          citations: true,
+          visibility_score: 50,
+          position: '5',
+          sentiment: 'Neutral',
+          volume: '200',
+          origin: 'paid',
+          category_name: 'Ads',
+          execution_date: '2026-03-08',
+          answer: 'Another answer',
+          url: 'https://b.com',
+          error_code: 'E01',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'AI%20Overview';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      // Sorted newest first
+      expect(body.executions[0].executionDate).to.equal('2026-03-08');
+      expect(body.executions[1].executionDate).to.equal('2026-03-01');
+      expect(body.executions[0].prompt).to.equal('q2');
+      expect(body.executions[0].mentions).to.equal(false);
+      expect(body.executions[0].citations).to.equal(true);
+      expect(body.executions[0].errorCode).to.equal('E01');
+      expect(body.executions[1].visibilityScore).to.equal(0);
+      expect(body.executions[1].position).to.equal('');
+      expect(body.executions[1].sentiment).to.equal('');
+      expect(body.executions[1].category).to.equal('');
+      expect(body.weeklyStats.length).to.be.greaterThan(0);
+    });
+
+    it('aggregates sources from fetchSourcesForExecutions', async () => {
+      const execRows = [
+        {
+          id: 'exec-1',
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 80,
+          position: '1',
+          sentiment: 'Positive',
+          volume: null,
+          origin: 'organic',
+          category_name: 'C',
+          execution_date: '2026-03-02',
+          answer: '',
+          url: '',
+          error_code: null,
+        },
+      ];
+      const sourceRows = [
+        {
+          execution_id: 'exec-1',
+          execution_date: '2026-03-02',
+          content_type: 'web',
+          url_id: 'u1',
+          source_urls: { url: 'https://example.com', hostname: 'example.com' },
+        },
+        // null source_urls exercises the || {} fallback in flattenSourceRow
+        {
+          execution_id: 'exec-1',
+          execution_date: null,
+          content_type: null,
+          url_id: 'u2',
+          source_urls: null,
+        },
+        // unknown execution_id exercises exec?.prompt || '' in flattenSourceRow
+        {
+          execution_id: 'unknown-exec',
+          execution_date: '2026-03-02',
+          content_type: null,
+          url_id: 'u3',
+          source_urls: { url: 'https://other.com', hostname: null },
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: execRows, error: null },
+        brand_presence_sources: { data: sourceRows, error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      // null source_urls row is skipped; unknown exec row adds a second entry
+      expect(body.sources).to.have.lengthOf(2);
+      const exampleSource = body.sources.find((s) => s.url === 'https://example.com');
+      expect(exampleSource).to.exist;
+      expect(exampleSource.citationCount).to.equal(1);
+    });
+
+    it('returns forbidden when siteId is provided but does not belong to org', async () => {
+      mockContext.params.topicId = 'T';
+      mockContext.data = { siteId: 'site-xyz' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('applies site_id filter when siteId passes org validation', async () => {
+      const client = createChainableMock(
+        { data: [], error: null },
+        [
+          { data: [{ id: 'site-123' }], error: null }, // site validation passes
+          { data: [], error: null }, // exec rows query
+        ],
+      );
+      mockContext.params.topicId = 'T';
+      mockContext.data = { siteId: 'site-123' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(client.eq).to.have.been.calledWith('site_id', 'site-123');
+    });
+
+    it('applies regionCode and origin filters from ctx.data', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.data = { region: 'US', origin: 'organic' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'US');
+      expect(client.ilike).to.have.been.calledWith('origin', 'organic');
+    });
+
+    it('uses empty-string fallback for null execution_date, prompt, region_code in execution map', async () => {
+      const rows = [
+        {
+          id: null,
+          topics: 'T',
+          prompt: null,
+          region_code: null,
+          mentions: false,
+          citations: false,
+          visibility_score: null,
+          position: null,
+          sentiment: null,
+          volume: null,
+          origin: null,
+          category_name: null,
+          execution_date: null,
+          answer: null,
+          url: null,
+          error_code: null,
+        },
+        {
+          id: null,
+          topics: 'T',
+          prompt: null,
+          region_code: null,
+          mentions: false,
+          citations: false,
+          visibility_score: null,
+          position: null,
+          sentiment: null,
+          volume: null,
+          origin: null,
+          category_name: null,
+          execution_date: null,
+          answer: null,
+          url: null,
+          error_code: null,
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.executions[0].prompt).to.equal('');
+      expect(body.executions[0].region).to.equal('');
+      expect(body.executions[0].executionDate).to.equal('');
+    });
+  });
+
+  // ── createPromptDetailHandler ───────────────────────────────────────────────
+  describe('createPromptDetailHandler', () => {
+    beforeEach(() => {
+      mockContext.params.topicId = 'AI%20Overview';
+      mockContext.data = { prompt: 'What is AI?' };
+    });
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden when org access check fails', async () => {
+      getOrgAndValidateAccess.rejects(
+        new Error('Only users belonging to the organization can view brand presence data'),
+      );
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest for malformed percent-encoded topicId', async () => {
+      mockContext.params.topicId = '%GG';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when prompt parameter is missing', async () => {
+      mockContext.data = {};
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when ctx.data is null (prompt missing)', async () => {
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns ok with zeroed stats when no rows', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal('AI Overview');
+      expect(body.prompt).to.equal('What is AI?');
+      expect(body.weeklyStats).to.deep.equal([]);
+      expect(body.executions).to.deep.equal([]);
+      expect(body.sources).to.deep.equal([]);
+      expect(body.stats.visibilityScore).to.equal(0);
+      expect(body.stats.mentions).to.equal(0);
+    });
+
+    it('returns ok with zeroed stats when data is null', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: null, error: null,
+      });
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns badRequest when query returns error', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: null,
+        error: { message: 'db error' },
+      });
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('filters by topics and prompt columns', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'AI%20Overview';
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('topics', 'AI Overview');
+      expect(client.eq).to.have.been.calledWith('prompt', 'What is AI?');
+    });
+
+    it('applies region_code filter when promptRegion is provided', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.data = { prompt: 'What is AI?', promptRegion: 'US' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'US');
+    });
+
+    it('applies regionCode and origin filters from ctx.data via buildDetailExecQuery', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.data = { prompt: 'What is AI?', region: 'DE', origin: 'paid' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'DE');
+      expect(client.ilike).to.have.been.calledWith('origin', 'paid');
+    });
+
+    it('also accepts prompt_region (snake_case alias)', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.data = { prompt: 'What is AI?', prompt_region: 'DE' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'DE');
+    });
+
+    it('computes averaged stats and returns executions sorted newest first', async () => {
+      const rows = [
+        {
+          id: 'e1',
+          topics: 'AI Overview',
+          prompt: 'What is AI?',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          volume: '100',
+          origin: 'organic',
+          category_name: 'Search',
+          execution_date: '2026-03-01',
+          answer: 'Answer A',
+          url: 'https://a.com',
+          error_code: null,
+        },
+        {
+          id: 'e2',
+          topics: 'AI Overview',
+          prompt: 'What is AI?',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: 60,
+          position: '4',
+          sentiment: 'Neutral',
+          volume: '50',
+          origin: 'organic',
+          category_name: 'Search',
+          execution_date: '2026-03-08',
+          answer: 'Answer B',
+          url: '',
+          error_code: null,
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      // avg visibility: (80 + 60) / 2 = 70
+      expect(body.stats.visibilityScore).to.equal(70);
+      // avg position: (2 + 4) / 2 = 3
+      expect(body.stats.position).to.equal('3');
+      expect(body.stats.mentions).to.equal(1);
+      expect(body.stats.citations).to.equal(1);
+      // Sorted newest first
+      expect(body.executions[0].executionDate).to.equal('2026-03-08');
+      expect(body.executions[1].executionDate).to.equal('2026-03-01');
+    });
+
+    it('counts negative sentiment rows but scores them at 0', async () => {
+      const rows = [
+        {
+          id: 'e1',
+          topics: 'T',
+          prompt: 'q',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: null,
+          position: null,
+          sentiment: 'Negative',
+          volume: null,
+          origin: '',
+          category_name: '',
+          execution_date: '2026-03-02',
+          answer: '',
+          url: '',
+          error_code: null,
+        },
+        {
+          id: 'e2',
+          topics: 'T',
+          prompt: 'q',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: null,
+          position: null,
+          sentiment: 'Positive',
+          volume: null,
+          origin: '',
+          category_name: '',
+          execution_date: '2026-03-02',
+          answer: '',
+          url: '',
+          error_code: null,
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.data = { prompt: 'q' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      // (100 + 0) / 2 = 50
+      expect(body.stats.sentiment).to.equal(50);
+    });
+
+    it('returns sentiment -1 when no sentiments present', async () => {
+      const rows = [
+        {
+          id: 'e1',
+          topics: 'T',
+          prompt: 'q',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: null,
+          position: null,
+          sentiment: '',
+          volume: null,
+          origin: '',
+          category_name: '',
+          execution_date: '2026-03-02',
+          answer: '',
+          url: '',
+          error_code: null,
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.data = { prompt: 'q' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.stats.sentiment).to.equal(-1);
+    });
+
+    it('filters by brand_id when brandId is a UUID', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000002');
+    });
+
+    it('returns forbidden when siteId does not belong to org', async () => {
+      mockContext.data = { prompt: 'What is AI?', siteId: 'site-xyz' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('uses empty-string fallback for null execution_date, prompt, region_code', async () => {
+      const rows = [
+        {
+          id: 'e1',
+          topics: 'T',
+          prompt: null,
+          region_code: null,
+          mentions: false,
+          citations: false,
+          visibility_score: null,
+          position: null,
+          sentiment: '',
+          volume: null,
+          origin: '',
+          category_name: '',
+          execution_date: null,
+          answer: '',
+          url: '',
+          error_code: null,
+        },
+        {
+          id: 'e2',
+          topics: 'T',
+          prompt: null,
+          region_code: null,
+          mentions: false,
+          citations: false,
+          visibility_score: null,
+          position: null,
+          sentiment: '',
+          volume: null,
+          origin: '',
+          category_name: '',
+          execution_date: null,
+          answer: '',
+          url: '',
+          error_code: null,
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.data = { prompt: 'q' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.executions[0].prompt).to.equal('');
+      expect(body.executions[0].region).to.equal('');
+      expect(body.executions[0].executionDate).to.equal('');
+    });
+
+    it('includes sources aggregated from fetchSourcesForExecutions', async () => {
+      const execRows = [
+        {
+          id: 'exec-1',
+          topics: 'T',
+          prompt: 'q',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 70,
+          position: '2',
+          sentiment: 'Positive',
+          volume: null,
+          origin: '',
+          category_name: '',
+          execution_date: '2026-03-02',
+          answer: '',
+          url: '',
+          error_code: null,
+        },
+      ];
+      const sourceRows = [
+        {
+          execution_id: 'exec-1',
+          execution_date: '2026-03-02',
+          content_type: 'pdf',
+          url_id: 'u1',
+          source_urls: { url: 'https://docs.example.com/guide', hostname: 'docs.example.com' },
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: execRows, error: null },
+        brand_presence_sources: { data: sourceRows, error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.data = { prompt: 'q' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.sources).to.have.lengthOf(1);
+      expect(body.sources[0].hostname).to.equal('docs.example.com');
+      expect(body.sources[0].contentType).to.equal('pdf');
     });
   });
 });
