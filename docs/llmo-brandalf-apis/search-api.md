@@ -85,7 +85,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 |-------|------|-------------|
 | `topic` | string | Topic/keyword name |
 | `matchType` | string | `"topic"` if the topic name matched the query; `"prompt"` if only prompts within the topic matched |
-| `promptCount` | number | Number of unique prompts (deduplicated by `prompt\|region_code`) |
+| `promptCount` | number | For `matchType:"topic"`: all unique prompts. For `matchType:"prompt"`: only prompts whose text matched the query (case-insensitive). |
 | `brandMentions` | number | Total mention count across all execution rows |
 | `brandCitations` | number | Total citation count across all execution rows |
 | `sourceCount` | number | Count of unique source URLs across all executions |
@@ -101,9 +101,11 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 1. **PostgREST query**: Uses `.or()` with double-quoted, escaped ILIKE patterns for case-insensitive substring matching on both topic name and prompt text. SQL ILIKE metacharacters (`%`, `_`) and PostgREST filter syntax characters (`,`, `.`, `(`, `)`, `"`) are escaped to prevent injection.
 2. **Aggregation**: Reuses the same `aggregateTopicData()` function as the topics endpoint (counts mentions/citations/sources from all execution rows, deduplicates prompts for `promptCount`)
 3. **matchType tagging**: After aggregation, each topic is tagged:
-   - `"topic"` — topic name contains the query string (case-insensitive)
-   - `"prompt"` — topic name does NOT match, but at least one prompt within it does
+   - `"topic"` — topic name contains the query string (case-insensitive). `promptCount` includes all unique prompts.
+   - `"prompt"` — topic name does NOT match, but at least one prompt within it does. `promptCount` is adjusted to only count unique prompts whose text matched the query.
 4. **Sort and paginate** server-side (default `pageSize=100`)
+
+This mirrors the original brand presence client-side search behaviour where prompt-matched topics only show matching prompts. The companion topic-prompts endpoint also supports a `query` parameter to filter expanded prompts server-side.
 
 ---
 

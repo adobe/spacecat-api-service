@@ -1226,7 +1226,18 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const items = buildPromptDetails(data || []);
+      let items = buildPromptDetails(data || []);
+
+      // When a search query is provided, filter to only prompts whose text
+      // matches — mirroring the original brand presence client-side behaviour
+      // where prompt-matched topics show only matching prompts on expansion.
+      const searchQuery = (ctx.data?.query ?? '').trim();
+      if (searchQuery) {
+        const searchLower = searchQuery.toLowerCase();
+        items = items.filter(
+          (item) => item.prompt.toLowerCase().includes(searchLower),
+        );
+      }
 
       const totalCount = items.length;
       const start = pagination.page * pagination.pageSize;
@@ -1343,11 +1354,34 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       }
 
       const queryLower = bounded.toLowerCase();
-      const topicDetails = aggregateTopicData(data || []).map((td) => ({
-        ...td,
-        matchType: td.topic.toLowerCase().includes(queryLower)
-          ? 'topic' : 'prompt',
-      }));
+      const rows = data || [];
+
+      // Pre-compute per-topic count of unique prompts that match the query.
+      // Used below to set promptCount for prompt-matched topics so the UI
+      // mirrors the original brand presence behaviour (showing only matching
+      // prompts when the topic name itself didn't match).
+      const matchingPromptCounts = new Map();
+      rows.forEach((row) => {
+        const topicName = row.topics || 'Unknown';
+        const promptText = (row.prompt || '').toLowerCase();
+        if (promptText.includes(queryLower)) {
+          if (!matchingPromptCounts.has(topicName)) {
+            matchingPromptCounts.set(topicName, new Set());
+          }
+          matchingPromptCounts.get(topicName).add(buildTopicPromptKey(row));
+        }
+      });
+
+      const topicDetails = aggregateTopicData(rows).map((td) => {
+        const isTopicMatch = td.topic.toLowerCase().includes(queryLower);
+        return {
+          ...td,
+          matchType: isTopicMatch ? 'topic' : 'prompt',
+          promptCount: isTopicMatch
+            ? td.promptCount
+            : matchingPromptCounts.get(td.topic).size,
+        };
+      });
 
       sortTopicDetails(topicDetails, pagination.sortBy, pagination.sortOrder);
 

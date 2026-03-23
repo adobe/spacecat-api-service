@@ -4533,6 +4533,77 @@ describe('llmo-brand-presence', () => {
       expect(client.ilike).to.have.been.calledWith('origin', 'organic');
     });
 
+    it('filters prompts by query param when provided', async () => {
+      const rows = [
+        {
+          topics: 'PDF Tools',
+          prompt: 'How to edit PDF files',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'PDF Tools',
+          prompt: 'Best image converter',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'PDF Tools',
+          prompt: 'PDF merge online',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+      ];
+      mockContext.params.topicId = 'PDF%20Tools';
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.have.lengthOf(2);
+      expect(body.items.map((i) => i.prompt)).to.deep.equal([
+        'How to edit PDF files',
+        'PDF merge online',
+      ]);
+      expect(body.totalCount).to.equal(2);
+    });
+
+    it('returns all prompts when query param is empty', async () => {
+      const rows = [
+        {
+          topics: 'T',
+          prompt: 'q1',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'T',
+          prompt: 'q2',
+          region_code: 'US',
+          execution_date: '2026-03-01',
+        },
+      ];
+      mockContext.params.topicId = 'T';
+      mockContext.data = { query: '' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items).to.have.lengthOf(2);
+      expect(body.totalCount).to.equal(2);
+    });
+
     it('filters by brand_id when brandId is a UUID', async () => {
       const client = createChainableMock({
         data: [],
@@ -4699,6 +4770,185 @@ describe('llmo-brand-presence', () => {
       expect(body.topicDetails).to.have.lengthOf(1);
       expect(body.topicDetails[0].topic).to.equal('Image Tools');
       expect(body.topicDetails[0].matchType).to.equal('prompt');
+    });
+
+    it('adjusts promptCount for prompt-matched topics to only count matching prompts', async () => {
+      const rows = [
+        {
+          topics: 'Image Tools',
+          prompt: 'convert pdf to image',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 70,
+          position: '3',
+          sentiment: 'Neutral',
+          volume: 50,
+          origin: 'ai',
+          category_name: 'Creative',
+          execution_date: '2026-03-01',
+          url: 'https://y.com',
+          error_code: null,
+          brand_presence_sources: [],
+        },
+        {
+          topics: 'Image Tools',
+          prompt: 'best image editor',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: 60,
+          position: '5',
+          sentiment: 'Positive',
+          volume: 40,
+          origin: 'ai',
+          category_name: 'Creative',
+          execution_date: '2026-03-01',
+          url: 'https://z.com',
+          error_code: null,
+          brand_presence_sources: [],
+        },
+        {
+          topics: 'Image Tools',
+          prompt: 'pdf merge tool',
+          region_code: 'EU',
+          mentions: true,
+          citations: true,
+          visibility_score: 80,
+          position: '1',
+          sentiment: 'Positive',
+          volume: 60,
+          origin: 'ai',
+          category_name: 'Creative',
+          execution_date: '2026-03-01',
+          url: 'https://w.com',
+          error_code: null,
+          brand_presence_sources: [],
+        },
+      ];
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(1);
+      expect(body.topicDetails[0].matchType).to.equal('prompt');
+      // 3 total unique prompts, but only 2 match 'pdf'
+      expect(body.topicDetails[0].promptCount).to.equal(2);
+    });
+
+    it('keeps full promptCount for topic-matched topics', async () => {
+      const rows = [
+        {
+          topics: 'PDF Editing',
+          prompt: 'how to merge files',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 90,
+          position: '1',
+          sentiment: 'Positive',
+          volume: 80,
+          origin: 'human',
+          category_name: 'Docs',
+          execution_date: '2026-03-01',
+          url: 'https://a.com',
+          error_code: null,
+          brand_presence_sources: [],
+        },
+        {
+          topics: 'PDF Editing',
+          prompt: 'best editor tool',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: 85,
+          position: '2',
+          sentiment: 'Neutral',
+          volume: 70,
+          origin: 'human',
+          category_name: 'Docs',
+          execution_date: '2026-03-01',
+          url: 'https://b.com',
+          error_code: null,
+          brand_presence_sources: [],
+        },
+      ];
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(1);
+      expect(body.topicDetails[0].matchType).to.equal('topic');
+      // topic name matches, so all prompts are counted
+      expect(body.topicDetails[0].promptCount).to.equal(2);
+    });
+
+    it('handles rows with null topics and prompt in search matching', async () => {
+      const rows = [
+        {
+          topics: null,
+          prompt: null,
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: 50,
+          position: '4',
+          sentiment: 'Neutral',
+          volume: 30,
+          origin: 'ai',
+          category_name: 'General',
+          execution_date: '2026-03-01',
+          url: null,
+          error_code: null,
+          brand_presence_sources: [],
+        },
+        {
+          topics: null,
+          prompt: 'unknown topic pdf query',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 60,
+          position: '2',
+          sentiment: 'Positive',
+          volume: 40,
+          origin: 'ai',
+          category_name: 'General',
+          execution_date: '2026-03-01',
+          url: null,
+          error_code: null,
+          brand_presence_sources: [],
+        },
+      ];
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(1);
+      expect(body.topicDetails[0].topic).to.equal('Unknown');
+      expect(body.topicDetails[0].matchType).to.equal('prompt');
+      expect(body.topicDetails[0].promptCount).to.equal(1);
     });
 
     it('uses .or() for PostgREST query with escaped pattern', async () => {
