@@ -4603,6 +4603,19 @@ describe('llmo-brand-presence', () => {
       expect(body.totalCount).to.equal(0);
     });
 
+    it('returns empty results when context.data is undefined', async () => {
+      mockContext.data = undefined;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.deep.equal([]);
+      expect(body.totalCount).to.equal(0);
+    });
+
     it('returns badRequest when query returns error', async () => {
       mockContext.data = { query: 'pdf' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -4720,13 +4733,16 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('applies optional filters: category, region, origin', async () => {
+    it('applies optional filters: category, region, origin, topicIds', async () => {
       const client = createChainableMock();
+      const topicUuid1 = '0178a3f0-1234-7000-8000-000000000010';
+      const topicUuid2 = '0178a3f0-1234-7000-8000-000000000011';
       mockContext.data = {
         query: 'pdf',
         categoryId: 'Acrobat',
         region: 'US',
         origin: 'human',
+        topicIds: [topicUuid1, topicUuid2],
       };
       mockContext.dataAccess.Site.postgrestService = client;
 
@@ -4736,6 +4752,36 @@ describe('llmo-brand-presence', () => {
       expect(client.eq).to.have.been.calledWith('category_name', 'Acrobat');
       expect(client.eq).to.have.been.calledWith('region_code', 'US');
       expect(client.ilike).to.have.been.calledWith('origin', 'human');
+      expect(client.in).to.have.been.calledWith('topic_id', [topicUuid1, topicUuid2]);
+    });
+
+    it('filters by category_id when categoryId is a valid UUID', async () => {
+      const client = createChainableMock();
+      const categoryUuid = '0178a3f0-1234-7000-8000-000000000020';
+      mockContext.data = {
+        query: 'pdf',
+        categoryId: categoryUuid,
+      };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('category_id', categoryUuid);
+    });
+
+    it('handles null data from PostgREST gracefully', async () => {
+      const client = createChainableMock({ data: null, error: null });
+      mockContext.data = { query: 'pdf' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.deep.equal([]);
+      expect(body.totalCount).to.equal(0);
     });
 
     it('filters by brand_id when brandId is a UUID', async () => {
