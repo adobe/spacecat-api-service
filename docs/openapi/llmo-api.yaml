@@ -1444,6 +1444,10 @@ llmo-opportunity-workspace-demo-brand-presence:
               $ref: './schemas.yaml#/PresignedUrlResponse'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
     security:
@@ -1472,6 +1476,10 @@ llmo-opportunity-workspace-demo-recommendations:
               $ref: './schemas.yaml#/PresignedUrlResponse'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
     security:
