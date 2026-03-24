@@ -291,6 +291,21 @@ describe('LlmoOpportunitiesController', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('accepts site_id (snake_case) as an alternative to siteId', async () => {
+      const site1 = createMockSite({ id: 'site-1', baseURL: 'https://a.com' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site1]);
+      mockContext.dataAccess.Opportunity.allBySiteId
+        .withArgs('site-1').resolves([createMockOpportunity({ id: 'o1', siteId: 'site-1' })]);
+      mockContext.data = { site_id: 'site-1' };
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getOpportunityCount(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+    });
+
     it('filters count to a single site when siteId is provided', async () => {
       const site1 = createMockSite({ id: 'site-1', baseURL: 'https://a.com' });
       const site2 = createMockSite({ id: 'site-2', baseURL: 'https://b.com' });
