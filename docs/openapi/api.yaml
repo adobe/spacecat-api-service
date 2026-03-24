@@ -486,6 +486,10 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/execution-dates:
+    $ref: './llmo-api.yaml#/llmo-brand-presence-execution-dates'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/brand-vs-competitors:
+    $ref: './llmo-api.yaml#/llmo-brand-vs-competitors'
   /sites/{siteId}/reports:
     $ref: './site-api.yaml#/site-reports'
   /sites/{siteId}/reports/{reportId}:

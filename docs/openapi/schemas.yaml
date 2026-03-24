@@ -6764,3 +6764,47 @@ PresignedUrlResponse:
     - presignedUrl
     - expiresAt
   additionalProperties: false
+
+ExecutionDatesResponse:
+  type: object
+  properties:
+    executionDates:
+      type: array
+      description: Distinct execution dates sorted newest first
+      items:
+        type: string
+        format: date
+        example: '2026-03-01'
+
+BrandVsCompetitorsResponse:
+  type: object
+  properties:
+    competitorData:
+      type: array
+      description: Aggregated competitor metrics per execution date
+      items:
+        type: object
+        properties:
+          siteId:
+            type: string
+            format: uuid
+          brandId:
+            type: string
+            format: uuid
+          brandName:
+            type: string
+          model:
+            type: string
+          executionDate:
+            type: string
+            format: date
+          categoryName:
+            type: string
+          regionCode:
+            type: string
+          competitor:
+            type: string
+          totalMentions:
+            type: integer
+          totalCitations:
+            type: integer

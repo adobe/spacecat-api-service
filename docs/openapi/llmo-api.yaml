@@ -1944,3 +1944,128 @@ llmo-edge-optimize-status:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-brand-presence-execution-dates:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand UUID or 'all' for all brands
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+    summary: Get available execution dates for brand presence data
+    description: |
+      Returns distinct execution dates for a given site's brand presence data.
+      The UI calls this endpoint first to discover available dates, then passes
+      selected dates to the brand-vs-competitors endpoint.
+    operationId: getBrandPresenceExecutionDates
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        description: Site UUID to filter execution dates
+        schema:
+          type: string
+          format: uuid
+      - name: model
+        in: query
+        required: false
+        description: LLM model name
+        schema:
+          type: string
+          default: chatgpt
+    responses:
+      '200':
+        description: List of available execution dates (YYYY-MM-DD), sorted newest first
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ExecutionDatesResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+    security:
+      - api_key: [ ]
+
+llmo-brand-vs-competitors:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand UUID or 'all' for all brands
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+    summary: Get brand vs competitors data by execution dates
+    description: |
+      Returns aggregated competitor mention/citation data from the
+      brand_vs_competitors_by_date view, filtered by specific execution dates.
+      Call the execution-dates endpoint first to get available dates.
+    operationId: getBrandVsCompetitors
+    parameters:
+      - name: executionDates
+        in: query
+        required: true
+        description: Comma-separated execution dates (YYYY-MM-DD)
+        schema:
+          type: string
+          example: '2026-01-01,2026-01-02'
+      - name: siteId
+        in: query
+        required: false
+        description: Site UUID to narrow results
+        schema:
+          type: string
+          format: uuid
+      - name: model
+        in: query
+        required: false
+        description: LLM model name
+        schema:
+          type: string
+          default: chatgpt
+      - name: categoryName
+        in: query
+        required: false
+        description: Filter by category name
+        schema:
+          type: string
+      - name: regionCode
+        in: query
+        required: false
+        description: Filter by region code (e.g. US, EU)
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Aggregated competitor data per execution date
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandVsCompetitorsResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+    security:
+      - api_key: [ ]
