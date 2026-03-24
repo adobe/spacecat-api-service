@@ -46,7 +46,7 @@ function OpportunitiesController(ctx) {
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
-  const { Opportunity, Suggestion } = dataAccess;
+  const { Opportunity } = dataAccess;
   if (!isObject(Opportunity)) {
     throw new Error('Opportunity Collection not available');
   }
@@ -74,43 +74,6 @@ function OpportunitiesController(ctx) {
   }
 
   /**
-   * Checks if an opportunity has any suggestions with PENDING_VALIDATION status.
-   * @param {string} opportunityId - The opportunity ID to check
-   * @returns {Promise<boolean>} True if the opportunity has PENDING_VALIDATION suggestions
-   */
-  async function hasPendingValidationSuggestions(opportunityId) {
-    try {
-      const suggestions = await Suggestion.allByOpportunityIdAndStatus(
-        opportunityId,
-        'PENDING_VALIDATION',
-      );
-      return suggestions && suggestions.length > 0;
-    } catch (e) {
-      ctx.log?.warn?.('Error checking for PENDING_VALIDATION suggestions', {
-        opportunityId,
-        error: e?.message ?? e,
-      });
-      // On error, filter out the opportunity
-      return true;
-    }
-  }
-
-  /**
-   * Filters out opportunities that have suggestions with PENDING_VALIDATION status.
-   * @param {Array} opportunities - Array of opportunity entities
-   * @returns {Promise<Array>} Filtered array of opportunities
-   */
-  async function filterPendingValidationOpportunities(opportunities) {
-    // Check all opportunities in parallel for better performance
-    const pendingChecks = await Promise.all(
-      opportunities.map((oppty) => hasPendingValidationSuggestions(oppty.getId())),
-    );
-
-    // Filter out opportunities that have pending validation suggestions
-    return opportunities.filter((_, index) => !pendingChecks[index]);
-  }
-
-  /**
    * Gets all opportunities for a given site.
    * @param {Object} context of the request
    * @returns {Promise<Response>} Array of opportunities response.
@@ -130,19 +93,10 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
-    try {
-      const allOpptys = await Opportunity.allBySiteId(siteId);
-      const filteredOpptys = await filterPendingValidationOpportunities(allOpptys);
-      const opptys = filteredOpptys.map((oppty) => OpportunityDto.toJSON(oppty));
+    const opptys = (await Opportunity.allBySiteId(siteId))
+      .map((oppty) => OpportunityDto.toJSON(oppty));
 
-      return ok(opptys);
-    } catch (e) {
-      ctx.log?.error?.('Error transforming opportunities to JSON', {
-        siteId,
-        error: e?.message ?? e,
-      });
-      return handleDataAccessError(e, 'Error retrieving opportunities');
-    }
+    return ok(opptys);
   };
 
   /**
@@ -169,20 +123,10 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
-    try {
-      const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
-      const filteredOpptys = await filterPendingValidationOpportunities(allOpptys);
-      const opptys = filteredOpptys.map((oppty) => OpportunityDto.toJSON(oppty));
+    const opptys = (await Opportunity.allBySiteIdAndStatus(siteId, status))
+      .map((oppty) => OpportunityDto.toJSON(oppty));
 
-      return ok(opptys);
-    } catch (e) {
-      ctx.log?.error?.('Error transforming opportunities to JSON', {
-        siteId,
-        status,
-        error: e?.message ?? e,
-      });
-      return handleDataAccessError(e, 'Error retrieving opportunities');
-    }
+    return ok(opptys);
   };
 
   /**
@@ -214,13 +158,6 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-
-    // Filter out opportunities with PENDING_VALIDATION suggestions
-    const hasPending = await hasPendingValidationSuggestions(opptyId);
-    if (hasPending) {
-      return notFound('Opportunity not found');
-    }
-
     if (await getIsSummitPlgEnabled(site, ctx, context)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, oppty);
@@ -229,16 +166,7 @@ function OpportunitiesController(ctx) {
         ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
       }
     }
-
-    try {
-      return ok(OpportunityDto.toJSON(oppty));
-    } catch (e) {
-      ctx.log?.error?.('Error transforming opportunity to JSON', {
-        opportunityId: opptyId,
-        error: e?.message ?? e,
-      });
-      return handleDataAccessError(e, 'Error retrieving opportunity');
-    }
+    return ok(OpportunityDto.toJSON(oppty));
   };
 
   /**
