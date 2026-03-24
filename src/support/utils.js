@@ -1390,9 +1390,10 @@ export const onboardSingleSite = async (
       });
     }
 
+    const onboardStartTime = Date.now();
     siteConfig.updateOnboardConfig({
       lastProfile: profileName.toLowerCase(),
-      lastStartTime: Date.now(),
+      lastStartTime: onboardStartTime,
     });
 
     site.setConfig(Config.toDynamoItem(siteConfig));
@@ -1560,7 +1561,7 @@ export const onboardSingleSite = async (
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
-    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`);
+    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${onboardStartTime}`);
 
     const startCommand = new StartExecutionCommand({
       stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,
