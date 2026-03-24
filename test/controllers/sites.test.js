@@ -3360,6 +3360,58 @@ describe('Sites Controller', () => {
     expect(updatedSite.code).to.deep.equal(codeConfig);
   });
 
+  it('shallow-merges config so partial update preserves existing keys', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      slack: { channel: '#test' },
+      llmo: { dataFolder: '/data', brand: 'Test' },
+      handlers: { 'meta-tags': { excludedURLs: [] } },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#updated' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    expect(site.setConfig).to.have.been.calledOnce;
+
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.slack).to.deep.equal({ channel: '#updated' });
+    expect(mergedConfig.llmo).to.deep.equal({ dataFolder: '/data', brand: 'Test' });
+    expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
+  });
+
+  it('allows removing a config key by explicitly setting it to null', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      slack: { channel: '#test' },
+      llmo: { dataFolder: '/data' },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#updated' }, llmo: null },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.slack).to.deep.equal({ channel: '#updated' });
+    expect(mergedConfig.llmo).to.equal(null);
+  });
+
   describe('pageTypes validation', () => {
     it('updates site with valid pageTypes', async () => {
       const site = sites[0];

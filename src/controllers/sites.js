@@ -632,7 +632,9 @@ function SitesController(ctx, log, env) {
     }
 
     if (isObject(requestBody.config)) {
-      site.setConfig(requestBody.config);
+      const existingConfig = Config.toDynamoItem(site.getConfig()) || {};
+      const merged = { ...existingConfig, ...requestBody.config };
+      site.setConfig(merged);
       updates = true;
     }
 
