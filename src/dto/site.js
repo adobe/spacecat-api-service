@@ -58,6 +58,23 @@ export const SiteDto = {
     updatedBy: site.getUpdatedBy(),
   }),
 
+  /**
+   * Slim representation for list endpoints to reduce payload size.
+   * Only includes fields actively consumed by UI clients.
+   * @param {Readonly<Site>} site - Site object.
+   * @returns {object}
+   */
+  toListJSON: (site) => ({
+    id: site.getId(),
+    baseURL: site.getBaseURL(),
+    organizationId: site.getOrganizationId(),
+    deliveryType: site.getDeliveryType(),
+    gitHubURL: site.getGitHubURL(),
+    isLive: site.getIsLive(),
+    isSandbox: site.getIsSandbox(),
+    config: ConfigDto.toListJSON(site.getConfig()),
+  }),
+
   // TODO: implement toCSV
   toCSV: () => '',
 
