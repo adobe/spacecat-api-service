@@ -1,3 +1,10 @@
+## [1.368.1](https://github.com/adobe/spacecat-api-service/compare/v1.368.0...v1.368.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* slim site dto for getall site call ([#2019](https://github.com/adobe/spacecat-api-service/issues/2019)) ([492abb4](https://github.com/adobe/spacecat-api-service/commit/492abb423040c4d1bd2041f0c77546e384623976))
+
 # [1.368.0](https://github.com/adobe/spacecat-api-service/compare/v1.367.0...v1.368.0) (2026-03-23)
 
 
