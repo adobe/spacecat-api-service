@@ -284,11 +284,10 @@ async function processOpportunityMatching(
     }
   });
 
-  // Use the pre-fetched suggestions map and filter for NEW status
-  // This avoids redundant database queries
+  // Use the pre-fetched NEW suggestions from the cached map
   const allSuggestions = allOpportunitiesNeedingMatching.map((oppData) => {
-    const allSuggestionsForOppty = suggestionsByOpportunityId.get(oppData.id) || [];
-    return allSuggestionsForOppty.filter((sugg) => sugg.getStatus() === 'NEW');
+    const cached = suggestionsByOpportunityId.get(oppData.id);
+    return cached?.newSuggestions || [];
   });
 
   // Match opportunities with URLs and categorize results

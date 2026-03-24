@@ -74,30 +74,44 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
 
     const allOpportunitiesUnfiltered = [...newOpportunities, ...inProgressOpportunities];
 
-    // Fetch ALL suggestions for ALL opportunities in one batch
-    // This avoids N+1 queries by fetching everything upfront
+    // Fetch suggestions once per opportunity, then partition by status in memory.
+    // This keeps the per-opportunity fail-closed behavior without doubling query count.
     const suggestionsByOpportunityId = new Map();
-    try {
-      const allSuggestionsArrays = await Promise.all(
-        allOpportunitiesUnfiltered.map((oppty) => Suggestion.allByOpportunityId(oppty.getId())),
-      );
-      allOpportunitiesUnfiltered.forEach((oppty, index) => {
-        suggestionsByOpportunityId.set(oppty.getId(), allSuggestionsArrays[index] || []);
-      });
-    } catch (e) {
-      log?.error?.('Error fetching suggestions for opportunities', {
-        siteId,
-        error: e?.message ?? e,
-      });
-      // On error, assume all opportunities have pending validation (fail-closed)
-      return ok([]);
-    }
+    const failedOpportunityIds = new Set();
 
-    // Filter out opportunities with PENDING_VALIDATION suggestions using the cached map
+    const results = await Promise.allSettled(
+      allOpportunitiesUnfiltered.map(async (oppty) => {
+        const allSuggestions = (await Suggestion.allByOpportunityId(oppty.getId())) ?? [];
+        const newSuggs = allSuggestions.filter((sugg) => sugg.getStatus() === 'NEW');
+        const pendingSuggs = allSuggestions.filter(
+          (sugg) => sugg.getStatus() === 'PENDING_VALIDATION',
+        );
+        return { newSuggs, pendingSuggs };
+      }),
+    );
+    allOpportunitiesUnfiltered.forEach((oppty, index) => {
+      const result = results[index];
+      if (result.status === 'fulfilled') {
+        // Store only NEW suggestions — these are reused for URL matching and DTOs
+        suggestionsByOpportunityId.set(oppty.getId(), {
+          newSuggestions: result.value.newSuggs,
+          hasPendingValidation: result.value.pendingSuggs.length > 0,
+        });
+      } else {
+        log?.warn?.('Failed to fetch suggestions for opportunity, excluding from results', {
+          opportunityId: oppty.getId(),
+          error: result.reason?.message,
+        });
+        failedOpportunityIds.add(oppty.getId());
+      }
+    });
+
+    // Filter out opportunities where suggestion fetch failed (fail-closed per-opportunity)
+    // or where any suggestion has PENDING_VALIDATION status
     const allOpportunities = allOpportunitiesUnfiltered.filter((oppty) => {
-      const suggestions = suggestionsByOpportunityId.get(oppty.getId()) || [];
-      const hasPending = suggestions.some((sugg) => sugg.getStatus() === 'PENDING_VALIDATION');
-      return !hasPending;
+      if (failedOpportunityIds.has(oppty.getId())) return false;
+      const cached = suggestionsByOpportunityId.get(oppty.getId());
+      return cached && !cached.hasPendingValidation;
     });
 
     // Categorize opportunities using configuration
@@ -154,11 +168,9 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
     const opportunitySummaries = topOpportunities.map((opportunity) => {
       const opportunityId = opportunity.getId();
       const paidUrlsData = paidUrlsMap.get(opportunityId);
-      // Use cached suggestions filtered by NEW status
-      const allSuggestionsForOppty = suggestionsByOpportunityId.get(opportunityId) || [];
-      const suggestions = paidUrlsData
-        ? []
-        : allSuggestionsForOppty.filter((sugg) => sugg.getStatus() === 'NEW');
+      const cached = suggestionsByOpportunityId.get(opportunityId);
+      // For CWV/forms opportunities with paidUrlsData, URLs come from paid traffic, not suggestions
+      const suggestions = paidUrlsData ? [] : cached.newSuggestions;
       return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData, TOP_URLS_LIMIT);
     });
 
