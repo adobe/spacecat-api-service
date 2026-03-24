@@ -237,7 +237,7 @@ async function processOpportunityMatching(
   categorizedOpportunities,
   allPaidTrafficData,
   pageViewThreshold,
-  Suggestion,
+  suggestionsByOpportunityId,
   log,
 ) {
   // Collect all opportunities that need URL matching
@@ -284,11 +284,12 @@ async function processOpportunityMatching(
     }
   });
 
-  // Fetch ALL suggestions ONCE for all opportunities
-  const suggestionsPromises = allOpportunitiesNeedingMatching.map(
-    (oppData) => Suggestion.allByOpportunityIdAndStatus(oppData.id, 'NEW'),
-  );
-  const allSuggestions = await Promise.all(suggestionsPromises);
+  // Use the pre-fetched suggestions map and filter for NEW status
+  // This avoids redundant database queries
+  const allSuggestions = allOpportunitiesNeedingMatching.map((oppData) => {
+    const allSuggestionsForOppty = suggestionsByOpportunityId.get(oppData.id) || [];
+    return allSuggestionsForOppty.filter((sugg) => sugg.getStatus() === 'NEW');
+  });
 
   // Match opportunities with URLs and categorize results
   const matchResults = new Map();

@@ -470,15 +470,16 @@ describe('TopPaidOpportunitiesController', () => {
         [validOppty, pendingValidationOppty],
       );
 
-      // Replace the stub with a custom implementation
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus = sandbox.stub()
-        .callsFake((oppId, status) => {
-          if (status === 'PENDING_VALIDATION') {
-            if (oppId === 'oppty-pending') {
-              return Promise.resolve([createSuggestion('https://example.com/page')]);
-            }
-            return Promise.resolve([]);
+      // Mock allByOpportunityId to return all suggestions for each opportunity
+      mockContext.dataAccess.Suggestion.allByOpportunityId = sandbox.stub()
+        .callsFake((oppId) => {
+          if (oppId === 'oppty-pending') {
+            // This opportunity has a PENDING_VALIDATION suggestion
+            return Promise.resolve([
+              { ...createSuggestion('https://example.com/page'), getStatus: () => 'PENDING_VALIDATION' },
+            ]);
           }
+          // oppty-valid has no PENDING_VALIDATION suggestions
           return Promise.resolve([]);
         });
 
@@ -495,15 +496,13 @@ describe('TopPaidOpportunitiesController', () => {
       const errorOppty = createOpportunity({ id: 'oppty-error', tags: ['paid media'] });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [validOppty, errorOppty]);
 
-      // Replace the stub with a custom implementation
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus = sandbox.stub()
-        .callsFake((oppId, status) => {
-          if (status === 'PENDING_VALIDATION') {
-            if (oppId === 'oppty-error') {
-              return Promise.reject(new Error('Database error'));
-            }
-            return Promise.resolve([]);
+      // Mock allByOpportunityId to throw error for one opportunity
+      mockContext.dataAccess.Suggestion.allByOpportunityId = sandbox.stub()
+        .callsFake((oppId) => {
+          if (oppId === 'oppty-error') {
+            return Promise.reject(new Error('Database error'));
           }
+          // oppty-success has no PENDING_VALIDATION suggestions
           return Promise.resolve([]);
         });
 
@@ -511,9 +510,8 @@ describe('TopPaidOpportunitiesController', () => {
         params: { siteId: SITE_ID }, data: {},
       });
       const opportunities = await response.json();
-      // Should only return oppty-success; oppty-error should be filtered out due to error
-      expect(opportunities).to.have.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('oppty-success');
+      // On error fetching suggestions, should return empty array (fail-closed)
+      expect(opportunities).to.have.lengthOf(0);
     });
   });
 

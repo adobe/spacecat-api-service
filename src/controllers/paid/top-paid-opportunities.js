@@ -42,47 +42,6 @@ async function validateSiteAndPermissions(siteId, Site, accessControlUtil) {
 }
 
 /**
- * Checks if an opportunity has any suggestions with PENDING_VALIDATION status.
- * @param {string} opportunityId - The opportunity ID to check
- * @param {object} Suggestion - Suggestion data access object
- * @param {object} log - Logger
- * @returns {Promise<boolean>} True if the opportunity has PENDING_VALIDATION suggestions
- */
-async function hasPendingValidationSuggestions(opportunityId, Suggestion, log) {
-  try {
-    const suggestions = await Suggestion.allByOpportunityIdAndStatus(
-      opportunityId,
-      'PENDING_VALIDATION',
-    );
-    return suggestions && suggestions.length > 0;
-  } catch (e) {
-    log?.warn?.('Error checking for PENDING_VALIDATION suggestions', {
-      opportunityId,
-      error: e?.message ?? e,
-    });
-    // On error, filter out the opportunity
-    return true;
-  }
-}
-
-/**
- * Filters out opportunities that have suggestions with PENDING_VALIDATION status.
- * @param {Array} opportunities - Array of opportunity entities
- * @param {object} Suggestion - Suggestion data access object
- * @param {object} log - Logger
- * @returns {Promise<Array>} Filtered array of opportunities
- */
-async function filterPendingValidationOpportunities(opportunities, Suggestion, log) {
-  // Check all opportunities in parallel for better performance
-  const pendingChecks = await Promise.all(
-    opportunities.map((oppty) => hasPendingValidationSuggestions(oppty.getId(), Suggestion, log)),
-  );
-
-  // Filter out opportunities that have pending validation suggestions
-  return opportunities.filter((_, index) => !pendingChecks[index]);
-}
-
-/**
  * Top Paid Opportunities controller.
  * @param {object} ctx - Context of the request.
  * @param {object} env - Environment variables.
@@ -115,12 +74,31 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
 
     const allOpportunitiesUnfiltered = [...newOpportunities, ...inProgressOpportunities];
 
-    // Filter out opportunities with PENDING_VALIDATION suggestions
-    const allOpportunities = await filterPendingValidationOpportunities(
-      allOpportunitiesUnfiltered,
-      Suggestion,
-      log,
-    );
+    // Fetch ALL suggestions for ALL opportunities in one batch
+    // This avoids N+1 queries by fetching everything upfront
+    const suggestionsByOpportunityId = new Map();
+    try {
+      const allSuggestionsArrays = await Promise.all(
+        allOpportunitiesUnfiltered.map((oppty) => Suggestion.allByOpportunityId(oppty.getId())),
+      );
+      allOpportunitiesUnfiltered.forEach((oppty, index) => {
+        suggestionsByOpportunityId.set(oppty.getId(), allSuggestionsArrays[index] || []);
+      });
+    } catch (e) {
+      log?.error?.('Error fetching suggestions for opportunities', {
+        siteId,
+        error: e?.message ?? e,
+      });
+      // On error, assume all opportunities have pending validation (fail-closed)
+      return ok([]);
+    }
+
+    // Filter out opportunities with PENDING_VALIDATION suggestions using the cached map
+    const allOpportunities = allOpportunitiesUnfiltered.filter((oppty) => {
+      const suggestions = suggestionsByOpportunityId.get(oppty.getId()) || [];
+      const hasPending = suggestions.some((sugg) => sugg.getStatus() === 'PENDING_VALIDATION');
+      return !hasPending;
+    });
 
     // Categorize opportunities using configuration
     const categorizedOpportunities = categorizeOpportunities(allOpportunities);
@@ -154,12 +132,12 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
       log.info(`No ${categoryNames} opportunities found for site ${siteId}, skipping Athena query`);
     }
 
-    // Process opportunity matching
+    // Process opportunity matching - pass the suggestions map to avoid refetching
     const { matchResults, paidUrlsMap } = await processOpportunityMatching(
       categorizedOpportunities,
       allPaidTrafficData,
       PAGE_VIEW_THRESHOLD,
-      Suggestion,
+      suggestionsByOpportunityId,
       log,
     );
 
@@ -173,17 +151,16 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
     const topOpportunities = filteredOpportunities.slice(0, 8);
 
     // Convert to DTOs
-    const opportunitySummaries = await Promise.all(
-      topOpportunities.map(async (opportunity) => {
-        const opportunityId = opportunity.getId();
-        const paidUrlsData = paidUrlsMap.get(opportunityId);
-        // Only fetch NEW suggestions if not a CWV opportunity (no paidUrlsData)
-        const suggestions = paidUrlsData
-          ? []
-          : await Suggestion.allByOpportunityIdAndStatus(opportunityId, 'NEW');
-        return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData, TOP_URLS_LIMIT);
-      }),
-    );
+    const opportunitySummaries = topOpportunities.map((opportunity) => {
+      const opportunityId = opportunity.getId();
+      const paidUrlsData = paidUrlsMap.get(opportunityId);
+      // Use cached suggestions filtered by NEW status
+      const allSuggestionsForOppty = suggestionsByOpportunityId.get(opportunityId) || [];
+      const suggestions = paidUrlsData
+        ? []
+        : allSuggestionsForOppty.filter((sugg) => sugg.getStatus() === 'NEW');
+      return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData, TOP_URLS_LIMIT);
+    });
 
     return ok(opportunitySummaries);
   };
