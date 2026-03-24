@@ -174,6 +174,8 @@ Content-Type: application/json
 
 ## Related APIs
 
+- [Brand Presence Sentiment Overview API](sentiment-overview-api.md) — Weekly sentiment distribution
+- [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly mentions, citations, and competitors
 - [Brand Presence Filter Dimensions API](filter-dimensions-api.md) — Returns available filter options
 - [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks
 
