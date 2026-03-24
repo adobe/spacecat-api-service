@@ -1,3 +1,10 @@
+# [1.370.0](https://github.com/adobe/spacecat-api-service/compare/v1.369.1...v1.370.0) (2026-03-24)
+
+
+### Features
+
+* endpoint to get demo data for opportunity workspace ([#2017](https://github.com/adobe/spacecat-api-service/issues/2017)) ([3bc22c5](https://github.com/adobe/spacecat-api-service/commit/3bc22c547e7c1ab274b74baf8ed3da6a0c51aa05))
+
 ## [1.369.1](https://github.com/adobe/spacecat-api-service/compare/v1.369.0...v1.369.1) (2026-03-24)
 
 
