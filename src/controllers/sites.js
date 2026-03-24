@@ -331,7 +331,7 @@ function SitesController(ctx, log, env) {
     const all = await Site.all({}, { fetchAllPages: true });
     const sites = all
       .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toJSON(site));
+      .map((site) => SiteDto.toListJSON(site));
     return ok(sites);
   };
 
@@ -632,7 +632,12 @@ function SitesController(ctx, log, env) {
     }
 
     if (isObject(requestBody.config)) {
-      site.setConfig(requestBody.config);
+      const siteConfig = site.getConfig();
+      const existingConfig = isNonEmptyObject(siteConfig)
+        ? Config.toDynamoItem(siteConfig) || {}
+        : {};
+      const merged = { ...existingConfig, ...requestBody.config };
+      site.setConfig(merged);
       updates = true;
     }
 

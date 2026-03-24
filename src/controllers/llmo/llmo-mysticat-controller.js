@@ -11,7 +11,18 @@
  */
 
 import AccessControlUtil from '../../support/access-control-util.js';
-import { createFilterDimensionsHandler, createBrandPresenceWeeksHandler } from './llmo-brand-presence.js';
+import {
+  createFilterDimensionsHandler,
+  createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
+  createMarketTrackingTrendsHandler, createTopicsHandler,
+  createTopicPromptsHandler,
+  createSearchHandler,
+  createTopicDetailHandler,
+  createPromptDetailHandler,
+  createSentimentMoversHandler,
+  createShareOfVoiceHandler,
+  createBrandPresenceStatsHandler,
+} from './llmo-brand-presence.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -37,10 +48,30 @@ function LlmoMysticatController(ctx) {
 
   const getFilterDimensions = createFilterDimensionsHandler(getOrgAndValidateAccess);
   const getBrandPresenceWeeks = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+  const getMarketTrackingTrends = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+  const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
+  const getTopics = createTopicsHandler(getOrgAndValidateAccess);
+  const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
+  const getSearch = createSearchHandler(getOrgAndValidateAccess);
+  const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
+  const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
+  const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
 
   return {
     getFilterDimensions,
     getBrandPresenceWeeks,
+    getMarketTrackingTrends,
+    getSentimentOverview,
+    getTopics,
+    getTopicPrompts,
+    getSearch,
+    getTopicDetail,
+    getPromptDetail,
+    getSentimentMovers,
+    getShareOfVoice,
+    getBrandPresenceStats,
   };
 }
 

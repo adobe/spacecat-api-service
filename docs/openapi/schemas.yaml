@@ -5768,6 +5768,173 @@ CustomerConfigTopic:
       type: string
       description: ID of the category this topic belongs to
       example: "photoshop-photo-editing"
+V2PromptListResponse:
+  type: object
+  description: Paginated list of prompts for a brand
+  required:
+    - items
+    - total
+    - limit
+    - page
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/V2Prompt'
+    total:
+      type: integer
+      description: Total number of prompts matching the filter
+    limit:
+      type: integer
+      description: Page size (items per page)
+    page:
+      type: integer
+      description: Current page number (1-based)
+
+V2Prompt:
+  type: object
+  description: A prompt with brand, category, and topic enrichment
+  properties:
+    id:
+      type: string
+      description: Business key (prompt_id)
+      example: "photoshop-prompt-1"
+    prompt:
+      type: string
+      description: The search query prompt text
+    name:
+      type: string
+      description: Display name
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this prompt is applicable
+    categoryId:
+      type: string
+      description: Category business key
+    topicId:
+      type: string
+      description: Topic business key
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      default: active
+    origin:
+      type: string
+      enum: [ai, human]
+      default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      example: "config"
+      default: "config"
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      type: string
+    brandId:
+      type: string
+      format: uuid
+      description: brands.id (uuid)
+    brandName:
+      type: string
+    category:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        origin:
+          type: string
+    topic:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        categoryId:
+          type: string
+
+V2PromptInput:
+  type: object
+  description: Input for creating/updating a prompt
+  required:
+    - prompt
+  properties:
+    id:
+      type: string
+      description: Optional business key; auto-generated if omitted
+    prompt:
+      type: string
+      description: The search query prompt text
+    name:
+      type: string
+      description: Display name (defaults to prompt slice)
+    regions:
+      type: array
+      items:
+        type: string
+      default: []
+    categoryId:
+      type: string
+    topicId:
+      type: string
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      default: active
+    origin:
+      type: string
+      enum: [ai, human]
+      default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      default: "config"
+
+V2PromptBulkDeleteRequest:
+  type: object
+  description: Request body for bulk-deleting prompts
+  required:
+    - promptIds
+  properties:
+    promptIds:
+      type: array
+      items:
+        type: string
+      minItems: 1
+      maxItems: 100
+      description: Array of prompt business keys to soft-delete
+
+V2PromptBulkDeleteResponse:
+  type: object
+  description: Response from bulk-deleting prompts
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of prompt IDs in request
+        success:
+          type: integer
+          description: Number of successfully deleted prompts
+        failure:
+          type: integer
+          description: Number of failed deletions
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          promptId:
+            type: string
+          reason:
+            type: string
+
 CustomerConfigPrompt:
   type: object
   description: A search prompt with category and topic ID references
@@ -6579,3 +6746,21 @@ PlgOnboarding:
       $ref: '#/DateTime'
     updatedAt:
       $ref: '#/DateTime'
+
+PresignedUrlResponse:
+  type: object
+  description: A short-lived presigned S3 URL and its expiry time
+  properties:
+    presignedUrl:
+      type: string
+      format: uri
+      description: Presigned S3 URL to download the resource
+    expiresAt:
+      type: string
+      format: date-time
+      description: ISO 8601 timestamp when the presigned URL expires
+      example: '2026-06-15T12:00:00.000Z'
+  required:
+    - presignedUrl
+    - expiresAt
+  additionalProperties: false
