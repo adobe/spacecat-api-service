@@ -16,7 +16,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  * Maps a DB brand row (with joined aliases/competitors) to the V2 config shape
  * the UI expects.
  */
-const BRAND_SELECT = '*, brand_aliases(alias), competitors(name), brand_sites(site_id)';
+const BRAND_SELECT = '*, brand_aliases(alias), competitors(name), brand_sites(site_id, sites(base_url))';
 
 function mapDbBrandToV2(row) {
   const aliases = (row.brand_aliases || []).map((a) => a.alias).filter(hasText);
@@ -31,7 +31,9 @@ function mapDbBrandToV2(row) {
     description: row.description || null,
     vertical: row.vertical || null,
     region: row.regions || [],
-    urls: (row.owned_urls || []).map((u) => ({ value: u })),
+    urls: (row.brand_sites || [])
+      .map((bs) => ({ value: bs.sites?.base_url }))
+      .filter((u) => hasText(u.value)),
     socialAccounts: (row.social || []).map((s) => ({ url: s })),
     earnedContent: (row.earned_sources || []).map((e) => ({ url: e })),
     brandAliases: aliases,
@@ -43,10 +45,17 @@ function mapDbBrandToV2(row) {
 }
 
 /**
- * Resolves brand URLs to site IDs by matching against the sites table,
- * then syncs the brand_sites junction table.
+ * Fully replaces brand_sites for a brand: deletes all existing entries,
+ * then resolves URLs to site IDs and inserts matching rows.
  */
 async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
+  const { error: deleteError } = await postgrestClient
+    .from('brand_sites')
+    .delete()
+    .eq('brand_id', brandId);
+
+  if (deleteError) throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
+
   if (!urls || urls.length === 0) return;
 
   const urlValues = urls
@@ -155,8 +164,6 @@ export async function upsertBrand({
     .map((e) => e?.url || e?.name).filter(hasText);
   const social = (brand.socialAccounts || [])
     .map((s) => s?.url || s?.handle).filter(hasText);
-  const ownedUrls = (brand.urls || [])
-    .map((u) => (typeof u === 'string' ? u : u?.value)).filter(hasText);
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
@@ -169,7 +176,6 @@ export async function upsertBrand({
     vertical: brand.vertical || null,
     earned_sources: earnedSources,
     social,
-    owned_urls: ownedUrls,
     regions,
     updated_by: updatedBy,
   };
@@ -233,7 +239,9 @@ export async function upsertBrand({
     }
   }
 
-  await syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy);
+  if (brand.urls !== undefined) {
+    await syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy);
+  }
 
   return getBrandById(organizationId, brandId, postgrestClient);
 }
@@ -269,10 +277,6 @@ export async function updateBrand({
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
       .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
-  }
-  if (updates.urls !== undefined) {
-    patch.owned_urls = (updates.urls || [])
-      .map((u) => (typeof u === 'string' ? u : u?.value)).filter(hasText);
   }
   if (updates.socialAccounts !== undefined) {
     patch.social = (updates.socialAccounts || [])

@@ -56,11 +56,11 @@ describe('brands-storage', () => {
         description: 'A test brand',
         vertical: 'Retail',
         regions: ['US'],
-        owned_urls: ['https://test.com'],
         social: [],
         earned_sources: [],
         brand_aliases: [{ alias: 'TB' }],
         competitors: [{ name: 'Rival' }],
+        brand_sites: [{ site_id: 'site-uuid-1', sites: { base_url: 'https://test.com' } }],
         updated_at: '2026-01-01',
         updated_by: 'user@test.com',
       };
@@ -141,12 +141,11 @@ describe('brands-storage', () => {
         description: 'desc',
         vertical: 'Tech',
         regions: ['US'],
-        owned_urls: ['https://example.com'],
         social: ['https://twitter.com/test'],
         earned_sources: ['https://blog.example.com'],
         brand_aliases: [{ alias: 'TB' }],
         competitors: [{ name: 'Rival' }],
-        brand_sites: [{ site_id: 'site-uuid-1' }],
+        brand_sites: [{ site_id: 'site-uuid-1', sites: { base_url: 'https://example.com' } }],
         updated_at: '2026-01-01',
         updated_by: 'user@test.com',
       };
@@ -477,7 +476,10 @@ describe('brands-storage', () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
         sites: { data: [{ id: 'site-uuid-1', base_url: 'https://test.com' }], error: null },
-        brand_sites: { data: null, error: { message: 'site sync error' } },
+        brand_sites: [
+          { data: null, error: null },
+          { data: null, error: { message: 'site sync error' } },
+        ],
       });
 
       await expect(upsertBrand({
@@ -503,6 +505,7 @@ describe('brands-storage', () => {
           { data: fullBrandRow, error: null },
         ],
         sites: { data: [], error: null },
+        brand_sites: { data: null, error: null },
       });
 
       const result = await upsertBrand({
@@ -679,12 +682,11 @@ describe('brands-storage', () => {
         name: 'Test',
         status: 'active',
         regions: ['US'],
-        owned_urls: ['https://new.com'],
         social: ['https://twitter.com/new'],
         earned_sources: ['https://blog.new.com'],
         brand_aliases: [],
         competitors: [],
-        brand_sites: [],
+        brand_sites: [{ site_id: 'new-site-uuid', sites: { base_url: 'https://new.com' } }],
       };
 
       const postgrestClient = createTableMockClient({
@@ -692,7 +694,8 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
-        sites: { data: [], error: null },
+        sites: { data: [{ id: 'new-site-uuid', base_url: 'https://new.com' }], error: null },
+        brand_sites: { data: null, error: null },
       });
 
       const result = await updateBrand({
@@ -910,12 +913,11 @@ describe('brands-storage', () => {
         name: 'Test',
         status: 'active',
         regions: [],
-        owned_urls: ['https://example.com'],
         social: [],
         earned_sources: [],
         brand_aliases: [],
         competitors: [],
-        brand_sites: [],
+        brand_sites: [{ site_id: 'example-site-uuid', sites: { base_url: 'https://example.com' } }],
       };
 
       const postgrestClient = createTableMockClient({
@@ -923,7 +925,8 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
-        sites: { data: [], error: null },
+        sites: { data: [{ id: 'example-site-uuid', base_url: 'https://example.com' }], error: null },
+        brand_sites: { data: null, error: null },
       });
 
       const result = await updateBrand({
