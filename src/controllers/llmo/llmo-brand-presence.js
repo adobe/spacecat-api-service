@@ -41,6 +41,12 @@ export const LLM_MODEL_VALUES = Object.freeze([
 const LLM_MODEL_SET = new Set(LLM_MODEL_VALUES);
 const DEFAULT_MODEL = 'chatgpt-free';
 
+/** Query-string aliases (case-insensitive). Not valid `llm_model` enum literals. */
+const MODEL_QUERY_ALIASES = new Map([
+  ['all', 'chatgpt-paid'],
+  ['chatgpt', 'chatgpt-free'],
+]);
+
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
@@ -97,13 +103,22 @@ function shouldApplyFilter(value) {
   return hasText(String(value));
 }
 
+/** @internal Exported for testing */
+export function resolveModelFromRequest(model) {
+  if (!hasText(model)) return DEFAULT_MODEL;
+  const trimmed = String(model).trim();
+  const alias = MODEL_QUERY_ALIASES.get(trimmed.toLowerCase());
+  return alias ?? trimmed;
+}
+
 /**
  * Validates model param against llm_model enum. Returns resolved model or error.
  * @param {string} [model] - Raw model from query (optional; defaults to chatgpt-free)
  * @returns {{ valid: boolean, model?: string, error?: string }}
+ * @internal Exported for testing
  */
-function validateModel(model) {
-  const resolved = hasText(model) ? String(model).trim() : DEFAULT_MODEL;
+export function validateModel(model) {
+  const resolved = resolveModelFromRequest(model);
   if (!LLM_MODEL_SET.has(resolved)) {
     return {
       valid: false,
@@ -549,7 +564,7 @@ function parseIsoWeek(weekStr) {
 function buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
   const {
     siteId, categoryId, regionCode,
   } = params;
@@ -581,7 +596,7 @@ function buildBrandExecutionsQuery(client, organizationId, params, defaults, fil
 function buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
   const {
     siteId, categoryId, regionCode,
   } = params;
@@ -852,7 +867,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       let q = client
         .from('brand_presence_executions')
@@ -1163,7 +1178,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         p_organization_id: organizationId,
         p_start_date: params.startDate || defaults.startDate,
         p_end_date: params.endDate || defaults.endDate,
-        p_model: params.model || 'chatgpt',
+        p_model: resolveModelFromRequest(params.model),
         p_brand_id: filterByBrandId || null,
         p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
         p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
@@ -1228,7 +1243,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       let topicName;
       try {
@@ -1350,7 +1365,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const bounded = query.slice(0, MAX_SEARCH_QUERY_LENGTH);
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       const pattern = buildSearchPattern(bounded);
 
@@ -1582,7 +1597,7 @@ export function aggregateDetailSources(sourceRows) {
 function buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
 
   let q = client
     .from('brand_presence_executions')
@@ -1985,7 +2000,7 @@ export function volumeToPopularity(volume, avgPositiveVolume) {
 function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
 
   return client.rpc('rpc_share_of_voice', {
     p_organization_id: organizationId,
@@ -2310,7 +2325,7 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       const q = ctx.data || {};
       const type = (q.type || 'top').toLowerCase();
@@ -2446,7 +2461,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
       const showTrends = parseShowTrends(q);
 
       if (shouldApplyFilter(params.siteId)) {
