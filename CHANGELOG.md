@@ -1,3 +1,11 @@
+## [1.368.2](https://github.com/adobe/spacecat-api-service/compare/v1.368.1...v1.368.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* shallow merge config patch ([#2020](https://github.com/adobe/spacecat-api-service/issues/2020)) ([d87ca6b](https://github.com/adobe/spacecat-api-service/commit/d87ca6b593ce231ce38214d3301a3074c5f02083))
+* shallow merge config patch ([#2020](https://github.com/adobe/spacecat-api-service/issues/2020)) ([#2021](https://github.com/adobe/spacecat-api-service/issues/2021)) ([d2020ac](https://github.com/adobe/spacecat-api-service/commit/d2020acb85630cb749b74ac9990b82850d276f62))
+
 ## [1.368.1](https://github.com/adobe/spacecat-api-service/compare/v1.368.0...v1.368.1) (2026-03-24)
 
 
