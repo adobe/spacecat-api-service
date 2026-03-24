@@ -182,6 +182,8 @@ Prompts are deduplicated by `prompt|region_code` — when multiple executions ex
 
 - [Brand Presence Filter Dimensions API](filter-dimensions-api.md) — Returns available filter options
 - [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks
+- [Brand Presence Sentiment Overview API](sentiment-overview-api.md) — Weekly sentiment distribution for charts
+- [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly mentions, citations, and competitors
 - [Brand Presence Sentiment Movers API](sentiment-movers-api.md) — Top/bottom sentiment movers
 
 ---
