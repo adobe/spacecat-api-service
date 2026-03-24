@@ -23,7 +23,7 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 |-----------|---------|------|---------|-------------|
 | `startDate` | `start_date` | string (YYYY-MM-DD) | 28 days ago | Start of date range |
 | `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
-| `model` | — | string | `chatgpt` | LLM model (e.g. chatgpt, gemini, copilot) |
+| `model` | — | enum | `chatgpt-free` | LLM model. Must be one of: `chatgpt-paid`, `chatgpt-free`, `google-ai-overview`, `perplexity`, `google-ai-mode`, `copilot`, `gemini`, `google`, `microsoft`, `mistral`, `anthropic`, `amazon`. Returns 400 if invalid. |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site |
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category. If UUID → `category_id`; if not UUID (e.g. "Acrobat") → `category_name` |
 | `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated UUIDs (e.g. `uuid1,uuid2`), or repeated param. Non-UUID values are ignored. Uses `topic_id` column. |
@@ -42,14 +42,14 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 |-----------|---------|
 | `startDate` | 28 days before today |
 | `endDate` | Today |
-| `model` | `chatgpt` |
+| `model` | `chatgpt-free` |
 
 ---
 
 ## Sample URL (All Parameters)
 
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=ai
 ```
 
 **Multiple topicIds (comma-separated):**
@@ -59,7 +59,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-d
 
 **Single brand variant:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt-free&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=ai
 ```
 
 ---
@@ -171,6 +171,7 @@ client.from('page_intents').select('page_intent').eq('site_id', siteId).limit(50
 | Status | Condition |
 |--------|-----------|
 | 400 | PostgREST not configured (DATA_SERVICE_PROVIDER ≠ postgres) |
+| 400 | Invalid `model` query parameter (not in llm_model enum) |
 | 400 | Organization not found |
 | 400 | PostgREST/PostgreSQL error |
 | 403 | User does not belong to the organization |
