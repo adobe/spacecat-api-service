@@ -53,6 +53,8 @@ export const INTERNAL_ROUTES = [
 
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
+  'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
+  'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',

@@ -1421,6 +1421,70 @@ llmo-brand-claims:
     security:
       - api_key: [ ]
 
+llmo-opportunity-workspace-demo-brand-presence:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get presigned URL for summit demo brand presence fixture
+    description: |
+      Returns a presigned S3 URL for downloading the summit demo brand presence fixture.
+      Used by the Opportunity Workspace summit demo to load static performance data
+      without bundling it in the UI.
+
+      S3 key: `workspace/llmo/demo/summit-demo-brand-presence.json`
+    operationId: getDemoBrandPresence
+    responses:
+      '200':
+        description: Presigned URL generated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PresignedUrlResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-opportunity-workspace-demo-recommendations:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get presigned URL for summit demo recommendations fixture
+    description: |
+      Returns a presigned S3 URL for downloading the summit demo recommendations fixture.
+      Used by the Opportunity Workspace summit demo to load static recommendations data
+      without bundling it in the UI.
+
+      S3 key: `workspace/llmo/demo/summit-demo-recommendations.json`
+    operationId: getDemoRecommendations
+    responses:
+      '200':
+        description: Presigned URL generated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PresignedUrlResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-edge-optimize-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
