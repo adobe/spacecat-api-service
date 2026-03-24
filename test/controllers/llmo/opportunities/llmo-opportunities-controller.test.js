@@ -261,6 +261,18 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.total).to.equal(1);
     });
 
+    it('returns 400 when organization has more than 40 sites', async () => {
+      const sites = Array.from({ length: 41 }, (_, i) => createMockSite({ id: `site-${i}` }));
+      mockContext.dataAccess.Site.allByOrganizationId.resolves(sites);
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getOpportunityCount(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('too many sites');
+    });
+
     it('returns 500 when site listing fails', async () => {
       mockContext.dataAccess.Site.allByOrganizationId.rejects(new Error('DB connection failed'));
 

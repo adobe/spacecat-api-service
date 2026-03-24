@@ -18,6 +18,7 @@ import { OpportunityDto } from '../../../dto/opportunity.js';
 import { getBrandById } from '../../../support/brands-storage.js';
 
 const MAX_CONCURRENT_SITES = 5;
+const MAX_SITES_FOR_COUNT = 40;
 const VALID_STATUSES = new Set(['NEW', 'IN_PROGRESS']);
 
 /**
@@ -111,6 +112,10 @@ function LlmoOpportunitiesController(ctx) {
           return forbidden('Site does not belong to the organization');
         }
         sites = [match];
+      }
+
+      if (sites.length > MAX_SITES_FOR_COUNT) {
+        return badRequest(`Organization has too many sites (${sites.length}) for an opportunity count. Maximum is ${MAX_SITES_FOR_COUNT}.`);
       }
 
       const countForSite = async (site) => {

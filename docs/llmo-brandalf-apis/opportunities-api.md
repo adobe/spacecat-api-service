@@ -130,7 +130,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 |--------|-----------|
 | 403 | User has no org access; `siteId` does not belong to the organization or brand |
 | 404 | Organization not found; brand not found (specific brandId only) |
-| 400 | Brand lookup requires PostgREST service but it is unavailable; unexpected error |
+| 400 | Organization exceeds the 40-site limit for count requests; brand lookup requires PostgREST service but it is unavailable; unexpected error |
 | 500 | Internal error fetching site list or opportunities |
 
 Site-level fetch failures (e.g. DynamoDB timeout for a single site) are logged as warnings and do not fail the overall request — the affected site contributes 0 to the count or is omitted from the listing.
