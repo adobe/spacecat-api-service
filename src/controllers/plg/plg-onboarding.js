@@ -50,6 +50,7 @@ const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const PLG_PROFILE_KEY = 'aso_plg';
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
+const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
@@ -182,6 +183,18 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
+  // Guard: only one domain per IMS org can be onboarded
+  const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
+  const alreadyOnboarded = existingRecords
+    .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
+  if (alreadyOnboarded) {
+    log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG}`);
+    await onboarding.save();
+    return onboarding;
+  }
+
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
