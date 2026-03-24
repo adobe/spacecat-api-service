@@ -1,3 +1,64 @@
+# [1.368.0](https://github.com/adobe/spacecat-api-service/compare/v1.367.0...v1.368.0) (2026-03-23)
+
+
+### Features
+
+* prompts CRUD ([#1953](https://github.com/adobe/spacecat-api-service/issues/1953)) ([44e7019](https://github.com/adobe/spacecat-api-service/commit/44e7019a4452c47195b69d8acef887dd66b84926))
+
+# [1.367.0](https://github.com/adobe/spacecat-api-service/compare/v1.366.0...v1.367.0) (2026-03-23)
+
+
+### Bug Fixes
+
+* aggregate prompt-level mentions and citations across executions | LLMO-3605 ([#2016](https://github.com/adobe/spacecat-api-service/issues/2016)) ([f0528df](https://github.com/adobe/spacecat-api-service/commit/f0528df13280ecc130f5b457eff84fca8b7730a8))
+
+
+### Features
+
+* add topic and prompt detail fetching capabilities |  LLMO-3814 ([#2015](https://github.com/adobe/spacecat-api-service/issues/2015)) ([f1df9a8](https://github.com/adobe/spacecat-api-service/commit/f1df9a858a17a06c2ad62869cf2f3d3dbc41b52c))
+
+# [1.366.0](https://github.com/adobe/spacecat-api-service/compare/v1.365.1...v1.366.0) (2026-03-23)
+
+
+### Features
+
+* add search endpoint for brand presence Data Insights table | LLMO-3605 ([#2013](https://github.com/adobe/spacecat-api-service/issues/2013)) ([f79cd3b](https://github.com/adobe/spacecat-api-service/commit/f79cd3bf5bf39e6d9488547c47171fe415dfcbbf))
+
+## [1.365.1](https://github.com/adobe/spacecat-api-service/compare/v1.365.0...v1.365.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* inline setup steps in e2e-tests workflow ([#2014](https://github.com/adobe/spacecat-api-service/issues/2014)) ([1f5de2d](https://github.com/adobe/spacecat-api-service/commit/1f5de2dd592eb417a892973a220cfeb787e6318e))
+
+# [1.365.0](https://github.com/adobe/spacecat-api-service/compare/v1.364.0...v1.365.0) (2026-03-23)
+
+
+### Features
+
+* add topics endpoint for brand presence Data Insights table | LLMO-3605 ([#1985](https://github.com/adobe/spacecat-api-service/issues/1985)) ([666b0bd](https://github.com/adobe/spacecat-api-service/commit/666b0bd7be116ba84e76d1fef3b91f3cd4c41d0a))
+
+# [1.364.0](https://github.com/adobe/spacecat-api-service/compare/v1.363.2...v1.364.0) (2026-03-23)
+
+
+### Features
+
+* llmo sentiment movers api ([#2006](https://github.com/adobe/spacecat-api-service/issues/2006)) ([95cec54](https://github.com/adobe/spacecat-api-service/commit/95cec54a91f390b9982a8d6663e464fb4fac8aae))
+
+## [1.363.2](https://github.com/adobe/spacecat-api-service/compare/v1.363.1...v1.363.2) (2026-03-22)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2009](https://github.com/adobe/spacecat-api-service/issues/2009)) ([879dde4](https://github.com/adobe/spacecat-api-service/commit/879dde48e813d64b98eec7b041d412065972f325))
+
+## [1.363.1](https://github.com/adobe/spacecat-api-service/compare/v1.363.0...v1.363.1) (2026-03-21)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2008](https://github.com/adobe/spacecat-api-service/issues/2008)) ([1c59503](https://github.com/adobe/spacecat-api-service/commit/1c59503d4c6bff2cb5482cc3743b719a76f56a10))
+
 # [1.363.0](https://github.com/adobe/spacecat-api-service/compare/v1.362.0...v1.363.0) (2026-03-20)
 
 

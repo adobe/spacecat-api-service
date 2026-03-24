@@ -230,13 +230,20 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
   });
 
-  it('handles spaceCatId not correctly formatted error for filter-dimensions', async () => {
-    context.pathInfo.suffix = '/org/1234/brands/all/brand-presence/filter-dimensions';
+  it('handles spaceCatId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/v2/orgs/not-a-uuid/brands/brand-1/prompts';
+    context.dataAccess.services = {
+      postgrestClient: {
+        from: () => ({
+          // eslint-disable-next-line max-len
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+        }),
+      },
+    };
 
-    request = new Request(`${baseUrl}/org/1234/brands/all/brand-presence/filter-dimensions`, {
-      method: 'GET',
-      headers: { 'x-api-key': apiKey },
-    });
+    // eslint-disable-next-line max-len
+    const url = `${baseUrl}/v2/orgs/not-a-uuid/brands/brand-1/prompts`;
+    request = new Request(url, { headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 
