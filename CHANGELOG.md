@@ -1,3 +1,10 @@
+# [1.371.0](https://github.com/adobe/spacecat-api-service/compare/v1.370.0...v1.371.0) (2026-03-24)
+
+
+### Features
+
+* bf opportunities api ([#2025](https://github.com/adobe/spacecat-api-service/issues/2025)) ([eaf20b6](https://github.com/adobe/spacecat-api-service/commit/eaf20b639b17b6966a3dbcc2a8a1f77f5f3e5e6f))
+
 # [1.370.0](https://github.com/adobe/spacecat-api-service/compare/v1.369.1...v1.370.0) (2026-03-24)
 
 
