@@ -42,6 +42,47 @@ async function validateSiteAndPermissions(siteId, Site, accessControlUtil) {
 }
 
 /**
+ * Checks if an opportunity has any suggestions with PENDING_VALIDATION status.
+ * @param {string} opportunityId - The opportunity ID to check
+ * @param {object} Suggestion - Suggestion data access object
+ * @param {object} log - Logger
+ * @returns {Promise<boolean>} True if the opportunity has PENDING_VALIDATION suggestions
+ */
+async function hasPendingValidationSuggestions(opportunityId, Suggestion, log) {
+  try {
+    const suggestions = await Suggestion.allByOpportunityIdAndStatus(
+      opportunityId,
+      'PENDING_VALIDATION',
+    );
+    return suggestions && suggestions.length > 0;
+  } catch (e) {
+    log?.warn?.('Error checking for PENDING_VALIDATION suggestions', {
+      opportunityId,
+      error: e?.message ?? e,
+    });
+    // On error, filter out the opportunity
+    return true;
+  }
+}
+
+/**
+ * Filters out opportunities that have suggestions with PENDING_VALIDATION status.
+ * @param {Array} opportunities - Array of opportunity entities
+ * @param {object} Suggestion - Suggestion data access object
+ * @param {object} log - Logger
+ * @returns {Promise<Array>} Filtered array of opportunities
+ */
+async function filterPendingValidationOpportunities(opportunities, Suggestion, log) {
+  // Check all opportunities in parallel for better performance
+  const pendingChecks = await Promise.all(
+    opportunities.map((oppty) => hasPendingValidationSuggestions(oppty.getId(), Suggestion, log)),
+  );
+
+  // Filter out opportunities that have pending validation suggestions
+  return opportunities.filter((_, index) => !pendingChecks[index]);
+}
+
+/**
  * Top Paid Opportunities controller.
  * @param {object} ctx - Context of the request.
  * @param {object} env - Environment variables.
@@ -72,7 +113,14 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
       Opportunity.allBySiteIdAndStatus(siteId, 'IN_PROGRESS'),
     ]);
 
-    const allOpportunities = [...newOpportunities, ...inProgressOpportunities];
+    const allOpportunitiesUnfiltered = [...newOpportunities, ...inProgressOpportunities];
+
+    // Filter out opportunities with PENDING_VALIDATION suggestions
+    const allOpportunities = await filterPendingValidationOpportunities(
+      allOpportunitiesUnfiltered,
+      Suggestion,
+      log,
+    );
 
     // Categorize opportunities using configuration
     const categorizedOpportunities = categorizeOpportunities(allOpportunities);

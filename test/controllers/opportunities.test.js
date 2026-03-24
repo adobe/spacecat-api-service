@@ -226,9 +226,14 @@ describe('Opportunities Controller', () => {
       }),
     };
 
+    const mockSuggestion = {
+      allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
+    };
+
     mockOpportunityDataAccess = {
       Opportunity: mockOpportunity,
       Site: mockSite,
+      Suggestion: mockSuggestion,
     };
 
     mockContext = {
@@ -402,6 +407,11 @@ describe('Opportunities Controller', () => {
   it('getByID catches grant suggestions handler errors gracefully', async () => {
     const mockSuggestion = {
       allByOpportunityIdAndStatus: sandbox.stub()
+        // First call for PENDING_VALIDATION check - return empty array
+        .onFirstCall()
+        .resolves([])
+        // Second call for grant suggestions - reject with error
+        .onSecondCall()
         .rejects(new Error('db failure')),
     };
     const mockSuggestionGrant = {};
@@ -457,8 +467,12 @@ describe('Opportunities Controller', () => {
   it('getByID catches grant suggestions handler errors gracefully when error has no message', async () => {
     const mockSuggestion = {
       allByOpportunityIdAndStatus: sandbox.stub()
-        // eslint-disable-next-line prefer-promise-reject-errors
-        .callsFake(() => Promise.reject(null)),
+        // First call for PENDING_VALIDATION check - return empty array
+        .onFirstCall()
+        .resolves([])
+        // Second call for grant suggestions - reject with error with no message
+        .onSecondCall()
+        .rejects(new Error()),
     };
     const mockToken = {
       findBySiteIdAndTokenType: sandbox.stub(),

@@ -44,13 +44,22 @@ export const OpportunitySummaryDto = {
     const urls = new Set();
     let totalPageViews = 0;
 
+    // Get opportunity data early to check for page-specific URLs
+    const opportunityData = opportunity.getData() || {};
+
     // If paidUrlsData provided, use those URLs and pageViews
     // (for CWV opportunities from paid traffic)
     if (paidUrlsData && paidUrlsData.urls) {
       paidUrlsData.urls.forEach((url) => urls.add(url));
       totalPageViews = paidUrlsData.pageViews || 0;
     } else {
-      // Otherwise, extract all URLs from suggestion data (for paid media opportunities)
+      // Check if opportunity data has a page-specific URL
+      // (e.g., no-cta-above-the-fold, high-organic-low-ctr)
+      if (opportunityData.page) {
+        urls.add(opportunityData.page);
+      }
+
+      // Extract all URLs from suggestion data (for paid media opportunities)
       suggestions.forEach((suggestion) => {
         const data = suggestion.getData();
         if (!data) return; // Skip if data is null/undefined
@@ -60,29 +69,35 @@ export const OpportunitySummaryDto = {
         if (data.urlFrom) urls.add(data.urlFrom);
         if (data.urlTo) urls.add(data.urlTo);
         if (data.url) urls.add(data.url);
-      });
-
-      // Aggregate page views from rank (which often represents traffic)
-      suggestions.forEach((suggestion) => {
-        const data = suggestion.getData();
-        if (!data) return; // Skip if data is null/undefined
-        const rank = suggestion.getRank();
-        if (rank && typeof rank === 'number') {
-          totalPageViews += rank;
-        }
-
-        // Also check for traffic_domain or trafficDomain in data
-        if (data.traffic_domain && typeof data.traffic_domain === 'number') {
-          totalPageViews += data.traffic_domain;
-        }
-        if (data.trafficDomain && typeof data.trafficDomain === 'number') {
-          totalPageViews += data.trafficDomain;
+        // Handle no-cta-above-the-fold contentFix structure
+        if (data.contentFix?.page_patch?.original_page_url) {
+          urls.add(data.contentFix.page_patch.original_page_url);
         }
       });
+
+      // Use pageViews from opportunity data if available
+      if (opportunityData.pageViews && typeof opportunityData.pageViews === 'number') {
+        totalPageViews = opportunityData.pageViews;
+      } else {
+        // Otherwise, aggregate page views from rank (which often represents traffic)
+        suggestions.forEach((suggestion) => {
+          const data = suggestion.getData();
+          if (!data) return; // Skip if data is null/undefined
+          const rank = suggestion.getRank();
+          if (rank && typeof rank === 'number') {
+            totalPageViews += rank;
+          }
+
+          // Also check for traffic_domain or trafficDomain in data
+          if (data.traffic_domain && typeof data.traffic_domain === 'number') {
+            totalPageViews += data.traffic_domain;
+          }
+          if (data.trafficDomain && typeof data.trafficDomain === 'number') {
+            totalPageViews += data.trafficDomain;
+          }
+        });
+      }
     }
-
-    // Get projected traffic data from opportunity data
-    const opportunityData = opportunity.getData() || {};
     const projectedTrafficLost = opportunityData.projectedTrafficLost || 0;
     const projectedTrafficValue = opportunityData.projectedTrafficValue || 0;
     const projectedConversionValue = opportunityData.projectedConversionValue || 0;

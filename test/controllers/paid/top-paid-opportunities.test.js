@@ -93,6 +93,12 @@ describe('TopPaidOpportunitiesController', () => {
     mockAthenaClient = { query: sandbox.stub().resolves([]) };
     AWSAthenaClient.fromContext.returns(mockAthenaClient);
 
+    const suggestionStub = sandbox.stub();
+    // Default: return empty array for PENDING_VALIDATION (filtering check)
+    suggestionStub.withArgs(sinon.match.any, 'PENDING_VALIDATION').resolves([]);
+    // Default: return empty array for other statuses (can be overridden in tests)
+    suggestionStub.resolves([]);
+
     mockContext = {
       log: {
         info: sandbox.stub(),
@@ -103,7 +109,9 @@ describe('TopPaidOpportunitiesController', () => {
       dataAccess: {
         Site: { findById: sandbox.stub().resolves(createMockSite()) },
         Opportunity: { allBySiteIdAndStatus: sandbox.stub().resolves([]) },
-        Suggestion: { allByOpportunityIdAndStatus: sandbox.stub().resolves([]) },
+        Suggestion: {
+          allByOpportunityIdAndStatus: suggestionStub,
+        },
       },
       attributes: {
         authInfo: {
@@ -451,6 +459,62 @@ describe('TopPaidOpportunitiesController', () => {
       const opportunities = await response.json();
       expect(opportunities).to.have.lengthOf(1);
     });
+
+    it('filters out opportunities with PENDING_VALIDATION suggestions', async () => {
+      const validOppty = createOpportunity({ id: 'oppty-valid', tags: ['paid media'] });
+      const pendingValidationOppty = createOpportunity({
+        id: 'oppty-pending', tags: ['paid media'],
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [validOppty, pendingValidationOppty],
+      );
+
+      // Replace the stub with a custom implementation
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus = sandbox.stub()
+        .callsFake((oppId, status) => {
+          if (status === 'PENDING_VALIDATION') {
+            if (oppId === 'oppty-pending') {
+              return Promise.resolve([createSuggestion('https://example.com/page')]);
+            }
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([]);
+        });
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('oppty-valid');
+    });
+
+    it('filters out opportunities when PENDING_VALIDATION check fails (fail-closed)', async () => {
+      const validOppty = createOpportunity({ id: 'oppty-success', tags: ['paid media'] });
+      const errorOppty = createOpportunity({ id: 'oppty-error', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [validOppty, errorOppty]);
+
+      // Replace the stub with a custom implementation
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus = sandbox.stub()
+        .callsFake((oppId, status) => {
+          if (status === 'PENDING_VALIDATION') {
+            if (oppId === 'oppty-error') {
+              return Promise.reject(new Error('Database error'));
+            }
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([]);
+        });
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      // Should only return oppty-success; oppty-error should be filtered out due to error
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('oppty-success');
+    });
   });
 
   describe('CWV opportunity filtering', () => {
@@ -623,7 +687,8 @@ describe('TopPaidOpportunitiesController', () => {
         params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
       });
 
-      expect(mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.callCount).to.equal(1);
+      // Called twice: once for PENDING_VALIDATION check, once for CWV suggestion fetching
+      expect(mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.callCount).to.equal(2);
     });
   });
 
