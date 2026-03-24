@@ -11,6 +11,7 @@
  */
 
 // TODO: re-export from @adobe/spacecat-shared-data-access package root
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
@@ -49,6 +50,7 @@ const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const PLG_PROFILE_KEY = 'aso_plg';
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
+const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
@@ -181,6 +183,18 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
+  // Guard: only one domain per IMS org can be onboarded
+  const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
+  const alreadyOnboarded = existingRecords
+    .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
+  if (alreadyOnboarded) {
+    log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG}`);
+    await onboarding.save();
+    return onboarding;
+  }
+
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
@@ -212,14 +226,24 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setOrganizationId(organizationId);
     steps.orgResolved = true;
 
-    // Step 2: RUM check — informational, does not block onboarding
+    // Step 2: AEM verification — domain must be an AEM site (RUM check OR delivery type)
     const rumApiClient = RUMAPIClient.createFrom(context);
+    let cachedDeliveryType = null;
     try {
       await rumApiClient.retrieveDomainkey(domain);
       steps.rumVerified = true;
     } catch {
       steps.rumVerified = false;
-      log.info(`No RUM data for ${domain}, continuing onboarding`);
+      log.info(`No RUM data for ${domain}, checking delivery type`);
+      cachedDeliveryType = await findDeliveryType(baseURL);
+      if (cachedDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
+        log.info(`Domain ${domain} is not an AEM site, moving to waitlist`);
+        onboarding.setStatus(STATUSES.WAITLISTED);
+        onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
+        onboarding.setSteps(steps);
+        await onboarding.save();
+        return onboarding;
+      }
     }
 
     // Step 3: Check site ownership
@@ -269,7 +293,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 
     // Step 5: Create site if new
     if (!site) {
-      const deliveryType = await findDeliveryType(baseURL);
+      const deliveryType = cachedDeliveryType ?? await findDeliveryType(baseURL);
       site = await Site.create({
         baseURL,
         organizationId,
