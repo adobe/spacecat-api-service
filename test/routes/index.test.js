@@ -269,6 +269,11 @@ describe('getRouteHandlers', () => {
     getFilterDimensions: () => null,
   };
 
+  const mockLlmoOpportunitiesController = {
+    getOpportunityCount: () => null,
+    getBrandOpportunities: () => null,
+  };
+
   const mockLlmoController = {
     getLlmoSheetData: () => null,
     getLlmoGlobalSheetData: () => null,
@@ -408,6 +413,7 @@ describe('getRouteHandlers', () => {
       mockFixesController,
       mockLlmoController,
       mockLlmoMysticatController,
+      mockLlmoOpportunitiesController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -530,6 +536,9 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
       'GET /org/:spaceCatId/brands/all/brand-presence/stats',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+      'GET /org/:spaceCatId/opportunities/count',
+      'GET /org/:spaceCatId/brands/all/opportunities',
+      'GET /org/:spaceCatId/brands/:brandId/opportunities',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',

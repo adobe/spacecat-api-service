@@ -119,6 +119,7 @@ export default function getRouteHandlers(
   fixesController,
   llmoController,
   llmoMysticatController,
+  llmoOpportunitiesController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -424,6 +425,11 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
+
+    // LLMO Opportunities (org-level)
+    'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
+    'GET /org/:spaceCatId/brands/all/opportunities': llmoOpportunitiesController.getBrandOpportunities,
+    'GET /org/:spaceCatId/brands/:brandId/opportunities': llmoOpportunitiesController.getBrandOpportunities,
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
