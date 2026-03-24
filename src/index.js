@@ -73,6 +73,7 @@ import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
+import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
@@ -202,6 +203,7 @@ async function run(request, context) {
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
     const llmoMysticatController = LlmoMysticatController(context);
+    const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
@@ -246,6 +248,7 @@ async function run(request, context) {
       fixesController,
       llmoController,
       llmoMysticatController,
+      llmoOpportunitiesController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,
