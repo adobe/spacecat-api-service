@@ -1,3 +1,10 @@
+# [1.372.0](https://github.com/adobe/spacecat-api-service/compare/v1.371.0...v1.372.0) (2026-03-24)
+
+
+### Features
+
+* onboarding and update redirects ([#1979](https://github.com/adobe/spacecat-api-service/issues/1979)) ([87e8caa](https://github.com/adobe/spacecat-api-service/commit/87e8caa44bf95be59319cdae35c07b2592bb0b42))
+
 # [1.371.0](https://github.com/adobe/spacecat-api-service/compare/v1.370.0...v1.371.0) (2026-03-24)
 
 
