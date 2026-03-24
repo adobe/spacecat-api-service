@@ -1133,8 +1133,8 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
         p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
         p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
-        p_sort_by: pagination.sortBy || 'name',
-        p_sort_order: pagination.sortOrder || 'asc',
+        p_sort_by: pagination.sortBy,
+        p_sort_order: pagination.sortOrder,
         p_page_offset: pagination.page * pagination.pageSize,
         p_page_limit: pagination.pageSize,
       });

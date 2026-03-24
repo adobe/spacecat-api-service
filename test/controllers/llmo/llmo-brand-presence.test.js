@@ -4190,6 +4190,34 @@ describe('llmo-brand-presence', () => {
       expect(td.popularityVolume).to.equal('N/A');
     });
 
+    it('handles null total_count in RPC row', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock({
+        data: [{ ...sampleRpcRow, total_count: null }],
+        error: null,
+      });
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.totalCount).to.equal(0);
+    });
+
+    it('passes siteId to RPC when site belongs to org', async () => {
+      const validSiteId = '0178a3f0-1234-7000-8000-000000000099';
+      mockContext.data = { siteId: validSiteId };
+      const client = createTopicsRpcMock({ data: [sampleRpcRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const [, params] = client.rpc.firstCall.args;
+      expect(params.p_site_id).to.equal(validSiteId);
+    });
+
     it('does not include items property in topicDetails', async () => {
       mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock({
         data: [sampleRpcRow],
@@ -5095,6 +5123,95 @@ describe('llmo-brand-presence', () => {
       const brandIdCalls = client.eq.getCalls()
         .filter((call) => call.args[0] === 'brand_id');
       expect(brandIdCalls).to.have.lengthOf(0);
+    });
+
+    it('sorts results by a numeric field', async () => {
+      const baseRow = {
+        region_code: 'US',
+        citations: false,
+        sentiment: 'Neutral',
+        origin: 'ai',
+        category_name: 'Cat',
+        execution_date: '2026-03-01',
+        error_code: null,
+        brand_presence_sources: [],
+      };
+      const rows = [
+        {
+          ...baseRow, topics: 'Topic A', prompt: 'pdf a', mentions: false, visibility_score: 50, position: '4', volume: 10, url: 'https://a.com',
+        },
+        {
+          ...baseRow, topics: 'Topic B', prompt: 'pdf b', mentions: true, visibility_score: 90, position: '1', volume: 20, url: 'https://b.com',
+        },
+        {
+          ...baseRow, topics: 'Topic C', prompt: 'pdf c', mentions: false, visibility_score: 30, position: '6', volume: 5, url: 'https://c.com',
+        },
+      ];
+      mockContext.data = { query: 'pdf', sortBy: 'mentions', sortOrder: 'desc' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails).to.have.lengthOf(3);
+      expect(body.topicDetails[0].topic).to.equal('Topic B');
+    });
+
+    it('falls back to sorting by topic when sortBy is unknown', async () => {
+      const rows = [
+        {
+          topics: 'Bravo',
+          prompt: 'pdf bravo',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 70,
+          position: '2',
+          sentiment: 'Neutral',
+          volume: 10,
+          origin: 'ai',
+          category_name: 'Cat',
+          execution_date: '2026-03-01',
+          url: 'https://b.com',
+          error_code: null,
+          brand_presence_sources: [],
+        },
+        {
+          topics: 'Alpha',
+          prompt: 'pdf alpha',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: 60,
+          position: '3',
+          sentiment: 'Neutral',
+          volume: 5,
+          origin: 'ai',
+          category_name: 'Cat',
+          execution_date: '2026-03-01',
+          url: 'https://a.com',
+          error_code: null,
+          brand_presence_sources: [],
+        },
+      ];
+      mockContext.data = { query: 'pdf', sortBy: 'nonexistent' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createSearchHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails[0].topic).to.equal('Alpha');
+      expect(body.topicDetails[1].topic).to.equal('Bravo');
     });
   });
 
