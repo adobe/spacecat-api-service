@@ -6767,12 +6767,16 @@ PresignedUrlResponse:
 
 BrandVsCompetitorsResponse:
   type: object
+  required:
+    - competitorData
+  additionalProperties: false
   properties:
     competitorData:
       type: array
       description: Aggregated competitor metrics per execution date
       items:
         type: object
+        additionalProperties: false
         properties:
           siteId:
             type: string

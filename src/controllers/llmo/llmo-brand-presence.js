@@ -2534,7 +2534,7 @@ function parseBrandVsCompetitorsParams(context) {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
     siteId: q.siteId || q.site_id,
-    model: q.model,
+    model: q.model || q.platform,
     categoryName: q.categoryName || q.category_name,
     regionCode: q.regionCode || q.region_code || q.region,
   };
@@ -2567,6 +2567,9 @@ export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
 
       if (!shouldApplyFilter(params.siteId)) {
         return badRequest('siteId is required');
+      }
+      if (!isValidUUID(params.siteId)) {
+        return badRequest('siteId must be a valid UUID');
       }
 
       const siteBelongsToOrg = await validateSiteBelongsToOrg(

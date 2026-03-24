@@ -2020,7 +2020,11 @@ llmo-brand-vs-competitors:
               $ref: './schemas.yaml#/BrandVsCompetitorsResponse'
       '400':
         $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
