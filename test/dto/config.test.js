@@ -72,7 +72,7 @@ describe('ConfigDto', () => {
           customerIntent: [{ key: 'intent1' }],
           someInternalField: 'should-be-excluded',
         },
-        edgeOptimizeConfig: { enabled: true, stagingDomains: ['stage.example.com'] },
+        edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
         slack: { channel: '#test', workspace: 'T123' },
         brandConfig: { brandId: 'brand-123' },
         fetchConfig: { overrideBaseURL: 'https://override.example.com' },
@@ -91,7 +91,7 @@ describe('ConfigDto', () => {
           tags: ['tag1'],
           customerIntent: [{ key: 'intent1' }],
         },
-        edgeOptimizeConfig: { enabled: true },
+        edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
         slack: { channel: '#test', workspace: 'T123' },
         brandConfig: { brandId: 'brand-123' },
         fetchConfig: { overrideBaseURL: 'https://override.example.com' },
@@ -102,7 +102,7 @@ describe('ConfigDto', () => {
       expect(result).to.not.have.property('contentAiConfig');
       expect(result).to.not.have.property('cdnLogsConfig');
       expect(result.llmo).to.not.have.property('someInternalField');
-      expect(result.edgeOptimizeConfig).to.not.have.property('stagingDomains');
+      expect(result.edgeOptimizeConfig).to.have.property('stagingDomains');
     });
 
     it('handles partial config with only llmo', () => {
@@ -113,6 +113,19 @@ describe('ConfigDto', () => {
       const result = ConfigDto.toListJSON({ some: 'config' });
       expect(result).to.deep.equal({
         llmo: { dataFolder: '/data', brand: 'Test' },
+      });
+    });
+
+    it('includes full edgeOptimizeConfig when present', () => {
+      sinon.stub(Config, 'toDynamoItem').returns({
+        edgeOptimizeConfig: { opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
+        slack: { channel: '#test' },
+      });
+
+      const result = ConfigDto.toListJSON({ some: 'config' });
+      expect(result).to.deep.equal({
+        edgeOptimizeConfig: { opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
+        slack: { channel: '#test' },
       });
     });
   });
