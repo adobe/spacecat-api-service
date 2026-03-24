@@ -1,3 +1,10 @@
+## [1.372.2](https://github.com/adobe/spacecat-api-service/compare/v1.372.1...v1.372.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* make platform/model filter an enum in llmo apis ([#1971](https://github.com/adobe/spacecat-api-service/issues/1971)) ([5c8687d](https://github.com/adobe/spacecat-api-service/commit/5c8687d759606f16a7b54d518da5d0bc4d82e0e7))
+
 ## [1.372.1](https://github.com/adobe/spacecat-api-service/compare/v1.372.0...v1.372.1) (2026-03-24)
 
 
