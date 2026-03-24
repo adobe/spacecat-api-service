@@ -1,3 +1,10 @@
+## [1.372.1](https://github.com/adobe/spacecat-api-service/compare/v1.372.0...v1.372.1) (2026-03-24)
+
+
+### Performance Improvements
+
+* replace topics handler with server-side RPC aggregation (LLMO-3605) ([#2026](https://github.com/adobe/spacecat-api-service/issues/2026)) ([06f82b9](https://github.com/adobe/spacecat-api-service/commit/06f82b9c7a8ee7c0f9708607f2831f7e79ddf58d))
+
 # [1.372.0](https://github.com/adobe/spacecat-api-service/compare/v1.371.0...v1.372.0) (2026-03-24)
 
 
