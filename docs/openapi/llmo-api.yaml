@@ -1945,59 +1945,6 @@ llmo-edge-optimize-status:
     security:
       - api_key: [ ]
 
-llmo-brand-presence-execution-dates:
-  parameters:
-    - name: spaceCatId
-      in: path
-      required: true
-      description: Organization ID (UUID)
-      schema:
-        type: string
-        format: uuid
-    - name: brandId
-      in: path
-      required: true
-      description: Brand UUID or 'all' for all brands
-      schema:
-        type: string
-  get:
-    tags:
-      - llmo
-    summary: Get available execution dates for brand presence data
-    description: |
-      Returns distinct execution dates for a given site's brand presence data.
-      The UI calls this endpoint first to discover available dates, then passes
-      selected dates to the brand-vs-competitors endpoint.
-    operationId: getBrandPresenceExecutionDates
-    parameters:
-      - name: siteId
-        in: query
-        required: true
-        description: Site UUID to filter execution dates
-        schema:
-          type: string
-          format: uuid
-      - name: model
-        in: query
-        required: false
-        description: LLM model name
-        schema:
-          type: string
-          default: chatgpt
-    responses:
-      '200':
-        description: List of available execution dates (YYYY-MM-DD), sorted newest first
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/ExecutionDatesResponse'
-      '400':
-        $ref: './responses.yaml#/400'
-      '403':
-        $ref: './responses.yaml#/403'
-    security:
-      - api_key: [ ]
-
 llmo-brand-vs-competitors:
   parameters:
     - name: spaceCatId
@@ -2016,27 +1963,35 @@ llmo-brand-vs-competitors:
   get:
     tags:
       - llmo
-    summary: Get brand vs competitors data by execution dates
+    summary: Get brand vs competitors aggregated data
     description: |
-      Returns aggregated competitor mention/citation data from the
-      brand_vs_competitors_by_date view, filtered by specific execution dates.
-      Call the execution-dates endpoint first to get available dates.
+      Returns aggregated competitor mention/citation data for a site.
+      Internally performs two PostgREST queries: first discovers execution
+      dates from brand_presence_executions, then queries the
+      brand_vs_competitors_by_date view with those dates.
     operationId: getBrandVsCompetitors
     parameters:
-      - name: executionDates
-        in: query
-        required: true
-        description: Comma-separated execution dates (YYYY-MM-DD)
-        schema:
-          type: string
-          example: '2026-01-01,2026-01-02'
       - name: siteId
         in: query
-        required: false
-        description: Site UUID to narrow results
+        required: true
+        description: Site UUID (required)
         schema:
           type: string
           format: uuid
+      - name: startDate
+        in: query
+        required: false
+        description: Start of date range (YYYY-MM-DD). Defaults to 28 days ago.
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        required: false
+        description: End of date range (YYYY-MM-DD). Defaults to today.
+        schema:
+          type: string
+          format: date
       - name: model
         in: query
         required: false

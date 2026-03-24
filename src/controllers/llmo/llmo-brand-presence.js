@@ -2531,33 +2531,39 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
 function parseBrandVsCompetitorsParams(context) {
   const q = context.data || {};
   return {
+    startDate: q.startDate || q.start_date,
+    endDate: q.endDate || q.end_date,
     siteId: q.siteId || q.site_id,
     model: q.model,
     categoryName: q.categoryName || q.category_name,
     regionCode: q.regionCode || q.region_code || q.region,
-    executionDates: q.executionDates || q.execution_dates,
   };
 }
 
 /**
- * Creates the getExecutionDates handler.
- * Returns distinct execution_date values for a given site, sorted descending.
- * Used as the first step in the two-step brand-vs-competitors query pattern:
- * 1. Get available execution dates for a site
- * 2. Query brand_vs_competitors_by_date with selected dates
+ * Creates the getBrandVsCompetitors handler.
+ * Single endpoint that internally makes two PostgREST calls:
+ * 1. Query brand_presence_executions to discover execution dates for the site
+ * 2. Query brand_vs_competitors_by_date VIEW with those dates
+ *
+ * This keeps date-range logic in the application layer while the DB provides
+ * simple view-based aggregation with partition-pruned queries.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
-export function createExecutionDatesHandler(getOrgAndValidateAccess) {
+export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
   return (context) => withBrandPresenceAuth(
     context,
     getOrgAndValidateAccess,
-    'execution-dates',
+    'brand-vs-competitors',
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
       const params = parseBrandVsCompetitorsParams(ctx);
+      const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const model = params.model || 'chatgpt';
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
 
       if (!shouldApplyFilter(params.siteId)) {
         return badRequest('siteId is required');
@@ -2572,80 +2578,41 @@ export function createExecutionDatesHandler(getOrgAndValidateAccess) {
         return forbidden('Site does not belong to the organization');
       }
 
-      let q = client
+      // Step 1: Get execution dates for the site
+      let datesQuery = client
         .from('brand_presence_executions')
         .select('execution_date')
         .eq('organization_id', organizationId)
         .eq('site_id', params.siteId)
-        .eq('model', model);
+        .eq('model', model)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate);
 
       if (filterByBrandId) {
-        q = q.eq('brand_id', filterByBrandId);
+        datesQuery = datesQuery.eq('brand_id', filterByBrandId);
       }
 
-      const { data, error } = await q.limit(QUERY_LIMIT);
+      const { data: datesData, error: datesError } = await datesQuery.limit(QUERY_LIMIT);
 
-      if (error) {
-        ctx.log.error(`Execution dates PostgREST error: ${error.message}`);
-        return badRequest(error.message);
+      if (datesError) {
+        ctx.log.error(`Brand vs competitors execution dates error: ${datesError.message}`);
+        return badRequest(datesError.message);
       }
 
       const dateSet = new Set();
-      (data || []).forEach((r) => {
+      (datesData || []).forEach((r) => {
         if (r.execution_date) dateSet.add(String(r.execution_date).slice(0, 10));
       });
       const executionDates = [...dateSet].sort((a, b) => b.localeCompare(a));
 
-      return ok({ executionDates });
-    },
-  );
-}
-
-function parseExecutionDates(raw) {
-  if (!raw) return [];
-  const arr = Array.isArray(raw)
-    ? raw
-    : String(raw).split(',').map((d) => d.trim());
-  return arr.filter(Boolean);
-}
-
-/**
- * Creates the getBrandVsCompetitors handler.
- * Queries the brand_vs_competitors_by_date VIEW with specific execution dates.
- * Used as the second step in the two-step query pattern.
- * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
- */
-export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
-  return (context) => withBrandPresenceAuth(
-    context,
-    getOrgAndValidateAccess,
-    'brand-vs-competitors',
-    async (ctx, client) => {
-      const { spaceCatId, brandId } = ctx.params;
-      const params = parseBrandVsCompetitorsParams(ctx);
-      const organizationId = spaceCatId;
-      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-      const model = params.model || 'chatgpt';
-
-      const dates = parseExecutionDates(params.executionDates);
-      if (dates.length === 0) {
-        return badRequest('executionDates is required');
+      if (executionDates.length === 0) {
+        return ok({ competitorData: [] });
       }
 
-      if (shouldApplyFilter(params.siteId)) {
-        const siteBelongsToOrg = await validateSiteBelongsToOrg(
-          client,
-          organizationId,
-          params.siteId,
-        );
-        if (!siteBelongsToOrg) {
-          return forbidden('Site does not belong to the organization');
-        }
-      }
-
+      // Step 2: Query the brand_vs_competitors_by_date view with those dates
       const chunks = [];
-      for (let i = 0; i < dates.length; i += IN_FILTER_CHUNK_SIZE) {
-        chunks.push(dates.slice(i, i + IN_FILTER_CHUNK_SIZE));
+      for (let i = 0; i < executionDates.length; i += IN_FILTER_CHUNK_SIZE) {
+        chunks.push(executionDates.slice(i, i + IN_FILTER_CHUNK_SIZE));
       }
 
       const results = await Promise.all(chunks.map((chunk) => {
@@ -2654,11 +2621,9 @@ export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
           .select('site_id, brand_id, brand_name, model, execution_date, category_name, region_code, competitor, total_mentions, total_citations')
           .eq('organization_id', organizationId)
           .eq('model', model)
-          .in('execution_date', chunk);
+          .in('execution_date', chunk)
+          .eq('site_id', params.siteId);
 
-        if (shouldApplyFilter(params.siteId)) {
-          q = q.eq('site_id', params.siteId);
-        }
         if (filterByBrandId) {
           q = q.eq('brand_id', filterByBrandId);
         }

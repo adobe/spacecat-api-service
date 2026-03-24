@@ -37,7 +37,6 @@ import {
   buildSearchPattern,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
-  createExecutionDatesHandler,
   createBrandVsCompetitorsHandler,
   dateToIsoWeek,
   getWeekDateRange,
@@ -6278,138 +6277,6 @@ describe('llmo-brand-presence', () => {
     });
   });
 
-  describe('createExecutionDatesHandler', () => {
-    it('returns badRequest when postgrestService is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = null;
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(getOrgAndValidateAccess).not.to.have.been.called;
-    });
-
-    it('returns forbidden when user has no org access', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when organization not found', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
-      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns badRequest when siteId is missing', async () => {
-      mockContext.dataAccess.Site.postgrestService = createTableAwareMock();
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('siteId is required');
-    });
-
-    it('returns forbidden when site does not belong to org', async () => {
-      const client = createTableAwareMock({
-        sites: { data: [], error: null },
-        brand_presence_executions: { data: [], error: null },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { siteId: 'site-1' };
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when PostgREST query errors', async () => {
-      const queryError = { message: 'relation does not exist' };
-      const client = createTableAwareMock({
-        sites: { data: [{ id: 'site-1' }], error: null },
-        brand_presence_executions: { data: null, error: queryError },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { siteId: 'site-1' };
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('relation does not exist');
-    });
-
-    it('returns ok with empty executionDates when no data', async () => {
-      const client = createTableAwareMock({
-        sites: { data: [{ id: 'site-1' }], error: null },
-        brand_presence_executions: { data: [], error: null },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { siteId: 'site-1' };
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.executionDates).to.deep.equal([]);
-    });
-
-    it('returns ok with distinct sorted dates (descending)', async () => {
-      const rows = [
-        { execution_date: '2026-03-01' },
-        { execution_date: '2026-03-15' },
-        { execution_date: '2026-03-01' },
-        { execution_date: '2026-03-08' },
-        { execution_date: '2026-03-15' },
-      ];
-      const client = createTableAwareMock({
-        sites: { data: [{ id: 'site-1' }], error: null },
-        brand_presence_executions: { data: rows, error: null },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { siteId: 'site-1' };
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.executionDates).to.deep.equal([
-        '2026-03-15',
-        '2026-03-08',
-        '2026-03-01',
-      ]);
-    });
-
-    it('filters by brandId when not all', async () => {
-      const client = createTableAwareMock({
-        sites: { data: [{ id: 'site-1' }], error: null },
-        brand_presence_executions: { data: [{ execution_date: '2026-03-01' }], error: null },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.params.brandId = 'brand-uuid-123';
-      mockContext.data = { siteId: 'site-1' };
-
-      const handler = createExecutionDatesHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(client.eq).to.have.been.calledWith('brand_id', 'brand-uuid-123');
-    });
-  });
-
   describe('createBrandVsCompetitorsHandler', () => {
     it('returns badRequest when postgrestService is missing', async () => {
       mockContext.dataAccess.Site.postgrestService = null;
@@ -6440,7 +6307,7 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns badRequest when executionDates is missing', async () => {
+    it('returns badRequest when siteId is missing', async () => {
       mockContext.dataAccess.Site.postgrestService = createTableAwareMock();
 
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
@@ -6448,28 +6315,16 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('executionDates is required');
-    });
-
-    it('returns badRequest when executionDates is empty string', async () => {
-      mockContext.dataAccess.Site.postgrestService = createTableAwareMock();
-      mockContext.data = { executionDates: '' };
-
-      const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('executionDates is required');
+      expect(body.message).to.equal('siteId is required');
     });
 
     it('returns forbidden when site does not belong to org', async () => {
       const client = createTableAwareMock({
         sites: { data: [], error: null },
-        brand_vs_competitors_by_date: { data: [], error: null },
+        brand_presence_executions: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { executionDates: '2026-03-01', siteId: 'site-1' };
+      mockContext.data = { siteId: 'site-1' };
 
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -6477,28 +6332,30 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('returns badRequest when PostgREST query errors', async () => {
-      const queryError = { message: 'view does not exist' };
+    it('returns badRequest when execution dates query errors', async () => {
+      const queryError = { message: 'relation does not exist' };
       const client = createTableAwareMock({
-        brand_vs_competitors_by_date: { data: null, error: queryError },
+        sites: { data: [{ id: 'site-1' }], error: null },
+        brand_presence_executions: { data: null, error: queryError },
       });
       mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { executionDates: '2026-03-01' };
+      mockContext.data = { siteId: 'site-1' };
 
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('view does not exist');
+      expect(body.message).to.equal('relation does not exist');
     });
 
-    it('returns ok with empty competitorData when no data', async () => {
+    it('returns ok with empty competitorData when no execution dates found', async () => {
       const client = createTableAwareMock({
-        brand_vs_competitors_by_date: { data: [], error: null },
+        sites: { data: [{ id: 'site-1' }], error: null },
+        brand_presence_executions: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { executionDates: '2026-03-01' };
+      mockContext.data = { siteId: 'site-1' };
 
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -6508,7 +6365,11 @@ describe('llmo-brand-presence', () => {
       expect(body.competitorData).to.deep.equal([]);
     });
 
-    it('returns ok with camelCase transformed rows', async () => {
+    it('returns ok with camelCase transformed rows from two-step query', async () => {
+      const execRows = [
+        { execution_date: '2026-03-01' },
+        { execution_date: '2026-03-08' },
+      ];
       const viewRows = [
         {
           site_id: 's1',
@@ -6524,10 +6385,12 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
+        sites: { data: [{ id: 's1' }], error: null },
+        brand_presence_executions: { data: execRows, error: null },
         brand_vs_competitors_by_date: { data: viewRows, error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { executionDates: '2026-03-01' };
+      mockContext.data = { siteId: 's1' };
 
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -6547,17 +6410,20 @@ describe('llmo-brand-presence', () => {
         totalMentions: 42,
         totalCitations: 7,
       });
+      // Verify both tables were queried
+      expect(client.from).to.have.been.calledWith('brand_presence_executions');
+      expect(client.from).to.have.been.calledWith('brand_vs_competitors_by_date');
     });
 
-    it('applies all optional filters', async () => {
+    it('applies optional filters including brandId, categoryName, regionCode', async () => {
       const client = createTableAwareMock({
         sites: { data: [{ id: 'site-1' }], error: null },
+        brand_presence_executions: { data: [{ execution_date: '2026-03-01' }], error: null },
         brand_vs_competitors_by_date: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
       mockContext.params.brandId = 'brand-uuid-123';
       mockContext.data = {
-        executionDates: '2026-03-01',
         siteId: 'site-1',
         categoryName: 'SEO',
         regionCode: 'US',
@@ -6573,37 +6439,64 @@ describe('llmo-brand-presence', () => {
       expect(client.eq).to.have.been.calledWith('region_code', 'US');
     });
 
-    it('parses comma-separated executionDates', async () => {
+    it('uses default 28-day date range when startDate/endDate not provided', async () => {
       const client = createTableAwareMock({
-        brand_vs_competitors_by_date: { data: [], error: null },
+        sites: { data: [{ id: 'site-1' }], error: null },
+        brand_presence_executions: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { executionDates: '2026-03-01,2026-03-08,2026-03-15' };
+      mockContext.data = { siteId: 'site-1' };
 
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
+      await handler(mockContext);
 
-      expect(result.status).to.equal(200);
-      expect(client.in).to.have.been.calledWith(
-        'execution_date',
-        ['2026-03-01', '2026-03-08', '2026-03-15'],
-      );
+      // Should have called gte and lte for date range filtering
+      expect(client.gte).to.have.been.calledWith('execution_date', sinon.match.string);
+      expect(client.lte).to.have.been.calledWith('execution_date', sinon.match.string);
     });
 
-    it('accepts executionDates as array', async () => {
+    it('applies custom startDate and endDate when provided', async () => {
       const client = createTableAwareMock({
+        sites: { data: [{ id: 'site-1' }], error: null },
+        brand_presence_executions: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+      mockContext.data = {
+        siteId: 'site-1',
+        startDate: '2026-01-01',
+        endDate: '2026-01-31',
+      };
+
+      const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.gte).to.have.been.calledWith('execution_date', '2026-01-01');
+      expect(client.lte).to.have.been.calledWith('execution_date', '2026-01-31');
+    });
+
+    it('deduplicates execution dates before querying the view', async () => {
+      const execRows = [
+        { execution_date: '2026-03-01' },
+        { execution_date: '2026-03-01' },
+        { execution_date: '2026-03-08' },
+        { execution_date: '2026-03-08' },
+      ];
+      const client = createTableAwareMock({
+        sites: { data: [{ id: 'site-1' }], error: null },
+        brand_presence_executions: { data: execRows, error: null },
         brand_vs_competitors_by_date: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { executionDates: ['2026-03-01', '2026-03-08'] };
+      mockContext.data = { siteId: 'site-1' };
 
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(200);
+      // Should pass deduplicated dates (descending) to .in()
       expect(client.in).to.have.been.calledWith(
         'execution_date',
-        ['2026-03-01', '2026-03-08'],
+        ['2026-03-08', '2026-03-01'],
       );
     });
   });

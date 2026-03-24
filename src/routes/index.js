@@ -425,8 +425,6 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
-    'GET /org/:spaceCatId/brands/all/brand-presence/execution-dates': llmoMysticatController.getExecutionDates,
-    'GET /org/:spaceCatId/brands/:brandId/brand-presence/execution-dates': llmoMysticatController.getExecutionDates,
     'GET /org/:spaceCatId/brands/all/brand-presence/brand-vs-competitors': llmoMysticatController.getBrandVsCompetitors,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/brand-vs-competitors': llmoMysticatController.getBrandVsCompetitors,
 

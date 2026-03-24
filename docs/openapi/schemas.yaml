@@ -6765,17 +6765,6 @@ PresignedUrlResponse:
     - expiresAt
   additionalProperties: false
 
-ExecutionDatesResponse:
-  type: object
-  properties:
-    executionDates:
-      type: array
-      description: Distinct execution dates sorted newest first
-      items:
-        type: string
-        format: date
-        example: '2026-03-01'
-
 BrandVsCompetitorsResponse:
   type: object
   properties:

@@ -22,7 +22,6 @@ import {
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
-  createExecutionDatesHandler,
   createBrandVsCompetitorsHandler,
 } from './llmo-brand-presence.js';
 
@@ -60,7 +59,6 @@ function LlmoMysticatController(ctx) {
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
-  const getExecutionDates = createExecutionDatesHandler(getOrgAndValidateAccess);
   const getBrandVsCompetitors = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
 
   return {
@@ -76,7 +74,6 @@ function LlmoMysticatController(ctx) {
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
-    getExecutionDates,
     getBrandVsCompetitors,
   };
 }
