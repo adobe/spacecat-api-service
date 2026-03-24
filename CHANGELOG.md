@@ -1,3 +1,10 @@
+## [1.368.3](https://github.com/adobe/spacecat-api-service/compare/v1.368.2...v1.368.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* return full edgeOptimizeConfig in slim site DTO ([#2022](https://github.com/adobe/spacecat-api-service/issues/2022)) ([b88b8bc](https://github.com/adobe/spacecat-api-service/commit/b88b8bc8535b13a784458444a01891a4f7887112))
+
 ## [1.368.2](https://github.com/adobe/spacecat-api-service/compare/v1.368.1...v1.368.2) (2026-03-24)
 
 
