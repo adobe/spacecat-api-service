@@ -1,3 +1,74 @@
+## [1.372.1](https://github.com/adobe/spacecat-api-service/compare/v1.372.0...v1.372.1) (2026-03-24)
+
+
+### Performance Improvements
+
+* replace topics handler with server-side RPC aggregation (LLMO-3605) ([#2026](https://github.com/adobe/spacecat-api-service/issues/2026)) ([06f82b9](https://github.com/adobe/spacecat-api-service/commit/06f82b9c7a8ee7c0f9708607f2831f7e79ddf58d))
+
+# [1.372.0](https://github.com/adobe/spacecat-api-service/compare/v1.371.0...v1.372.0) (2026-03-24)
+
+
+### Features
+
+* onboarding and update redirects ([#1979](https://github.com/adobe/spacecat-api-service/issues/1979)) ([87e8caa](https://github.com/adobe/spacecat-api-service/commit/87e8caa44bf95be59319cdae35c07b2592bb0b42))
+
+# [1.371.0](https://github.com/adobe/spacecat-api-service/compare/v1.370.0...v1.371.0) (2026-03-24)
+
+
+### Features
+
+* bf opportunities api ([#2025](https://github.com/adobe/spacecat-api-service/issues/2025)) ([eaf20b6](https://github.com/adobe/spacecat-api-service/commit/eaf20b639b17b6966a3dbcc2a8a1f77f5f3e5e6f))
+
+# [1.370.0](https://github.com/adobe/spacecat-api-service/compare/v1.369.1...v1.370.0) (2026-03-24)
+
+
+### Features
+
+* endpoint to get demo data for opportunity workspace ([#2017](https://github.com/adobe/spacecat-api-service/issues/2017)) ([3bc22c5](https://github.com/adobe/spacecat-api-service/commit/3bc22c547e7c1ab274b74baf8ed3da6a0c51aa05))
+
+## [1.369.1](https://github.com/adobe/spacecat-api-service/compare/v1.369.0...v1.369.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* **plg:** waitlist non-AEM domains and enforce one onboarded domain per IMS org         ([#2001](https://github.com/adobe/spacecat-api-service/issues/2001)) ([fc85310](https://github.com/adobe/spacecat-api-service/commit/fc853109e00c1c6a15d0fdb786a1012ac2c41675))
+
+# [1.369.0](https://github.com/adobe/spacecat-api-service/compare/v1.368.4...v1.369.0) (2026-03-24)
+
+
+### Features
+
+* update brandalf api docs with latest schema ([#2024](https://github.com/adobe/spacecat-api-service/issues/2024)) ([6bd8c57](https://github.com/adobe/spacecat-api-service/commit/6bd8c57540f60861bffa76271f6a5c0e862ec48d))
+
+## [1.368.4](https://github.com/adobe/spacecat-api-service/compare/v1.368.3...v1.368.4) (2026-03-24)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2010](https://github.com/adobe/spacecat-api-service/issues/2010)) ([964e0f2](https://github.com/adobe/spacecat-api-service/commit/964e0f29de146725b96caa1a8ae686534cbc233e))
+
+## [1.368.3](https://github.com/adobe/spacecat-api-service/compare/v1.368.2...v1.368.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* return full edgeOptimizeConfig in slim site DTO ([#2022](https://github.com/adobe/spacecat-api-service/issues/2022)) ([b88b8bc](https://github.com/adobe/spacecat-api-service/commit/b88b8bc8535b13a784458444a01891a4f7887112))
+
+## [1.368.2](https://github.com/adobe/spacecat-api-service/compare/v1.368.1...v1.368.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* shallow merge config patch ([#2020](https://github.com/adobe/spacecat-api-service/issues/2020)) ([d87ca6b](https://github.com/adobe/spacecat-api-service/commit/d87ca6b593ce231ce38214d3301a3074c5f02083))
+* shallow merge config patch ([#2020](https://github.com/adobe/spacecat-api-service/issues/2020)) ([#2021](https://github.com/adobe/spacecat-api-service/issues/2021)) ([d2020ac](https://github.com/adobe/spacecat-api-service/commit/d2020acb85630cb749b74ac9990b82850d276f62))
+
+## [1.368.1](https://github.com/adobe/spacecat-api-service/compare/v1.368.0...v1.368.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* slim site dto for getall site call ([#2019](https://github.com/adobe/spacecat-api-service/issues/2019)) ([492abb4](https://github.com/adobe/spacecat-api-service/commit/492abb423040c4d1bd2041f0c77546e384623976))
+
 # [1.368.0](https://github.com/adobe/spacecat-api-service/compare/v1.367.0...v1.368.0) (2026-03-23)
 
 

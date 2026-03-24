@@ -48,6 +48,23 @@ function expectSiteDto(site) {
 }
 
 /**
+ * Asserts that an object has the slim SiteDto.toListJSON shape
+ * returned by GET /sites (list endpoint).
+ */
+function expectSiteListDto(site) {
+  expect(site).to.be.an('object');
+  expect(site.id).to.be.a('string');
+  expect(site.baseURL).to.be.a('string');
+  expect(site.organizationId).to.be.a('string');
+  expectISOTimestamp(site.createdAt, 'createdAt');
+  expectISOTimestamp(site.updatedAt, 'updatedAt');
+  expect(site).to.have.property('deliveryType');
+  expect(site).to.have.property('isLive');
+  expect(site).to.have.property('config');
+  expect(site).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+}
+
+/**
  * Shared Site endpoint tests.
  * Runs identically against both DynamoDB (v2) and PostgreSQL (v3).
  *
@@ -68,7 +85,7 @@ export default function siteTests(getHttpClient, resetData) {
         // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
         // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3)
         expect(res.body).to.be.an('array').with.lengthOf(2);
-        res.body.forEach((s) => expectSiteDto(s));
+        res.body.forEach((s) => expectSiteListDto(s));
         const ids = res.body.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
         expect(ids).to.include(SITE_4_ID);

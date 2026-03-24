@@ -57,6 +57,7 @@ import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
+import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -1017,6 +1018,24 @@ function LlmoController(ctx) {
     }
   };
 
+  // Factory for demo fixture endpoints — validates site/LLMO access then delegates to handler
+  const createDemoFixtureHandler = (handler, label) => async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      return await handler(context);
+    } catch (error) {
+      log.error(`Unexpected error retrieving demo ${label} for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to retrieve demo fixture');
+    }
+  };
+
+  const getDemoBrandPresence = createDemoFixtureHandler(handleDemoBrandPresence, 'brand-presence');
+  const getDemoRecommendations = createDemoFixtureHandler(handleDemoRecommendations, 'recommendations');
+
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-config
    * Creates or updates Tokowaka edge optimization configuration
@@ -1704,6 +1723,8 @@ function LlmoController(ctx) {
     queryFiles,
     getLlmoRationale,
     getBrandClaims,
+    getDemoBrandPresence,
+    getDemoRecommendations,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
     createOrUpdateStageEdgeConfig,

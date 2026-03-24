@@ -269,6 +269,11 @@ describe('getRouteHandlers', () => {
     getFilterDimensions: () => null,
   };
 
+  const mockLlmoOpportunitiesController = {
+    getOpportunityCount: () => null,
+    getBrandOpportunities: () => null,
+  };
+
   const mockLlmoController = {
     getLlmoSheetData: () => null,
     getLlmoGlobalSheetData: () => null,
@@ -295,6 +300,8 @@ describe('getRouteHandlers', () => {
     updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
+    getDemoBrandPresence: () => null,
+    getDemoRecommendations: () => null,
     markOpportunitiesReviewed: () => null,
   };
 
@@ -406,6 +413,7 @@ describe('getRouteHandlers', () => {
       mockFixesController,
       mockLlmoController,
       mockLlmoMysticatController,
+      mockLlmoOpportunitiesController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -528,6 +536,9 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
       'GET /org/:spaceCatId/brands/all/brand-presence/stats',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+      'GET /org/:spaceCatId/opportunities/count',
+      'GET /org/:spaceCatId/brands/all/opportunities',
+      'GET /org/:spaceCatId/brands/:brandId/opportunities',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',
@@ -727,6 +738,8 @@ describe('getRouteHandlers', () => {
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
+      'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
+      'GET /sites/:siteId/llmo/strategy/demo/recommendations',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
@@ -972,6 +985,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/brand-presence'].handler).to.equal(mockLlmoController.getDemoBrandPresence);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/brand-presence'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/recommendations'].handler).to.equal(mockLlmoController.getDemoRecommendations);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/recommendations'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].handler).to.equal(mockConsentBannerController.getScreenshots);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].handler).to.equal(mockLlmoController.patchLlmoCdnLogsFilter);

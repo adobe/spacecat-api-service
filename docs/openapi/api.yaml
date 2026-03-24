@@ -472,6 +472,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
   /sites/{siteId}/llmo/brand-claims:
     $ref: './llmo-api.yaml#/llmo-brand-claims'
+  /sites/{siteId}/llmo/strategy/demo/brand-presence:
+    $ref: './llmo-api.yaml#/llmo-opportunity-workspace-demo-brand-presence'
+  /sites/{siteId}/llmo/strategy/demo/recommendations:
+    $ref: './llmo-api.yaml#/llmo-opportunity-workspace-demo-recommendations'
   /sites/{siteId}/llmo/edge-optimize-config:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:

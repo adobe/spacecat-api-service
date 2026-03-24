@@ -1131,6 +1131,94 @@ export const createEntitlementAndEnrollment = async (
   }
 };
 
+/*
+* Queues an identify redirects audit for a site.
+* @param {Object} site - The site to queue an identify redirects audit for.
+* @param {string} baseURL? - The base URL of the site.
+* @param {number} minutes? - The number of minutes to audit for.
+* @param {boolean} updateRedirects? - Whether to update the redirects.
+* @param {Object} slackContext - The Slack context object.
+* @param {Object} context - The Lambda context containing dataAccess, log, etc.
+* @returns {Promise<{ok: boolean, error?: string}>} - ok: true or { ok: false, error }.
+*/
+export async function queueIdentifyRedirectsAudit(
+  {
+    site, baseURL, minutes = 2000, updateRedirects = false, slackContext,
+  },
+  context,
+) {
+  const {
+    env,
+    log,
+    sqs,
+  } = context;
+
+  const { say, channelId, threadTs } = slackContext || {};
+  try {
+    if (!site) {
+      return { ok: false, error: `:x: No site found with base URL '${baseURL}'.` };
+    }
+
+    const resolvedBaseURL = baseURL || site.getBaseURL();
+    if (!resolvedBaseURL) {
+      return { ok: false, error: 'missing_base_url' };
+    }
+
+    // check for SQS client to talk to audit worker
+    if (!sqs) {
+      return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
+    }
+
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+    // check either authoringType or deliveryType is CS/CW
+    if (![
+      SiteModel.AUTHORING_TYPES.CS, // cs
+      SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
+    ].includes(authoringType)
+    && ![
+      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
+    ].includes(deliveryType)) {
+      return {
+        ok: false,
+        error: ':warning: identify-redirects currently supports AEM CS/CW only. '
+          + `This site authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`,
+      };
+    }
+
+    const deliveryConfig = site.getDeliveryConfig?.() || {};
+    const { programId, environmentId } = deliveryConfig;
+    if (!hasText(programId) || !hasText(environmentId)) {
+      return { ok: false, error: ':x: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for Splunk queries.' };
+    }
+
+    if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
+      return { ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' };
+    }
+    if (say) {
+      const updateRedirectsMessage = updateRedirects ? 'and update' : '';
+      await say(`:mag: Queued redirect pattern detection ${updateRedirectsMessage} for *${resolvedBaseURL}* (last ${minutes}m). I’ll reply here when it’s ready.`);
+    }
+
+    await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+      type: 'identify-redirects',
+      siteId: site.getId(),
+      baseURL: resolvedBaseURL,
+      programId: String(programId),
+      environmentId: String(environmentId),
+      minutes,
+      updateRedirects,
+      slackContext: channelId != null && threadTs != null
+        ? { channelId, threadTs }
+        : undefined,
+    });
+    return { ok: true };
+  } catch (error) {
+    log.error(error);
+    throw error;
+  }
+}
+
 /**
  * Shared onboarding function used by both modal and command implementations.
  *
@@ -1405,6 +1493,43 @@ export const onboardSingleSite = async (
       reportLine.status = 'Failed';
       await say(`:x: *Error saving site configuration:* ${error.message}`);
       return reportLine;
+    }
+
+    // configure redirectsmode and redirectssource
+    // check for valid authoringType and deliveryType
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+    let validForRedirects = true;
+    // check either authoringType or deliveryType is CS/CW
+    if (![
+      SiteModel.AUTHORING_TYPES.CS, // cs
+      SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
+    ].includes(authoringType)
+    && ![
+      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
+    ].includes(deliveryType)) {
+      validForRedirects = false;
+    }
+    if (!validForRedirects) {
+      // skip update-redirects if invalid for redirects
+      log.info(`skipping update-redirects, as the site ${baseURL} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`);
+    } else {
+      const updateRedirectsResult = await queueIdentifyRedirectsAudit(
+        {
+          site,
+          baseURL,
+          minutes: 2000,
+          updateRedirects: true,
+          slackContext,
+        },
+        context,
+      );
+      if (!updateRedirectsResult.ok) {
+        reportLine.errors = updateRedirectsResult.error;
+        reportLine.status = 'Failed';
+        await say(updateRedirectsResult.error);
+        return reportLine;
+      }
     }
 
     for (const importType of importTypes) {
