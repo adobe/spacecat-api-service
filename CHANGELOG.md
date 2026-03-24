@@ -1,3 +1,10 @@
+# [1.373.0](https://github.com/adobe/spacecat-api-service/compare/v1.372.2...v1.373.0) (2026-03-24)
+
+
+### Features
+
+* llmo auto-fix support ([#1998](https://github.com/adobe/spacecat-api-service/issues/1998)) ([1c31200](https://github.com/adobe/spacecat-api-service/commit/1c312008292d4d3ea2178c8db7f9d20db2235161))
+
 ## [1.372.2](https://github.com/adobe/spacecat-api-service/compare/v1.372.1...v1.372.2) (2026-03-24)
 
 
