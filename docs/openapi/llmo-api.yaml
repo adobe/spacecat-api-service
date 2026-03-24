@@ -1441,32 +1441,9 @@ llmo-opportunity-workspace-demo-brand-presence:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                presignedUrl:
-                  type: string
-                  format: uri
-                  description: Presigned S3 URL to download the fixture
-                expiresAt:
-                  type: string
-                  format: date-time
-                  description: ISO 8601 timestamp when the presigned URL expires
-                  example: '2026-06-15T12:00:00.000Z'
-              required:
-                - presignedUrl
-                - expiresAt
+              $ref: './schemas.yaml#/PresignedUrlResponse'
       '401':
         $ref: './responses.yaml#/401'
-      '404':
-        description: Demo brand presence fixture not found in S3
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  example: 'Demo fixture not found: brand-presence'
       '500':
         $ref: './responses.yaml#/500'
     security:
@@ -1492,32 +1469,9 @@ llmo-opportunity-workspace-demo-recommendations:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                presignedUrl:
-                  type: string
-                  format: uri
-                  description: Presigned S3 URL to download the fixture
-                expiresAt:
-                  type: string
-                  format: date-time
-                  description: ISO 8601 timestamp when the presigned URL expires
-                  example: '2026-06-15T12:00:00.000Z'
-              required:
-                - presignedUrl
-                - expiresAt
+              $ref: './schemas.yaml#/PresignedUrlResponse'
       '401':
         $ref: './responses.yaml#/401'
-      '404':
-        description: Demo recommendations fixture not found in S3
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  example: 'Demo fixture not found: recommendations'
       '500':
         $ref: './responses.yaml#/500'
     security:

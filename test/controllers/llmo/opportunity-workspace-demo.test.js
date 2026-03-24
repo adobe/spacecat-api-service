@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Adobe. All rights reserved.
+ * Copyright 2026 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -22,7 +22,6 @@ const TEST_PRESIGNED_URL = 'https://s3.amazonaws.com/test-bucket/workspace/llmo/
 
 const mockHttpUtils = {
   ok: (data) => ({ status: 200, json: async () => data }),
-  notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
   internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
 };
 
@@ -127,37 +126,9 @@ describe('demo-fixtures', () => {
       expect(body.message).to.equal('S3 bucket is not configured for this environment');
     });
 
-    it('returns 404 when the fixture file does not exist in S3', async () => {
-      const noSuchKey = new Error('key not found');
-      noSuchKey.name = 'NoSuchKey';
-      mockGetSignedUrl.rejects(noSuchKey);
-
-      const result = await handleDemoBrandPresence(baseContext);
-
-      expect(result.status).to.equal(404);
-      const body = await result.json();
-      expect(body.message).to.equal('Demo fixture not found: brand-presence');
-      expect(mockLog.warn).to.have.been.calledWith(
-        'Demo fixture not found at workspace/llmo/demo/summit-demo-brand-presence.json',
-      );
-    });
-
-    it('returns 500 when the S3 bucket does not exist', async () => {
-      const noSuchBucket = new Error('bucket not found');
-      noSuchBucket.name = 'NoSuchBucket';
-      mockGetSignedUrl.rejects(noSuchBucket);
-
-      const result = await handleDemoBrandPresence(baseContext);
-
-      expect(result.status).to.equal(500);
-      const body = await result.json();
-      expect(body.message).to.equal('Failed to retrieve demo fixture');
-    });
-
-    it('returns 500 for generic S3 errors without leaking details', async () => {
-      const accessDenied = new Error('Access denied');
-      accessDenied.name = 'AccessDenied';
-      mockGetSignedUrl.rejects(accessDenied);
+    it('returns 500 when URL signing fails', async () => {
+      const error = new Error('signing failed');
+      mockGetSignedUrl.rejects(error);
 
       const result = await handleDemoBrandPresence(baseContext);
 
@@ -165,7 +136,7 @@ describe('demo-fixtures', () => {
       const body = await result.json();
       expect(body.message).to.equal('Failed to retrieve demo fixture');
       expect(mockLog.error).to.have.been.calledWith(
-        'S3 error retrieving demo fixture brand-presence: Access denied',
+        'Error generating presigned URL for demo fixture brand-presence: signing failed',
       );
     });
   });
@@ -185,19 +156,7 @@ describe('demo-fixtures', () => {
       );
     });
 
-    it('returns 404 when the fixture file does not exist in S3', async () => {
-      const noSuchKey = new Error('key not found');
-      noSuchKey.name = 'NoSuchKey';
-      mockGetSignedUrl.rejects(noSuchKey);
-
-      const result = await handleDemoRecommendations(baseContext);
-
-      expect(result.status).to.equal(404);
-      const body = await result.json();
-      expect(body.message).to.equal('Demo fixture not found: recommendations');
-    });
-
-    it('returns 500 for generic S3 errors without leaking details', async () => {
+    it('returns 500 when URL signing fails', async () => {
       const error = new Error('timeout');
       error.name = 'TimeoutError';
       mockGetSignedUrl.rejects(error);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Adobe. All rights reserved.
+ * Copyright 2026 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, notFound, internalServerError,
+  ok, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 
 const DEMO_BRAND_PRESENCE_KEY = 'workspace/llmo/demo/summit-demo-brand-presence.json';
@@ -46,13 +46,8 @@ async function generateDemoPresignedUrl(context, s3Key, label) {
       presignedUrl: url,
       expiresAt: new Date(Date.now() + EXPIRES_IN * 1000).toISOString(),
     });
-  } catch (s3Error) {
-    if (s3Error.name === 'NoSuchKey') {
-      log.warn(`Demo fixture not found at ${s3Key}`);
-      return notFound(`Demo fixture not found: ${label}`);
-    }
-
-    log.error(`S3 error retrieving demo fixture ${label}: ${s3Error.message}`);
+  } catch (error) {
+    log.error(`Error generating presigned URL for demo fixture ${label}: ${error.message}`);
     return internalServerError('Failed to retrieve demo fixture');
   }
 }
