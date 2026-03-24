@@ -10,6 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
+/**
+ * Slack slash-style command: `detect-cdn {url}` (single URL argument only).
+ *
+ * Examples — same invocation shape; behavior differs when the URL is a known SpaceCat site:
+ *
+ * - `detect-cdn https://example.com` — Queues CDN detection for that URL. The worker replies in
+ *   this thread with the detected CDN. If no SpaceCat site uses that base URL, the job has no
+ *   `siteId` and the worker does not update delivery configuration.
+ *
+ * - `detect-cdn https://customer.example` — If that base URL matches a SpaceCat site, the queued
+ *   message includes `siteId`; when the worker finishes, it can persist `deliveryConfig.cdn` for
+ *   that site (in addition to posting the result in Slack).
+ */
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
@@ -21,7 +35,11 @@ export default function DetectCdnCommand(context) {
   const baseCommand = BaseCommand({
     id: 'detect-cdn',
     name: 'Detect CDN',
-    description: 'Detects which CDN a website uses (e.g. Cloudflare, Akamai, Fastly) from HTTP headers. Optional: pass a Spacecat site base URL to associate the result with a site for future onboarding.',
+    description:
+      'Detects which CDN a website uses (e.g. Cloudflare, Akamai, Fastly) from its HTTP headers. '
+      + 'Usage: detect-cdn {url}. The bot always posts the detected CDN in this thread. '
+      + 'If {url} matches a SpaceCat site base URL in our system, the worker also saves the CDN '
+      + "on that site's delivery configuration.",
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {url}`,
   });
@@ -56,7 +74,8 @@ export default function DetectCdnCommand(context) {
         return;
       }
 
-      // Optional: if URL matches a Spacecat site, pass siteId for future onboarding integration
+      // If base URL matches a SpaceCat site, include siteId so the worker can persist
+      // deliveryConfig.cdn on that site.
       let siteId = null;
       try {
         const site = await Site.findByBaseURL(baseURL);
