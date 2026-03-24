@@ -3360,6 +3360,51 @@ describe('Sites Controller', () => {
     expect(updatedSite.code).to.deep.equal(codeConfig);
   });
 
+  it('sets config when site has no existing config', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    expect(site.setConfig).to.have.been.calledOnce;
+
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
+  });
+
+  it('sets config when toDynamoItem returns null for existing config', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns({ something: true });
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const toDynamoStub = sandbox.stub(Config, 'toDynamoItem').returns(null);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    expect(toDynamoStub).to.have.been.called;
+    expect(site.setConfig).to.have.been.calledOnce;
+
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
+  });
+
   it('shallow-merges config so partial update preserves existing keys', async () => {
     const site = sites[0];
     const existingConfig = Config({
