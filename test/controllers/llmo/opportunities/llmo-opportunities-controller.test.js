@@ -475,6 +475,23 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.total).to.equal(0);
     });
 
+    it('defaults brandId to "all" when params.brandId is undefined (static /brands/all/ route)', async () => {
+      // brandId is not set in params for the static /brands/all/opportunities route
+      delete mockContext.params.brandId;
+      const site = createMockSite({ id: 'site-1' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site]);
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+      mockContext.dataAccess.Opportunity.allBySiteId.withArgs('site-1').resolves([]);
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.brandId).to.equal('all');
+      expect(body.total).to.equal(0);
+    });
+
     it('returns 500 when site listing fails', async () => {
       mockContext.params.brandId = 'all';
       mockContext.dataAccess.Site.allByOrganizationId.rejects(new Error('DB error'));
