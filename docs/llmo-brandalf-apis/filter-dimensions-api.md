@@ -180,6 +180,8 @@ client.from('page_intents').select('page_intent').eq('site_id', siteId).limit(50
 ## Related APIs
 
 - [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks for a given model, optionally filtered by brand or site.
+- [Brand Presence Sentiment Overview API](sentiment-overview-api.md) — Weekly sentiment percentages
+- [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly mentions, citations, and competitor breakdown
 
 ---
 

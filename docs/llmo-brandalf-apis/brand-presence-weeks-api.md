@@ -141,6 +141,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/weeks?mo
 ## Related APIs
 
 - [Brand Presence Filter Dimensions API](filter-dimensions-api.md) — Returns available filter options (brands, categories, topics, origins, regions, page_intents) for the Brand Presence feature.
+- [Brand Presence Sentiment Overview API](sentiment-overview-api.md) — Weekly sentiment distribution
+- [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly mentions, citations, and competitor breakdown
 
 ---
 
