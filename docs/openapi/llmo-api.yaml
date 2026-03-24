@@ -1421,6 +1421,108 @@ llmo-brand-claims:
     security:
       - api_key: [ ]
 
+llmo-opportunity-workspace-demo-brand-presence:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get presigned URL for summit demo brand presence fixture
+    description: |
+      Returns a presigned S3 URL for downloading the summit demo brand presence fixture.
+      Used by the Opportunity Workspace summit demo to load static performance data
+      without bundling it in the UI.
+
+      S3 key: `workspace/llmo/demo/summit-demo-brand-presence.json`
+    operationId: getDemoBrandPresence
+    responses:
+      '200':
+        description: Presigned URL generated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                presignedUrl:
+                  type: string
+                  format: uri
+                  description: Presigned S3 URL to download the fixture
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp when the presigned URL expires
+                  example: '2026-06-15T12:00:00.000Z'
+              required:
+                - presignedUrl
+                - expiresAt
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Demo brand presence fixture not found in S3
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Demo fixture not found: brand-presence'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-opportunity-workspace-demo-recommendations:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get presigned URL for summit demo recommendations fixture
+    description: |
+      Returns a presigned S3 URL for downloading the summit demo recommendations fixture.
+      Used by the Opportunity Workspace summit demo to load static recommendations data
+      without bundling it in the UI.
+
+      S3 key: `workspace/llmo/demo/summit-demo-recommendations.json`
+    operationId: getDemoRecommendations
+    responses:
+      '200':
+        description: Presigned URL generated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                presignedUrl:
+                  type: string
+                  format: uri
+                  description: Presigned S3 URL to download the fixture
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp when the presigned URL expires
+                  example: '2026-06-15T12:00:00.000Z'
+              required:
+                - presignedUrl
+                - expiresAt
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Demo recommendations fixture not found in S3
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Demo fixture not found: recommendations'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-edge-optimize-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'

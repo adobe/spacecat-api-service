@@ -22,8 +22,8 @@ const TEST_PRESIGNED_URL = 'https://s3.amazonaws.com/test-bucket/workspace/llmo/
 
 const mockHttpUtils = {
   ok: (data) => ({ status: 200, json: async () => data }),
-  badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
   notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+  internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
 };
 
 describe('demo-fixtures', () => {
@@ -99,30 +99,30 @@ describe('demo-fixtures', () => {
       expect(expiresAt).to.be.at.most(after + oneHourMs);
     });
 
-    it('returns 400 when S3 is not configured', async () => {
+    it('returns 500 when S3 is not configured', async () => {
       const result = await handleDemoBrandPresence({ ...baseContext, s3: null });
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('S3 storage is not configured for this environment');
     });
 
-    it('returns 400 when S3 client is missing', async () => {
+    it('returns 500 when S3 client is missing', async () => {
       const result = await handleDemoBrandPresence({
         ...baseContext,
         s3: { ...baseContext.s3, s3Client: null },
       });
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
     });
 
-    it('returns 400 when S3 bucket is not configured', async () => {
+    it('returns 500 when S3 bucket is not configured', async () => {
       const result = await handleDemoBrandPresence({
         ...baseContext,
         s3: { ...baseContext.s3, s3Bucket: null },
       });
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('S3 bucket is not configured for this environment');
     });
@@ -142,28 +142,31 @@ describe('demo-fixtures', () => {
       );
     });
 
-    it('returns 400 when the S3 bucket does not exist', async () => {
+    it('returns 500 when the S3 bucket does not exist', async () => {
       const noSuchBucket = new Error('bucket not found');
       noSuchBucket.name = 'NoSuchBucket';
       mockGetSignedUrl.rejects(noSuchBucket);
 
       const result = await handleDemoBrandPresence(baseContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.equal('Storage bucket not found: test-bucket');
+      expect(body.message).to.equal('Failed to retrieve demo fixture');
     });
 
-    it('returns 400 for generic S3 errors', async () => {
+    it('returns 500 for generic S3 errors without leaking details', async () => {
       const accessDenied = new Error('Access denied');
       accessDenied.name = 'AccessDenied';
       mockGetSignedUrl.rejects(accessDenied);
 
       const result = await handleDemoBrandPresence(baseContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.equal('Error retrieving demo fixture: Access denied');
+      expect(body.message).to.equal('Failed to retrieve demo fixture');
+      expect(mockLog.error).to.have.been.calledWith(
+        'S3 error retrieving demo fixture brand-presence: Access denied',
+      );
     });
   });
 
@@ -194,16 +197,16 @@ describe('demo-fixtures', () => {
       expect(body.message).to.equal('Demo fixture not found: recommendations');
     });
 
-    it('returns 400 for generic S3 errors', async () => {
+    it('returns 500 for generic S3 errors without leaking details', async () => {
       const error = new Error('timeout');
       error.name = 'TimeoutError';
       mockGetSignedUrl.rejects(error);
 
       const result = await handleDemoRecommendations(baseContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.equal('Error retrieving demo fixture: timeout');
+      expect(body.message).to.equal('Failed to retrieve demo fixture');
     });
   });
 });

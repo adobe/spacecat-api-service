@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, notFound,
+  ok, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 
 const DEMO_BRAND_PRESENCE_KEY = 'workspace/llmo/demo/summit-demo-brand-presence.json';
@@ -23,12 +23,12 @@ async function generateDemoPresignedUrl(context, s3Key, label) {
   const { log, s3 } = context;
 
   if (!s3 || !s3.s3Client) {
-    return badRequest('S3 storage is not configured for this environment');
+    return internalServerError('S3 storage is not configured for this environment');
   }
 
   const bucketName = s3.s3Bucket;
   if (!bucketName) {
-    return badRequest('S3 bucket is not configured for this environment');
+    return internalServerError('S3 bucket is not configured for this environment');
   }
 
   log.info(`Getting demo fixture: ${label}`);
@@ -51,13 +51,9 @@ async function generateDemoPresignedUrl(context, s3Key, label) {
       log.warn(`Demo fixture not found at ${s3Key}`);
       return notFound(`Demo fixture not found: ${label}`);
     }
-    if (s3Error.name === 'NoSuchBucket') {
-      log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
-    }
 
     log.error(`S3 error retrieving demo fixture ${label}: ${s3Error.message}`);
-    return badRequest(`Error retrieving demo fixture: ${s3Error.message}`);
+    return internalServerError('Failed to retrieve demo fixture');
   }
 }
 

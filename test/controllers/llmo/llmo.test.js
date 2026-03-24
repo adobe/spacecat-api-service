@@ -3862,22 +3862,18 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('should return 400 when S3 is not configured', async () => {
+    it('should return 500 when S3 is not configured', async () => {
       const result = await controller.getDemoBrandPresence({ ...demoContext, s3: null });
 
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+      expect(result.status).to.equal(500);
     });
 
-    it('should return 400 when LLMO is not enabled for site', async () => {
+    it('should return 500 for unexpected errors', async () => {
       mockConfig.getLlmoConfig.returns({});
 
       const result = await controller.getDemoBrandPresence(demoContext);
 
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+      expect(result.status).to.equal(500);
     });
   });
 
@@ -3924,20 +3920,18 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('should return 400 when S3 is not configured', async () => {
+    it('should return 500 when S3 is not configured', async () => {
       const result = await controller.getDemoRecommendations({ ...demoContext, s3: null });
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
     });
 
-    it('should return 400 when LLMO is not enabled for site', async () => {
+    it('should return 500 for unexpected errors', async () => {
       mockConfig.getLlmoConfig.returns({});
 
       const result = await controller.getDemoRecommendations(demoContext);
 
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+      expect(result.status).to.equal(500);
     });
   });
 

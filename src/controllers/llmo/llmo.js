@@ -1018,35 +1018,23 @@ function LlmoController(ctx) {
     }
   };
 
-  // Handles requests for the summit demo brand presence fixture (presigned S3 URL)
-  const getDemoBrandPresence = async (context) => {
+  // Factory for demo fixture endpoints — validates site/LLMO access then delegates to handler
+  const createDemoFixtureHandler = (handler, label) => async (context) => {
     const { log } = context;
     const { siteId } = context.params;
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) return siteValidation;
 
-      return await handleDemoBrandPresence(context);
+      return await handler(context);
     } catch (error) {
-      log.error(`Error getting demo brand presence for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      log.error(`Unexpected error retrieving demo ${label} for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to retrieve demo fixture');
     }
   };
 
-  // Handles requests for the summit demo recommendations fixture (presigned S3 URL)
-  const getDemoRecommendations = async (context) => {
-    const { log } = context;
-    const { siteId } = context.params;
-    try {
-      const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
-
-      return await handleDemoRecommendations(context);
-    } catch (error) {
-      log.error(`Error getting demo recommendations for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
-    }
-  };
+  const getDemoBrandPresence = createDemoFixtureHandler(handleDemoBrandPresence, 'brand-presence');
+  const getDemoRecommendations = createDemoFixtureHandler(handleDemoRecommendations, 'recommendations');
 
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-config
