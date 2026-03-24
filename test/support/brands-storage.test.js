@@ -489,6 +489,19 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Failed to sync brand_sites: site sync error');
     });
 
+    it('throws when brand_sites delete fails during syncBrandSites', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        brand_sites: { data: null, error: { message: 'delete error' } },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_sites: delete error');
+    });
+
     it('skips syncBrandSites when urls resolve to no matching sites', async () => {
       const fullBrandRow = {
         id: BRAND_ID,
