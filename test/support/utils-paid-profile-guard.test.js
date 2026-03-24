@@ -21,9 +21,9 @@ use(sinonChai);
 /**
  * Unit tests for the paid-profile guard in onboardSingleSite (utils.js).
  *
- * The guard blocks re-onboarding a site that was previously onboarded with a
- * paid profile using a lower-tier profile (e.g. demo/test),
- * unless additionalParams.force === true.
+ * The guard blocks re-onboarding a site that has the ahref-paid-pages import
+ * (signal for a previously paid-profile site) with a lower-tier profile,
+ * unless the incoming profile has protected:true or additionalParams.force===true.
  */
 describe('onboardSingleSite — paid profile guard', () => {
   const SITE_URL = 'https://example.com';
@@ -33,7 +33,6 @@ describe('onboardSingleSite — paid profile guard', () => {
   let sandbox;
   let onboardSingleSite;
   let sayStub;
-  let makeSiteWithProfile;
 
   before(async () => {
     // Esmock heavy/AWS dependencies so the module loads cleanly in test.
@@ -63,21 +62,29 @@ describe('onboardSingleSite — paid profile guard', () => {
   beforeEach(() => {
     sandbox = sinon.createSandbox();
     sayStub = sandbox.stub().resolves();
-
-    // lastOnboardProfile is stored in handlers.lastOnboardProfile (inside the serialized
-    // handlers field) so it survives DB round-trips.
-    makeSiteWithProfile = (profileName) => ({
-      getConfig: () => ({ getHandlers: () => ({ lastOnboardProfile: profileName }) }),
-    });
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
+  // A site with ahref-paid-pages import signals it was previously onboarded with the paid profile.
+  const makePaidSite = () => ({
+    getConfig: () => ({
+      getImports: () => ({ 'ahref-paid-pages': {} }),
+    }),
+  });
+
+  // A site with no paid imports — not a paid site.
+  const makeNonPaidSite = () => ({
+    getConfig: () => ({
+      getImports: () => ({}),
+    }),
+  });
+
   /**
    * Builds a minimal context for testing the guard.
-   * Site.findByBaseURL is the hook point: first call is the guard lookup.
+   * Site.findByBaseURL resolves to the provided site (or null).
    */
   const makeContext = (guardSite) => ({
     log: {
@@ -107,9 +114,14 @@ describe('onboardSingleSite — paid profile guard', () => {
     sqs: { sendMessage: sandbox.stub().resolves() },
   });
 
-  const minimalProfile = {
+  // Lower-tier profile — not protected.
+  const demoProfile = { audits: { cwv: {} }, imports: {}, config: {} };
+
+  // Paid profile — protected: true skips the guard.
+  const paidProfile = {
+    protected: true,
     audits: { cwv: {} },
-    imports: {},
+    imports: { 'ahref-paid-pages': {} },
     config: {},
   };
 
@@ -121,18 +133,34 @@ describe('onboardSingleSite — paid profile guard', () => {
 
   describe('blocking scenarios', () => {
     it('blocks re-onboarding a paid site with demo profile', async () => {
-      const context = makeContext(makeSiteWithProfile('paid'));
-
       const result = await onboardSingleSite(
         SITE_URL,
         IMS_ORG_ID,
         {},
-        minimalProfile,
+        demoProfile,
         300,
         slackContext(),
-        context,
+        makeContext(makePaidSite()),
         {},
         { profileName: 'demo' },
+      );
+
+      expect(result.status).to.equal('Failed');
+      expect(result.errors).to.match(/Blocked.*paid/);
+      expect(sayStub).to.have.been.calledWith(sinon.match(GUARD_WARNING_PATTERN));
+    });
+
+    it('blocks re-onboarding a paid site with test profile', async () => {
+      const result = await onboardSingleSite(
+        SITE_URL,
+        IMS_ORG_ID,
+        {},
+        demoProfile,
+        300,
+        slackContext(),
+        makeContext(makePaidSite()),
+        {},
+        { profileName: 'test' },
       );
 
       expect(result.status).to.equal('Failed');
@@ -142,23 +170,23 @@ describe('onboardSingleSite — paid profile guard', () => {
   });
 
   describe('allowed scenarios', () => {
-    // For tests where the guard should NOT block, the function will proceed into
+    // For tests where the guard should NOT block, the function proceeds into
     // createSiteAndOrganization which is not fully mocked — it may throw.
     // We catch that and only assert that the guard warning was NOT sent.
 
-    const assertGuardNotTriggered = async (guardSite, profileName, additionalParams = {}) => {
-      const context = makeContext(guardSite);
+    const assertGuardNotTriggered = async (guardSite, incomingProfile, additionalParams = {}) => {
+      let result;
       try {
-        await onboardSingleSite(
+        result = await onboardSingleSite(
           SITE_URL,
           IMS_ORG_ID,
           {},
-          minimalProfile,
+          incomingProfile,
           300,
           slackContext(),
-          context,
+          makeContext(guardSite),
           additionalParams,
-          { profileName },
+          { profileName: incomingProfile.name || 'demo' },
         );
       } catch {
         // Expected — downstream deps are not fully mocked. Guard is what we're testing.
@@ -167,22 +195,25 @@ describe('onboardSingleSite — paid profile guard', () => {
         (call) => GUARD_WARNING_PATTERN.test(call.args[0]),
       );
       expect(guardWarningSent).to.be.false;
+      if (result) {
+        expect(result.status).to.not.equal('Failed');
+      }
     };
 
-    it('allows re-onboarding when force=true even if previous profile is paid', async () => {
-      await assertGuardNotTriggered(makeSiteWithProfile('paid'), 'demo', { force: true });
+    it('allows re-onboarding when force=true even if previous site is paid', async () => {
+      await assertGuardNotTriggered(makePaidSite(), demoProfile, { force: true });
     });
 
-    it('allows onboarding when site has no previous profile', async () => {
-      await assertGuardNotTriggered(null, 'demo');
+    it('allows onboarding when site does not exist yet', async () => {
+      await assertGuardNotTriggered(null, demoProfile);
     });
 
-    it('allows onboarding when previous profile is not a paid profile', async () => {
-      await assertGuardNotTriggered(makeSiteWithProfile('demo'), 'demo');
+    it('allows onboarding when previous site has no paid imports', async () => {
+      await assertGuardNotTriggered(makeNonPaidSite(), demoProfile);
     });
 
-    it('allows re-onboarding with paid profile regardless of previous profile', async () => {
-      await assertGuardNotTriggered(makeSiteWithProfile('paid'), 'paid');
+    it('allows re-onboarding with paid profile regardless of previous site state', async () => {
+      await assertGuardNotTriggered(makePaidSite(), paidProfile);
     });
   });
 });

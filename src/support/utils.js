@@ -969,6 +969,7 @@ const createSiteAndOrganization = async (
   reportLine,
   context,
   deliveryConfig,
+  prefetchedSite = null,
 ) => {
   const { imsClient, dataAccess, log } = context;
   const { Site, Organization } = dataAccess;
@@ -976,7 +977,7 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
-  let site = await Site.findByBaseURL(baseURL);
+  let site = prefetchedSite ?? await Site.findByBaseURL(baseURL);
   let organizationId;
 
   if (site) {
@@ -1149,12 +1150,6 @@ export const createEntitlementAndEnrollment = async (
  * @returns {Promise<Object>} Report line object
  */
 
-/**
- * Profiles that are considered "paid" and protected from accidental re-onboarding
- * with a lower-tier profile (e.g. demo/test).
- */
-const PAID_PROFILES = ['paid'];
-
 export const onboardSingleSite = async (
   baseURLInput,
   imsOrganizationID,
@@ -1212,19 +1207,33 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    // Single site lookup shared between the guard and createSiteAndOrganization.
+    // Fail-open on DB error: guard is skipped, onboarding proceeds normally.
+    const { Site: SiteLookup } = dataAccess;
+    let prefetchedSite = null;
+    try {
+      prefetchedSite = await SiteLookup.findByBaseURL(baseURL);
+    } catch (lookupError) {
+      log.warn(`Site lookup failed for ${baseURL}, skipping paid profile guard:`, lookupError);
+    }
+
     // Block re-onboarding a paid-profile site with a lower-tier profile unless force=true.
-    if (!additionalParams.force && !PAID_PROFILES.includes(profileName)) {
-      const { Site: SiteLookup } = dataAccess;
-      const existingSite = await SiteLookup.findByBaseURL(baseURL);
-      const previousProfile = existingSite?.getConfig()?.getHandlers()?.lastOnboardProfile;
-      if (previousProfile && PAID_PROFILES.includes(previousProfile)) {
-        const msg = `:warning: Site \`${baseURL}\` was previously onboarded with the *${previousProfile}* profile. `
-          + `Re-onboarding with *${profileName}* is blocked to protect the paid configuration.\n`
-          + 'If this is intentional, select *Force Onboard* in the modal and resubmit.';
-        await say(msg);
-        reportLine.errors = `Blocked: site already onboarded with paid profile "${previousProfile}"`;
-        reportLine.status = 'Failed';
-        return reportLine;
+    // Skip if the incoming profile is itself protected (upgrading to paid is always allowed).
+    if (!profile.protected) {
+      const hasPaidImport = prefetchedSite?.getConfig()?.getImports()?.['ahref-paid-pages'] !== undefined;
+      if (hasPaidImport) {
+        if (additionalParams.force) {
+          log.warn(`Force re-onboarding ${baseURL}: overriding paid profile with "${profileName}"`);
+          await say(`:warning: Force re-onboarding \`${baseURL}\` — overriding paid profile with *${profileName}*.`);
+        } else {
+          const msg = `:warning: Site \`${baseURL}\` was previously onboarded with the *paid* profile. `
+            + `Re-onboarding with *${profileName}* is blocked to protect the paid configuration.\n`
+            + `To override, re-run \`/onboard ${baseURL}\` and select *Force Onboard* in the modal.`;
+          await say(msg);
+          reportLine.errors = 'Blocked: site already onboarded with paid profile';
+          reportLine.status = 'Failed';
+          return reportLine;
+        }
       }
     }
 
@@ -1269,6 +1278,7 @@ export const onboardSingleSite = async (
       reportLine,
       context,
       additionalParams.deliveryConfig,
+      prefetchedSite,
     );
 
     // Validate tier
@@ -1380,9 +1390,10 @@ export const onboardSingleSite = async (
       });
     }
 
-    const handlers = siteConfig.getHandlers() || {};
-    handlers.lastOnboardProfile = profileName;
-    siteConfig.state.handlers = handlers;
+    siteConfig.updateOnboardConfig({
+      lastProfile: profileName.toLowerCase(),
+      lastStartTime: Date.now(),
+    });
 
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
