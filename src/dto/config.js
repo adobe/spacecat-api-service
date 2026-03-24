@@ -48,7 +48,7 @@ const toListJSON = (config) => {
     if (customerIntent) result.llmo.customerIntent = customerIntent;
   }
   if (isNonEmptyObject(json.edgeOptimizeConfig)) {
-    result.edgeOptimizeConfig = { enabled: json.edgeOptimizeConfig.enabled };
+    result.edgeOptimizeConfig = json.edgeOptimizeConfig;
   }
   if (isNonEmptyObject(json.slack)) {
     result.slack = json.slack;
