@@ -1,3 +1,10 @@
+## [1.369.1](https://github.com/adobe/spacecat-api-service/compare/v1.369.0...v1.369.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* **plg:** waitlist non-AEM domains and enforce one onboarded domain per IMS org         ([#2001](https://github.com/adobe/spacecat-api-service/issues/2001)) ([fc85310](https://github.com/adobe/spacecat-api-service/commit/fc853109e00c1c6a15d0fdb786a1012ac2c41675))
+
 # [1.369.0](https://github.com/adobe/spacecat-api-service/compare/v1.368.4...v1.369.0) (2026-03-24)
 
 
