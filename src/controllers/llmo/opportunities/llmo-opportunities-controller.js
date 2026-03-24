@@ -81,10 +81,12 @@ function LlmoOpportunitiesController(ctx) {
   /**
    * GET /org/:spaceCatId/opportunities/count
    * Returns total LLMO opportunity count across all sites in the organization.
+   * Accepts optional ?siteId query parameter to scope results to a single site.
    */
   const getOpportunityCount = async (context) => {
     const { dataAccess, log } = context;
     const { Site, Opportunity } = dataAccess;
+    const filterSiteId = context.data?.siteId || context.data?.site_id;
 
     let organization;
     try {
@@ -101,7 +103,15 @@ function LlmoOpportunitiesController(ctx) {
 
     try {
       const orgId = organization.getId();
-      const sites = await Site.allByOrganizationId(orgId);
+      let sites = await Site.allByOrganizationId(orgId);
+
+      if (filterSiteId) {
+        const match = sites.find((s) => s.getId() === filterSiteId);
+        if (!match) {
+          return forbidden('Site does not belong to the organization');
+        }
+        sites = [match];
+      }
 
       const countForSite = async (site) => {
         try {
@@ -134,11 +144,13 @@ function LlmoOpportunitiesController(ctx) {
    * GET /org/:spaceCatId/brands/:brandId/opportunities
    * GET /org/:spaceCatId/brands/all/opportunities
    * Returns all LLMO opportunities for sites under the given brand (or all org sites).
+   * Accepts optional ?siteId query parameter to scope results to a single site.
    */
   const getBrandOpportunities = async (context) => {
     const { dataAccess, log } = context;
     const { Site, Opportunity } = dataAccess;
     const brandId = context.params.brandId || 'all';
+    const filterSiteId = context.data?.siteId || context.data?.site_id;
 
     let organization;
     try {
@@ -176,6 +188,13 @@ function LlmoOpportunitiesController(ctx) {
 
         siteIds = brand.siteIds || [];
         brandName = brand.name;
+      }
+
+      if (filterSiteId) {
+        if (!siteIds.includes(filterSiteId)) {
+          return forbidden('Site does not belong to the organization or brand');
+        }
+        siteIds = [filterSiteId];
       }
 
       if (siteIds.length === 0) {

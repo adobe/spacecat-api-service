@@ -278,6 +278,36 @@ describe('LlmoOpportunitiesController', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('filters count to a single site when siteId is provided', async () => {
+      const site1 = createMockSite({ id: 'site-1', baseURL: 'https://a.com' });
+      const site2 = createMockSite({ id: 'site-2', baseURL: 'https://b.com' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site1, site2]);
+      mockContext.dataAccess.Opportunity.allBySiteId
+        .withArgs('site-1').resolves([createMockOpportunity({ id: 'o1', siteId: 'site-1' })])
+        .withArgs('site-2').resolves([createMockOpportunity({ id: 'o2', siteId: 'site-2' })]);
+      mockContext.data = { siteId: 'site-1' };
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getOpportunityCount(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.bySite).to.have.length(1);
+      expect(body.bySite[0].siteId).to.equal('site-1');
+    });
+
+    it('returns 403 when siteId filter does not belong to the org', async () => {
+      const site1 = createMockSite({ id: 'site-1' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site1]);
+      mockContext.data = { siteId: 'unknown-site' };
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getOpportunityCount(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('getBrandOpportunities', () => {
@@ -510,6 +540,55 @@ describe('LlmoOpportunitiesController', () => {
       const result = await controller.getBrandOpportunities(mockContext);
 
       expect(result.status).to.equal(400);
+    });
+
+    it('filters brand opportunities to a single site when siteId is provided', async () => {
+      mockContext.params.brandId = 'all';
+      const site1 = createMockSite({ id: 'site-1', baseURL: 'https://a.com' });
+      const site2 = createMockSite({ id: 'site-2', baseURL: 'https://b.com' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site1, site2]);
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site1);
+      mockContext.dataAccess.Opportunity.allBySiteId
+        .withArgs('site-1').resolves([createMockOpportunity({ id: 'o1', siteId: 'site-1' })])
+        .withArgs('site-2').resolves([createMockOpportunity({ id: 'o2', siteId: 'site-2' })]);
+      mockContext.data = { siteId: 'site-1' };
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.opportunities[0].id).to.equal('o1');
+    });
+
+    it('returns 403 when siteId filter is not in the brand site list', async () => {
+      mockContext.params.brandId = 'all';
+      const site1 = createMockSite({ id: 'site-1' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site1]);
+      mockContext.data = { siteId: 'unknown-site' };
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('accepts site_id (snake_case) as an alternative to siteId', async () => {
+      mockContext.params.brandId = 'all';
+      const site1 = createMockSite({ id: 'site-1', baseURL: 'https://a.com' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site1]);
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site1);
+      mockContext.dataAccess.Opportunity.allBySiteId
+        .withArgs('site-1').resolves([createMockOpportunity({ id: 'o1', siteId: 'site-1' })]);
+      mockContext.data = { site_id: 'site-1' };
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
     });
 
     it('handles brand with undefined siteIds', async () => {
