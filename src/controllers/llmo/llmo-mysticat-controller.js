@@ -14,7 +14,11 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import {
   createFilterDimensionsHandler,
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
-  createMarketTrackingTrendsHandler,
+  createMarketTrackingTrendsHandler, createTopicsHandler,
+  createTopicPromptsHandler,
+  createSearchHandler,
+  createTopicDetailHandler,
+  createPromptDetailHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
@@ -46,6 +50,11 @@ function LlmoMysticatController(ctx) {
   const getBrandPresenceWeeks = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
   const getMarketTrackingTrends = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
   const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
+  const getTopics = createTopicsHandler(getOrgAndValidateAccess);
+  const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
+  const getSearch = createSearchHandler(getOrgAndValidateAccess);
+  const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
@@ -55,6 +64,11 @@ function LlmoMysticatController(ctx) {
     getBrandPresenceWeeks,
     getMarketTrackingTrends,
     getSentimentOverview,
+    getTopics,
+    getTopicPrompts,
+    getSearch,
+    getTopicDetail,
+    getPromptDetail,
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,

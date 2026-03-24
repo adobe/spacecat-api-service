@@ -1,3 +1,72 @@
+## [1.368.4](https://github.com/adobe/spacecat-api-service/compare/v1.368.3...v1.368.4) (2026-03-24)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2010](https://github.com/adobe/spacecat-api-service/issues/2010)) ([964e0f2](https://github.com/adobe/spacecat-api-service/commit/964e0f29de146725b96caa1a8ae686534cbc233e))
+
+## [1.368.3](https://github.com/adobe/spacecat-api-service/compare/v1.368.2...v1.368.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* return full edgeOptimizeConfig in slim site DTO ([#2022](https://github.com/adobe/spacecat-api-service/issues/2022)) ([b88b8bc](https://github.com/adobe/spacecat-api-service/commit/b88b8bc8535b13a784458444a01891a4f7887112))
+
+## [1.368.2](https://github.com/adobe/spacecat-api-service/compare/v1.368.1...v1.368.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* shallow merge config patch ([#2020](https://github.com/adobe/spacecat-api-service/issues/2020)) ([d87ca6b](https://github.com/adobe/spacecat-api-service/commit/d87ca6b593ce231ce38214d3301a3074c5f02083))
+* shallow merge config patch ([#2020](https://github.com/adobe/spacecat-api-service/issues/2020)) ([#2021](https://github.com/adobe/spacecat-api-service/issues/2021)) ([d2020ac](https://github.com/adobe/spacecat-api-service/commit/d2020acb85630cb749b74ac9990b82850d276f62))
+
+## [1.368.1](https://github.com/adobe/spacecat-api-service/compare/v1.368.0...v1.368.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* slim site dto for getall site call ([#2019](https://github.com/adobe/spacecat-api-service/issues/2019)) ([492abb4](https://github.com/adobe/spacecat-api-service/commit/492abb423040c4d1bd2041f0c77546e384623976))
+
+# [1.368.0](https://github.com/adobe/spacecat-api-service/compare/v1.367.0...v1.368.0) (2026-03-23)
+
+
+### Features
+
+* prompts CRUD ([#1953](https://github.com/adobe/spacecat-api-service/issues/1953)) ([44e7019](https://github.com/adobe/spacecat-api-service/commit/44e7019a4452c47195b69d8acef887dd66b84926))
+
+# [1.367.0](https://github.com/adobe/spacecat-api-service/compare/v1.366.0...v1.367.0) (2026-03-23)
+
+
+### Bug Fixes
+
+* aggregate prompt-level mentions and citations across executions | LLMO-3605 ([#2016](https://github.com/adobe/spacecat-api-service/issues/2016)) ([f0528df](https://github.com/adobe/spacecat-api-service/commit/f0528df13280ecc130f5b457eff84fca8b7730a8))
+
+
+### Features
+
+* add topic and prompt detail fetching capabilities |  LLMO-3814 ([#2015](https://github.com/adobe/spacecat-api-service/issues/2015)) ([f1df9a8](https://github.com/adobe/spacecat-api-service/commit/f1df9a858a17a06c2ad62869cf2f3d3dbc41b52c))
+
+# [1.366.0](https://github.com/adobe/spacecat-api-service/compare/v1.365.1...v1.366.0) (2026-03-23)
+
+
+### Features
+
+* add search endpoint for brand presence Data Insights table | LLMO-3605 ([#2013](https://github.com/adobe/spacecat-api-service/issues/2013)) ([f79cd3b](https://github.com/adobe/spacecat-api-service/commit/f79cd3bf5bf39e6d9488547c47171fe415dfcbbf))
+
+## [1.365.1](https://github.com/adobe/spacecat-api-service/compare/v1.365.0...v1.365.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* inline setup steps in e2e-tests workflow ([#2014](https://github.com/adobe/spacecat-api-service/issues/2014)) ([1f5de2d](https://github.com/adobe/spacecat-api-service/commit/1f5de2dd592eb417a892973a220cfeb787e6318e))
+
+# [1.365.0](https://github.com/adobe/spacecat-api-service/compare/v1.364.0...v1.365.0) (2026-03-23)
+
+
+### Features
+
+* add topics endpoint for brand presence Data Insights table | LLMO-3605 ([#1985](https://github.com/adobe/spacecat-api-service/issues/1985)) ([666b0bd](https://github.com/adobe/spacecat-api-service/commit/666b0bd7be116ba84e76d1fef3b91f3cd4c41d0a))
+
 # [1.364.0](https://github.com/adobe/spacecat-api-service/compare/v1.363.2...v1.364.0) (2026-03-23)
 
 
