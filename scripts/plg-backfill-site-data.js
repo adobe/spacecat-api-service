@@ -178,9 +178,23 @@ async function backfillSiteData({ domain, imsOrgId }, context) {
   if (!site) {
     log.warn(`  Site not found for ${baseURL}, skipping`);
     return {
-      domain, status: 'skipped', reason: 'site not found', filled: [],
+      domain, imsOrgId, siteId: '', status: 'skipped', filled: '', originalSite: '',
     };
   }
+
+  // Snapshot original site state before any modifications (for rollback)
+  const originalSite = JSON.stringify({
+    siteId: site.getId(),
+    organizationId: site.getOrganizationId(),
+    deliveryType: site.getDeliveryType(),
+    deliveryConfig: site.getDeliveryConfig(),
+    code: site.getCode(),
+    hlxConfig: site.getHlxConfig(),
+    language: site.getLanguage(),
+    region: site.getRegion(),
+    projectId: site.getProjectId(),
+    fetchConfig: site.getConfig()?.getFetchConfig(),
+  });
 
   const filled = [];
   let dirty = false;
@@ -311,13 +325,23 @@ async function backfillSiteData({ domain, imsOrgId }, context) {
     await site.save();
     log.info(`  Saved site ${site.getId()} with ${filled.length} field(s) filled`);
     return {
-      domain, siteId: site.getId(), status: 'updated', filled,
+      domain,
+      imsOrgId,
+      siteId: site.getId(),
+      status: 'updated',
+      filled: filled.join('; '),
+      originalSite,
     };
   }
 
   log.info(`  No missing data for site ${site.getId()}`);
   return {
-    domain, siteId: site.getId(), status: 'complete', filled,
+    domain,
+    imsOrgId,
+    siteId: site.getId(),
+    status: 'complete',
+    filled: '',
+    originalSite,
   };
 }
 
@@ -353,11 +377,25 @@ async function main() {
       } catch (error) {
         log.error(`Unexpected error for ${domain}: ${error.message}`);
         results.push({
-          domain, status: 'failed', reason: error.message, filled: [],
+          domain, imsOrgId, siteId: '', status: 'failed', filled: error.message, originalSite: '',
         });
       }
     }),
   );
+
+  // Write CSV report (includes original site snapshot for rollback)
+  if (results.length > 0) {
+    const headers = Object.keys(results[0]);
+    const csvLines = [
+      headers.join(','),
+      ...results.map((r) => headers.map((h) => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(',')),
+    ];
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const csvFile = inputFile.replace(/\.json$/, `-backfill-report-${timestamp}.csv`);
+    const { writeFileSync } = await import('fs');
+    writeFileSync(csvFile, csvLines.join('\n'), 'utf-8');
+    log.info(`\nCSV report written to ${csvFile}`);
+  }
 
   // Summary
   log.info('\n--- Summary ---');
@@ -367,9 +405,8 @@ async function main() {
   const failedResults = results.filter((r) => r.status === 'failed');
 
   log.info(`Updated: ${updated.length}, Already complete: ${complete.length}, Skipped: ${skipped.length}, Failed: ${failedResults.length}`);
-  updated.forEach((r) => log.info(`  ${r.domain}: filled [${r.filled.join(', ')}]`));
-  skipped.forEach((r) => log.info(`  ${r.domain}: skipped (${r.reason})`));
-  failedResults.forEach((r) => log.info(`  ${r.domain}: failed (${r.reason})`));
+  updated.forEach((r) => log.info(`  ${r.domain}: filled [${r.filled}]`));
+  failedResults.forEach((r) => log.info(`  ${r.domain}: failed (${r.filled})`));
 }
 
 main().catch((error) => {
