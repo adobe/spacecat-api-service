@@ -531,7 +531,7 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
   });
 
-  it('gets all sites', async () => {
+  it('gets all sites with slim DTO', async () => {
     mockDataAccess.Site.all.resolves(sites);
 
     const result = await sitesController.getAll();
@@ -543,6 +543,8 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
     expect(resultSites[1]).to.have.property('id', SITE_IDS[1]);
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
+
+    expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
   it('gets all sites for a non-admin user', async () => {

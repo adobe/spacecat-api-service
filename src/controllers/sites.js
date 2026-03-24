@@ -331,7 +331,7 @@ function SitesController(ctx, log, env) {
     const all = await Site.all({}, { fetchAllPages: true });
     const sites = all
       .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toJSON(site));
+      .map((site) => SiteDto.toListJSON(site));
     return ok(sites);
   };
 
