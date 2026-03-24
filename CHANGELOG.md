@@ -1,3 +1,10 @@
+# [1.369.0](https://github.com/adobe/spacecat-api-service/compare/v1.368.4...v1.369.0) (2026-03-24)
+
+
+### Features
+
+* update brandalf api docs with latest schema ([#2024](https://github.com/adobe/spacecat-api-service/issues/2024)) ([6bd8c57](https://github.com/adobe/spacecat-api-service/commit/6bd8c57540f60861bffa76271f6a5c0e862ec48d))
+
 ## [1.368.4](https://github.com/adobe/spacecat-api-service/compare/v1.368.3...v1.368.4) (2026-03-24)
 
 
