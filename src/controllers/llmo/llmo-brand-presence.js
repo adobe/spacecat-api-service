@@ -2595,7 +2595,10 @@ export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
         datesQuery = datesQuery.eq('brand_id', filterByBrandId);
       }
 
-      const { data: datesData, error: datesError } = await datesQuery.limit(QUERY_LIMIT);
+      // Use high row limit — we only extract distinct dates, but the table may have
+      // many rows per date (multiple brands/models/categories). Same rationale as
+      // WEEKS_QUERY_LIMIT in createBrandPresenceWeeksHandler.
+      const { data: datesData, error: datesError } = await datesQuery.limit(WEEKS_QUERY_LIMIT);
 
       if (datesError) {
         ctx.log.error(`Brand vs competitors execution dates error: ${datesError.message}`);
