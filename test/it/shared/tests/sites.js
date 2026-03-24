@@ -56,10 +56,12 @@ function expectSiteListDto(site) {
   expect(site.id).to.be.a('string');
   expect(site.baseURL).to.be.a('string');
   expect(site.organizationId).to.be.a('string');
+  expectISOTimestamp(site.createdAt, 'createdAt');
+  expectISOTimestamp(site.updatedAt, 'updatedAt');
   expect(site).to.have.property('deliveryType');
   expect(site).to.have.property('isLive');
   expect(site).to.have.property('config');
-  expect(site).to.not.have.any.keys('name', 'hlxConfig', 'authoringType', 'deliveryConfig', 'createdAt', 'updatedAt', 'pageTypes', 'projectId', 'isPrimaryLocale', 'region', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+  expect(site).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
 }
 
 /**

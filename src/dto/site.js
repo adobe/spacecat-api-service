@@ -67,11 +67,15 @@ export const SiteDto = {
   toListJSON: (site) => ({
     id: site.getId(),
     baseURL: site.getBaseURL(),
+    name: site.getName(),
     organizationId: site.getOrganizationId(),
     deliveryType: site.getDeliveryType(),
     gitHubURL: site.getGitHubURL(),
     isLive: site.getIsLive(),
     isSandbox: site.getIsSandbox(),
+    createdAt: site.getCreatedAt(),
+    updatedAt: site.getUpdatedAt(),
+    region: site.getRegion(),
     config: ConfigDto.toListJSON(site.getConfig()),
   }),
 

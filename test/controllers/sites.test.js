@@ -544,7 +544,7 @@ describe('Sites Controller', () => {
     expect(resultSites[1]).to.have.property('id', SITE_IDS[1]);
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
 
-    expect(resultSites[0]).to.not.have.any.keys('name', 'hlxConfig', 'authoringType', 'deliveryConfig', 'createdAt', 'updatedAt', 'pageTypes', 'projectId', 'isPrimaryLocale', 'region', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+    expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
   it('gets all sites for a non-admin user', async () => {
