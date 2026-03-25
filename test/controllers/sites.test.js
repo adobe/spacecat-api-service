@@ -4116,9 +4116,7 @@ describe('Sites Controller', () => {
     });
 
     it('falls back to "unknown" when neither getter nor property is present', async () => {
-      mockDataAccess.PageCitability.allBySiteId.resolves([
-        {},
-      ]);
+      mockDataAccess.PageCitability.allBySiteId.resolves([{}]);
       const result = await sitesController.getPageCitabilityCounts({
         params: { siteId: SITE_IDS[0] },
         data: { groupBy: 'updatedBy' },
@@ -4126,6 +4124,135 @@ describe('Sites Controller', () => {
       const response = await result.json();
       expect(result.status).to.equal(200);
       expect(response).to.deep.equal({ unknown: 1 });
+    });
+
+    it('returns bad request when period and from are both provided', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { period: '7d', from: '2025-01-01' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'period and from/to are mutually exclusive');
+    });
+
+    it('returns bad request for an invalid period value', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { period: '3d' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('Invalid period');
+    });
+
+    it('returns bad request for an invalid from date', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { from: 'not-a-date' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Invalid from date');
+    });
+
+    it('returns bad request for an invalid to date', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { to: 'not-a-date' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Invalid to date');
+    });
+
+    it('filters records by period=7d', async () => {
+      const now = new Date();
+      const fiveDaysAgo = new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString();
+      const tenDaysAgo = new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString();
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => fiveDaysAgo },
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => tenDaysAgo },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', period: '7d' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('returns all records for period=all', async () => {
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => tenDaysAgo },
+        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => tenDaysAgo },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', period: 'all' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1, 'page-citability': 1 });
+    });
+
+    it('filters records by explicit from/to date range', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-02-15T00:00:00.000Z' },
+        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-01-10T00:00:00.000Z' },
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-03-20T00:00:00.000Z' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', from: '2025-02-01', to: '2025-02-28' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('filters records with only from date', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-03-01T00:00:00.000Z' },
+        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-01-01T00:00:00.000Z' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', from: '2025-02-01' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('filters records with only to date', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-01-01T00:00:00.000Z' },
+        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-03-01T00:00:00.000Z' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', to: '2025-02-01' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('includes records with no updatedAt when time filter is applied', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => null },
+        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-01-01T00:00:00.000Z' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', from: '2025-02-01' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
     });
   });
 
