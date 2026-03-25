@@ -100,6 +100,7 @@ export function parseUrlInspectorParams(context) {
     channel: q.channel || q.content_type,
     platform: q.platform || q.model,
     limit: q.limit ? Number(q.limit) : undefined,
+    offset: q.offset ? Number(q.offset) : undefined,
     url: q.url,
     domain: q.domain,
     includeAll: q.includeAll === 'true' || q.includeAll === true,

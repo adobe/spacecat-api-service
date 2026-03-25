@@ -16,7 +16,7 @@ import {
   withUrlInspectorAuth, parseUrlInspectorParams, requireSiteId, shouldApplyFilter,
 } from './llmo-url-inspector.js';
 
-const DEFAULT_LIMIT = 2000;
+const DEFAULT_LIMIT = 50;
 
 const CONTENT_TYPE_MAP = {
   competitor: 'others',
@@ -108,6 +108,9 @@ export function createTrendingUrlsHandler(getOrgAndValidateAccess) {
       const siteError = requireSiteId(params);
       if (siteError) return siteError;
 
+      const limit = params.limit || DEFAULT_LIMIT;
+      const offset = params.offset || 0;
+
       const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate,
@@ -118,8 +121,9 @@ export function createTrendingUrlsHandler(getOrgAndValidateAccess) {
           ? (CHANNEL_TO_DB[params.channel] || params.channel)
           : null,
         p_platform: shouldApplyFilter(params.platform) ? params.platform : null,
-        p_limit: params.limit || DEFAULT_LIMIT,
+        p_limit: limit,
         p_brand_id: params.brandId || null,
+        p_offset: offset,
       };
 
       const { data, error } = await client.rpc('rpc_url_inspector_trending_urls', rpcParams);
@@ -129,8 +133,12 @@ export function createTrendingUrlsHandler(getOrgAndValidateAccess) {
         return badRequest(error.message);
       }
 
-      const result = assembleResponse(data);
-      return ok(result);
+      const { totalNonOwnedUrls, urls } = assembleResponse(data);
+      return ok({
+        totalNonOwnedUrls,
+        urls,
+        pagination: { limit, offset, total: totalNonOwnedUrls },
+      });
     },
   );
 }

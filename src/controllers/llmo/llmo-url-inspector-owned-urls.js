@@ -16,6 +16,8 @@ import {
   withUrlInspectorAuth, parseUrlInspectorParams, requireSiteId, shouldApplyFilter,
 } from './llmo-url-inspector.js';
 
+const DEFAULT_LIMIT = 50;
+
 /**
  * Computes a WoW trend from a sorted array of { week, value } objects.
  * Compares the last two entries to determine direction.
@@ -42,6 +44,7 @@ export function computeTrend(weeklyValues) {
 /**
  * GET /org/:spaceCatId/brands/:brandId/url-inspector/owned-urls
  * Owned URL citation data with per-URL WoW trend indicators.
+ * Supports server-side pagination via ?limit=N&offset=N query params.
  * @see elmo-ui/docs/api-specs/02-owned-urls-table.md
  */
 export function createOwnedUrlsHandler(getOrgAndValidateAccess) {
@@ -54,6 +57,9 @@ export function createOwnedUrlsHandler(getOrgAndValidateAccess) {
       const siteError = requireSiteId(params);
       if (siteError) return siteError;
 
+      const limit = params.limit || DEFAULT_LIMIT;
+      const offset = params.offset || 0;
+
       const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate || null,
@@ -62,6 +68,8 @@ export function createOwnedUrlsHandler(getOrgAndValidateAccess) {
         p_region: shouldApplyFilter(params.region) ? params.region : null,
         p_platform: shouldApplyFilter(params.platform) ? params.platform : null,
         p_brand_id: params.brandId || null,
+        p_limit: limit,
+        p_offset: offset,
       };
 
       const { data, error } = await client.rpc('rpc_url_inspector_owned_urls', rpcParams);
@@ -72,6 +80,7 @@ export function createOwnedUrlsHandler(getOrgAndValidateAccess) {
       }
 
       const rows = data || [];
+      const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
 
       const urls = rows.map((row) => ({
         url: row.url,
@@ -84,7 +93,10 @@ export function createOwnedUrlsHandler(getOrgAndValidateAccess) {
         promptsCitedTrend: computeTrend(row.weekly_prompts_cited),
       }));
 
-      return ok({ urls });
+      return ok({
+        urls,
+        pagination: { limit, offset, total },
+      });
     },
   );
 }
