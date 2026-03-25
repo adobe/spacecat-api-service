@@ -4167,12 +4167,9 @@ describe('Sites Controller', () => {
     });
 
     it('filters records by period=7d', async () => {
-      const now = new Date();
-      const fiveDaysAgo = new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString();
-      const tenDaysAgo = new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString();
+      // DB handles the between filter — mock returns only what would survive it
       mockDataAccess.PageCitability.allBySiteId.resolves([
-        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => fiveDaysAgo },
-        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => tenDaysAgo },
+        { getUpdatedBy: () => 'prerender' },
       ]);
       const result = await sitesController.getPageCitabilityCounts({
         params: { siteId: SITE_IDS[0] },
@@ -4199,10 +4196,9 @@ describe('Sites Controller', () => {
     });
 
     it('filters records by explicit from/to date range', async () => {
+      // DB handles the between filter — mock returns only what would survive it
       mockDataAccess.PageCitability.allBySiteId.resolves([
-        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-02-15T00:00:00.000Z' },
-        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-01-10T00:00:00.000Z' },
-        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-03-20T00:00:00.000Z' },
+        { getUpdatedBy: () => 'prerender' },
       ]);
       const result = await sitesController.getPageCitabilityCounts({
         params: { siteId: SITE_IDS[0] },
@@ -4214,9 +4210,9 @@ describe('Sites Controller', () => {
     });
 
     it('filters records with only from date', async () => {
+      // DB handles the between filter — mock returns only what would survive it
       mockDataAccess.PageCitability.allBySiteId.resolves([
-        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-03-01T00:00:00.000Z' },
-        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-01-01T00:00:00.000Z' },
+        { getUpdatedBy: () => 'prerender' },
       ]);
       const result = await sitesController.getPageCitabilityCounts({
         params: { siteId: SITE_IDS[0] },
@@ -4228,9 +4224,9 @@ describe('Sites Controller', () => {
     });
 
     it('filters records with only to date', async () => {
+      // DB handles the between filter — mock returns only what would survive it
       mockDataAccess.PageCitability.allBySiteId.resolves([
-        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => '2025-01-01T00:00:00.000Z' },
-        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-03-01T00:00:00.000Z' },
+        { getUpdatedBy: () => 'prerender' },
       ]);
       const result = await sitesController.getPageCitabilityCounts({
         params: { siteId: SITE_IDS[0] },
