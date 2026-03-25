@@ -74,7 +74,9 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
     ]);
 
     const allOpportunitiesUnfiltered = [...newOpportunities, ...inProgressOpportunities];
-    const opportunityIds = allOpportunitiesUnfiltered.map((oppty) => oppty.getId());
+    const categorizedOpportunitiesUnfiltered = categorizeOpportunities(allOpportunitiesUnfiltered);
+    const supportedOpportunities = Array.from(categorizedOpportunitiesUnfiltered.values()).flat();
+    const opportunityIds = supportedOpportunities.map((opportunity) => opportunity.id);
     const {
       suggestionsByOpportunityId,
       failedOpportunityIds,
@@ -86,14 +88,17 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
 
     // Filter out opportunities where suggestion fetch failed (fail-closed per-opportunity)
     // or where any suggestion has PENDING_VALIDATION status
-    const allOpportunities = allOpportunitiesUnfiltered.filter((oppty) => {
-      if (failedOpportunityIds.has(oppty.getId())) return false;
-      const cached = suggestionsByOpportunityId.get(oppty.getId());
-      return cached && !cached.hasPendingValidation;
+    const categorizedOpportunities = new Map();
+    categorizedOpportunitiesUnfiltered.forEach((opportunities, category) => {
+      categorizedOpportunities.set(
+        category,
+        opportunities.filter((opportunity) => {
+          if (failedOpportunityIds.has(opportunity.id)) return false;
+          const cached = suggestionsByOpportunityId.get(opportunity.id);
+          return cached && !cached.hasPendingValidation;
+        }),
+      );
     });
-
-    // Categorize opportunities using configuration
-    const categorizedOpportunities = categorizeOpportunities(allOpportunities);
 
     // Check if any opportunity types require Athena query (i.e., require URL matching)
     const configsRequiringAthena = OPPORTUNITY_TYPE_CONFIGS.filter(

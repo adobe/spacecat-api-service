@@ -482,6 +482,29 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
+    it('loads suggestions only for supported valid paid opportunity types', async () => {
+      const supportedOppty = createOpportunity({ id: 'oppty-supported', tags: ['paid media'] });
+      const unsupportedOppty = createOpportunity({ id: 'oppty-unsupported', type: 'seo' });
+      const invalidOppty = createOpportunity({
+        id: 'oppty-invalid',
+        tags: ['paid media'],
+        description: null,
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [supportedOppty, unsupportedOppty, invalidOppty],
+      );
+
+      await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.calledOnce).to.be.true;
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.firstCall.args[0]).to.deep.equal([
+        { opportunityId: 'oppty-supported' },
+      ]);
+    });
+
     it('filters out opportunities with PENDING_VALIDATION suggestions', async () => {
       const validOppty = createOpportunity({ id: 'oppty-valid', tags: ['paid media'] });
       const pendingValidationOppty = createOpportunity({
