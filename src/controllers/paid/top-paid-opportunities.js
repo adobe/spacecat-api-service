@@ -24,6 +24,7 @@ import {
   processOpportunityMatching,
   combineAndSortOpportunities,
 } from './opportunity-matcher.js';
+import { loadSuggestionsByOpportunityIds } from './opportunity-suggestions.js';
 
 async function validateSiteAndPermissions(siteId, Site, accessControlUtil) {
   const site = await Site.findById(siteId);
@@ -72,10 +73,32 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
       Opportunity.allBySiteIdAndStatus(siteId, 'IN_PROGRESS'),
     ]);
 
-    const allOpportunities = [...newOpportunities, ...inProgressOpportunities];
+    const allOpportunitiesUnfiltered = [...newOpportunities, ...inProgressOpportunities];
+    const categorizedOpportunitiesUnfiltered = categorizeOpportunities(allOpportunitiesUnfiltered);
+    const supportedOpportunities = Array.from(categorizedOpportunitiesUnfiltered.values()).flat();
+    const opportunityIds = supportedOpportunities.map((opportunity) => opportunity.id);
+    const {
+      suggestionsByOpportunityId,
+      failedOpportunityIds,
+    } = await loadSuggestionsByOpportunityIds(
+      Suggestion,
+      opportunityIds,
+      log,
+    );
 
-    // Categorize opportunities using configuration
-    const categorizedOpportunities = categorizeOpportunities(allOpportunities);
+    // Filter out opportunities where suggestion fetch failed (fail-closed per-opportunity)
+    // or where any suggestion has PENDING_VALIDATION status
+    const categorizedOpportunities = new Map();
+    categorizedOpportunitiesUnfiltered.forEach((opportunities, category) => {
+      categorizedOpportunities.set(
+        category,
+        opportunities.filter((opportunity) => {
+          if (failedOpportunityIds.has(opportunity.id)) return false;
+          const cached = suggestionsByOpportunityId.get(opportunity.id);
+          return cached && !cached.hasPendingValidation;
+        }),
+      );
+    });
 
     // Check if any opportunity types require Athena query (i.e., require URL matching)
     const configsRequiringAthena = OPPORTUNITY_TYPE_CONFIGS.filter(
@@ -106,12 +129,12 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
       log.info(`No ${categoryNames} opportunities found for site ${siteId}, skipping Athena query`);
     }
 
-    // Process opportunity matching
+    // Process opportunity matching - pass the suggestions map to avoid refetching
     const { matchResults, paidUrlsMap } = await processOpportunityMatching(
       categorizedOpportunities,
       allPaidTrafficData,
       PAGE_VIEW_THRESHOLD,
-      Suggestion,
+      suggestionsByOpportunityId,
       log,
     );
 
@@ -125,17 +148,14 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
     const topOpportunities = filteredOpportunities.slice(0, 8);
 
     // Convert to DTOs
-    const opportunitySummaries = await Promise.all(
-      topOpportunities.map(async (opportunity) => {
-        const opportunityId = opportunity.getId();
-        const paidUrlsData = paidUrlsMap.get(opportunityId);
-        // Only fetch NEW suggestions if not a CWV opportunity (no paidUrlsData)
-        const suggestions = paidUrlsData
-          ? []
-          : await Suggestion.allByOpportunityIdAndStatus(opportunityId, 'NEW');
-        return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData, TOP_URLS_LIMIT);
-      }),
-    );
+    const opportunitySummaries = topOpportunities.map((opportunity) => {
+      const opportunityId = opportunity.getId();
+      const paidUrlsData = paidUrlsMap.get(opportunityId);
+      const cached = suggestionsByOpportunityId.get(opportunityId);
+      // For CWV/forms opportunities with paidUrlsData, URLs come from paid traffic, not suggestions
+      const suggestions = paidUrlsData ? [] : cached.newSuggestions;
+      return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData, TOP_URLS_LIMIT);
+    });
 
     return ok(opportunitySummaries);
   };

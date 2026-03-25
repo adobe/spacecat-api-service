@@ -1023,6 +1023,76 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
+  const CITABILITY_PERIODS = new Set(['7d', '30d', '90d', '1y', 'all']);
+  const CITABILITY_PERIOD_MS = {
+    '7d': 7, '30d': 30, '90d': 90, '1y': 365,
+  };
+
+  const getPageCitabilityCounts = async (context) => {
+    const { siteId } = context.params;
+    const groupBy = context.data?.groupBy ?? 'updatedBy';
+    const period = context.data?.period;
+    const from = context.data?.from;
+    const to = context.data?.to;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!CITABILITY_GROUP_BY_FIELDS.has(groupBy)) {
+      return badRequest(`Invalid groupBy field. Allowed values: ${[...CITABILITY_GROUP_BY_FIELDS].join(', ')}`);
+    }
+
+    if (period && (from || to)) {
+      return badRequest('period and from/to are mutually exclusive');
+    }
+
+    if (period && !CITABILITY_PERIODS.has(period)) {
+      return badRequest(`Invalid period. Allowed values: ${[...CITABILITY_PERIODS].join(', ')}`);
+    }
+
+    let fromDate = null;
+    let toDate = null;
+
+    if (from || to) {
+      if (from) {
+        fromDate = new Date(from);
+        if (Number.isNaN(fromDate.getTime())) return badRequest('Invalid from date');
+      }
+      if (to) {
+        toDate = new Date(to);
+        if (Number.isNaN(toDate.getTime())) return badRequest('Invalid to date');
+      }
+    } else if (period && period !== 'all') {
+      const days = CITABILITY_PERIOD_MS[period];
+      toDate = new Date();
+      fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its page citability records');
+    }
+
+    const { PageCitability } = dataAccess;
+    const queryOptions = (fromDate || toDate)
+      ? { between: { attribute: 'updatedAt', start: (fromDate ?? new Date(0)).toISOString(), end: (toDate ?? new Date()).toISOString() } }
+      : {};
+    const records = await PageCitability.allBySiteId(siteId, queryOptions);
+    const counts = {};
+    for (const record of records) {
+      const getterName = `get${groupBy.charAt(0).toUpperCase()}${groupBy.slice(1)}`;
+      const value = String(record[getterName]?.() ?? record[groupBy] ?? 'unknown');
+      counts[value] = (counts[value] ?? 0) + 1;
+    }
+    return ok(counts);
+  };
+
   const getTopPages = async (context) => {
     const { siteId, source, geo } = context.params;
 
@@ -1222,6 +1292,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getPageCitabilityCounts,
     getTopPages,
     resolveSite,
     getBrandProfile,
