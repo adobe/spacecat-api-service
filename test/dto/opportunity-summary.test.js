@@ -447,5 +447,34 @@ describe('OpportunitySummaryDto', () => {
       expect(result.urls).to.include('https://example.com/main-page');
       expect(result.urls).to.include('https://example.com/another-page');
     });
+
+    it('returns no URLs for consent-banner opportunities even when page-specific data exists', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Cookie consent',
+        getDescription: () => 'Cookie banner blocks the experience',
+        getType: () => 'consent-banner',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          page: 'https://example.com/landing-page',
+          pageViews: 12000,
+          projectedTrafficValue: 5000,
+        }),
+      };
+
+      const suggestions = [
+        {
+          getData: () => ({
+            url: 'https://example.com/should-not-link',
+          }),
+          getRank: () => 50,
+        },
+      ];
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, suggestions);
+
+      expect(result.urls).to.deep.equal([]);
+      expect(result.pageViews).to.equal(12000);
+    });
   });
 });

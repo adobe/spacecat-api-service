@@ -44,36 +44,41 @@ export const OpportunitySummaryDto = {
     const urls = new Set();
     let totalPageViews = 0;
 
+    const opportunityType = opportunity.getType();
+    const isSiteWideOpportunity = opportunityType === 'consent-banner';
+
     // Get opportunity data early to check for page-specific URLs
     const opportunityData = opportunity.getData() || {};
 
     // If paidUrlsData provided, use those URLs and pageViews
     // (for CWV opportunities from paid traffic)
-    if (paidUrlsData && paidUrlsData.urls) {
+    if (paidUrlsData && paidUrlsData.urls && !isSiteWideOpportunity) {
       paidUrlsData.urls.forEach((url) => urls.add(url));
       totalPageViews = paidUrlsData.pageViews || 0;
     } else {
       // Check if opportunity data has a page-specific URL
       // (e.g., no-cta-above-the-fold, high-organic-low-ctr)
-      if (opportunityData.page) {
+      if (opportunityData.page && !isSiteWideOpportunity) {
         urls.add(opportunityData.page);
       }
 
       // Extract all URLs from suggestion data (for paid media opportunities)
-      suggestions.forEach((suggestion) => {
-        const data = suggestion.getData();
-        if (!data) return; // Skip if data is null/undefined
-        // Handle different URL field names in suggestion data
-        if (data.url_from) urls.add(data.url_from);
-        if (data.url_to) urls.add(data.url_to);
-        if (data.urlFrom) urls.add(data.urlFrom);
-        if (data.urlTo) urls.add(data.urlTo);
-        if (data.url) urls.add(data.url);
-        // Handle no-cta-above-the-fold contentFix structure
-        if (data.contentFix?.page_patch?.original_page_url) {
-          urls.add(data.contentFix.page_patch.original_page_url);
-        }
-      });
+      if (!isSiteWideOpportunity) {
+        suggestions.forEach((suggestion) => {
+          const data = suggestion.getData();
+          if (!data) return; // Skip if data is null/undefined
+          // Handle different URL field names in suggestion data
+          if (data.url_from) urls.add(data.url_from);
+          if (data.url_to) urls.add(data.url_to);
+          if (data.urlFrom) urls.add(data.urlFrom);
+          if (data.urlTo) urls.add(data.urlTo);
+          if (data.url) urls.add(data.url);
+          // Handle no-cta-above-the-fold contentFix structure
+          if (data.contentFix?.page_patch?.original_page_url) {
+            urls.add(data.contentFix.page_patch.original_page_url);
+          }
+        });
+      }
 
       // Use pageViews from opportunity data if available
       if (opportunityData.pageViews && typeof opportunityData.pageViews === 'number') {
@@ -126,7 +131,7 @@ export const OpportunitySummaryDto = {
       type: null,
       description: null,
       status: opportunity.getStatus(),
-      system_type: opportunity.getType(),
+      system_type: opportunityType,
       system_description: opportunity.getDescription(),
       pageViews: totalPageViews,
       projectedTrafficLost,
