@@ -1218,6 +1218,64 @@ export async function queueIdentifyRedirectsAudit(
   }
 }
 
+/*
+ * Queues a detect-cdn audit (worker probes the URL and may persist deliveryConfig.cdn).
+ * @param {Object} params
+ * @param {Object} [params.site] - When set, job includes siteId (Slack or onboarding).
+ * @param {string} [params.baseURL] - URL to probe; falls back to site.getBaseURL().
+ * @param {Object} [params.slackContext] - Optional say, channelId, threadTs for Slack replies.
+ * @param {Object} context - Lambda context (env, sqs, log).
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function queueDetectCdnAudit(
+  { site, baseURL, slackContext },
+  context,
+) {
+  const {
+    env,
+    log,
+    sqs,
+  } = context;
+  const { say, channelId, threadTs } = slackContext || {};
+
+  try {
+    const resolvedBaseURL = (baseURL || site?.getBaseURL?.() || '').trim();
+    if (!hasText(resolvedBaseURL)) {
+      return { ok: false, error: ':warning: detect-cdn: missing or invalid URL.' };
+    }
+
+    if (!sqs) {
+      return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
+    }
+
+    if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
+      return { ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' };
+    }
+
+    const siteId = site?.getId?.();
+    const payload = {
+      type: 'detect-cdn',
+      baseURL: resolvedBaseURL,
+      ...(hasText(siteId) && { siteId }),
+      ...(channelId != null && threadTs != null
+        ? { slackContext: { channelId, threadTs } }
+        : {}),
+    };
+
+    if (say) {
+      await say(
+        `:mag: Queued CDN detection for *${resolvedBaseURL}*. I'll reply here when it's ready.`,
+      );
+    }
+
+    await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, payload);
+    return { ok: true };
+  } catch (error) {
+    log.error(error);
+    throw error;
+  }
+}
+
 /**
  * Shared onboarding function used by both modal and command implementations.
  *
@@ -1454,6 +1512,19 @@ export const onboardSingleSite = async (
       reportLine.status = 'Failed';
       await say(`:x: *Error saving site configuration:* ${error.message}`);
       return reportLine;
+    }
+
+    const detectCdnResult = await queueDetectCdnAudit(
+      {
+        site,
+        baseURL: resolvedUrl,
+        slackContext,
+      },
+      context,
+    );
+    if (!detectCdnResult.ok) {
+      log.warn(`[onboard] CDN detection queue failed for site ${siteID}: ${detectCdnResult.error}`);
+      await say(`:warning: ${detectCdnResult.error}`);
     }
 
     // configure redirectsmode and redirectssource

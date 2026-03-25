@@ -27,6 +27,7 @@ describe('DetectCdnCommand', () => {
   let sqsStub;
   let extractURLFromSlackInputStub;
   let postErrorMessageStub;
+  let queueDetectCdnAuditStub;
 
   beforeEach(async function beforeEachHook() {
     this.timeout(10000);
@@ -34,6 +35,7 @@ describe('DetectCdnCommand', () => {
     postErrorMessageStub = sinon.stub().callsFake(async (sayFn, err) => {
       await sayFn(`:nuclear-warning: Oops! Something went wrong: ${err.message}`);
     });
+    queueDetectCdnAuditStub = sinon.stub().resolves({ ok: true });
 
     DetectCdnCommand = (await esmock(
       '../../../../src/support/slack/commands/detect-cdn.js',
@@ -41,6 +43,9 @@ describe('DetectCdnCommand', () => {
         '../../../../src/utils/slack/base.js': {
           extractURLFromSlackInput: extractURLFromSlackInputStub,
           postErrorMessage: postErrorMessageStub,
+        },
+        '../../../../src/support/utils.js': {
+          queueDetectCdnAudit: queueDetectCdnAuditStub,
         },
       },
     )).default;
@@ -90,6 +95,10 @@ describe('DetectCdnCommand', () => {
 
   it('notifies when AUDIT_JOBS_QUEUE_URL is missing', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
+    queueDetectCdnAuditStub.resolves({
+      ok: false,
+      error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.',
+    });
     const command = DetectCdnCommand({
       ...context,
       env: {},
@@ -103,6 +112,10 @@ describe('DetectCdnCommand', () => {
 
   it('notifies when env is undefined', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
+    queueDetectCdnAuditStub.resolves({
+      ok: false,
+      error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.',
+    });
     const { env: _, ...contextWithoutEnv } = context;
     const command = DetectCdnCommand(contextWithoutEnv);
 
@@ -114,6 +127,10 @@ describe('DetectCdnCommand', () => {
 
   it('notifies when SQS client is missing', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
+    queueDetectCdnAuditStub.resolves({
+      ok: false,
+      error: ':x: Server misconfiguration: missing SQS client.',
+    });
     const command = DetectCdnCommand({
       ...context,
       sqs: null,
@@ -125,79 +142,61 @@ describe('DetectCdnCommand', () => {
     expect(slackContext.say.firstCall.args[0]).to.include('missing SQS client');
   });
 
-  it('says queued and sends SQS message when URL is valid and no site found', async () => {
+  it('delegates to queueDetectCdnAudit when URL is valid and no site found', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves(null);
     const command = DetectCdnCommand(context);
 
     await command.handleExecution(['https://example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledOnce;
-    expect(slackContext.say.firstCall.args[0]).to.include('Queued CDN detection for *https://example.com*');
-    expect(sqsStub.sendMessage).to.have.been.calledOnce;
-    expect(sqsStub.sendMessage.firstCall.args[0]).to.equal('https://sqs.example.com/queue');
-    expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.equal({
-      type: 'detect-cdn',
+    expect(queueDetectCdnAuditStub).to.have.been.calledOnce;
+    expect(queueDetectCdnAuditStub.firstCall.args[0]).to.deep.include({
       baseURL: 'https://example.com',
-      slackContext: {
-        channelId: 'C123',
-        threadTs: '1712345678.9012',
-      },
+      site: null,
+      slackContext,
     });
+    expect(queueDetectCdnAuditStub.firstCall.args[1]).to.equal(context);
   });
 
-  it('includes siteId in SQS payload when site is found for base URL', async () => {
+  it('passes site to queueDetectCdnAudit when site is found for base URL', async () => {
     extractURLFromSlackInputStub.returns('https://mysite.com');
-    dataAccessStub.Site.findByBaseURL.resolves({
-      getId: () => 'site-uuid-123',
-    });
+    const mockSite = { getId: () => 'site-uuid-123' };
+    dataAccessStub.Site.findByBaseURL.resolves(mockSite);
     const command = DetectCdnCommand(context);
 
     await command.handleExecution(['https://mysite.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledOnce;
-    expect(sqsStub.sendMessage).to.have.been.calledOnce;
-    expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({
-      type: 'detect-cdn',
+    expect(queueDetectCdnAuditStub).to.have.been.calledOnce;
+    expect(queueDetectCdnAuditStub.firstCall.args[0]).to.deep.include({
       baseURL: 'https://mysite.com',
-      siteId: 'site-uuid-123',
-      slackContext: {
-        channelId: 'C123',
-        threadTs: '1712345678.9012',
-      },
+      site: mockSite,
+      slackContext,
     });
   });
 
-  it('still queues job without siteId when Site.findByBaseURL throws', async () => {
+  it('still queues when Site.findByBaseURL throws (site null)', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.rejects(new Error('db error'));
     const command = DetectCdnCommand(context);
 
     await command.handleExecution(['https://example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledOnce;
-    expect(slackContext.say.firstCall.args[0]).to.include('Queued CDN detection');
-    expect(sqsStub.sendMessage).to.have.been.calledOnce;
-    expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('siteId');
-    expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({
-      type: 'detect-cdn',
+    expect(queueDetectCdnAuditStub).to.have.been.calledOnce;
+    expect(queueDetectCdnAuditStub.firstCall.args[0]).to.deep.include({
       baseURL: 'https://example.com',
-      slackContext: {
-        channelId: 'C123',
-        threadTs: '1712345678.9012',
-      },
+      site: null,
+      slackContext,
     });
   });
 
-  it('logs and posts error when an exception occurs in handleExecution', async () => {
+  it('logs and posts error when queueDetectCdnAudit throws', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves(null);
-    sqsStub.sendMessage.rejects(new Error('SQS failure'));
+    queueDetectCdnAuditStub.rejects(new Error('SQS failure'));
     const command = DetectCdnCommand(context);
 
     await command.handleExecution(['https://example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledTwice; // once "Queued...", then error
     expect(context.log.error).to.have.been.calledOnce;
     expect(postErrorMessageStub).to.have.been.calledOnce;
     expect(postErrorMessageStub.firstCall.args[0]).to.equal(slackContext.say);

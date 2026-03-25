@@ -24,9 +24,8 @@
  *   that site (in addition to posting the result in Slack).
  */
 
-import { hasText } from '@adobe/spacecat-shared-utils';
-
 import BaseCommand from './base.js';
+import { queueDetectCdnAudit } from '../../utils.js';
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['detect-cdn'];
@@ -46,14 +45,12 @@ export default function DetectCdnCommand(context) {
 
   const {
     dataAccess,
-    env,
     log,
-    sqs,
   } = context;
   const { Site } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
-    const { say, channelId, threadTs } = slackContext;
+    const { say } = slackContext;
 
     try {
       const [urlInput] = args;
@@ -64,39 +61,21 @@ export default function DetectCdnCommand(context) {
         return;
       }
 
-      if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
-        await say(':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.');
-        return;
-      }
-
-      if (!sqs) {
-        await say(':x: Server misconfiguration: missing SQS client.');
-        return;
-      }
-
-      // If base URL matches a SpaceCat site, include siteId so the worker can persist
-      // deliveryConfig.cdn on that site.
-      let siteId = null;
+      let site = null;
       try {
-        const site = await Site.findByBaseURL(baseURL);
-        if (site) {
-          siteId = site.getId();
-        }
+        site = await Site.findByBaseURL(baseURL);
       } catch {
         // ignore; we can still detect CDN for any URL
       }
 
-      await say(`:mag: Queued CDN detection for *${baseURL}*. I'll reply here when it's ready.`);
+      const result = await queueDetectCdnAudit(
+        { baseURL, site, slackContext },
+        context,
+      );
 
-      await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
-        type: 'detect-cdn',
-        baseURL,
-        ...(siteId && { siteId }),
-        slackContext: {
-          channelId,
-          threadTs,
-        },
-      });
+      if (!result.ok) {
+        await say(result.error);
+      }
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
