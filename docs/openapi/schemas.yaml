@@ -6746,3 +6746,21 @@ PlgOnboarding:
       $ref: '#/DateTime'
     updatedAt:
       $ref: '#/DateTime'
+
+PresignedUrlResponse:
+  type: object
+  description: A short-lived presigned S3 URL and its expiry time
+  properties:
+    presignedUrl:
+      type: string
+      format: uri
+      description: Presigned S3 URL to download the resource
+    expiresAt:
+      type: string
+      format: date-time
+      description: ISO 8601 timestamp when the presigned URL expires
+      example: '2026-06-15T12:00:00.000Z'
+  required:
+    - presignedUrl
+    - expiresAt
+  additionalProperties: false

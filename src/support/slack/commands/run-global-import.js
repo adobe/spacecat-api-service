@@ -20,6 +20,7 @@ const PHRASES = ['run global import'];
 
 const GLOBAL_IMPORTS = [
   'stale-suggestions-cleanup',
+  'optimize-at-edge-enabled-marking',
 ];
 
 /**

@@ -51,8 +51,15 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
 
+  // LLMO Opportunities - org-scoped, LLMO product; not yet required by S2S consumers
+  'GET /org/:spaceCatId/opportunities/count',
+  'GET /org/:spaceCatId/brands/all/opportunities',
+  'GET /org/:spaceCatId/brands/:brandId/opportunities',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
+  'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
+  'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',

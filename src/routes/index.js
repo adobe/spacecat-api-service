@@ -119,6 +119,7 @@ export default function getRouteHandlers(
   fixesController,
   llmoController,
   llmoMysticatController,
+  llmoOpportunitiesController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -385,6 +386,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
+    'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
+    'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
@@ -422,6 +425,11 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
+
+    // LLMO Opportunities (org-level)
+    'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
+    'GET /org/:spaceCatId/brands/all/opportunities': llmoOpportunitiesController.getBrandOpportunities,
+    'GET /org/:spaceCatId/brands/:brandId/opportunities': llmoOpportunitiesController.getBrandOpportunities,
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
