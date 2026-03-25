@@ -237,3 +237,4 @@ The handler reshapes the flat RPC rows into `ShareOfVoiceData[]`:
 
 - [Brand Presence Filter Dimensions API](filter-dimensions-api.md) — Returns available filter options for the Brand Presence feature.
 - [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks for a given model.
+- [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly trends from executions + competitor data (non-RPC)

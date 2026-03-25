@@ -193,3 +193,5 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 
 - [Filter Dimensions API](./filter-dimensions-api.md) — Filter options for Brand Presence
 - [Brand Presence Weeks API](./brand-presence-weeks-api.md) — Available weeks for date picker
+- [Brand Presence Sentiment Overview API](./sentiment-overview-api.md) — Weekly sentiment distribution
+- [Brand Presence Market Tracking Trends API](./market-tracking-trends-api.md) — Weekly mentions, citations, and competitors
