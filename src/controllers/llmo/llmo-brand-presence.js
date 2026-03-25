@@ -2588,7 +2588,7 @@ export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
 
@@ -2629,7 +2629,12 @@ export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
         q = q.eq('region_code', params.regionCode);
       }
 
-      const { data, error } = await q.limit(QUERY_LIMIT);
+      // Use WEEKS_QUERY_LIMIT — the view groups by (competitor, date, category,
+      // region), so row count grows with competitors × categories × regions × weeks.
+      // A 28-day window for an org with 100 competitors, 15 categories, and 10 regions
+      // produces ~60K rows.  QUERY_LIMIT (5000) would silently truncate, producing
+      // wrong totals when aggregate=true.
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
 
       if (error) {
         ctx.log.error(`Brand vs competitors PostgREST error: ${error.message}`);

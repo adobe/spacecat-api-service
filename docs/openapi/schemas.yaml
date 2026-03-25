@@ -6773,10 +6773,21 @@ BrandVsCompetitorsResponse:
   properties:
     competitorData:
       type: array
-      description: Aggregated competitor metrics per execution date
+      description: >
+        Aggregated competitor metrics per execution date.
+        When aggregate=true, rows are rolled up across categoryName/regionCode
+        and those fields are omitted.
       items:
         type: object
-        additionalProperties: false
+        required:
+          - siteId
+          - brandId
+          - brandName
+          - model
+          - executionDate
+          - competitor
+          - totalMentions
+          - totalCitations
         properties:
           siteId:
             type: string
@@ -6793,8 +6804,10 @@ BrandVsCompetitorsResponse:
             format: date
           categoryName:
             type: string
+            description: Present only when aggregate is not set (omitted when aggregate=true)
           regionCode:
             type: string
+            description: Present only when aggregate is not set (omitted when aggregate=true)
           competitor:
             type: string
           totalMentions:
