@@ -4101,6 +4101,32 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(200);
       expect(response).to.deep.equal({ '2025-01-01': 2, '2025-01-02': 1 });
     });
+
+    it('falls back to direct property when getter is absent', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { updatedBy: 'prerender' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('falls back to "unknown" when neither getter nor property is present', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        {},
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ unknown: 1 });
+    });
   });
 
   describe('getTopPages', () => {
