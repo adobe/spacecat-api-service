@@ -1023,11 +1023,18 @@ function SitesController(ctx, log, env) {
     }
   };
 
-  const getPageCitabilityCountByUpdatedBy = async (context) => {
+  const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
+
+  const getPageCitabilityCounts = async (context) => {
     const { siteId } = context.params;
+    const groupBy = context.data?.groupBy ?? 'updatedBy';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
+    }
+
+    if (!CITABILITY_GROUP_BY_FIELDS.has(groupBy)) {
+      return badRequest(`Invalid groupBy field. Allowed values: ${[...CITABILITY_GROUP_BY_FIELDS].join(', ')}`);
     }
 
     const site = await Site.findById(siteId);
@@ -1043,8 +1050,9 @@ function SitesController(ctx, log, env) {
     const records = await PageCitability.allBySiteId(siteId);
     const counts = {};
     for (const record of records) {
-      const key = record.getUpdatedBy?.() ?? record.updatedBy ?? 'unknown';
-      counts[key] = (counts[key] ?? 0) + 1;
+      const getterName = `get${groupBy.charAt(0).toUpperCase()}${groupBy.slice(1)}`;
+      const value = String(record[getterName]?.() ?? record[groupBy] ?? 'unknown');
+      counts[value] = (counts[value] ?? 0) + 1;
     }
     return ok(counts);
   };
@@ -1248,7 +1256,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
-    getPageCitabilityCountByUpdatedBy,
+    getPageCitabilityCounts,
     getTopPages,
     resolveSite,
     getBrandProfile,

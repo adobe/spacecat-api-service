@@ -134,6 +134,7 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'getPageCitabilityCounts',
     'getTopPages',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
@@ -177,6 +178,9 @@ describe('Sites Controller', () => {
         allBySiteId: sandbox.stub().resolves([]),
         allBySiteIdAndSource: sandbox.stub().resolves([]),
         allBySiteIdAndSourceAndGeo: sandbox.stub().resolves([]),
+      },
+      PageCitability: {
+        allBySiteId: sandbox.stub().resolves([]),
       },
       Organization: {
         findById: sandbox.stub().resolves(null),
@@ -3981,6 +3985,121 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+  });
+
+  describe('getPageCitabilityCounts', () => {
+    it('returns bad request when site ID is missing', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: undefined },
+        data: {},
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request for an invalid groupBy field', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'invalidField' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('Invalid groupBy field');
+    });
+
+    it('returns not found when the site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its page citability records');
+    });
+
+    it('returns empty counts when no records exist', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({});
+    });
+
+    it('defaults to groupBy=updatedBy when groupBy is not specified', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+        { getUpdatedBy: () => 'page-citability' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1, 'page-citability': 1 });
+    });
+
+    it('returns counts grouped by updatedBy', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+        { getUpdatedBy: () => 'prerender' },
+        { getUpdatedBy: () => 'page-citability' },
+        { getUpdatedBy: () => 'spacecat' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 2, 'page-citability': 1, spacecat: 1 });
+    });
+
+    it('returns counts grouped by url', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUrl: () => 'https://example.com/a' },
+        { getUrl: () => 'https://example.com/a' },
+        { getUrl: () => 'https://example.com/b' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'url' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ 'https://example.com/a': 2, 'https://example.com/b': 1 });
+    });
+
+    it('returns counts grouped by updatedAt', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedAt: () => '2025-01-01' },
+        { getUpdatedAt: () => '2025-01-01' },
+        { getUpdatedAt: () => '2025-01-02' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedAt' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ '2025-01-01': 2, '2025-01-02': 1 });
     });
   });
 
