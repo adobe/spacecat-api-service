@@ -125,10 +125,55 @@ export function getTopSuggestions(suggestions, opportunityName) {
 }
 
 /**
- * Grants top ungranted suggestions for an opportunity. Ensures a
- * token exists for the current cycle; if none, creates one with
- * total = (config max) minus already-granted count. Then grants
- * top ungranted groups up to the remaining token count.
+ * Grants suggestion groups using the SuggestionGrant.grantSuggestions RPC.
+ *
+ * @param {Object} SuggestionGrant - SuggestionGrant collection.
+ * @param {Array} groups - Groups from getTopSuggestions.
+ * @param {string} siteId - Site ID.
+ * @param {string} tokenType - Token type.
+ * @returns {Promise<void>}
+ */
+async function grantGroups(SuggestionGrant, groups, siteId, tokenType) {
+  await Promise.all(
+    groups.map((group) => {
+      const ids = group.items.map((s) => s.getId()).filter(Boolean);
+      return ids.length > 0
+        ? SuggestionGrant.grantSuggestions(ids, siteId, tokenType)
+        : Promise.resolve();
+    }),
+  );
+}
+
+/**
+ * Revokes grants by their grant IDs using the shared
+ * SuggestionGrant.revokeSuggestionGrant RPC. Each call atomically
+ * deletes the suggestion_grants rows and decrements the token used count.
+ *
+ * @param {Object} SuggestionGrant - SuggestionGrant collection.
+ * @param {string[]} grantIds - Unique grant IDs to revoke.
+ * @returns {Promise<void>}
+ */
+async function revokeGrants(SuggestionGrant, grantIds) {
+  if (!grantIds?.length) return;
+  await Promise.all(
+    grantIds.map((grantId) => SuggestionGrant.revokeSuggestionGrant(grantId)),
+  );
+}
+
+/**
+ * Grants top ungranted suggestions for an opportunity.
+ *
+ * **When a token already exists (current cycle):**
+ * Fetches all grants for the current token. If any granted
+ * suggestion has OUTDATED or REJECTED status, revokes all
+ * grants for this token, then re-grants only the non-stale
+ * ones. Fills remaining capacity from NEW ungranted suggestions.
+ *
+ * **When no token exists (new cycle):**
+ * Creates a new token with the default tokensPerCycle total.
+ * Revokes old grants from the previous cycle and re-grants them
+ * with the new token. Then fills remaining capacity from NEW
+ * ungranted suggestions.
  *
  * @param {Object} dataAccess - Data access collections.
  * @param {Object} site - Site model (getId()).
@@ -156,30 +201,71 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const newSuggestionIds = newSuggestions.map((s) => s.getId());
   if (!newSuggestionIds.length) return;
 
-  const { grantIds, notGrantedIds } = await SuggestionGrant
+  const { grantedIds, grantIds } = await SuggestionGrant
     .splitSuggestionsByGrantStatus(newSuggestionIds);
 
   let token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
-  if (!token) {
-    const suppliedTotal = Math.max(1, config.tokensPerCycle - (grantIds?.length ?? 0));
+  const isNewToken = !token;
+
+  if (isNewToken) {
+    // New cycle: create token with default tokensPerCycle total
     token = await Token.findBySiteIdAndTokenType(siteId, tokenType, {
       createIfNotFound: true,
-      total: suppliedTotal,
     });
+
+    // Revoke old grants from previous cycle and re-grant with new token
+    if (grantedIds?.length > 0) {
+      await revokeGrants(SuggestionGrant, grantIds);
+
+      const grantedEntities = newSuggestions
+        .filter((s) => grantedIds.includes(s.getId()));
+      const grantedGroups = getTopSuggestions(grantedEntities, oppType);
+      await grantGroups(SuggestionGrant, grantedGroups, siteId, tokenType);
+
+      // Re-fetch token to get updated remaining after re-grants
+      token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
+      if (!token) return;
+    }
+  } else {
+    // Existing token: fetch all grants for this token and check for stale suggestions
+    const tokenGrants = await SuggestionGrant
+      .allByIndexKeys({ tokenId: token.getId() });
+
+    if (tokenGrants?.length > 0) {
+      const grantedSuggestionIds = tokenGrants.map((g) => g.getSuggestionId());
+      const grantedSuggestions = await Promise.all(
+        grantedSuggestionIds.map((id) => Suggestion.findById(id)),
+      );
+
+      const hasStale = grantedSuggestions.some(
+        (s) => s && (s.getStatus() === STATUSES.OUTDATED
+          || s.getStatus() === STATUSES.REJECTED),
+      );
+
+      if (hasStale) {
+        // Revoke all grants for this token; remaining token granting below
+        // will re-grant eligible suggestions along with new ones
+        const uniqueGrantIds = [...new Set(tokenGrants.map((g) => g.getGrantId()))];
+        await revokeGrants(SuggestionGrant, uniqueGrantIds);
+
+        // Re-fetch token to get updated remaining after revokes
+        token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
+        if (!token) return;
+      }
+    }
   }
 
   const remaining = token.getRemaining();
   if (remaining <= 0) return;
+
+  // Re-fetch grant status since revokes may have changed it
+  const freshNewIds = newSuggestions.map((s) => s.getId());
+  const { notGrantedIds: currentNotGrantedIds } = await SuggestionGrant
+    .splitSuggestionsByGrantStatus(freshNewIds);
+
   const notGrantedEntities = newSuggestions
-    .filter((s) => notGrantedIds.includes(s.getId()));
+    .filter((s) => currentNotGrantedIds.includes(s.getId()));
   const topGroups = getTopSuggestions(notGrantedEntities, oppType)
     .slice(0, remaining);
-  await Promise.all(
-    topGroups.map((group) => {
-      const ids = group.items.map((s) => s.getId()).filter(Boolean);
-      return ids.length > 0
-        ? SuggestionGrant.grantSuggestions(ids, siteId, tokenType)
-        : Promise.resolve();
-    }),
-  );
+  await grantGroups(SuggestionGrant, topGroups, siteId, tokenType);
 }
