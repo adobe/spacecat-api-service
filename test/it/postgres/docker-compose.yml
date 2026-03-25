@@ -25,8 +25,23 @@ services:
       timeout: 3s
       retries: 30
 
+  minio:
+    image: minio/minio:latest
+    container_name: spacecat-it-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data
+    ports:
+      - "${IT_MINIO_PORT:-9100}:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   data-service:
-    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v1.13.0
+    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v1.29.0
     container_name: spacecat-it-data-service
     depends_on:
       db:

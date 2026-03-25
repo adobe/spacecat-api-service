@@ -23,7 +23,6 @@ describe('SentimentTopicDto', () => {
         getTopicId: () => 'topic-456',
         getName: () => '2026 Corvette Stingray',
         getDescription: () => 'Latest corvette model reviews',
-        getSubPrompts: () => ['Focus on performance', 'Analyze design feedback'],
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-02T00:00:00Z',
@@ -38,7 +37,6 @@ describe('SentimentTopicDto', () => {
         topicId: 'topic-456',
         name: '2026 Corvette Stingray',
         description: 'Latest corvette model reviews',
-        subPrompts: ['Focus on performance', 'Analyze design feedback'],
         enabled: true,
         createdAt: '2026-01-01T00:00:00Z',
         updatedAt: '2026-01-02T00:00:00Z',
@@ -47,34 +45,12 @@ describe('SentimentTopicDto', () => {
       });
     });
 
-    it('handles empty arrays', () => {
-      const mockTopic = {
-        getSiteId: () => 'site-456',
-        getTopicId: () => 'topic-789',
-        getName: () => 'Empty Topic',
-        getDescription: () => undefined,
-        getSubPrompts: () => [],
-        getEnabled: () => false,
-        getCreatedAt: () => '2026-01-01T00:00:00Z',
-        getUpdatedAt: () => '2026-01-01T00:00:00Z',
-        getCreatedBy: () => 'system',
-        getUpdatedBy: () => 'system',
-      };
-
-      const result = SentimentTopicDto.toJSON(mockTopic);
-
-      expect(result.subPrompts).to.deep.equal([]);
-      expect(result.enabled).to.equal(false);
-      expect(result.description).to.equal(undefined);
-    });
-
     it('handles null/undefined values from getters', () => {
       const mockTopic = {
         getSiteId: () => 'site-789',
         getTopicId: () => 'topic-abc',
         getName: () => 'Test Topic',
         getDescription: () => null,
-        getSubPrompts: () => undefined,
         getEnabled: () => true,
         getCreatedAt: () => null,
         getUpdatedAt: () => undefined,
@@ -88,8 +64,6 @@ describe('SentimentTopicDto', () => {
       expect(result.topicId).to.equal('topic-abc');
       expect(result.name).to.equal('Test Topic');
       expect(result.description).to.equal(null);
-      // Arrays should default to empty arrays when null/undefined
-      expect(result.subPrompts).to.deep.equal([]);
     });
   });
 });

@@ -9,15 +9,13 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { queueIdentifyRedirectsAudit } from '../../utils.js';
 
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['identify-redirects'];
-const DEFAULT_MINUTES = 60;
+const DEFAULT_MINUTES = 2500; // 41 hours, 40 minutes
 
 export default function IdentifyRedirectsCommand(context) {
   const baseCommand = BaseCommand({
@@ -30,14 +28,13 @@ export default function IdentifyRedirectsCommand(context) {
 
   const {
     dataAccess,
-    env,
     log,
-    sqs,
+    updateRedirects = false,
   } = context;
   const { Site } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
-    const { say, channelId, threadTs } = slackContext;
+    const { say } = slackContext;
 
     try {
       const [baseURLInput, minutesInput] = args;
@@ -57,52 +54,17 @@ export default function IdentifyRedirectsCommand(context) {
         return;
       }
 
-      const authoringType = site.getAuthoringType();
-      const deliveryType = site.getDeliveryType();
-      // check either authoringType or deliveryType is CS/CW
-      if (![
-        SiteModel.AUTHORING_TYPES.CS,
-        SiteModel.AUTHORING_TYPES.CS_CW,
-      ].includes(authoringType)
-      && ![
-        SiteModel.DELIVERY_TYPES.AEM_CS,
-      ].includes(deliveryType)) {
-        await say(`:warning: identify-redirects currently supports AEM CS/CW only. This site authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`);
-        return;
-      }
-
-      const deliveryConfig = site.getDeliveryConfig?.() || {};
-      const { programId, environmentId } = deliveryConfig;
-
-      if (!hasText(programId) || !hasText(environmentId)) {
-        await say(':warning: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for Splunk queries.');
-        return;
-      }
-
-      if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
-        await say(':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.');
-        return;
-      }
-
-      if (!sqs) {
-        await say(':x: Server misconfiguration: missing SQS client.');
-        return;
-      }
-
-      await say(`:mag: Queued redirect pattern detection for *${baseURL}* (last ${minutes}m). I’ll reply here when it’s ready.`);
-
-      await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
-        type: 'identify-redirects',
-        siteId: site.getId(),
+      const result = await queueIdentifyRedirectsAudit({
+        site,
         baseURL,
-        programId: String(programId),
-        environmentId: String(environmentId),
         minutes,
-        slackContext: {
-          channelId,
-          threadTs,
-        },
-      });
+        updateRedirects,
+        slackContext,
+      }, context);
+
+      if (!result.ok) {
+        await say(result.message || result.error);
+      }
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

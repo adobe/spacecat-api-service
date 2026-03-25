@@ -16,12 +16,19 @@ import { Request } from '@adobe/fetch';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AccessControlUtil from '../src/support/access-control-util.js';
 
-import { main } from './utils.js';
-
 use(sinonChai);
+
+const s2sAuthWrapperStub = (fn) => fn;
+
+const { main } = await esmock('../src/index.js', {
+  '@adobe/spacecat-shared-http-utils': {
+    s2sAuthWrapper: s2sAuthWrapperStub,
+  },
+});
 
 const baseUrl = 'https://base.spacecat';
 
@@ -221,6 +228,41 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles spaceCatId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/v2/orgs/not-a-uuid/brands/brand-1/prompts';
+    context.dataAccess.services = {
+      postgrestClient: {
+        from: () => ({
+          // eslint-disable-next-line max-len
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+        }),
+      },
+    };
+
+    // eslint-disable-next-line max-len
+    const url = `${baseUrl}/v2/orgs/not-a-uuid/brands/brand-1/prompts`;
+    request = new Request(url, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Organization Id (spaceCatId) is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles brandId not correctly formatted error for filter-dimensions', async () => {
+    context.pathInfo.suffix = '/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/invalid-brand/brand-presence/filter-dimensions';
+
+    request = new Request(`${baseUrl}/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/invalid-brand/brand-presence/filter-dimensions`, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Brand Id is invalid. Please provide a valid UUID or "all".');
   });
 
   it('handles dynamic route errors', async () => {

@@ -27,18 +27,20 @@ import {
   isValidUUID,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
-
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import {
   sendAutofixMessage,
+  getCookieValue,
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
+  getIsSummitPlgEnabled,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -173,7 +175,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, Site, Configuration,
+    Opportunity, Suggestion, SuggestionGrant, Site, Configuration,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -185,6 +187,29 @@ function SuggestionsController(ctx, sqs, env) {
   }
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Filters suggestions to only granted ones when summit-plg is enabled for the site
+   * and the request originates from the sites-optimizer-ui client.
+   * Returns all suggestions unchanged when either condition is not met.
+   * @param {Object} site - Site entity.
+   * @param {Array} suggestions - Suggestion entities to filter.
+   * @param {Object} context - Request context.
+   * @returns {Promise<Array>} Filtered suggestion entities.
+   */
+  const filterByGrantStatus = async (site, suggestions, context) => {
+    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
+      return suggestions;
+    }
+    try {
+      const ids = suggestions.map((s) => s.getId());
+      const { grantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(ids);
+      return suggestions.filter((s) => grantedIds.includes(s.getId()));
+    } catch (err) {
+      ctx.log?.error?.('Failed to filter suggestions by grant status', err?.message ?? err);
+      return suggestions;
+    }
+  };
 
   /**
    * Gets all suggestions for a given site and opportunity
@@ -226,13 +251,19 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Fetch all suggestions (single DB call)
     let suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
-
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
       if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
+      }
+    }
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+      try {
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+      /* c8 ignore next 3 */
+      } catch (err) {
+        ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
       }
     }
 
@@ -242,8 +273,8 @@ function SuggestionsController(ctx, sqs, env) {
         (sugg) => statuses.includes(sugg.getStatus()),
       );
     }
-
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -294,7 +325,6 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestionEntities = results.data || [];
     const newCursor = results.cursor || null;
 
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
@@ -302,8 +332,8 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
 
@@ -351,7 +381,6 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
@@ -359,7 +388,8 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -410,7 +440,6 @@ function SuggestionsController(ctx, sqs, env) {
       returnCursor: true,
     });
     const { data: suggestionEntities = [], cursor: newCursor = null } = results;
-    // Check if the opportunity belongs to the site
     let opportunity = null;
     if (suggestionEntities.length > 0) {
       opportunity = await suggestionEntities[0].getOpportunity();
@@ -418,7 +447,8 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map(
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok({
@@ -473,6 +503,10 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunity = await suggestion.getOpportunity();
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context)
+      && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
+      return notFound('Suggestion not found');
     }
     return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
   };
@@ -887,12 +921,14 @@ function SuggestionsController(ctx, sqs, env) {
    * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
    * suggestions, then queues an autofix message via SQS.
    *
-   * For promise token resolution, prefers the x-promise-token request header if present.
-   * Falls back to obtaining a token via IMS when the header is absent or empty.
+   * For promise token resolution, reads the promiseToken cookie sent by the browser
+   * (set via /auth/promise endpoint). Falls back to obtaining a token via IMS when
+   * the cookie is absent.
    *
    * @param {Object} context - The request context
    * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
+   *   `cookie` header with `promiseToken=<token>` for promise-based authoring types
    * @param {Object} context.params - Path parameters (siteId, opportunityId)
    * @param {Object} context.data - Request body containing suggestionIds
    * @returns {Promise<Response>} 207 multi-status response with per-suggestion results
@@ -1009,13 +1045,16 @@ function SuggestionsController(ctx, sqs, env) {
             statusCode: 400,
           });
         /* c8 ignore stop */
-        } else if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+        } else if (
+          suggestion.getStatus() === SuggestionModel.STATUSES.NEW
+          || suggestion.getStatus() === SuggestionModel.STATUSES.PENDING_VALIDATION
+        ) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
             uuid: suggestion.getId(),
             index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Suggestion is not in NEW status',
+            message: 'Suggestion must be in NEW or PENDING_VALIDATION status for auto-fix',
             statusCode: 400,
           });
         }
@@ -1030,6 +1069,9 @@ function SuggestionsController(ctx, sqs, env) {
         const url = data?.url || data?.recommendations?.[0]?.pageUrl
           || data?.url_from
           || data?.urlFrom
+          || (opportunity.getType() === 'no-cta-above-the-fold'
+            ? data?.contentFix?.page_patch?.original_page_url
+            : null)
           || opportunityData?.page; // for high-organic-low-ctr
         if (!url) return acc;
 
@@ -1071,10 +1113,9 @@ function SuggestionsController(ctx, sqs, env) {
     let promiseTokenResponse;
     const skipPromiseToken = isAssessAction && precheckOnly === true;
     if (!skipPromiseToken) {
-      const { pathInfo } = context;
-      const headerToken = pathInfo?.headers?.['x-promise-token'];
-      if (hasText(headerToken)) {
-        promiseTokenResponse = { promise_token: headerToken };
+      const cookieToken = getCookieValue(context, 'promiseToken');
+      if (hasText(cookieToken)) {
+        promiseTokenResponse = { promise_token: cookieToken };
       } else {
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
@@ -1464,6 +1505,9 @@ function SuggestionsController(ctx, sqs, env) {
 
     context.log.info(`[edge-deploy] allSuggestions count: ${allSuggestions.length}`);
 
+    const isEdgeDeployableStatus = (status) => status === SuggestionModel.STATUSES.NEW
+      || status === SuggestionModel.STATUSES.PENDING_VALIDATION;
+
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
     const domainWideSuggestions = [];
@@ -1498,12 +1542,12 @@ function SuggestionsController(ctx, sqs, env) {
             statusCode: 400,
           });
         }
-      } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
-        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} (status: ${suggestion.getStatus()}) is not in NEW status`);
+      } else if (!isEdgeDeployableStatus(suggestion.getStatus())) {
+        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} (status: ${suggestion.getStatus()}) must be NEW or PENDING_VALIDATION for edge deploy`);
         failedSuggestions.push({
           uuid: suggestionId,
           index,
-          message: 'Suggestion is not in NEW status',
+          message: 'Suggestion must be in NEW or PENDING_VALIDATION status for edge deploy',
           statusCode: 400,
         });
       } else {
@@ -1687,7 +1731,7 @@ function SuggestionsController(ctx, sqs, env) {
             succeededSuggestions.push(suggestion);
             context.log.info(`[edge-deploy] Successfully deployed domain-wide suggestion ${suggestionId} by ${profile?.email || 'tokowaka-deployment'}`);
 
-            // Mark all other NEW suggestions that match allowedRegexPatterns
+            // Mark all other NEW / PENDING_VALIDATION suggestions that match allowedRegexPatterns
             try {
               // Get IDs of suggestions skipped in this batch
               const skippedInBatchIds = new Set(
@@ -1708,8 +1752,7 @@ function SuggestionsController(ctx, sqs, env) {
                   return false;
                 }
 
-                // Only process NEW suggestions
-                if (s.getStatus() !== SuggestionModel.STATUSES.NEW) {
+                if (!isEdgeDeployableStatus(s.getStatus())) {
                   return false;
                 }
 

@@ -22,11 +22,11 @@ use(sinonChai);
 describe('IdentifyRedirectsCommand', () => {
   const SiteModelStub = {
     AUTHORING_TYPES: {
-      CS: 'CS',
-      CS_CW: 'CS_CW',
+      CS: 'cs',
+      CS_CW: 'cs/crosswalk',
     },
     DELIVERY_TYPES: {
-      AEM_CS: 'AEM_CS',
+      AEM_CS: 'aem_cs',
     },
   };
 
@@ -223,7 +223,7 @@ describe('IdentifyRedirectsCommand', () => {
       baseURL: 'https://example.com',
       programId: 'p',
       environmentId: 'e',
-      minutes: 60,
+      minutes: 2500,
     });
     expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({
       slackContext: {

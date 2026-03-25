@@ -29,8 +29,8 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 import { EntitlementDto } from '../dto/entitlement.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
-const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
-const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
+const FREE_TRIAL_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 
 /**
  * Entitlements controller. Provides methods to read entitlements by organization.
@@ -82,22 +82,26 @@ function EntitlementsController(ctx) {
       return ok(orgEntitlements);
     } catch (e) {
       context.log.error(`Error getting entitlements for organization ${organizationId}: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to retrieve entitlements');
     }
   };
 
   /**
    * Creates an entitlement for an organization.
    * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Array of entitlements response.
+   * @returns {Promise<Response>} Created entitlement response.
    */
   const createEntitlement = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create entitlements');
     }
     const { organizationId } = context.params;
+    const { productCode = EntitlementModel.PRODUCT_CODES.LLMO } = context.data || {};
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
+    }
+    if (typeof productCode !== 'string' || !VALID_PRODUCT_CODES.has(productCode)) {
+      return badRequest(`Invalid product code. Must be one of: ${[...VALID_PRODUCT_CODES].join(', ')}`);
     }
     try {
       const organization = await Organization.findById(organizationId);
@@ -107,13 +111,13 @@ function EntitlementsController(ctx) {
       const tierClient = await TierClient.createForOrg(
         context,
         organization,
-        LLMO_PRODUCT_CODE,
+        productCode,
       );
-      const { entitlement } = await tierClient.createEntitlement(LLMO_TIER);
+      const { entitlement } = await tierClient.createEntitlement(FREE_TRIAL_TIER);
       return created(EntitlementDto.toJSON(entitlement));
     } catch (e) {
       context.log.error(`Error creating entitlement for organization ${organizationId}: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to create entitlement');
     }
   };
 

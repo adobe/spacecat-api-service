@@ -218,8 +218,13 @@ function SentimentController(ctx, log) {
 
     const userId = getUserIdentifier(context);
 
+    const existingResult = await SentimentTopic.allBySiteId(siteId, {});
+    const existingNames = new Set(
+      (existingResult.data || []).map((t) => t.getName().toLowerCase()),
+    );
+    const batchNames = new Set();
+
     const processingPromises = topics.map(async (topicData) => {
-      // Validate name
       if (!hasText(topicData.name)) {
         return {
           success: false,
@@ -228,12 +233,30 @@ function SentimentController(ctx, log) {
         };
       }
 
+      const normalizedName = topicData.name.toLowerCase();
+
+      if (existingNames.has(normalizedName)) {
+        return {
+          success: false,
+          name: topicData.name,
+          reason: 'A topic with this name already exists for this site',
+        };
+      }
+
+      if (batchNames.has(normalizedName)) {
+        return {
+          success: false,
+          name: topicData.name,
+          reason: 'Duplicate topic name within the same request',
+        };
+      }
+      batchNames.add(normalizedName);
+
       try {
         const newTopic = await SentimentTopic.create({
           siteId,
           name: topicData.name,
           description: topicData.description,
-          subPrompts: isArray(topicData.subPrompts) ? topicData.subPrompts : [],
           enabled: topicData.enabled !== false,
           createdBy: userId,
           updatedBy: userId,
@@ -321,10 +344,8 @@ function SentimentController(ctx, log) {
         return notFound('Topic not found');
       }
 
-      // Update allowed fields
       if (hasText(updates.name)) topic.setName(updates.name);
       if (updates.description !== undefined) topic.setDescription(updates.description);
-      if (isArray(updates.subPrompts)) topic.setSubPrompts(updates.subPrompts);
       if (typeof updates.enabled === 'boolean') topic.setEnabled(updates.enabled);
 
       topic.setUpdatedBy(userId);
@@ -374,116 +395,6 @@ function SentimentController(ctx, log) {
     } catch (error) {
       log.error(`Error deleting topic ${topicId}: ${error.message}`);
       return internalServerError('Failed to delete topic');
-    }
-  };
-
-  /**
-   * Add sub-prompts to a topic.
-   * POST /sites/{siteId}/sentiment/topics/{topicId}/prompts
-   */
-  const addSubPrompts = async (context) => {
-    const { siteId, topicId } = context.params;
-    const { prompts } = context.data || {};
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!isValidUUID(topicId)) {
-      return badRequest('Topic ID required');
-    }
-
-    if (!isArray(prompts) || prompts.length === 0) {
-      return badRequest('Prompts array required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can modify topics');
-    }
-
-    const userId = getUserIdentifier(context);
-
-    try {
-      let topic = await SentimentTopic.findById(siteId, topicId);
-
-      if (!topic) {
-        return notFound('Topic not found');
-      }
-
-      // Add prompts (skip duplicates)
-      const existingPrompts = new Set(topic.getSubPrompts() || []);
-      prompts.forEach((prompt) => {
-        if (hasText(prompt) && !existingPrompts.has(prompt)) {
-          topic.addSubPrompt(prompt);
-          existingPrompts.add(prompt);
-        }
-      });
-
-      topic.setUpdatedBy(userId);
-      topic = await topic.save();
-
-      return ok(SentimentTopicDto.toJSON(topic));
-    } catch (error) {
-      log.error(`Error adding prompts to topic ${topicId}: ${error.message}`);
-      return internalServerError('Failed to add prompts');
-    }
-  };
-
-  /**
-   * Remove sub-prompts from a topic.
-   * DELETE /sites/{siteId}/sentiment/topics/{topicId}/prompts
-   */
-  const removeSubPrompts = async (context) => {
-    const { siteId, topicId } = context.params;
-    const { prompts } = context.data || {};
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!isValidUUID(topicId)) {
-      return badRequest('Topic ID required');
-    }
-
-    if (!isArray(prompts) || prompts.length === 0) {
-      return badRequest('Prompts array required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can modify topics');
-    }
-
-    const userId = getUserIdentifier(context);
-
-    try {
-      let topic = await SentimentTopic.findById(siteId, topicId);
-
-      if (!topic) {
-        return notFound('Topic not found');
-      }
-
-      // Remove prompts
-      prompts.forEach((prompt) => {
-        topic.removeSubPrompt(prompt);
-      });
-
-      topic.setUpdatedBy(userId);
-      topic = await topic.save();
-
-      return ok(SentimentTopicDto.toJSON(topic));
-    } catch (error) {
-      log.error(`Error removing prompts from topic ${topicId}: ${error.message}`);
-      return internalServerError('Failed to remove prompts');
     }
   };
 
@@ -966,8 +877,6 @@ function SentimentController(ctx, log) {
     createTopics,
     updateTopic,
     deleteTopic,
-    addSubPrompts,
-    removeSubPrompts,
     // Guidelines
     listGuidelines,
     getGuideline,
