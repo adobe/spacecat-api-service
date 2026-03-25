@@ -165,6 +165,14 @@ export const NON_EXISTENT_ACCESS_ID = 'fa999999-9999-4999-b999-999999999999';
 export const TRIAL_USER_2_ID = 'c3333333-3333-4333-b333-333333333333';
 export const TRIAL_USER_2_EMAIL = 'test-delegate@example.com'; // matches delegatedUser JWT trial_email
 
+// ── Brand Presence (under SITE_1, ORG_1) ──
+
+export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // Acme Corp, SITE_1
+export const BP_EXEC_1_ID = 'ac111111-1111-4111-b111-111111111111'; // 2026-03-01
+export const BP_EXEC_2_ID = 'ac222222-2222-4222-a222-222222222222'; // 2026-03-08
+export const BP_EXEC_DATE_1 = '2026-03-01';
+export const BP_EXEC_DATE_2 = '2026-03-08';
+
 // ── Non-existent IDs for 404 tests ──
 
 export const NON_EXISTENT_ORG_ID = '99999999-9999-4999-b999-999999999999';

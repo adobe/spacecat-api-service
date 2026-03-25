@@ -33,6 +33,11 @@ import { asyncJobs } from './seed-data/async-jobs.js';
 import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
 import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
+import {
+  brands,
+  brandPresenceExecutions,
+  executionsCompetitorData,
+} from './seed-data/brand-presence.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -126,7 +131,14 @@ async function seed() {
     insertRows('plg_onboardings', plgOnboardings),
     insertRows('trial_user_activities', trialUserActivities),
     insertRows('sentiment_topics', sentimentTopics),
+    insertRows('brands', brands),
   ]);
+
+  // Level 2b: depend on brands
+  await insertRows('brand_presence_executions', brandPresenceExecutions);
+
+  // Level 2c: depend on brand_presence_executions
+  await insertRows('executions_competitor_data', executionsCompetitorData);
 
   // Level 3: depend on opportunities, audits, topics
   await Promise.all([
