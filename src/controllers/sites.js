@@ -1023,6 +1023,32 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const getPageCitabilityCountByUpdatedBy = async (context) => {
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its page citability records');
+    }
+
+    const { PageCitability } = dataAccess;
+    const records = await PageCitability.allBySiteId(siteId);
+    const counts = {};
+    for (const record of records) {
+      const key = record.getUpdatedBy?.() ?? record.updatedBy ?? 'unknown';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return ok(counts);
+  };
+
   const getTopPages = async (context) => {
     const { siteId, source, geo } = context.params;
 
@@ -1222,6 +1248,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getPageCitabilityCountByUpdatedBy,
     getTopPages,
     resolveSite,
     getBrandProfile,
