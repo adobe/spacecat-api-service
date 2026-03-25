@@ -1,6 +1,6 @@
 # Brand vs Competitors API
 
-Returns aggregated competitor mention/citation data for a site. Internally performs two PostgREST queries: first discovers execution dates from `brand_presence_executions`, then queries the `brand_vs_competitors_by_date` view with those dates.
+Returns aggregated competitor mention/citation data for a site. Queries the `brand_vs_competitors_by_date` view directly with date-range filters. Supports an `aggregate` mode that rolls up across category/region for chart-ready totals.
 
 ---
 
@@ -75,6 +75,8 @@ Category/region filters still apply *before* aggregation, so `aggregate=true&cat
 
 ## Response Format
 
+**Default** (per category/region):
+
 ```json
 {
   "competitorData": [
@@ -89,6 +91,25 @@ Category/region filters still apply *before* aggregation, so `aggregate=true&cat
       "competitor": "Competitor Inc",
       "totalMentions": 42,
       "totalCitations": 7
+    }
+  ]
+}
+```
+
+**With `aggregate=true`** (rolled up — no `categoryName`/`regionCode`):
+
+```json
+{
+  "competitorData": [
+    {
+      "siteId": "c2473d89-e997-458d-a86d-b4096649c12b",
+      "brandId": "019cb903-1184-7f92-8325-f9d1176af316",
+      "brandName": "Acme Corp",
+      "model": "chatgpt",
+      "executionDate": "2026-03-01",
+      "competitor": "Competitor Inc",
+      "totalMentions": 120,
+      "totalCitations": 18
     }
   ]
 }
