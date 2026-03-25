@@ -1305,11 +1305,13 @@ export const onboardSingleSite = async (
       log.warn(`Site lookup failed for ${baseURL}, skipping paid profile guard:`, lookupError);
     }
 
-    // Block re-onboarding a paid-profile site with a lower-tier profile unless force=true.
-    // Skip if the incoming profile is itself protected (upgrading to paid is always allowed).
+    // Prevent downgrading a site that was previously onboarded with the paid profile.
+    // A non-protected incoming profile cannot override a paid onboarding unless force=true.
     if (!profile.protected) {
-      const hasPaidImport = prefetchedSite?.getConfig()?.getImports()?.['ahref-paid-pages'] !== undefined;
-      if (hasPaidImport) {
+      const siteConfig = prefetchedSite?.getConfig();
+      const hasPaidImport = isImportEnabled('ahref-paid-pages', siteConfig?.getImports());
+      const hasPaidOnboardConfig = siteConfig?.getOnboardConfig()?.lastProfile === 'paid';
+      if (hasPaidImport || hasPaidOnboardConfig) {
         if (additionalParams.force) {
           log.warn(`Force re-onboarding ${baseURL}: overriding paid profile with "${profileName}"`);
           await say(`:warning: Force re-onboarding \`${baseURL}\` — overriding paid profile with *${profileName}*.`);

@@ -68,17 +68,29 @@ describe('onboardSingleSite — paid profile guard', () => {
     sandbox.restore();
   });
 
-  // A site with ahref-paid-pages import signals it was previously onboarded with the paid profile.
+  // A site with ahref-paid-pages import AND onboardConfig.lastProfile='paid' —
+  // both signals indicate a previous paid onboarding.
   const makePaidSite = () => ({
     getConfig: () => ({
-      getImports: () => ({ 'ahref-paid-pages': {} }),
+      getImports: () => [{ type: 'ahref-paid-pages', enabled: true }],
+      getOnboardConfig: () => ({ lastProfile: 'paid', lastStartTime: 1000 }),
     }),
   });
 
-  // A site with no paid imports — not a paid site.
+  // A site with no paid imports but onboardConfig.lastProfile='paid' —
+  // covers the case where imports were not set but onboardConfig was backfilled.
+  const makePaidOnboardConfigSite = () => ({
+    getConfig: () => ({
+      getImports: () => [{ type: 'organic-traffic', enabled: true }],
+      getOnboardConfig: () => ({ lastProfile: 'paid', lastStartTime: 1000 }),
+    }),
+  });
+
+  // A site with no paid imports and no paid onboardConfig — not a paid site.
   const makeNonPaidSite = () => ({
     getConfig: () => ({
-      getImports: () => ({}),
+      getImports: () => [{ type: 'organic-traffic', enabled: true }],
+      getOnboardConfig: () => undefined,
     }),
   });
 
@@ -167,6 +179,24 @@ describe('onboardSingleSite — paid profile guard', () => {
       expect(result.errors).to.match(/Blocked.*paid/);
       expect(sayStub).to.have.been.calledWith(sinon.match(GUARD_WARNING_PATTERN));
     });
+
+    it('blocks re-onboarding when onboardConfig.lastProfile is paid (even without paid import)', async () => {
+      const result = await onboardSingleSite(
+        SITE_URL,
+        IMS_ORG_ID,
+        {},
+        demoProfile,
+        300,
+        slackContext(),
+        makeContext(makePaidOnboardConfigSite()),
+        {},
+        { profileName: 'demo' },
+      );
+
+      expect(result.status).to.equal('Failed');
+      expect(result.errors).to.match(/Blocked.*paid/);
+      expect(sayStub).to.have.been.calledWith(sinon.match(GUARD_WARNING_PATTERN));
+    });
   });
 
   describe('allowed scenarios', () => {
@@ -200,8 +230,12 @@ describe('onboardSingleSite — paid profile guard', () => {
       }
     };
 
-    it('allows re-onboarding when force=true even if previous site is paid', async () => {
+    it('allows re-onboarding when force=true even if previous site has paid import', async () => {
       await assertGuardNotTriggered(makePaidSite(), demoProfile, { force: true });
+    });
+
+    it('allows re-onboarding when force=true even if onboardConfig.lastProfile is paid', async () => {
+      await assertGuardNotTriggered(makePaidOnboardConfigSite(), demoProfile, { force: true });
     });
 
     it('allows onboarding when site does not exist yet', async () => {
