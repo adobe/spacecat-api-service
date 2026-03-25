@@ -1,3 +1,10 @@
+# [1.374.0](https://github.com/adobe/spacecat-api-service/compare/v1.373.0...v1.374.0) (2026-03-25)
+
+
+### Features
+
+* add optimize-at-edge-enabled-marking to global import slack command ([#2005](https://github.com/adobe/spacecat-api-service/issues/2005)) ([e150100](https://github.com/adobe/spacecat-api-service/commit/e1501006830c47963f26145eefdf4a60d9763409))
+
 # [1.373.0](https://github.com/adobe/spacecat-api-service/compare/v1.372.2...v1.373.0) (2026-03-24)
 
 
