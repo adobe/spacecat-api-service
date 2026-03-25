@@ -268,12 +268,12 @@ export async function startBulkStatusJob(path, env, log) {
   const site = 'project-elmo-ui-data';
   const ref = 'main';
   const headers = {
-    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
     'Content-Type': 'application/json',
   };
 
-  if (!env.HLX_ADMIN_TOKEN) {
-    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     return null;
   }
 
@@ -312,10 +312,10 @@ export async function pollJobStatus(jobName, env, log) {
   const site = 'project-elmo-ui-data';
   const ref = 'main';
   const topic = 'status';
-  const headers = { Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}` };
+  const headers = { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
 
-  if (!env.HLX_ADMIN_TOKEN) {
-    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     return null;
   }
 
@@ -374,12 +374,12 @@ export async function bulkUnpublishPaths(paths, dataFolder, env, log) {
   const site = 'project-elmo-ui-data';
   const ref = 'main';
   const headers = {
-    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
     'Content-Type': 'application/json',
   };
 
-  if (!env.HLX_ADMIN_TOKEN) {
-    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     return;
   }
 
