@@ -1966,9 +1966,10 @@ llmo-brand-vs-competitors:
     summary: Get brand vs competitors aggregated data
     description: |
       Returns aggregated competitor mention/citation data for a site.
-      Internally performs two PostgREST queries: first discovers execution
-      dates from brand_presence_executions, then queries the
-      brand_vs_competitors_by_date view with those dates.
+      Queries the brand_vs_competitors_by_date view directly with date-range
+      filters. Response rows are at (competitor, executionDate, categoryName,
+      regionCode) granularity — aggregate across categoryName/regionCode
+      client-side for chart totals.
     operationId: getBrandVsCompetitors
     parameters:
       - name: siteId
@@ -2011,6 +2012,16 @@ llmo-brand-vs-competitors:
         description: Filter by region code (e.g. US, EU)
         schema:
           type: string
+      - name: aggregate
+        in: query
+        required: false
+        description: >
+          When true, rolls up across categoryName/regionCode to return one row
+          per (competitor, executionDate). Aggregated rows omit categoryName and
+          regionCode. Use for Market Tracking chart totals.
+        schema:
+          type: boolean
+          default: false
     responses:
       '200':
         description: Aggregated competitor data per execution date

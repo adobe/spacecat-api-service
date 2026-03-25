@@ -6322,7 +6322,6 @@ describe('llmo-brand-presence', () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
       const client = createTableAwareMock({
         sites: { data: [], error: null },
-        brand_presence_executions: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
       mockContext.data = { siteId: siteUuid };
@@ -6331,24 +6330,6 @@ describe('llmo-brand-presence', () => {
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(403);
-    });
-
-    it('returns badRequest when execution dates query errors', async () => {
-      const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
-      const queryError = { message: 'relation does not exist' };
-      const client = createTableAwareMock({
-        sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: null, error: queryError },
-      });
-      mockContext.dataAccess.Site.postgrestService = client;
-      mockContext.data = { siteId: siteUuid };
-
-      const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
-      const result = await handler(mockContext);
-
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.equal('relation does not exist');
     });
 
     it('returns badRequest when siteId is not a valid UUID', async () => {
@@ -6364,12 +6345,11 @@ describe('llmo-brand-presence', () => {
       expect(body.message).to.equal('siteId must be a valid UUID');
     });
 
-    it('returns badRequest when view query returns error (Step 2)', async () => {
+    it('returns badRequest when view query returns error', async () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
       const viewError = { message: 'view "brand_vs_competitors_by_date" does not exist' };
       const client = createTableAwareMock({
         sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: [{ execution_date: '2026-03-01' }], error: null },
         brand_vs_competitors_by_date: { data: null, error: viewError },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -6386,11 +6366,11 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('returns ok with empty competitorData when no execution dates found', async () => {
+    it('returns ok with empty competitorData when view returns no rows', async () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
       const client = createTableAwareMock({
         sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: [], error: null },
+        brand_vs_competitors_by_date: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
       mockContext.data = { siteId: siteUuid };
@@ -6403,13 +6383,9 @@ describe('llmo-brand-presence', () => {
       expect(body.competitorData).to.deep.equal([]);
     });
 
-    it('returns ok with camelCase transformed rows from two-step query', async () => {
+    it('returns ok with camelCase transformed rows', async () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
       const brandUuid = '0178a3f0-1234-7000-8000-000000000088';
-      const execRows = [
-        { execution_date: '2026-03-01' },
-        { execution_date: '2026-03-08' },
-      ];
       const viewRows = [
         {
           site_id: siteUuid,
@@ -6426,7 +6402,6 @@ describe('llmo-brand-presence', () => {
       ];
       const client = createTableAwareMock({
         sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: execRows, error: null },
         brand_vs_competitors_by_date: { data: viewRows, error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -6450,8 +6425,6 @@ describe('llmo-brand-presence', () => {
         totalMentions: 42,
         totalCitations: 7,
       });
-      // Verify both tables were queried
-      expect(client.from).to.have.been.calledWith('brand_presence_executions');
       expect(client.from).to.have.been.calledWith('brand_vs_competitors_by_date');
     });
 
@@ -6459,7 +6432,6 @@ describe('llmo-brand-presence', () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
       const client = createTableAwareMock({
         sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: [{ execution_date: '2026-03-01' }], error: null },
         brand_vs_competitors_by_date: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -6484,7 +6456,7 @@ describe('llmo-brand-presence', () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
       const client = createTableAwareMock({
         sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: [], error: null },
+        brand_vs_competitors_by_date: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
       mockContext.data = { siteId: siteUuid };
@@ -6492,7 +6464,6 @@ describe('llmo-brand-presence', () => {
       const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      // Should have called gte and lte for date range filtering
       expect(client.gte).to.have.been.calledWith('execution_date', sinon.match.string);
       expect(client.lte).to.have.been.calledWith('execution_date', sinon.match.string);
     });
@@ -6501,7 +6472,7 @@ describe('llmo-brand-presence', () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
       const client = createTableAwareMock({
         sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: [], error: null },
+        brand_vs_competitors_by_date: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
       mockContext.data = {
@@ -6517,18 +6488,37 @@ describe('llmo-brand-presence', () => {
       expect(client.lte).to.have.been.calledWith('execution_date', '2026-01-31');
     });
 
-    it('deduplicates execution dates before querying the view', async () => {
+    it('returns per-category/region rows when aggregate is not set', async () => {
       const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
-      const execRows = [
-        { execution_date: '2026-03-01' },
-        { execution_date: '2026-03-01' },
-        { execution_date: '2026-03-08' },
-        { execution_date: '2026-03-08' },
+      const viewRows = [
+        {
+          site_id: siteUuid,
+          brand_id: 'b1',
+          brand_name: 'Acme',
+          model: 'chatgpt',
+          execution_date: '2026-03-01',
+          category_name: 'SEO',
+          region_code: 'US',
+          competitor: 'Rival',
+          total_mentions: 10,
+          total_citations: 2,
+        },
+        {
+          site_id: siteUuid,
+          brand_id: 'b1',
+          brand_name: 'Acme',
+          model: 'chatgpt',
+          execution_date: '2026-03-01',
+          category_name: 'PPC',
+          region_code: 'US',
+          competitor: 'Rival',
+          total_mentions: 5,
+          total_citations: 1,
+        },
       ];
       const client = createTableAwareMock({
         sites: { data: [{ id: siteUuid }], error: null },
-        brand_presence_executions: { data: execRows, error: null },
-        brand_vs_competitors_by_date: { data: [], error: null },
+        brand_vs_competitors_by_date: { data: viewRows, error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
       mockContext.data = { siteId: siteUuid };
@@ -6537,11 +6527,120 @@ describe('llmo-brand-presence', () => {
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(200);
-      // Should pass deduplicated dates (descending) to .in()
-      expect(client.in).to.have.been.calledWith(
-        'execution_date',
-        ['2026-03-08', '2026-03-01'],
-      );
+      const body = await result.json();
+      expect(body.competitorData).to.have.lengthOf(2);
+      expect(body.competitorData[0]).to.have.property('categoryName', 'SEO');
+      expect(body.competitorData[1]).to.have.property('categoryName', 'PPC');
+    });
+
+    it('aggregates across categoryName/regionCode when aggregate=true', async () => {
+      const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
+      const viewRows = [
+        {
+          site_id: siteUuid,
+          brand_id: 'b1',
+          brand_name: 'Acme',
+          model: 'chatgpt',
+          execution_date: '2026-03-01',
+          category_name: 'SEO',
+          region_code: 'US',
+          competitor: 'Rival',
+          total_mentions: 10,
+          total_citations: 2,
+        },
+        {
+          site_id: siteUuid,
+          brand_id: 'b1',
+          brand_name: 'Acme',
+          model: 'chatgpt',
+          execution_date: '2026-03-01',
+          category_name: 'PPC',
+          region_code: 'US',
+          competitor: 'Rival',
+          total_mentions: 5,
+          total_citations: 1,
+        },
+        {
+          site_id: siteUuid,
+          brand_id: 'b1',
+          brand_name: 'Acme',
+          model: 'chatgpt',
+          execution_date: '2026-03-01',
+          category_name: 'SEO',
+          region_code: 'DE',
+          competitor: 'Rival',
+          total_mentions: 8,
+          total_citations: 3,
+        },
+        {
+          site_id: siteUuid,
+          brand_id: 'b1',
+          brand_name: 'Acme',
+          model: 'chatgpt',
+          execution_date: '2026-03-01',
+          category_name: 'SEO',
+          region_code: 'US',
+          competitor: 'Other Co',
+          total_mentions: 20,
+          total_citations: 5,
+        },
+      ];
+      const client = createTableAwareMock({
+        sites: { data: [{ id: siteUuid }], error: null },
+        brand_vs_competitors_by_date: { data: viewRows, error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+      mockContext.data = { siteId: siteUuid, aggregate: 'true' };
+
+      const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.competitorData).to.have.lengthOf(2);
+
+      const rival = body.competitorData.find((r) => r.competitor === 'Rival');
+      expect(rival).to.deep.equal({
+        siteId: siteUuid,
+        brandId: 'b1',
+        brandName: 'Acme',
+        model: 'chatgpt',
+        executionDate: '2026-03-01',
+        competitor: 'Rival',
+        totalMentions: 23,
+        totalCitations: 6,
+      });
+
+      const other = body.competitorData.find((r) => r.competitor === 'Other Co');
+      expect(other.totalMentions).to.equal(20);
+      expect(other.totalCitations).to.equal(5);
+
+      // Aggregated rows should not include categoryName/regionCode
+      expect(rival).to.not.have.property('categoryName');
+      expect(rival).to.not.have.property('regionCode');
+    });
+
+    it('aggregate=true still respects categoryName/regionCode filters', async () => {
+      const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
+      const client = createTableAwareMock({
+        sites: { data: [{ id: siteUuid }], error: null },
+        brand_vs_competitors_by_date: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+      mockContext.data = {
+        siteId: siteUuid,
+        aggregate: 'true',
+        categoryName: 'SEO',
+        regionCode: 'US',
+      };
+
+      const handler = createBrandVsCompetitorsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      // Filters are still applied at the PostgREST level before aggregation
+      expect(client.eq).to.have.been.calledWith('category_name', 'SEO');
+      expect(client.eq).to.have.been.calledWith('region_code', 'US');
     });
   });
 });

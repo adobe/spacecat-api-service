@@ -27,6 +27,7 @@ Returns aggregated competitor mention/citation data for a site. Internally perfo
 | `model` | — | string | No | `chatgpt` | LLM model |
 | `categoryName` | `category_name` | string | No | — | Filter by category name |
 | `regionCode` | `region_code`, `region` | string | No | — | Filter by region code |
+| `aggregate` | — | boolean | No | `false` | Roll up across categoryName/regionCode |
 
 ---
 
@@ -42,25 +43,33 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/brand-vs
 GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/brand-vs-competitors?siteId=c2473d89-e997-458d-a86d-b4096649c12b&startDate=2026-01-01&endDate=2026-03-31&categoryName=SEO&regionCode=US
 ```
 
+**Aggregated for Market Tracking chart (one row per competitor per week):**
+```
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/brand-vs-competitors?siteId=c2473d89-e997-458d-a86d-b4096649c12b&aggregate=true
+```
+
 ---
 
-## Internal Queries (PostgREST)
+## Internal Query (PostgREST)
 
-This endpoint performs two sequential PostgREST queries:
+Single query against the `brand_vs_competitors_by_date` VIEW with date-range filters:
 
-**Step 1 — Discover execution dates:**
-- Queries `brand_presence_executions` table
-- Selects `execution_date`, filtered by `organization_id`, `site_id`, `model`, date range (`gte`/`lte`), optionally `brand_id`
-- Deduplicates dates client-side via `Set`
-
-**Step 2 — Query competitor aggregation:**
-- Queries `brand_vs_competitors_by_date` VIEW
 - Selects: `site_id`, `brand_id`, `brand_name`, `model`, `execution_date`, `category_name`, `region_code`, `competitor`, `total_mentions`, `total_citations`
-- Uses `.in('execution_date', dates)` with chunking (50 dates per chunk)
+- Filters: `organization_id`, `site_id`, `model`, `execution_date` (gte/lte date range)
 - Optional filters: `brand_id`, `category_name`, `region_code`
-- Row limit: 5000 per chunk
+- Row limit: 5000
+
+The VIEW is a regular (non-materialized) view — PostgreSQL pushes WHERE clauses through the GROUP BY into partition-pruned, index-covered scans on the source tables.
 
 The underlying VIEW aggregates `executions_competitor_data` joined with `brand_presence_executions` and `organizations`, grouping by competitor (using `COALESCE(parent_company, competitor)` for fallback).
+
+### Aggregation mode
+
+By default, the response returns rows at `(competitor, executionDate, categoryName, regionCode)` granularity.
+
+With `aggregate=true`, the server rolls up across `categoryName`/`regionCode` and returns one row per `(competitor, executionDate)` — the shape the **Market Tracking chart** needs directly. Aggregated rows omit `categoryName` and `regionCode`.
+
+Category/region filters still apply *before* aggregation, so `aggregate=true&categoryName=SEO` returns chart-ready totals scoped to the SEO category.
 
 ---
 

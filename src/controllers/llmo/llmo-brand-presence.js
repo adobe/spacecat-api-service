@@ -2537,17 +2537,44 @@ function parseBrandVsCompetitorsParams(context) {
     model: q.model || q.platform,
     categoryName: q.categoryName || q.category_name,
     regionCode: q.regionCode || q.region_code || q.region,
+    aggregate: q.aggregate === 'true' || q.aggregate === true,
   };
 }
 
 /**
+ * Rolls up view rows by (siteId, brandId, brandName, model, executionDate, competitor),
+ * summing totalMentions and totalCitations across categoryName/regionCode.
+ */
+function aggregateCompetitorRows(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const key = `${row.site_id}|${row.brand_id}|${row.model}|${row.execution_date}|${row.competitor}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.total_mentions += row.total_mentions || 0;
+      existing.total_citations += row.total_citations || 0;
+    } else {
+      map.set(key, {
+        site_id: row.site_id,
+        brand_id: row.brand_id,
+        brand_name: row.brand_name,
+        model: row.model,
+        execution_date: row.execution_date,
+        competitor: row.competitor,
+        total_mentions: row.total_mentions || 0,
+        total_citations: row.total_citations || 0,
+      });
+    }
+  }
+  return [...map.values()];
+}
+
+/**
  * Creates the getBrandVsCompetitors handler.
- * Single endpoint that internally makes two PostgREST calls:
- * 1. Query brand_presence_executions to discover execution dates for the site
- * 2. Query brand_vs_competitors_by_date VIEW with those dates
- *
- * This keeps date-range logic in the application layer while the DB provides
- * simple view-based aggregation with partition-pruned queries.
+ * Queries the brand_vs_competitors_by_date VIEW directly with date-range filters.
+ * The VIEW is a regular (non-materialized) view — PostgreSQL pushes WHERE clauses
+ * through the GROUP BY into partition-pruned, index-covered scans on the source
+ * tables, so no separate execution-date discovery step is needed.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
@@ -2581,10 +2608,11 @@ export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
         return forbidden('Site does not belong to the organization');
       }
 
-      // Step 1: Get execution dates for the site
-      let datesQuery = client
-        .from('brand_presence_executions')
-        .select('execution_date')
+      // Query the view directly — date-range filters push down through the
+      // GROUP BY into partition-pruned scans on the underlying tables.
+      let q = client
+        .from('brand_vs_competitors_by_date')
+        .select('site_id, brand_id, brand_name, model, execution_date, category_name, region_code, competitor, total_mentions, total_citations')
         .eq('organization_id', organizationId)
         .eq('site_id', params.siteId)
         .eq('model', model)
@@ -2592,66 +2620,43 @@ export function createBrandVsCompetitorsHandler(getOrgAndValidateAccess) {
         .lte('execution_date', endDate);
 
       if (filterByBrandId) {
-        datesQuery = datesQuery.eq('brand_id', filterByBrandId);
+        q = q.eq('brand_id', filterByBrandId);
+      }
+      if (shouldApplyFilter(params.categoryName)) {
+        q = q.eq('category_name', params.categoryName);
+      }
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
       }
 
-      // Use high row limit — we only extract distinct dates, but the table may have
-      // many rows per date (multiple brands/models/categories). Same rationale as
-      // WEEKS_QUERY_LIMIT in createBrandPresenceWeeksHandler.
-      const { data: datesData, error: datesError } = await datesQuery.limit(WEEKS_QUERY_LIMIT);
+      const { data, error } = await q.limit(QUERY_LIMIT);
 
-      if (datesError) {
-        ctx.log.error(`Brand vs competitors execution dates error: ${datesError.message}`);
-        return badRequest(datesError.message);
+      if (error) {
+        ctx.log.error(`Brand vs competitors PostgREST error: ${error.message}`);
+        return badRequest(error.message);
       }
 
-      const dateSet = new Set();
-      (datesData || []).forEach((r) => {
-        if (r.execution_date) dateSet.add(String(r.execution_date).slice(0, 10));
-      });
-      const executionDates = [...dateSet].sort((a, b) => b.localeCompare(a));
+      const rows = data || [];
 
-      if (executionDates.length === 0) {
-        return ok({ competitorData: [] });
+      // When aggregate=true, roll up across categoryName/regionCode to produce
+      // one row per (competitor, executionDate) — the shape the Market Tracking
+      // chart needs directly.
+      if (params.aggregate) {
+        const aggregated = aggregateCompetitorRows(rows);
+        const competitorData = aggregated.map((row) => ({
+          siteId: row.site_id,
+          brandId: row.brand_id,
+          brandName: row.brand_name,
+          model: row.model,
+          executionDate: row.execution_date,
+          competitor: row.competitor,
+          totalMentions: row.total_mentions,
+          totalCitations: row.total_citations,
+        }));
+        return ok({ competitorData });
       }
 
-      // Step 2: Query the brand_vs_competitors_by_date view with those dates
-      const chunks = [];
-      for (let i = 0; i < executionDates.length; i += IN_FILTER_CHUNK_SIZE) {
-        chunks.push(executionDates.slice(i, i + IN_FILTER_CHUNK_SIZE));
-      }
-
-      const results = await Promise.all(chunks.map((chunk) => {
-        let q = client
-          .from('brand_vs_competitors_by_date')
-          .select('site_id, brand_id, brand_name, model, execution_date, category_name, region_code, competitor, total_mentions, total_citations')
-          .eq('organization_id', organizationId)
-          .eq('model', model)
-          .in('execution_date', chunk)
-          .eq('site_id', params.siteId);
-
-        if (filterByBrandId) {
-          q = q.eq('brand_id', filterByBrandId);
-        }
-        if (shouldApplyFilter(params.categoryName)) {
-          q = q.eq('category_name', params.categoryName);
-        }
-        if (shouldApplyFilter(params.regionCode)) {
-          q = q.eq('region_code', params.regionCode);
-        }
-
-        return q.limit(QUERY_LIMIT);
-      }));
-
-      const failed = results.find((r) => r.error);
-      if (failed) {
-        ctx.log.error(`Brand vs competitors PostgREST error: ${failed.error.message}`);
-        return badRequest(failed.error.message);
-      }
-
-      const allRows = results.flatMap((r) => r.data || []);
-
-      const competitorData = allRows.map((row) => ({
+      const competitorData = rows.map((row) => ({
         siteId: row.site_id,
         brandId: row.brand_id,
         brandName: row.brand_name,
