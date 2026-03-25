@@ -1080,21 +1080,15 @@ function SitesController(ctx, log, env) {
     }
 
     const { PageCitability } = dataAccess;
-    const records = await PageCitability.allBySiteId(siteId);
+    const queryOptions = (fromDate || toDate)
+      ? { between: { attribute: 'updatedAt', start: (fromDate ?? new Date(0)).toISOString(), end: (toDate ?? new Date()).toISOString() } }
+      : {};
+    const records = await PageCitability.allBySiteId(siteId, queryOptions);
     const counts = {};
     for (const record of records) {
-      const withinRange = (() => {
-        if (!fromDate && !toDate) return true;
-        const updatedAt = record.getUpdatedAt?.() ?? record.updatedAt;
-        const d = updatedAt ? new Date(updatedAt) : null;
-        if (!d) return true;
-        return (!fromDate || d >= fromDate) && (!toDate || d <= toDate);
-      })();
-      if (withinRange) {
-        const getterName = `get${groupBy.charAt(0).toUpperCase()}${groupBy.slice(1)}`;
-        const value = String(record[getterName]?.() ?? record[groupBy] ?? 'unknown');
-        counts[value] = (counts[value] ?? 0) + 1;
-      }
+      const getterName = `get${groupBy.charAt(0).toUpperCase()}${groupBy.slice(1)}`;
+      const value = String(record[getterName]?.() ?? record[groupBy] ?? 'unknown');
+      counts[value] = (counts[value] ?? 0) + 1;
     }
     return ok(counts);
   };

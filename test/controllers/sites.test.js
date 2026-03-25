@@ -4241,18 +4241,36 @@ describe('Sites Controller', () => {
       expect(response).to.deep.equal({ prerender: 1 });
     });
 
-    it('includes records with no updatedAt when time filter is applied', async () => {
-      mockDataAccess.PageCitability.allBySiteId.resolves([
-        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => null },
-        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => '2025-01-01T00:00:00.000Z' },
-      ]);
-      const result = await sitesController.getPageCitabilityCounts({
+    it('passes between option to allBySiteId when from and to are provided', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([{ getUpdatedBy: () => 'prerender' }]);
+      await sitesController.getPageCitabilityCounts({
         params: { siteId: SITE_IDS[0] },
-        data: { groupBy: 'updatedBy', from: '2025-02-01' },
+        data: { groupBy: 'updatedBy', from: '2025-02-01', to: '2025-02-28' },
       });
-      const response = await result.json();
-      expect(result.status).to.equal(200);
-      expect(response).to.deep.equal({ prerender: 1 });
+      const [, options] = mockDataAccess.PageCitability.allBySiteId.firstCall.args;
+      expect(options).to.have.nested.property('between.attribute', 'updatedAt');
+      expect(options).to.have.nested.property('between.start');
+      expect(options).to.have.nested.property('between.end');
+    });
+
+    it('passes between option to allBySiteId when period is set', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([]);
+      await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', period: '7d' },
+      });
+      const [, options] = mockDataAccess.PageCitability.allBySiteId.firstCall.args;
+      expect(options).to.have.nested.property('between.attribute', 'updatedAt');
+    });
+
+    it('passes no options to allBySiteId when no time filter is set', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([]);
+      await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const [, options] = mockDataAccess.PageCitability.allBySiteId.firstCall.args;
+      expect(options).to.deep.equal({});
     });
   });
 
