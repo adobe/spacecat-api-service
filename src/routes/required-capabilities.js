@@ -51,8 +51,15 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
 
+  // LLMO Opportunities - org-scoped, LLMO product; not yet required by S2S consumers
+  'GET /org/:spaceCatId/opportunities/count',
+  'GET /org/:spaceCatId/brands/all/opportunities',
+  'GET /org/:spaceCatId/brands/:brandId/opportunities',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
+  'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
+  'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
@@ -76,6 +83,12 @@ export const INTERNAL_ROUTES = [
 
   // Entitlement write - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
+
+  // IMS org access (delegation grants) - admin-only, cross-org grant management
+  'POST /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access',
+  'GET /sites/:siteId/ims-org-access/:accessId',
+  'DELETE /sites/:siteId/ims-org-access/:accessId',
 
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
@@ -125,6 +138,20 @@ const routeRequiredCapabilities = {
   'DELETE /organizations/:organizationId': 'organization:write',
   'GET /organizations/:organizationId/sites': 'site:read',
   'GET /organizations/:organizationId/brands': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/categories': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/categories': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
+  'DELETE /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
+  'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
+  'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
@@ -133,6 +160,20 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/topics': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/search': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': 'brand:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',

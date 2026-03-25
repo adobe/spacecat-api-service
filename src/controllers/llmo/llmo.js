@@ -32,6 +32,7 @@ import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { UnauthorizedProductError } from '../../support/errors.js';
 import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
@@ -56,6 +57,7 @@ import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
+import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -81,13 +83,24 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    const hasAccessToElmo = await accessControlUtil.hasAccess(
-      site,
-      '',
-      EntitlementModel.PRODUCT_CODES.LLMO,
-    );
+    let hasAccessToElmo;
+    try {
+      hasAccessToElmo = await accessControlUtil.hasAccess(
+        site,
+        '',
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+    } catch (e) {
+      // Product-code mismatch is an auth denial → 403. All other errors (e.g. entitlement
+      // validation failures like "emailId is required") are business errors → rethrow so
+      // callers' catch blocks return 400.
+      if (e instanceof UnauthorizedProductError) {
+        return forbidden(e.message);
+      }
+      throw e;
+    }
     if (!hasAccessToElmo) {
-      throw new Error('Only users belonging to the organization can view its sites');
+      return forbidden('Only users belonging to the organization can view its sites');
     }
     return { site, config, llmoConfig };
   };
@@ -646,9 +659,6 @@ function LlmoController(ctx) {
       const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -698,9 +708,6 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -725,9 +732,6 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -762,9 +766,6 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -1016,6 +1017,24 @@ function LlmoController(ctx) {
       return badRequest(error.message);
     }
   };
+
+  // Factory for demo fixture endpoints — validates site/LLMO access then delegates to handler
+  const createDemoFixtureHandler = (handler, label) => async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      return await handler(context);
+    } catch (error) {
+      log.error(`Unexpected error retrieving demo ${label} for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to retrieve demo fixture');
+    }
+  };
+
+  const getDemoBrandPresence = createDemoFixtureHandler(handleDemoBrandPresence, 'brand-presence');
+  const getDemoRecommendations = createDemoFixtureHandler(handleDemoRecommendations, 'recommendations');
 
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-config
@@ -1557,10 +1576,6 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().tags || []);
     } catch (error) {
       log.error(`Error marking opportunities as reviewed: ${error.message}`);
-
-      if (error.message === 'Only users belonging to the organization can view its sites') {
-        return forbidden(error.message);
-      }
       return badRequest(error.message);
     }
   };
@@ -1708,6 +1723,8 @@ function LlmoController(ctx) {
     queryFiles,
     getLlmoRationale,
     getBrandClaims,
+    getDemoBrandPresence,
+    getDemoRecommendations,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
     createOrUpdateStageEdgeConfig,
