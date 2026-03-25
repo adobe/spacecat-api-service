@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -80,11 +78,21 @@ function setupOpportunityMocks(mockOpportunity, opportunities = []) {
     .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 }
 
-// Helper to set up suggestion mocks for allByOpportunityId.
-// The controller fetches all suggestions once, then partitions by status in memory.
+// Helper to set up suggestion mocks for batchGetByKeys/allByOpportunityId fallback.
 // suggestionMap: { opportunityId: [suggestion, ...], ... }
 // Suggestions should have getStatus() returning their status (default 'NEW').
 function setupSuggestionMocks(mockSuggestion, suggestionMap = {}) {
+  mockSuggestion.batchGetByKeys.callsFake(
+    (keys) => Promise.resolve({
+      data: keys.flatMap(
+        ({ opportunityId }) => (suggestionMap[opportunityId] || []).map((suggestion) => ({
+          ...suggestion,
+          getOpportunityId: () => opportunityId,
+        })),
+      ),
+      unprocessed: [],
+    }),
+  );
   mockSuggestion.allByOpportunityId.callsFake(
     (oppId) => Promise.resolve(suggestionMap[oppId] || []),
   );
@@ -119,6 +127,7 @@ describe('TopPaidOpportunitiesController', () => {
         Site: { findById: sandbox.stub().resolves(createMockSite()) },
         Opportunity: { allBySiteIdAndStatus: sandbox.stub().resolves([]) },
         Suggestion: {
+          batchGetByKeys: sandbox.stub().resolves({ data: [], unprocessed: [] }),
           allByOpportunityId: sandbox.stub().resolves([]),
           allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
         },
@@ -500,7 +509,7 @@ describe('TopPaidOpportunitiesController', () => {
     it('handles null suggestion collections as empty', async () => {
       const paidOppty = createOpportunity({ id: 'oppty-null-suggestions', tags: ['paid media'] });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityId.resolves(null);
+      mockContext.dataAccess.Suggestion.batchGetByKeys.resolves({ data: null, unprocessed: [] });
 
       const response = await controller.getTopPaidOpportunities({
         params: { siteId: SITE_ID }, data: {},
@@ -516,7 +525,7 @@ describe('TopPaidOpportunitiesController', () => {
       const errorOppty = createOpportunity({ id: 'oppty-error', tags: ['paid media'] });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [validOppty, errorOppty]);
 
-      // Mock allByOpportunityId to throw error for one opportunity
+      mockContext.dataAccess.Suggestion.batchGetByKeys.rejects(new Error('Batch unavailable'));
       mockContext.dataAccess.Suggestion.allByOpportunityId.callsFake((oppId) => {
         if (oppId === 'oppty-error') {
           return Promise.reject(new Error('Database error'));
@@ -694,7 +703,7 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
-    it('uses allByOpportunityId once per opportunity (no duplicate fetches)', async () => {
+    it('uses batchGetByKeys once to load suggestions', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
       setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
@@ -706,8 +715,11 @@ describe('TopPaidOpportunitiesController', () => {
         params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
       });
 
-      // allByOpportunityId called once per opportunity (upfront batch)
-      expect(mockContext.dataAccess.Suggestion.allByOpportunityId.callCount).to.equal(1);
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.calledOnce).to.be.true;
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.firstCall.args[0]).to.deep.equal([
+        { opportunityId: 'cwv-1' },
+      ]);
+      expect(mockContext.dataAccess.Suggestion.allByOpportunityId.called).to.be.false;
       expect(mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.called).to.be.false;
     });
   });

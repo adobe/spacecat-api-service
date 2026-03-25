@@ -24,6 +24,7 @@ import {
   processOpportunityMatching,
   combineAndSortOpportunities,
 } from './opportunity-matcher.js';
+import { loadSuggestionsByOpportunityIds } from './opportunity-suggestions.js';
 
 async function validateSiteAndPermissions(siteId, Site, accessControlUtil) {
   const site = await Site.findById(siteId);
@@ -73,38 +74,15 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
     ]);
 
     const allOpportunitiesUnfiltered = [...newOpportunities, ...inProgressOpportunities];
-
-    // Fetch suggestions once per opportunity, then partition by status in memory.
-    // This keeps the per-opportunity fail-closed behavior without doubling query count.
-    const suggestionsByOpportunityId = new Map();
-    const failedOpportunityIds = new Set();
-
-    const results = await Promise.allSettled(
-      allOpportunitiesUnfiltered.map(async (oppty) => {
-        const allSuggestions = (await Suggestion.allByOpportunityId(oppty.getId())) ?? [];
-        const newSuggs = allSuggestions.filter((sugg) => sugg.getStatus() === 'NEW');
-        const pendingSuggs = allSuggestions.filter(
-          (sugg) => sugg.getStatus() === 'PENDING_VALIDATION',
-        );
-        return { newSuggs, pendingSuggs };
-      }),
+    const opportunityIds = allOpportunitiesUnfiltered.map((oppty) => oppty.getId());
+    const {
+      suggestionsByOpportunityId,
+      failedOpportunityIds,
+    } = await loadSuggestionsByOpportunityIds(
+      Suggestion,
+      opportunityIds,
+      log,
     );
-    allOpportunitiesUnfiltered.forEach((oppty, index) => {
-      const result = results[index];
-      if (result.status === 'fulfilled') {
-        // Store only NEW suggestions — these are reused for URL matching and DTOs
-        suggestionsByOpportunityId.set(oppty.getId(), {
-          newSuggestions: result.value.newSuggs,
-          hasPendingValidation: result.value.pendingSuggs.length > 0,
-        });
-      } else {
-        log?.warn?.('Failed to fetch suggestions for opportunity, excluding from results', {
-          opportunityId: oppty.getId(),
-          error: result.reason?.message,
-        });
-        failedOpportunityIds.add(oppty.getId());
-      }
-    });
 
     // Filter out opportunities where suggestion fetch failed (fail-closed per-opportunity)
     // or where any suggestion has PENDING_VALIDATION status
