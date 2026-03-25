@@ -2581,7 +2581,7 @@ describe('LlmoController', () => {
       mockEnv.SHAREPOINT_AUTHORITY = 'test-authority';
       mockEnv.SHAREPOINT_DOMAIN_ID = 'test-domain-id';
       mockEnv.LLMO_ONBOARDING_GITHUB_TOKEN = 'test-github-token';
-      mockEnv.HLX_ADMIN_TOKEN = 'test-hlx-token';
+      mockEnv.HLX_ONBOARDING_TOKEN = 'test-hlx-token';
       mockEnv.DEFAULT_ORGANIZATION_ID = 'default-org-id';
 
       onboardingContext = {

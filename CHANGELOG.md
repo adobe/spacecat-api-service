@@ -1,3 +1,17 @@
+## [1.375.2](https://github.com/adobe/spacecat-api-service/compare/v1.375.1...v1.375.2) (2026-03-25)
+
+
+### Bug Fixes
+
+* top-pages no pending validation returned ([#2031](https://github.com/adobe/spacecat-api-service/issues/2031)) ([251209d](https://github.com/adobe/spacecat-api-service/commit/251209dcba5ba442949e2be915f15622bcfbdc2d))
+
+## [1.375.1](https://github.com/adobe/spacecat-api-service/compare/v1.375.0...v1.375.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* update helix token ([#2018](https://github.com/adobe/spacecat-api-service/issues/2018)) ([c09cae4](https://github.com/adobe/spacecat-api-service/commit/c09cae497c67a454f92f1e526492162f0c745422))
+
 # [1.375.0](https://github.com/adobe/spacecat-api-service/compare/v1.374.0...v1.375.0) (2026-03-25)
 
 
