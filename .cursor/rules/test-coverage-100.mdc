@@ -1,0 +1,30 @@
+---
+description: Keep c8 coverage at 100% after src changes; run tests before finishing
+alwaysApply: true
+---
+
+# Test coverage (100%)
+
+This repo enforces **100%** lines, branches, and statements for `src/**/*.js` via **c8** and `.nycrc.json` (`check-coverage: true`).
+
+## After editing code under `src/`
+
+1. Run **`npm test`** (same command CI uses: `c8` + mocha). Do not mark the task done if coverage fails.
+2. If coverage fails, **add or extend unit tests** in `test/` (mirror `src/` layout) until thresholds pass. Prefer exercising real code paths over `c8 ignore` comments unless the project already uses them for a case that cannot be tested.
+
+## Faster iteration (optional)
+
+To check one source file against its test file:
+
+```bash
+npx c8 --check-coverage --lines 100 --branches 100 --statements 100 --functions 100 \
+  --include='src/path/to/file.js' --src src \
+  mocha test/path/to/matching.test.js --timeout 15000
+```
+
+Replace paths to match the module you changed.
+
+## Do not
+
+- Assume coverage is fine without running `npm test` after substantive `src/` edits.
+- Leave new functions or branches untested when they carry business logic.

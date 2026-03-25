@@ -323,6 +323,9 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/brand-profile': 'site:read',
   'POST /sites/:siteId/brand-profile': 'site:write',
 
+  // Page Citability
+  'GET /sites/:siteId/page-citability/counts': 'site:read',
+
   // Top Pages
   'GET /sites/:siteId/top-pages': 'site:read',
   'GET /sites/:siteId/top-pages/:source': 'site:read',

@@ -44,8 +44,10 @@ import {
   strCompare,
   toFilterOption,
   toISOWeek,
+  validateModel,
   validateSiteBelongsToOrg,
   volumeToPopularity,
+  resolveModelFromRequest,
 } from '../../../src/controllers/llmo/llmo-brand-presence.js';
 
 use(sinonChai);
@@ -272,6 +274,40 @@ describe('llmo-brand-presence', () => {
     it('compares truthy strings normally', () => {
       expect(strCompare('a', 'b')).to.be.lessThan(0);
       expect(strCompare('b', 'a')).to.be.greaterThan(0);
+    });
+  });
+
+  describe('resolveModelFromRequest / validateModel', () => {
+    it('defaults missing or empty model to chatgpt-free', () => {
+      expect(resolveModelFromRequest(undefined)).to.equal('chatgpt-free');
+      expect(resolveModelFromRequest(null)).to.equal('chatgpt-free');
+      expect(resolveModelFromRequest('')).to.equal('chatgpt-free');
+    });
+
+    it('maps query aliases case-insensitively', () => {
+      expect(resolveModelFromRequest('all')).to.equal('chatgpt-paid');
+      expect(resolveModelFromRequest('ALL')).to.equal('chatgpt-paid');
+      expect(resolveModelFromRequest('chatgpt')).to.equal('chatgpt-free');
+      expect(resolveModelFromRequest('ChatGPT')).to.equal('chatgpt-free');
+    });
+
+    it('passes through canonical enum values and trims whitespace', () => {
+      expect(resolveModelFromRequest('gemini')).to.equal('gemini');
+      expect(resolveModelFromRequest('  gemini  ')).to.equal('gemini');
+      expect(resolveModelFromRequest('chatgpt-paid')).to.equal('chatgpt-paid');
+    });
+
+    it('validateModel accepts defaults, aliases, and enum values', () => {
+      expect(validateModel(undefined)).to.deep.equal({ valid: true, model: 'chatgpt-free' });
+      expect(validateModel('all')).to.deep.equal({ valid: true, model: 'chatgpt-paid' });
+      expect(validateModel('gemini')).to.deep.equal({ valid: true, model: 'gemini' });
+    });
+
+    it('validateModel rejects unknown models with error message', () => {
+      const r = validateModel('openai');
+      expect(r.valid).to.equal(false);
+      expect(r.error).to.include('Invalid model');
+      expect(r.error).to.include('chatgpt-free');
     });
   });
 
@@ -521,6 +557,36 @@ describe('llmo-brand-presence', () => {
       expect(mockContext.log.error).to.have.been.calledWith(
         'Brand presence filter-dimensions PostgREST error: relation "brand_presence_executions" does not exist',
       );
+    });
+
+    it('returns badRequest when model is invalid', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { model: 'openai' };
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid model');
+      expect(body.message).to.include('chatgpt-paid');
+      expect(body.message).to.include('chatgpt-free');
+    });
+
+    it('maps model query aliases for filter-dimensions (all → paid, chatgpt → free)', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+
+      mockContext.data = { model: 'ALL' };
+      await handler(mockContext);
+      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-paid');
+
+      chainMock.eq.resetHistory();
+      mockContext.data = { model: 'ChatGPT' };
+      await handler(mockContext);
+      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-free');
     });
 
     it('handles executions query returning data: null (uses empty rows fallback)', async () => {
@@ -1068,25 +1134,61 @@ describe('llmo-brand-presence', () => {
       });
     });
 
-    it('defaults model to chatgpt when not provided', async () => {
+    it('defaults model to chatgpt-free when not provided', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt');
+      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-free');
     });
 
     it('uses model from query param when provided', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { model: 'openai' };
+      mockContext.data = { model: 'gemini' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('model', 'openai');
+      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
+    });
+
+    it('maps model query alias "all" to chatgpt-paid', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { model: 'all' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-paid');
+    });
+
+    it('maps legacy model query "chatgpt" to chatgpt-free', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { model: 'chatgpt' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-free');
+    });
+
+    it('returns badRequest when model is invalid', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { model: 'invalid-model' };
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid model');
+      expect(body.message).to.include('chatgpt-paid');
+      expect(body.message).to.include('chatgpt-free');
     });
 
     it('filters by brandId when single brand route', async () => {
@@ -1883,14 +1985,14 @@ describe('llmo-brand-presence', () => {
       expect(client.from).to.have.been.calledWith('executions_competitor_data');
     });
 
-    it('defaults model to chatgpt when not provided', async () => {
+    it('defaults model to chatgpt-free when not provided', async () => {
       const client = createTableAwareMock();
       mockContext.dataAccess.Site.postgrestService = client;
 
       const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(client.eq).to.have.been.calledWith('model', 'chatgpt');
+      expect(client.eq).to.have.been.calledWith('model', 'chatgpt-free');
     });
 
     it('uses model from query param when provided', async () => {

@@ -1,3 +1,31 @@
+# [1.375.0](https://github.com/adobe/spacecat-api-service/compare/v1.374.0...v1.375.0) (2026-03-25)
+
+
+### Features
+
+* add generic page-citability counts endpoint with groupBy support ([#2032](https://github.com/adobe/spacecat-api-service/issues/2032)) ([d6d8b9d](https://github.com/adobe/spacecat-api-service/commit/d6d8b9dafae864cc90c1dbb22ef85b330fc58636))
+
+# [1.374.0](https://github.com/adobe/spacecat-api-service/compare/v1.373.0...v1.374.0) (2026-03-25)
+
+
+### Features
+
+* add optimize-at-edge-enabled-marking to global import slack command ([#2005](https://github.com/adobe/spacecat-api-service/issues/2005)) ([e150100](https://github.com/adobe/spacecat-api-service/commit/e1501006830c47963f26145eefdf4a60d9763409))
+
+# [1.373.0](https://github.com/adobe/spacecat-api-service/compare/v1.372.2...v1.373.0) (2026-03-24)
+
+
+### Features
+
+* llmo auto-fix support ([#1998](https://github.com/adobe/spacecat-api-service/issues/1998)) ([1c31200](https://github.com/adobe/spacecat-api-service/commit/1c312008292d4d3ea2178c8db7f9d20db2235161))
+
+## [1.372.2](https://github.com/adobe/spacecat-api-service/compare/v1.372.1...v1.372.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* make platform/model filter an enum in llmo apis ([#1971](https://github.com/adobe/spacecat-api-service/issues/1971)) ([5c8687d](https://github.com/adobe/spacecat-api-service/commit/5c8687d759606f16a7b54d518da5d0bc4d82e0e7))
+
 ## [1.372.1](https://github.com/adobe/spacecat-api-service/compare/v1.372.0...v1.372.1) (2026-03-24)
 
 

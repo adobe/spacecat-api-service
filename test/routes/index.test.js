@@ -47,6 +47,7 @@ describe('getRouteHandlers', () => {
     getAllWithLatestAudit: sinon.stub(),
     getByID: sinon.stub(),
     getByBaseURL: sinon.stub(),
+    getPageCitabilityCounts: sinon.stub(),
   };
 
   const mockPTA2Controller = {
@@ -616,6 +617,7 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'GET /sites/:siteId/scraped-content/:type',
+      'GET /sites/:siteId/page-citability/counts',
       'GET /sites/:siteId/top-pages',
       'GET /sites/:siteId/top-pages/:source',
       'GET /sites/:siteId/top-pages/:source/:geo',
