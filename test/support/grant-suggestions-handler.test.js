@@ -448,6 +448,53 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
+      it('handles empty grantIds when grantedIds exist (revokeGrants guard)', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+        const s2 = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const createdToken = { getRemaining: () => 3 };
+        const tokenAfterRegrant = { getRemaining: () => 1 };
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
+        };
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub(),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+        // grantedIds has items but grantIds is empty — triggers revokeGrants guard
+        SuggestionGrant.splitSuggestionsByGrantStatus
+          .onFirstCall().resolves({
+            grantedIds: ['sugg-1'],
+            grantIds: [],
+            notGrantedIds: ['sugg-2'],
+          })
+          .onSecondCall().resolves({
+            grantedIds: ['sugg-1'],
+            grantIds: [],
+            notGrantedIds: ['sugg-2'],
+          });
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(null)
+          .onSecondCall().resolves(createdToken)
+          .onThirdCall()
+          .resolves(tokenAfterRegrant);
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // revokeGrants called but no revokes since grantIds is empty
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        // Re-grant of grantedIds + grant of remaining
+        expect(SuggestionGrant.grantSuggestions.callCount).to.be.greaterThan(0);
+      });
+
       it('returns early after re-grant if token is null on re-fetch', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
