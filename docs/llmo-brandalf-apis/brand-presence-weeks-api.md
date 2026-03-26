@@ -21,7 +21,7 @@ Returns applicable ISO weeks (YYYY-Wnn) for the given model, optionally filtered
 
 | Parameter | Aliases | Type | Default | Description |
 |-----------|---------|------|---------|-------------|
-| `model` | — | string | `chatgpt` | LLM model (e.g. openai, chatgpt, gemini, copilot) |
+| `model` | — | enum | `chatgpt-free` | LLM model. Must be one of: `chatgpt-paid`, `chatgpt-free`, `google-ai-overview`, `perplexity`, `google-ai-mode`, `copilot`, `gemini`, `google`, `microsoft`, `mistral`, `anthropic`, `amazon`. Returns 400 if invalid. |
 | `siteId` | `site_id` | string (UUID) | — | Filter weeks to a specific site |
 
 ---
@@ -101,14 +101,14 @@ Each item has `week` (ISO week string YYYY-Wnn), `startDate` (Monday), and `endD
 
 ## Sample URLs
 
-**All brands, default model (chatgpt):**
+**All brands, default model (chatgpt-free):**
 ```
 GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/weeks
 ```
 
-**Single brand, openai model:**
+**Single brand, chatgpt-paid model:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/weeks?model=openai
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/weeks?model=chatgpt-paid
 ```
 
 **Weeks for a specific site:**
@@ -130,6 +130,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/weeks?mo
 | Status | Condition |
 |--------|-----------|
 | 400 | PostgREST not configured (DATA_SERVICE_PROVIDER ≠ postgres) |
+| 400 | Invalid `model` query parameter (not in llm_model enum) |
 | 400 | Organization not found |
 | 400 | PostgREST/PostgreSQL query error |
 | 403 | User does not belong to the organization |
