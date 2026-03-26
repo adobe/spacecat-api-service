@@ -56,6 +56,17 @@ describe('onboardSingleSite — paid profile guard', () => {
         wwwUrlResolver: sinon.stub().returns(SITE_URL),
         getLastNumberOfWeeks: sinon.stub().returns([]),
       },
+      '@adobe/spacecat-shared-tier-client': {
+        // eslint-disable-next-line func-style
+        default: {
+          createForSite: async () => ({
+            createEntitlement: async () => ({
+              entitlement: { getId: () => 'ent-test' },
+              siteEnrollment: { getId: () => 'enr-test' },
+            }),
+          }),
+        },
+      },
     }));
   });
 
@@ -95,6 +106,38 @@ describe('onboardSingleSite — paid profile guard', () => {
   });
 
   /**
+   * Builds a site mock with a fully-stubbed Config that can survive the happy path,
+   * allowing tests to assert on updateOnboardConfig being called.
+   */
+  const makeHappyPathSite = () => {
+    const updateOnboardConfigStub = sinon.stub();
+    const site = {
+      getId: () => 'site-123',
+      getBaseURL: () => SITE_URL,
+      getOrganizationId: () => 'org-123',
+      getProjectId: () => undefined,
+      getLanguage: () => undefined,
+      getRegion: () => undefined,
+      getCode: () => undefined,
+      getAuthoringType: () => undefined,
+      getDeliveryType: () => undefined,
+      getConfig: () => ({
+        getImports: () => [],
+        getOnboardConfig: () => undefined,
+        updateOnboardConfig: updateOnboardConfigStub,
+        updateFetchConfig: sinon.stub(),
+        getFetchConfig: () => undefined,
+      }),
+      setConfig: sinon.stub(),
+      setProjectId: sinon.stub(),
+      setLanguage: sinon.stub(),
+      setRegion: sinon.stub(),
+      save: sinon.stub().resolves(),
+    };
+    return { site, updateOnboardConfigStub };
+  };
+
+  /**
    * Builds a minimal context for testing the guard.
    * Site.findByBaseURL resolves to the provided site (or null).
    */
@@ -120,6 +163,13 @@ describe('onboardSingleSite — paid profile guard', () => {
       },
       Organization: {
         findByImsOrgId: sandbox.stub().rejects(new Error('not needed in guard tests')),
+      },
+      Project: {
+        allByOrganizationId: sandbox.stub().resolves([]),
+        create: sandbox.stub().resolves({
+          getId: () => 'proj-test',
+          getProjectName: () => 'example-com',
+        }),
       },
     },
     imsClient: { getImsOrganizationDetails: sandbox.stub() },
@@ -232,10 +282,12 @@ describe('onboardSingleSite — paid profile guard', () => {
 
     it('allows re-onboarding when force=true even if previous site has paid import', async () => {
       await assertGuardNotTriggered(makePaidSite(), demoProfile, { force: true });
+      expect(sayStub).to.have.been.calledWith(sinon.match(/Force re-onboarding/));
     });
 
     it('allows re-onboarding when force=true even if onboardConfig.lastProfile is paid', async () => {
       await assertGuardNotTriggered(makePaidOnboardConfigSite(), demoProfile, { force: true });
+      expect(sayStub).to.have.been.calledWith(sinon.match(/Force re-onboarding/));
     });
 
     it('allows onboarding when site does not exist yet', async () => {
@@ -248,6 +300,64 @@ describe('onboardSingleSite — paid profile guard', () => {
 
     it('allows re-onboarding with paid profile regardless of previous site state', async () => {
       await assertGuardNotTriggered(makePaidSite(), paidProfile);
+    });
+  });
+
+  describe('updateOnboardConfig', () => {
+    it('calls updateOnboardConfig with lastProfile and lastStartTime on the happy path', async () => {
+      const { site, updateOnboardConfigStub } = makeHappyPathSite();
+      const ctx = makeContext(site);
+      // Override findByBaseURL to return our fully-stubbed site
+      ctx.dataAccess.Site.findByBaseURL = sandbox.stub().resolves(site);
+
+      try {
+        await onboardSingleSite(
+          SITE_URL,
+          IMS_ORG_ID,
+          {},
+          demoProfile,
+          300,
+          slackContext(),
+          ctx,
+          {},
+          { profileName: 'demo' },
+        );
+      } catch {
+        // Downstream deps (Configuration, Organization) are not fully mocked — expected to throw.
+        // We only care that updateOnboardConfig was reached before the failure.
+      }
+
+      expect(updateOnboardConfigStub).to.have.been.calledOnce;
+      const [payload] = updateOnboardConfigStub.firstCall.args;
+      expect(payload).to.have.property('lastProfile', 'demo');
+      expect(payload).to.have.property('lastStartTime').that.is.a('number');
+      expect(payload).to.not.have.property('forcedOverride');
+    });
+
+    it('includes forcedOverride:true in updateOnboardConfig payload when force=true', async () => {
+      const { site, updateOnboardConfigStub } = makeHappyPathSite();
+      const ctx = makeContext(site);
+      ctx.dataAccess.Site.findByBaseURL = sandbox.stub().resolves(site);
+
+      try {
+        await onboardSingleSite(
+          SITE_URL,
+          IMS_ORG_ID,
+          {},
+          demoProfile,
+          300,
+          slackContext(),
+          ctx,
+          { force: true },
+          { profileName: 'demo' },
+        );
+      } catch {
+        // Expected — downstream deps not fully mocked.
+      }
+
+      expect(updateOnboardConfigStub).to.have.been.calledOnce;
+      const [payload] = updateOnboardConfigStub.firstCall.args;
+      expect(payload).to.have.property('forcedOverride', true);
     });
   });
 });

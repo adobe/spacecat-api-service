@@ -37,6 +37,12 @@ import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 
+// Two signals indicate a previous paid onboarding:
+// 1. ahref-paid-pages import — unique to the paid profile's import set.
+// 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
+//    after onboardConfig tracking was introduced.
+const PAID_PROFILE_IMPORT = 'ahref-paid-pages';
+
 /**
  * Step Functions execution names must be 1–80 chars and may only contain
  * letters, numbers, hyphens, or underscores
@@ -1309,19 +1315,19 @@ export const onboardSingleSite = async (
     // A non-protected incoming profile cannot override a paid onboarding unless force=true.
     if (!profile.protected) {
       const siteConfig = prefetchedSite?.getConfig();
-      const hasPaidImport = isImportEnabled('ahref-paid-pages', siteConfig?.getImports());
+      const hasPaidImport = isImportEnabled(PAID_PROFILE_IMPORT, siteConfig?.getImports());
       const hasPaidOnboardConfig = siteConfig?.getOnboardConfig()?.lastProfile === 'paid';
       if (hasPaidImport || hasPaidOnboardConfig) {
         if (additionalParams.force) {
           log.warn(`Force re-onboarding ${baseURL}: overriding paid profile with "${profileName}"`);
-          await say(`:warning: Force re-onboarding \`${baseURL}\` — overriding paid profile with *${profileName}*.`);
+          await say(`:warning: Force re-onboarding \`${baseURL}\` - overriding paid profile with *${profileName}*.`);
         } else {
+          reportLine.errors = 'Blocked: site already onboarded with paid profile';
+          reportLine.status = 'Failed';
           const msg = `:warning: Site \`${baseURL}\` was previously onboarded with the *paid* profile. `
             + `Re-onboarding with *${profileName}* is blocked to protect the paid configuration.\n`
             + `To override, re-run \`/onboard ${baseURL}\` and select *Force Onboard* in the modal.`;
           await say(msg);
-          reportLine.errors = 'Blocked: site already onboarded with paid profile';
-          reportLine.status = 'Failed';
           return reportLine;
         }
       }
@@ -1484,6 +1490,7 @@ export const onboardSingleSite = async (
     siteConfig.updateOnboardConfig({
       lastProfile: profileName.toLowerCase(),
       lastStartTime: onboardStartTime,
+      ...(additionalParams.force ? { forcedOverride: true } : {}),
     });
 
     site.setConfig(Config.toDynamoItem(siteConfig));
