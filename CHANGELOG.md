@@ -1,3 +1,10 @@
+## [1.377.1](https://github.com/adobe/spacecat-api-service/compare/v1.377.0...v1.377.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* brand url management ([#2029](https://github.com/adobe/spacecat-api-service/issues/2029)) ([b829c1d](https://github.com/adobe/spacecat-api-service/commit/b829c1dea060260166e4467d03f53fa0838a8032))
+
 # [1.377.0](https://github.com/adobe/spacecat-api-service/compare/v1.376.2...v1.377.0) (2026-03-26)
 
 
