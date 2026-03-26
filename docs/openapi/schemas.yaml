@@ -6477,7 +6477,7 @@ SentimentGuideline:
       items:
         type: string
       description: Enabled audit types
-      example: ["wikipedia-analysis", "reddit-analysis"]
+      example: ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
     enabled:
       type: boolean
       description: Whether guideline is active
@@ -6514,7 +6514,7 @@ SentimentGuidelineInput:
       items:
         type: string
       description: Audit types to associate
-      example: ["wikipedia-analysis", "reddit-analysis"]
+      example: ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
     enabled:
       type: boolean
       default: true

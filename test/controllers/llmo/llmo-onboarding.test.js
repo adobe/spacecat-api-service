@@ -58,7 +58,7 @@ describe('LLMO Onboarding Functions', () => {
       SHAREPOINT_AUTHORITY: 'test-authority',
       SHAREPOINT_DOMAIN_ID: 'test-domain-id',
       DEFAULT_ORGANIZATION_ID: 'default-org-id',
-      HLX_ADMIN_TOKEN: 'test-admin-token',
+      HLX_ONBOARDING_TOKEN: 'test-onboarding-token',
     };
 
     // Create mock SharePoint client and folder

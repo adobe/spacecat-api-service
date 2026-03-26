@@ -34,6 +34,7 @@ import {
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
+import { traceIdResponseWrapper } from './support/trace-id-response-wrapper.js';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -312,6 +313,7 @@ const wrappedMain = wrap(run)
 
 export const main = wrappedMain
   .with(localCORSWrapper)
+  .with(traceIdResponseWrapper)
   .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)
