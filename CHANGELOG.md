@@ -1,3 +1,10 @@
+## [1.376.1](https://github.com/adobe/spacecat-api-service/compare/v1.376.0...v1.376.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* optimize edge preview API ([#2034](https://github.com/adobe/spacecat-api-service/issues/2034)) ([37181b5](https://github.com/adobe/spacecat-api-service/commit/37181b5c8c41ac05cb09cf8284c1c6411b55f26d))
+
 # [1.376.0](https://github.com/adobe/spacecat-api-service/compare/v1.375.2...v1.376.0) (2026-03-26)
 
 
