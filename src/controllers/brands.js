@@ -806,6 +806,63 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // Temporary: hardcoded site IDs for which the S3-to-DB config sync is enabled.
+  // TODO: replace with actual site UUIDs per environment.
+  const ALLOWED_SITE_IDS = [
+    '00000000-0000-0000-0000-000000000001', // dev
+    '00000000-0000-0000-0000-000000000002', // prod
+  ];
+
+  function isSyncEnabledForSite(siteId) {
+    return ALLOWED_SITE_IDS.includes(siteId);
+  }
+
+  const triggerConfigSync = async (context) => {
+    const { spaceCatId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const rawQueryString = context.invocation?.event?.rawQueryString || '';
+      const params = Object.fromEntries(
+        rawQueryString.split('&').filter(Boolean).map((p) => p.split('=')),
+      );
+      const { siteId } = params;
+
+      if (!hasText(siteId) || !isValidUUID(siteId)) {
+        return badRequest('Query parameter siteId (valid UUID) is required');
+      }
+
+      const site = await Site.findById(siteId);
+      if (!site) return notFound(`Site not found: ${siteId}`);
+      if (site.getOrganizationId() !== spaceCatId) {
+        return forbidden('Site does not belong to this organization');
+      }
+
+      if (!isSyncEnabledForSite(siteId)) {
+        return badRequest(`Config sync is not enabled for site ${siteId}`);
+      }
+
+      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+        type: 'llmo-config-db-sync',
+        siteId,
+      });
+
+      log.info(`On-demand config DB sync triggered for site ${siteId}`);
+      return ok({ message: 'Config sync triggered', siteId });
+    } catch (error) {
+      log.error(`Error triggering config sync for org ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
@@ -824,6 +881,7 @@ function BrandsController(ctx, log, env) {
     updatePromptByBrandAndId,
     deletePromptByBrandAndId,
     bulkDeletePromptsByBrand,
+    triggerConfigSync,
   };
 }
 

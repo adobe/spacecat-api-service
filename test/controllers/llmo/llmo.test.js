@@ -1558,6 +1558,29 @@ describe('LlmoController', () => {
       expect(mockContext.sqs.sendMessage).to.not.have.been.called;
     });
 
+    it('should trigger llmo-config-db-sync when site is in ALLOWED_SITE_IDS', async () => {
+      mockContext.params.siteId = '00000000-0000-0000-0000-000000000001';
+
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+        TEST_QUEUE_URL,
+        {
+          type: 'llmo-config-db-sync',
+          siteId: '00000000-0000-0000-0000-000000000001',
+        },
+      );
+    });
+
+    it('should not trigger llmo-config-db-sync when site is not in ALLOWED_SITE_IDS', async () => {
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.not.have.been.calledWith(
+        TEST_QUEUE_URL,
+        sinon.match({ type: 'llmo-config-db-sync' }),
+      );
+    });
+
     it('should return bad request when payload is not an object', async () => {
       mockContext.data = null;
 

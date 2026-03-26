@@ -64,6 +64,17 @@ const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
+// Temporary: hardcoded site IDs for which the S3-to-DB config sync is enabled.
+// TODO: replace with actual site UUIDs per environment.
+const ALLOWED_SITE_IDS = [
+  '00000000-0000-0000-0000-000000000001', // dev
+  '00000000-0000-0000-0000-000000000002', // prod
+];
+
+function isSyncEnabledForSite(siteId) {
+  return ALLOWED_SITE_IDS.includes(siteId);
+}
+
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -527,6 +538,13 @@ function LlmoController(ctx) {
               ? prevConfig.version
               : /* c8 ignore next */ null,
           },
+        });
+      }
+
+      if (isSyncEnabledForSite(siteId)) {
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: 'llmo-config-db-sync',
+          siteId,
         });
       }
 
