@@ -1,3 +1,10 @@
+# [1.377.0](https://github.com/adobe/spacecat-api-service/compare/v1.376.2...v1.377.0) (2026-03-26)
+
+
+### Features
+
+* add x-trace-id to API responses via traceIdResponseWrapper ([#2036](https://github.com/adobe/spacecat-api-service/issues/2036)) ([bad2bb4](https://github.com/adobe/spacecat-api-service/commit/bad2bb42b25cfa95d428f814c039b6654ae1228c))
+
 ## [1.376.2](https://github.com/adobe/spacecat-api-service/compare/v1.376.1...v1.376.2) (2026-03-26)
 
 
