@@ -1,3 +1,17 @@
+# [1.379.0](https://github.com/adobe/spacecat-api-service/compare/v1.378.0...v1.379.0) (2026-03-26)
+
+
+### Features
+
+* create initial v2 customer config during LLMO onboarding ([#2040](https://github.com/adobe/spacecat-api-service/issues/2040)) ([4f42405](https://github.com/adobe/spacecat-api-service/commit/4f42405c8d76349e20c09fac443a997e7e51f11c))
+
+# [1.378.0](https://github.com/adobe/spacecat-api-service/compare/v1.377.1...v1.378.0) (2026-03-26)
+
+
+### Features
+
+* add response compression to API service ([#2045](https://github.com/adobe/spacecat-api-service/issues/2045)) ([c7a30c0](https://github.com/adobe/spacecat-api-service/commit/c7a30c0cdc869de89cd76deace98f7efecb7e95e)), closes [adobe/spacecat-shared#1471](https://github.com/adobe/spacecat-shared/issues/1471)
+
 ## [1.377.1](https://github.com/adobe/spacecat-api-service/compare/v1.377.0...v1.377.1) (2026-03-26)
 
 
