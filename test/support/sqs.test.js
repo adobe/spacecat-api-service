@@ -156,6 +156,32 @@ describe('sqs', () => {
     expect(context.log.debug).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);
   });
 
+  it('passes DelaySeconds when provided', async () => {
+    const messageId = 'message-id';
+    const message = { key: 'value' };
+
+    nock('https://sqs.us-east-1.amazonaws.com')
+      .post('/')
+      .reply(200, (_, body) => {
+        const {
+          MessageBody, QueueUrl, DelaySeconds,
+        } = JSON.parse(body);
+        expect(QueueUrl).to.equal(QUEUE_URL);
+        expect(DelaySeconds).to.equal(10);
+        expect(JSON.parse(MessageBody).key).to.equal(message.key);
+        return {
+          MessageId: messageId,
+          MD5OfMessageBody: crypto.createHash('md5').update(MessageBody, 'utf-8').digest('hex'),
+        };
+      });
+
+    await wrap(async (req, ctx) => {
+      await ctx.sqs.sendMessage(QUEUE_URL, message, undefined, { delaySeconds: 10 });
+    }).with(sqsWrapper)({}, context);
+
+    expect(context.log.debug).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);
+  });
+
   describe('Named queues', () => {
     let sqs;
     let sendStub;
