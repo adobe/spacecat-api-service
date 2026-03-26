@@ -16,6 +16,7 @@ import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { AUDIT_OPPORTUNITY_MAP } from '@adobe/spacecat-shared-utils';
 import { computeAuditCompletion } from '../../../../src/support/slack/commands/onboard-status.js';
 
 use(sinonChai);
@@ -39,11 +40,13 @@ describe('OnboardStatusCommand', () => {
   }
 
   function makeSite(overrides = {}) {
-    const { handlers = {}, ...siteOverrides } = overrides;
+    const { lastStartTime, ...siteOverrides } = overrides;
     return {
       getId: sinon.stub().returns(siteId),
       getOpportunities: sinon.stub().resolves([]),
-      getConfig: sinon.stub().returns({ getHandlers: sinon.stub().returns(handlers) }),
+      getConfig: sinon.stub().returns({
+        getOnboardConfig: sinon.stub().returns(lastStartTime ? { lastStartTime } : undefined),
+      }),
       ...siteOverrides,
     };
   }
@@ -188,9 +191,11 @@ describe('OnboardStatusCommand', () => {
 
     it('shows hourglass for opportunity whose source audit is still pending', async () => {
       const opp = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([{ id: 's1' }]) };
-      // cwv lastAuditRunTime=onboardTime; record predates it → pending → ⏳
-      const handlers = { cwv: { lastAuditRunTime: onboardTime } };
-      const siteWithOpp = makeSite({ handlers, getOpportunities: sinon.stub().resolves([opp]) });
+      // lastStartTime=onboardTime; cwv record predates it → pending → ⏳
+      const siteWithOpp = makeSite({
+        lastStartTime: onboardTime,
+        getOpportunities: sinon.stub().resolves([opp]),
+      });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
       dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
@@ -206,9 +211,11 @@ describe('OnboardStatusCommand', () => {
 
     it('does not fetch suggestions for pending opportunity', async () => {
       const opp = { getType: sinon.stub().returns('sitemap'), getSuggestions: sinon.stub().resolves([]) };
-      // sitemap lastAuditRunTime=onboardTime; record predates it → pending
-      const handlers = { sitemap: { lastAuditRunTime: onboardTime } };
-      const siteWithOpp = makeSite({ handlers, getOpportunities: sinon.stub().resolves([opp]) });
+      // lastStartTime=onboardTime; sitemap record predates it → pending
+      const siteWithOpp = makeSite({
+        lastStartTime: onboardTime,
+        getOpportunities: sinon.stub().resolves([opp]),
+      });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithOpp);
       dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('sitemap', new Date(onboardTime - 500).toISOString()),
@@ -268,25 +275,16 @@ describe('OnboardStatusCommand', () => {
   });
 
   describe('handleExecution — audit completion disclaimer', () => {
-    // All 9 audit types present in AUDIT_OPPORTUNITY_MAP
-    const ALL_MAP_TYPES = [
-      'cwv', 'forms-opportunities', 'meta-tags', 'experimentation-opportunities',
-      'broken-backlinks', 'broken-internal-links', 'sitemap', 'alt-text', 'accessibility',
-    ];
+    // All audit types present in AUDIT_OPPORTUNITY_MAP
+    const ALL_MAP_TYPES = Object.keys(AUDIT_OPPORTUNITY_MAP);
 
     function makeAllMapAudits(timestamp) {
       return ALL_MAP_TYPES.map((t) => makeAudit(t, timestamp));
     }
 
-    // Build a handlers object with lastAuditRunTime set for each of the given types
-    function makeHandlers(types, runTime) {
-      return Object.fromEntries(types.map((t) => [t, { lastAuditRunTime: runTime }]));
-    }
-
-    it('shows "all complete" when all map-known audits completed after lastAuditRunTime', async () => {
-      // lastAuditRunTime = onboardTime; audits completed at onboardTime+1000 → completed
-      const handlers = makeHandlers(ALL_MAP_TYPES, onboardTime);
-      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ handlers }));
+    it('shows "all complete" when all map-known audits completed after lastStartTime', async () => {
+      // lastStartTime = onboardTime; audits completed at onboardTime+1000 → completed
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
       dataAccessStub.LatestAudit.allBySiteId.resolves(
         makeAllMapAudits(new Date(onboardTime + 1000).toISOString()),
       );
@@ -299,12 +297,13 @@ describe('OnboardStatusCommand', () => {
       );
     });
 
-    it('shows pending warning when audit record predates lastAuditRunTime', async () => {
-      // cwv ran at onboardTime-1000 but lastAuditRunTime is onboardTime → cwv is pending
-      const handlers = makeHandlers(ALL_MAP_TYPES, onboardTime);
-      const audits = makeAllMapAudits(new Date(onboardTime + 1000).toISOString());
-      audits[0] = makeAudit('cwv', new Date(onboardTime - 1000).toISOString());
-      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ handlers }));
+    it('shows pending warning when audit record predates lastStartTime', async () => {
+      // cwv ran at onboardTime-1000 but lastStartTime is onboardTime → cwv is pending
+      const audits = ALL_MAP_TYPES.map((t) => makeAudit(
+        t,
+        new Date(t === 'cwv' ? onboardTime - 1000 : onboardTime + 1000).toISOString(),
+      ));
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
       dataAccessStub.LatestAudit.allBySiteId.resolves(audits);
 
       const command = OnboardStatusCommand(context);
@@ -317,11 +316,12 @@ describe('OnboardStatusCommand', () => {
     });
 
     it('uses singular "audit" grammar when exactly one audit is pending', async () => {
-      // Only cwv is stale (predates lastAuditRunTime); all others completed after
-      const handlers = makeHandlers(ALL_MAP_TYPES, onboardTime);
-      const audits = makeAllMapAudits(new Date(onboardTime + 1000).toISOString());
-      audits[0] = makeAudit('cwv', new Date(onboardTime - 1000).toISOString());
-      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ handlers }));
+      // Only cwv is stale (predates lastStartTime); all others completed after
+      const audits = ALL_MAP_TYPES.map((t) => makeAudit(
+        t,
+        new Date(t === 'cwv' ? onboardTime - 1000 : onboardTime + 1000).toISOString(),
+      ));
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
       dataAccessStub.LatestAudit.allBySiteId.resolves(audits);
 
       const command = OnboardStatusCommand(context);
@@ -345,8 +345,8 @@ describe('OnboardStatusCommand', () => {
       expect(disclaimer).to.match(/audits may still be in progress/);
     });
 
-    it('shows "all complete" when records exist but no lastAuditRunTime set', async () => {
-      // No lastAuditRunTime in handlers → any existing record counts as completed
+    it('shows "all complete" when records exist but no lastStartTime set', async () => {
+      // No lastStartTime in onboardConfig → any existing record counts as completed
       dataAccessStub.Site.findByBaseURL.resolves(makeSite());
       dataAccessStub.LatestAudit.allBySiteId.resolves(
         makeAllMapAudits(new Date().toISOString()),
@@ -383,10 +383,9 @@ describe('OnboardStatusCommand', () => {
     });
 
     it('excludes infrastructure audit types not in AUDIT_OPPORTUNITY_MAP from disclaimer', async () => {
-      // cwv has lastAuditRunTime=onboardTime; its record predates that → pending
+      // cwv record predates lastStartTime → pending
       // scrape-top-pages is not in the map → excluded from disclaimer
-      const handlers = { cwv: { lastAuditRunTime: onboardTime } };
-      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ handlers }));
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
       dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('cwv', new Date(onboardTime - 1000).toISOString()),
         makeAudit('scrape-top-pages', new Date(onboardTime - 1000).toISOString()),
@@ -403,9 +402,8 @@ describe('OnboardStatusCommand', () => {
     });
 
     it('uses kebab-to-Title-Case conversion for audit types not in the title map', async () => {
-      // forms-opportunities has lastAuditRunTime=onboardTime; its record predates → pending
-      const handlers = { 'forms-opportunities': { lastAuditRunTime: onboardTime } };
-      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ handlers }));
+      // forms-opportunities record predates lastStartTime → pending
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
       dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('forms-opportunities', new Date(onboardTime - 1000).toISOString()),
       ]);
@@ -435,7 +433,7 @@ describe('OnboardStatusCommand', () => {
       );
     });
 
-    it('uses empty handlers when getConfig returns null', async () => {
+    it('handles null getConfig gracefully', async () => {
       const site = makeSite({ getConfig: sinon.stub().returns(null) });
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.LatestAudit.allBySiteId.resolves([]);
@@ -468,39 +466,37 @@ describe('OnboardStatusCommand', () => {
 
 describe('computeAuditCompletion', () => {
   it('marks audit type as pending when no record exists in latestAudits', () => {
-    const { pendingAuditTypes, completedAuditTypes } = computeAuditCompletion(['cwv'], {}, []);
+    const { pendingAuditTypes, completedAuditTypes } = computeAuditCompletion(['cwv'], undefined, []);
     expect(pendingAuditTypes).to.deep.equal(['cwv']);
     expect(completedAuditTypes).to.deep.equal([]);
   });
 
-  it('marks audit as pending when record predates lastAuditRunTime', () => {
+  it('marks audit as pending when record predates lastStartTime', () => {
     const runTime = Date.now();
-    const handlers = { cwv: { lastAuditRunTime: runTime } };
     const staleAudit = {
       getAuditType: () => 'cwv',
       getAuditedAt: () => new Date(runTime - 1000).toISOString(),
     };
-    const { pendingAuditTypes } = computeAuditCompletion(['cwv'], handlers, [staleAudit]);
+    const { pendingAuditTypes } = computeAuditCompletion(['cwv'], runTime, [staleAudit]);
     expect(pendingAuditTypes).to.deep.equal(['cwv']);
   });
 
-  it('marks audit as completed when record postdates lastAuditRunTime', () => {
+  it('marks audit as completed when record postdates lastStartTime', () => {
     const runTime = Date.now() - 60000;
-    const handlers = { cwv: { lastAuditRunTime: runTime } };
     const freshAudit = {
       getAuditType: () => 'cwv',
       getAuditedAt: () => new Date(runTime + 1000).toISOString(),
     };
-    const { completedAuditTypes } = computeAuditCompletion(['cwv'], handlers, [freshAudit]);
+    const { completedAuditTypes } = computeAuditCompletion(['cwv'], runTime, [freshAudit]);
     expect(completedAuditTypes).to.deep.equal(['cwv']);
   });
 
-  it('treats existing record as completed when no lastAuditRunTime set', () => {
+  it('treats existing record as completed when no lastStartTime set', () => {
     const audit = {
       getAuditType: () => 'cwv',
       getAuditedAt: () => new Date(Date.now() - 86400000).toISOString(), // 1 day old
     };
-    const { completedAuditTypes, pendingAuditTypes } = computeAuditCompletion(['cwv'], {}, [audit]);
+    const { completedAuditTypes, pendingAuditTypes } = computeAuditCompletion(['cwv'], undefined, [audit]);
     expect(completedAuditTypes).to.deep.equal(['cwv']);
     expect(pendingAuditTypes).to.deep.equal([]);
   });

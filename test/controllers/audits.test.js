@@ -641,6 +641,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -681,6 +682,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -722,6 +724,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -766,6 +769,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -850,6 +854,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -895,6 +900,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -938,6 +944,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -980,6 +987,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -1021,6 +1029,7 @@ describe('Audits Controller', () => {
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
         getBrandProfile: () => ({}),
+        getOnboardConfig: () => undefined,
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -1088,6 +1097,7 @@ describe('Audits Controller', () => {
           getTokowakaConfig: () => ({}),
           getEdgeOptimizeConfig: () => undefined,
           getBrandProfile: () => ({}),
+          getOnboardConfig: () => undefined,
         };
 
         site.getConfig = () => siteConfig;

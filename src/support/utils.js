@@ -1351,16 +1351,6 @@ export const onboardSingleSite = async (
       });
     }
 
-    // Record the trigger time for each audit in the profile so that onboard status
-    // can compare lastAuditRunTime against LatestAudit.auditedAt per audit type.
-    const profileAuditTypes = Object.keys(profile.audits);
-    const now = Date.now();
-    const handlers = siteConfig.getHandlers() || {};
-    for (const auditType of profileAuditTypes) {
-      handlers[auditType] = { ...(handlers[auditType] || {}), lastAuditRunTime: now };
-    }
-    siteConfig.state.handlers = handlers;
-
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();

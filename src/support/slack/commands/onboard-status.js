@@ -10,74 +10,31 @@
  * governing permissions and limitations under the License.
  */
 
+import {
+  getAuditsForOpportunity,
+  getOpportunityTitle,
+  AUDIT_OPPORTUNITY_MAP,
+} from '@adobe/spacecat-shared-utils';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import BaseCommand from './base.js';
 
 const PHRASES = ['onboard status'];
 
 /**
- * Maps audit types to a human-readable title for Slack output.
- * Mirrors the same helper used in opportunity-status-processor.
- * @param {string} auditType
- * @returns {string}
- */
-function getAuditTitle(auditType) {
-  const titles = {
-    cwv: 'Core Web Vitals',
-    'meta-tags': 'SEO Meta Tags',
-    'broken-backlinks': 'Broken Backlinks',
-    'broken-internal-links': 'Broken Internal Links',
-    'alt-text': 'Alt Text',
-    sitemap: 'Sitemap',
-  };
-  if (titles[auditType]) return titles[auditType];
-  return auditType
-    .split('-')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
-/**
- * Maps audit types to their corresponding opportunity types.
- * Kept in sync with audit-opportunity-map.js in spacecat-task-processor.
- */
-const AUDIT_OPPORTUNITY_MAP = {
-  cwv: ['cwv'],
-  'forms-opportunities': ['form-accessibility', 'forms-opportunities'],
-  'meta-tags': ['meta-tags'],
-  'experimentation-opportunities': ['high-organic-low-ctr'],
-  'broken-backlinks': ['broken-backlinks'],
-  'broken-internal-links': ['broken-internal-links'],
-  sitemap: ['sitemap'],
-  'alt-text': ['alt-text'],
-  accessibility: ['accessibility'],
-};
-
-/**
- * Returns the audit types that can generate the given opportunity type.
- * @param {string} oppType
- * @returns {string[]}
- */
-function getAuditTypesForOpportunity(oppType) {
-  return Object.entries(AUDIT_OPPORTUNITY_MAP)
-    .filter(([, opps]) => opps.includes(oppType))
-    .map(([auditType]) => auditType);
-}
-
-/**
  * Computes which audit types are pending vs completed from already-fetched audit records.
- * Uses per-audit lastAuditRunTime stored in site config handlers to determine if the
- * most recent DB record post-dates the last trigger. If lastAuditRunTime is absent for
- * an audit type (e.g. site onboarded before this feature), any existing record is treated
- * as completed — only a missing record counts as pending.
+ * Uses onboardConfig.lastStartTime (persisted during onboarding) as the trigger anchor —
+ * the same value the task processor reads as onboardStartTime from the message context.
+ * An audit is pending if its record predates the trigger or doesn't exist yet.
+ * If lastStartTime is absent (site onboarded before this feature), any existing record
+ * is treated as completed — only a missing record counts as pending.
  * Pure function — no DB calls.
  *
  * @param {string[]} auditTypes
- * @param {Object} handlers - site config handlers keyed by audit type
+ * @param {number|undefined} lastStartTime - onboardConfig.lastStartTime from site config
  * @param {Array} latestAudits - records from LatestAudit.allBySiteId
  * @returns {{pendingAuditTypes: string[], completedAuditTypes: string[]}}
  */
-export function computeAuditCompletion(auditTypes, handlers, latestAudits) {
+export function computeAuditCompletion(auditTypes, lastStartTime, latestAudits) {
   const pendingAuditTypes = [];
   const completedAuditTypes = [];
   const auditsByType = {};
@@ -90,19 +47,18 @@ export function computeAuditCompletion(auditTypes, handlers, latestAudits) {
     const audit = auditsByType[auditType];
     if (!audit) {
       pendingAuditTypes.push(auditType);
-    } else {
-      const lastAuditRunTime = handlers?.[auditType]?.lastAuditRunTime;
-      if (lastAuditRunTime) {
-        const auditedAt = new Date(audit.getAuditedAt()).getTime();
-        if (auditedAt < lastAuditRunTime) {
-          pendingAuditTypes.push(auditType);
-        } else {
-          completedAuditTypes.push(auditType);
-        }
+    } else if (lastStartTime) {
+      const auditedAt = new Date(audit.getAuditedAt()).getTime();
+      // auditedAt <= lastStartTime means the record predates or ties with the trigger —
+      // treat as pending. An exact match is rare but indicates an in-flight audit.
+      if (auditedAt <= lastStartTime) {
+        pendingAuditTypes.push(auditType);
       } else {
-        // No trigger time recorded — treat existing record as completed.
         completedAuditTypes.push(auditType);
       }
+    } else {
+      // No onboard start time recorded — treat existing record as completed.
+      completedAuditTypes.push(auditType);
     }
   }
   return { pendingAuditTypes, completedAuditTypes };
@@ -164,9 +120,9 @@ Example:
 
       const siteId = site.getId();
 
-      // Per-audit trigger timestamps stored by onboard site in site config handlers.
-      // Used by computeAuditCompletion to detect audits that haven't completed yet.
-      const handlers = site.getConfig()?.getHandlers() || {};
+      // Onboard trigger timestamp — same value the task processor reads as onboardStartTime.
+      // Used by computeAuditCompletion to detect audits that predate the last onboarding.
+      const lastStartTime = site.getConfig()?.getOnboardConfig()?.lastStartTime;
 
       // Fetch latest audits — derive auditTypes (for opportunity filtering) from records.
       // For the pending check, always compare against ALL map-known audit types so that
@@ -180,7 +136,7 @@ Example:
         }
         const knownTypes = Object.keys(AUDIT_OPPORTUNITY_MAP);
         const audits = latestAudits || [];
-        pendingAuditTypes = computeAuditCompletion(knownTypes, handlers, audits)
+        pendingAuditTypes = computeAuditCompletion(knownTypes, lastStartTime, audits)
           .pendingAuditTypes;
       } catch (auditErr) {
         log.warn(`[onboard-status] Could not fetch audit types for site ${siteId}: ${auditErr.message}`);
@@ -202,40 +158,32 @@ Example:
       // Fetch opportunities and build status lines.
       // Opportunities whose source audit is still pending show ⏳ instead of stale ✅/ℹ️.
       const opportunities = await site.getOpportunities();
-      const opportunityStatusLines = [];
       const processedTypes = new Set();
+      const shouldFilter = auditTypes.length > 0
+        && expectedOpportunityTypes.length > 0
+        && !hasUnknownAuditTypes;
 
-      /* eslint-disable no-await-in-loop */
-      for (const opportunity of opportunities) {
+      const visibleOpportunities = opportunities.filter((opportunity) => {
         const oppType = opportunity.getType();
-
-        const shouldFilter = auditTypes.length > 0
-          && expectedOpportunityTypes.length > 0
-          && !hasUnknownAuditTypes;
-
-        if (shouldFilter && !expectedOpportunityTypes.includes(oppType)) {
-          // eslint-disable-next-line no-continue
-          continue;
-        }
-        if (processedTypes.has(oppType)) {
-          // eslint-disable-next-line no-continue
-          continue;
-        }
+        if (shouldFilter && !expectedOpportunityTypes.includes(oppType)) return false;
+        if (processedTypes.has(oppType)) return false;
         processedTypes.add(oppType);
+        return true;
+      });
 
-        const sourceAuditIsPending = getAuditTypesForOpportunity(oppType)
-          .some((auditType) => pendingAuditTypes.includes(auditType));
-
-        if (sourceAuditIsPending) {
-          opportunityStatusLines.push(`${getAuditTitle(oppType)} :hourglass_flowing_sand:`);
-        } else {
+      const opportunityStatusLines = await Promise.all(
+        visibleOpportunities.map(async (opportunity) => {
+          const oppType = opportunity.getType();
+          const sourceAuditIsPending = getAuditsForOpportunity(oppType)
+            .some((auditType) => pendingAuditTypes.includes(auditType));
+          if (sourceAuditIsPending) {
+            return `${getOpportunityTitle(oppType)} :hourglass_flowing_sand:`;
+          }
           const suggestions = await opportunity.getSuggestions();
-          const hasSuggestions = suggestions && suggestions.length > 0;
-          const statusIcon = hasSuggestions ? ':white_check_mark:' : ':information_source:';
-          opportunityStatusLines.push(`${getAuditTitle(oppType)} ${statusIcon}`);
-        }
-      }
-      /* eslint-enable no-await-in-loop */
+          const statusIcon = suggestions?.length > 0 ? ':white_check_mark:' : ':information_source:';
+          return `${getOpportunityTitle(oppType)} ${statusIcon}`;
+        }),
+      );
 
       // Section: Opportunity Statuses
       await say(`*Opportunity Statuses for site ${siteUrl}*`);
@@ -253,7 +201,7 @@ Example:
         (t) => AUDIT_OPPORTUNITY_MAP[t]?.length > 0,
       );
       if (relevantPendingTypes.length > 0) {
-        const pendingList = relevantPendingTypes.map(getAuditTitle).join(', ');
+        const pendingList = relevantPendingTypes.map(getOpportunityTitle).join(', ');
         await say(
           `:warning: *Heads-up:* The following audit${relevantPendingTypes.length > 1 ? 's' : ''} `
           + `may still be in progress: *${pendingList}*.\n`
