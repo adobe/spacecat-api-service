@@ -53,8 +53,8 @@ function mapDbBrandToV2(row) {
     const base = bs.sites?.base_url;
     if (!hasText(base)) return [];
     const paths = bs.paths || [];
-    if (paths.length === 0) return [{ value: base }];
-    return paths.map((p) => ({ value: `${base}${p}` }));
+    const effectivePaths = paths.length === 0 ? ['/'] : paths;
+    return effectivePaths.map((p) => ({ value: p === '/' ? base : `${base}${p}` }));
   });
 
   return {
@@ -128,7 +128,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .forEach((value) => {
       const { base, path } = parseUrlParts(value);
       if (!pathsByBase.has(base)) pathsByBase.set(base, []);
-      if (path) pathsByBase.get(base).push(path);
+      pathsByBase.get(base).push(path || '/');
     });
 
   if (pathsByBase.size === 0) return;

@@ -507,6 +507,42 @@ describe('brands-storage', () => {
       ]);
     });
 
+    it('preserves base URL alongside path URLs using sentinel slash', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-uuid-1',
+          paths: ['/', '/products'],
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://adobe.com' },
+            { value: 'https://adobe.com/products' },
+          ],
+        },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com' },
+        { value: 'https://adobe.com/products' },
+      ]);
+    });
+
     it('throws when brand_sites upsert fails during syncBrandSites', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
