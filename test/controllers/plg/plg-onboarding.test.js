@@ -1288,6 +1288,107 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- AEM site verification ---
+
+  describe('onboard - AEM site verification', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('waitlists domain when RUM check fails and delivery type is OTHER', async () => {
+      rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
+      findDeliveryTypeStub.resolves('other');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/not an AEM site/);
+      expect(mockOnboarding.save).to.have.been.called;
+      // Should NOT proceed to bot blocker or site creation
+      expect(detectBotBlockerStub).to.not.have.been.called;
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+    });
+
+    it('continues onboarding when RUM fails but delivery type is AEM', async () => {
+      rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
+      findDeliveryTypeStub.resolves('aem_edge');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // delivery type should NOT be fetched again at site creation (cached)
+      expect(findDeliveryTypeStub).to.have.been.calledOnce;
+    });
+  });
+
+  // --- One domain per IMS org ---
+
+  describe('onboard - one domain per IMS org', () => {
+    let controller;
+
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('waitlists domain when another domain is already onboarded for the same IMS org', async () => {
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+      expect(mockOnboarding.save).to.have.been.called;
+      // Should NOT proceed to org resolution or site creation
+      expect(createOrFindOrganizationStub).to.not.have.been.called;
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+    });
+
+    it('allows onboarding when the same domain is already onboarded (re-onboard)', async () => {
+      const onboardedRecord = createMockOnboarding({
+        domain: TEST_DOMAIN,
+        status: 'ONBOARDED',
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('allows onboarding when other domains exist but none are onboarded', async () => {
+      const waitlistedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'WAITLISTED',
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+  });
+
   // --- Entitlement ---
 
   describe('onboard - entitlement handling', () => {
@@ -1429,6 +1530,7 @@ describe('PlgOnboardingController', () => {
 
       expect(response.status).to.equal(200);
       expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(

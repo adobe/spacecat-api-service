@@ -18,6 +18,7 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
 
@@ -58,6 +59,8 @@ const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, 
 describe('LlmoController', () => {
   let controller;
   let controllerWithAccessDenied;
+  let controllerWithThrowingAccess;
+  let controllerWithBusinessError;
   let LlmoController;
   let mockContext;
   let mockSite;
@@ -271,6 +274,57 @@ describe('LlmoController', () => {
       },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
+
+    // Controller where hasAccess throws '[Error] Unauthorized request'
+    // → getSiteAndValidateLlmo returns 403
+    const LlmoControllerThrowAuth = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/support/access-control-util.js': {
+        default: {
+          fromContext() {
+            return {
+              async hasAccess() {
+                throw new UnauthorizedProductError('[Error] Unauthorized request');
+              },
+              hasAdminAccess() { return true; },
+              isLLMOAdministrator() { return true; },
+              async isOwnerOfSite() { return true; },
+            };
+          },
+        },
+      },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+    });
+    controllerWithThrowingAccess = LlmoControllerThrowAuth;
+
+    // Controller where hasAccess throws a business error (not Unauthorized) → rethrow → 400
+    const LlmoControllerThrowBusiness = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/support/access-control-util.js': {
+        default: {
+          fromContext() {
+            return {
+              async hasAccess() { throw new Error('emailId is required'); },
+              hasAdminAccess() { return true; },
+              isLLMOAdministrator() { return true; },
+              async isOwnerOfSite() { return true; },
+            };
+          },
+        },
+      },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+    });
+    controllerWithBusinessError = LlmoControllerThrowBusiness;
   });
 
   beforeEach(async () => {
@@ -600,9 +654,23 @@ describe('LlmoController', () => {
 
       const result = await deniedController.getLlmoSheetData(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 403 when hasAccess throws [Error] Unauthorized request', async () => {
+      const ctrl = controllerWithThrowingAccess(mockContext);
+      const result = await ctrl.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 400 when hasAccess throws a business error', async () => {
+      const ctrl = controllerWithBusinessError(mockContext);
+      const result = await ctrl.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('emailId is required');
     });
 
     it('should handle response headers correctly', async () => {
@@ -2513,7 +2581,7 @@ describe('LlmoController', () => {
       mockEnv.SHAREPOINT_AUTHORITY = 'test-authority';
       mockEnv.SHAREPOINT_DOMAIN_ID = 'test-domain-id';
       mockEnv.LLMO_ONBOARDING_GITHUB_TOKEN = 'test-github-token';
-      mockEnv.HLX_ADMIN_TOKEN = 'test-hlx-token';
+      mockEnv.HLX_ONBOARDING_TOKEN = 'test-hlx-token';
       mockEnv.DEFAULT_ORGANIZATION_ID = 'default-org-id';
 
       onboardingContext = {
@@ -3440,7 +3508,7 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
     });
 
-    it('should return 400 when LLMO access validation fails', async () => {
+    it('should return 403 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const contextWithParams = {
         ...rationaleContext,
@@ -3450,13 +3518,21 @@ describe('LlmoController', () => {
       };
       const result = await controllerDenied.getLlmoRationale(contextWithParams);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
 
-      expect(mockLog.error).to.have.been.calledWith(
-        `Error getting LLMO rationale for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
-      );
+    it('should return 400 when LLMO is not enabled for site', async () => {
+      mockConfig.getLlmoConfig.returns({});
+      const contextWithParams = {
+        ...rationaleContext,
+        data: { topic: 'any topic' },
+      };
+      const result = await controller.getLlmoRationale(contextWithParams);
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
     });
 
     it('should return 404 when site is not found', async () => {
@@ -3694,17 +3770,13 @@ describe('LlmoController', () => {
       expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
     });
 
-    it('should return 400 when LLMO access validation fails', async () => {
+    it('should return 403 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const result = await controllerDenied.getBrandClaims(brandClaimsContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
-
-      expect(mockLog.error).to.have.been.calledWith(
-        `Error getting brand claims for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
-      );
     });
 
     it('should return 400 when S3 is not configured', async () => {
@@ -3736,6 +3808,130 @@ describe('LlmoController', () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.getBrandClaims(brandClaimsContext);
       expect(result.status).to.equal(404);
+    });
+
+    it('should return 400 when LLMO is not enabled for site', async () => {
+      mockConfig.getLlmoConfig.returns({});
+      const result = await controller.getBrandClaims(brandClaimsContext);
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+    });
+  });
+
+  describe('getDemoBrandPresence', () => {
+    let demoContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      demoContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {},
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should return presigned URL for demo brand presence fixture', async () => {
+      const result = await controller.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(
+        'workspace/llmo/demo/summit-demo-brand-presence.json',
+      );
+    });
+
+    it('should return 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 500 when S3 is not configured', async () => {
+      const result = await controller.getDemoBrandPresence({ ...demoContext, s3: null });
+
+      expect(result.status).to.equal(500);
+    });
+
+    it('should return 500 for unexpected errors', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const result = await controller.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(500);
+    });
+  });
+
+  describe('getDemoRecommendations', () => {
+    let demoContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      demoContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {},
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should return presigned URL for demo recommendations fixture', async () => {
+      const result = await controller.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(
+        'workspace/llmo/demo/summit-demo-recommendations.json',
+      );
+    });
+
+    it('should return 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 500 when S3 is not configured', async () => {
+      const result = await controller.getDemoRecommendations({ ...demoContext, s3: null });
+
+      expect(result.status).to.equal(500);
+    });
+
+    it('should return 500 for unexpected errors', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const result = await controller.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(500);
     });
   });
 

@@ -36,7 +36,7 @@ export const mochaHooks = {
 
     await startPostgres();
 
-    const env = buildEnv('postgres', publicKeyB64);
+    const env = buildEnv(publicKeyB64);
     const baseUrl = await startServer(env);
 
     ctx.httpClient = createHttpClient(baseUrl, tokens);
