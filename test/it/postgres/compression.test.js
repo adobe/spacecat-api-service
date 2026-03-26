@@ -10,9 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { ctx } from './harness.js';
 import compressionTests from '../shared/tests/compression.js';
-
-const { ctx } = global;
 
 compressionTests(
   () => ctx.httpClient,
