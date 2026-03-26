@@ -2243,6 +2243,34 @@ describe('LLMO Onboarding Functions', () => {
   });
 
   describe('ensureInitialCustomerConfigV2', () => {
+    it('throws when PostgREST is not available', async () => {
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies(),
+      );
+
+      try {
+        await ensureInitialCustomerConfigV2({
+          organizationId: 'org-123',
+          brandName: 'Test Brand',
+          imsOrgId: 'ABC123@AdobeOrg',
+          siteId: 'site-123',
+          baseURL: 'https://example.com',
+          context: {
+            dataAccess: {
+              services: {},
+            },
+            log: mockLog,
+          },
+        });
+        expect.fail('Expected ensureInitialCustomerConfigV2 to throw');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+        );
+      }
+    });
+
     it('creates and writes the initial v2 config when one does not exist', async () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
       const { ensureInitialCustomerConfigV2 } = await esmock(
