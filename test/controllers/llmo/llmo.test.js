@@ -237,6 +237,13 @@ describe('LlmoController', () => {
           }
         },
       },
+      '../../../src/controllers/llmo/llmo-onboarding.js': {
+        validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+        generateDataFolder: sinon.stub().returns('test-folder'),
+        performLlmoOnboarding: sinon.stub().resolves({}),
+        performLlmoOffboarding: sinon.stub().resolves({}),
+        postLlmoAlert: (...args) => postLlmoAlertStub(...args),
+      },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
       },
