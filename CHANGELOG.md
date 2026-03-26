@@ -1,3 +1,10 @@
+## [1.376.2](https://github.com/adobe/spacecat-api-service/compare/v1.376.1...v1.376.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* stagger cdn analysis backfill messages ([#2039](https://github.com/adobe/spacecat-api-service/issues/2039)) ([1a8c741](https://github.com/adobe/spacecat-api-service/commit/1a8c74183122cd32f795eed2df6b289a3b79a7a1))
+
 ## [1.376.1](https://github.com/adobe/spacecat-api-service/compare/v1.376.0...v1.376.1) (2026-03-26)
 
 
