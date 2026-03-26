@@ -1504,12 +1504,15 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
-    // configure redirectsmode and redirectssource
-    // check for valid authoringType and deliveryType
+    // Configure redirectsmode and redirectssource
+    // check for authoringType, deliveryType, environmentID, and programID
+    // skip update-redirects if invalid
     const authoringType = site.getAuthoringType();
     const deliveryType = site.getDeliveryType();
+    const deliveryConfig = site.getDeliveryConfig?.() || {};
+    const { programId, environmentId } = deliveryConfig;
     let validForRedirects = true;
-    // check either authoringType or deliveryType is CS/CW
+    let skipMessage = '';
     if (![
       SiteModel.AUTHORING_TYPES.CS, // cs
       SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
@@ -1518,10 +1521,16 @@ export const onboardSingleSite = async (
       SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
     ].includes(deliveryType)) {
       validForRedirects = false;
+      skipMessage = `the site ${baseURL} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`;
+    } else if (!hasText(programId) || !hasText(environmentId)) {
+      // Check for environmentID and ProgramID, skip update-redirects if missing
+      validForRedirects = false;
+      skipMessage = `the site ${baseURL} is not valid for redirects because environmentID and/or programID is missing.`;
     }
+
     if (!validForRedirects) {
       // skip update-redirects if invalid for redirects
-      log.info(`skipping update-redirects, as the site ${baseURL} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`);
+      log.info(skipMessage);
     } else {
       const updateRedirectsResult = await queueIdentifyRedirectsAudit(
         {

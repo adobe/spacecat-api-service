@@ -1,3 +1,10 @@
+# [1.380.0](https://github.com/adobe/spacecat-api-service/compare/v1.379.0...v1.380.0) (2026-03-26)
+
+
+### Features
+
+* onboarding skip update-redirect if not valid ([#2046](https://github.com/adobe/spacecat-api-service/issues/2046)) ([2dfa922](https://github.com/adobe/spacecat-api-service/commit/2dfa9222f757f4b611dd08d0edc704f4fba2d92e))
+
 # [1.379.0](https://github.com/adobe/spacecat-api-service/compare/v1.378.0...v1.379.0) (2026-03-26)
 
 
