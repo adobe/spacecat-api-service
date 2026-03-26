@@ -41,16 +41,23 @@ All brand endpoints return and accept the same shape:
   "vertical": "Software & Technology",
   "region": ["US", "GB", "DE"],
   "urls": [
-    { "value": "https://adobe.com" }
+    { "value": "https://adobe.com" },
+    { "value": "https://adobe.com/products" }
   ],
   "socialAccounts": [
-    { "url": "https://twitter.com/adobe" }
+    { "url": "https://twitter.com/adobe", "regions": ["US"] }
   ],
   "earnedContent": [
-    { "url": "https://techcrunch.com" }
+    { "name": "TechCrunch", "url": "https://techcrunch.com", "regions": ["US"] }
   ],
-  "brandAliases": ["Adobe Inc", "ADBE"],
-  "competitors": ["Microsoft", "Canva"],
+  "brandAliases": [
+    { "name": "Adobe Inc", "regions": ["US"] },
+    { "name": "ADBE", "regions": [] }
+  ],
+  "competitors": [
+    { "name": "Microsoft", "url": null, "regions": [] },
+    { "name": "Canva", "url": "https://canva.com", "regions": ["US"] }
+  ],
   "siteIds": ["c2473d89-e997-458d-a86d-b4096649c12b"],
   "updatedAt": "2026-01-02T00:00:00Z",
   "updatedBy": "user@adobe.com"
@@ -61,11 +68,11 @@ All brand endpoints return and accept the same shape:
 - `status` — `active` (default), `pending`, or `deleted`; use `pending` for brands awaiting review
 - `origin` — `human` (default) or `ai`
 - `region` — ISO 3166-1 alpha-2 country codes (e.g. `US`, `GB`)
-- `urls` — brand site URLs; each is matched against the org's known sites to populate `siteIds`
-- `socialAccounts` — only `url` is persisted; `platform` and `regions` sent by the UI are discarded
-- `earnedContent` — only `url` is persisted; `name` and `regions` sent by the UI are discarded
-- `brandAliases` — returned as a plain `string[]`; the UI's per-alias `regions` field is not stored
-- `competitors` — returned as a plain `string[]`; the UI's per-competitor `url` and `regions` fields are not stored
+- `urls` — brand site URLs, optionally with paths (e.g. `https://adobe.com/products`); matched against the org's known sites to populate `siteIds`. Multiple paths under the same base URL share one `brand_sites` row.
+- `socialAccounts` — `url` and `regions` are persisted and returned; `platform` sent by the UI is discarded
+- `earnedContent` — `name`, `url`, and `regions` are persisted and returned
+- `brandAliases` — each entry includes `name` and `regions`; accepts plain strings or `{ name }` objects on write
+- `competitors` — each entry includes `name`, `url` (nullable), and `regions`; accepts plain strings or `{ name }` objects on write
 - `siteIds` — read-only, resolved from `urls` via the `brand_sites` join table
 
 ---
@@ -113,10 +120,10 @@ Creates a brand. Uses `organization_id + name` as the upsert conflict key — po
 | `vertical` | no | Industry vertical |
 | `region` | no | Array of country codes |
 | `urls` | no | Array of `{ value: string }` objects; matched to org sites |
-| `socialAccounts` | no | Array of `{ url: string }` objects |
-| `earnedContent` | no | Array of `{ url: string }` objects |
-| `brandAliases` | no | Array of strings or `{ name: string }` objects |
-| `competitors` | no | Array of strings or `{ name: string }` objects |
+| `socialAccounts` | no | Array of `{ url: string, regions?: string[] }` objects |
+| `earnedContent` | no | Array of `{ name: string, url: string, regions?: string[] }` objects |
+| `brandAliases` | no | Array of strings or `{ name: string, regions?: string[] }` objects |
+| `competitors` | no | Array of strings or `{ name: string, url?: string, regions?: string[] }` objects |
 
 **Response:** Created/updated brand object (`200`).
 
@@ -128,7 +135,7 @@ Partially updates a brand. Only fields present in the request body are modified.
 
 `brandId` accepts either a UUID or the brand's exact name (case-insensitive).
 
-**Important:** `brandAliases` and `competitors` are **append-only via upsert** — existing entries are not deleted when you send a shorter list. To remove an alias or competitor, delete it explicitly (not yet supported via this API; requires direct DB operation).
+**Important:** All child arrays (`brandAliases`, `competitors`, `socialAccounts`, `earnedContent`, `urls`) use **full replace semantics** — when a field is present in the request body, all existing entries for that field are deleted and replaced with the submitted list. Omit a field entirely to leave it unchanged.
 
 **Request body:** Any subset of the brand fields listed in the POST section above.
 
