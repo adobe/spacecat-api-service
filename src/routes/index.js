@@ -89,6 +89,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
+ * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -135,6 +136,7 @@ export default function getRouteHandlers(
   consumersController,
   plgOnboardingController,
   imsOrgAccessController,
+  featureFlagsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -451,6 +453,11 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
+    'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
+      featureFlagsController.putByOrganizationProductAndName,
+    'DELETE /organizations/:organizationId/feature-flags/:product/:flagName':
+      featureFlagsController.deleteByOrganizationProductAndName,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
