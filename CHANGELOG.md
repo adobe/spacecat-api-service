@@ -1,3 +1,10 @@
+# [1.376.0](https://github.com/adobe/spacecat-api-service/compare/v1.375.2...v1.376.0) (2026-03-26)
+
+
+### Features
+
+* update sentiment guidelines to include additional audit types (cited, youtube) ([#2037](https://github.com/adobe/spacecat-api-service/issues/2037)) ([1b15c37](https://github.com/adobe/spacecat-api-service/commit/1b15c374a25c5c72674d3590b404b9316f5840b2))
+
 ## [1.375.2](https://github.com/adobe/spacecat-api-service/compare/v1.375.1...v1.375.2) (2026-03-25)
 
 
