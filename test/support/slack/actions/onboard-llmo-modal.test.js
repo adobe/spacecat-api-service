@@ -124,6 +124,17 @@ describe('onboard-llmo-modal', () => {
     sendMessage: sinonSandbox.stub(),
   });
 
+  const createDefaultMockPostgrestClient = (sinonSandbox) => ({
+    from: sinonSandbox.stub().callsFake(() => ({
+      select: sinonSandbox.stub().returns({
+        eq: sinonSandbox.stub().returns({
+          maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
+        }),
+      }),
+      upsert: sinonSandbox.stub().resolves({ error: null }),
+    })),
+  });
+
   const createDefaultMockLambdaCtx = (sinonSandbox, overrides = {}) => {
     const mockSite = overrides.mockSite || createDefaultMockSite(sinonSandbox);
     const mockConfiguration = overrides.mockConfiguration
@@ -140,6 +151,8 @@ describe('onboard-llmo-modal', () => {
     const mockImsClient = overrides.mockImsClient
       || createDefaultMockImsClient(sinonSandbox);
     const mockSqs = overrides.mockSqs || createDefaultMockSqs(sinonSandbox);
+    const mockPostgrestClient = overrides.mockPostgrestClient
+      || createDefaultMockPostgrestClient(sinonSandbox);
 
     return {
       log: {
@@ -154,7 +167,9 @@ describe('onboard-llmo-modal', () => {
         Organization: mockOrganization,
         Entitlement: mockEntitlement,
         SiteEnrollment: mockSiteEnrollment,
-
+        services: {
+          postgrestClient: mockPostgrestClient,
+        },
       },
       env: {
         ENV: 'prod',
