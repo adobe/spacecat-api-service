@@ -1,3 +1,31 @@
+# [1.377.0](https://github.com/adobe/spacecat-api-service/compare/v1.376.2...v1.377.0) (2026-03-26)
+
+
+### Features
+
+* add x-trace-id to API responses via traceIdResponseWrapper ([#2036](https://github.com/adobe/spacecat-api-service/issues/2036)) ([bad2bb4](https://github.com/adobe/spacecat-api-service/commit/bad2bb42b25cfa95d428f814c039b6654ae1228c))
+
+## [1.376.2](https://github.com/adobe/spacecat-api-service/compare/v1.376.1...v1.376.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* stagger cdn analysis backfill messages ([#2039](https://github.com/adobe/spacecat-api-service/issues/2039)) ([1a8c741](https://github.com/adobe/spacecat-api-service/commit/1a8c74183122cd32f795eed2df6b289a3b79a7a1))
+
+## [1.376.1](https://github.com/adobe/spacecat-api-service/compare/v1.376.0...v1.376.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* optimize edge preview API ([#2034](https://github.com/adobe/spacecat-api-service/issues/2034)) ([37181b5](https://github.com/adobe/spacecat-api-service/commit/37181b5c8c41ac05cb09cf8284c1c6411b55f26d))
+
+# [1.376.0](https://github.com/adobe/spacecat-api-service/compare/v1.375.2...v1.376.0) (2026-03-26)
+
+
+### Features
+
+* update sentiment guidelines to include additional audit types (cited, youtube) ([#2037](https://github.com/adobe/spacecat-api-service/issues/2037)) ([1b15c37](https://github.com/adobe/spacecat-api-service/commit/1b15c374a25c5c72674d3590b404b9316f5840b2))
+
 ## [1.375.2](https://github.com/adobe/spacecat-api-service/compare/v1.375.1...v1.375.2) (2026-03-25)
 
 
