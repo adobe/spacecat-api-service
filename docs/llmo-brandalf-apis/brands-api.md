@@ -155,34 +155,7 @@ Soft-deletes a brand by setting `status = 'deleted'`. The brand remains in the d
 
 ## Prompts
 
-Prompts are stored per-brand and used as LLM prompt templates.
-
-### GET /v2/orgs/:spaceCatId/brands/:brandId/prompts
-
-Returns all prompts for a brand.
-
-**Query parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `type` | string | Filter by prompt type |
-| `status` | string | Filter by status |
-
-### POST /v2/orgs/:spaceCatId/brands/:brandId/prompts
-
-Creates one or more prompts. Request body is an array of prompt objects.
-
-### PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId
-
-Updates a single prompt.
-
-### DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId
-
-Deletes a single prompt.
-
-### POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete
-
-Bulk-deletes prompts. Request body: `{ "promptIds": ["uuid1", "uuid2"] }`.
+Prompt management endpoints are documented separately. See [Prompts Management API](./prompts-management-api.md) for full details on listing, creating, updating, and bulk-deleting prompts scoped to a brand.
 
 ---
 
@@ -207,6 +180,8 @@ Bulk-deletes prompts. Request body: `{ "promptIds": ["uuid1", "uuid2"] }`.
 
 ## Related APIs
 
+- [Prompts Management API](./prompts-management-api.md) — Prompt CRUD scoped to a brand
+- [Categories API](./categories-api.md) — Org-level category management
 - [Opportunities API](./opportunities-api.md) — LLMO opportunities scoped to a brand
 - [Brand Presence Stats API](./brand-presence-stats-api.md) — Visibility statistics per brand
-- [Topics API](./topics-api.md) — Topics associated with a brand
+- [Topics & Topic Prompts API](./topics-api.md) — Brand presence analytics by topic (read-only)
