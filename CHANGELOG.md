@@ -1,3 +1,24 @@
+## [1.376.1](https://github.com/adobe/spacecat-api-service/compare/v1.376.0...v1.376.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* optimize edge preview API ([#2034](https://github.com/adobe/spacecat-api-service/issues/2034)) ([37181b5](https://github.com/adobe/spacecat-api-service/commit/37181b5c8c41ac05cb09cf8284c1c6411b55f26d))
+
+# [1.376.0](https://github.com/adobe/spacecat-api-service/compare/v1.375.2...v1.376.0) (2026-03-26)
+
+
+### Features
+
+* update sentiment guidelines to include additional audit types (cited, youtube) ([#2037](https://github.com/adobe/spacecat-api-service/issues/2037)) ([1b15c37](https://github.com/adobe/spacecat-api-service/commit/1b15c374a25c5c72674d3590b404b9316f5840b2))
+
+## [1.375.2](https://github.com/adobe/spacecat-api-service/compare/v1.375.1...v1.375.2) (2026-03-25)
+
+
+### Bug Fixes
+
+* top-pages no pending validation returned ([#2031](https://github.com/adobe/spacecat-api-service/issues/2031)) ([251209d](https://github.com/adobe/spacecat-api-service/commit/251209dcba5ba442949e2be915f15622bcfbdc2d))
+
 ## [1.375.1](https://github.com/adobe/spacecat-api-service/compare/v1.375.0...v1.375.1) (2026-03-25)
 
 
