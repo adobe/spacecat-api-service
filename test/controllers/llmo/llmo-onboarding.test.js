@@ -40,6 +40,11 @@ describe('LLMO Onboarding Functions', () => {
       Configuration: {
         findLatest: sinon.stub(),
       },
+      services: {
+        postgrestClient: {
+          from: sinon.stub(),
+        },
+      },
     };
 
     // Create mock log
@@ -165,6 +170,13 @@ describe('LLMO Onboarding Functions', () => {
     };
   };
 
+  const createMockCustomerConfigV2Storage = (sandbox = sinon, options = {}) => ({
+    readCustomerConfigV2FromPostgres: options.readCustomerConfigV2FromPostgres
+      || sandbox.stub().resolves(null),
+    writeCustomerConfigV2ToPostgres: options.writeCustomerConfigV2ToPostgres
+      || sandbox.stub().resolves(),
+  });
+
   const createCommonEsmockDependencies = (options = {}) => {
     const {
       mockTierClient,
@@ -174,7 +186,10 @@ describe('LLMO Onboarding Functions', () => {
       mockSharePointClient: sharePointClient,
       mockOctokit,
       mockDrsClient,
+      mockCustomerConfigV2Storage,
     } = options;
+    const effectiveCustomerConfigV2Storage = mockCustomerConfigV2Storage
+      || createMockCustomerConfigV2Storage();
 
     const deps = {
       '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
@@ -210,6 +225,8 @@ describe('LLMO Onboarding Functions', () => {
     if (mockDrsClient) {
       deps['@adobe/spacecat-shared-drs-client'] = { default: mockDrsClient };
     }
+
+    deps['../../../src/support/customer-config-v2-storage.js'] = effectiveCustomerConfigV2Storage;
 
     return deps;
   };
@@ -1248,6 +1265,7 @@ describe('LLMO Onboarding Functions', () => {
       );
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
@@ -1260,6 +1278,7 @@ describe('LLMO Onboarding Functions', () => {
           mockSharePointClient: sharePointClient,
           mockOctokit,
           mockDrsClient,
+          mockCustomerConfigV2Storage,
         }),
       );
 
@@ -1309,6 +1328,13 @@ describe('LLMO Onboarding Functions', () => {
       // Verify site was saved
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
       expect(mockSite.save).to.have.been.called;
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+
+      const writtenConfig = mockCustomerConfigV2Storage
+        .writeCustomerConfigV2ToPostgres.firstCall.args[1];
+      expect(writtenConfig.customer.customerName).to.equal('Test Brand');
+      expect(writtenConfig.customer.brands[0].v1SiteId).to.equal('site123');
+      expect(writtenConfig.customer.brands[0].baseUrl).to.equal('https://example.com');
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
@@ -2181,6 +2207,184 @@ describe('LLMO Onboarding Functions', () => {
 
       // Restore setTimeout
       restoreSetTimeout(originalSetTimeout);
+    });
+  });
+
+  describe('buildInitialCustomerConfigV2', () => {
+    it('builds a single active brand config for onboarding', async () => {
+      const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      const result = buildInitialCustomerConfigV2({
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        overrideBaseURL: 'https://www.example.com',
+        updatedBy: 'tester@example.com',
+      });
+
+      expect(result.customer.customerName).to.equal('Test Brand');
+      expect(result.customer.imsOrgID).to.equal('ABC123@AdobeOrg');
+      expect(result.customer.categories).to.deep.equal([]);
+      expect(result.customer.topics).to.deep.equal([]);
+      expect(result.customer.brands).to.have.lengthOf(1);
+      expect(result.customer.availableVerticals).to.be.an('array').that.is.not.empty;
+
+      const [brand] = result.customer.brands;
+      expect(brand.name).to.equal('Test Brand');
+      expect(brand.status).to.equal('active');
+      expect(brand.v1SiteId).to.equal('site-123');
+      expect(brand.baseUrl).to.equal('https://www.example.com');
+      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
+      expect(brand.updatedBy).to.equal('tester@example.com');
+      expect(brand.prompts).to.deep.equal([]);
+    });
+  });
+
+  describe('ensureInitialCustomerConfigV2', () => {
+    it('throws when PostgREST is not available', async () => {
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies(),
+      );
+
+      try {
+        await ensureInitialCustomerConfigV2({
+          organizationId: 'org-123',
+          brandName: 'Test Brand',
+          imsOrgId: 'ABC123@AdobeOrg',
+          siteId: 'site-123',
+          baseURL: 'https://example.com',
+          context: {
+            dataAccess: {
+              services: {},
+            },
+            log: mockLog,
+          },
+        });
+        expect.fail('Expected ensureInitialCustomerConfigV2 to throw');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+        );
+      }
+    });
+
+    it('creates and writes the initial v2 config when one does not exist', async () => {
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        attributes: {
+          authInfo: {
+            profile: {
+              email: 'owner@example.com',
+            },
+          },
+        },
+      };
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        overrideBaseURL: 'https://www.example.com',
+        context,
+      });
+
+      expect(mockCustomerConfigV2Storage.readCustomerConfigV2FromPostgres).to.have.been.calledWith(
+        'org-123',
+        mockDataAccess.services.postgrestClient,
+      );
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[0]).to.equal('org-123');
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[2])
+        .to.equal(mockDataAccess.services.postgrestClient);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[3])
+        .to.equal('owner@example.com');
+
+      const writtenConfig = mockCustomerConfigV2Storage
+        .writeCustomerConfigV2ToPostgres.firstCall.args[1];
+      expect(writtenConfig.customer.customerName).to.equal('Test Brand');
+      expect(writtenConfig.customer.brands[0].v1SiteId).to.equal('site-123');
+      expect(writtenConfig.customer.brands[0].baseUrl).to.equal('https://www.example.com');
+      expect(result).to.deep.equal(writtenConfig);
+      expect(mockLog.info).to.have.been.calledWith('Initialized V2 customer config for organization org-123 during onboarding');
+    });
+
+    it('uses authInfo.getProfile email when profile.email is not available', async () => {
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'fallback-owner@example.com',
+              }),
+            },
+          },
+        },
+      });
+
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[3])
+        .to.equal('fallback-owner@example.com');
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[1]
+        .customer.brands[0].updatedBy).to.equal('fallback-owner@example.com');
+    });
+
+    it('skips writing when the v2 config already exists', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'existing-brand' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result).to.equal(existingConfig);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWith(
+        'V2 customer config already exists for organization org-123, skipping initialization',
+      );
     });
   });
 
