@@ -2320,6 +2320,38 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith('Initialized V2 customer config for organization org-123 during onboarding');
     });
 
+    it('uses authInfo.getProfile email when profile.email is not available', async () => {
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'fallback-owner@example.com',
+              }),
+            },
+          },
+        },
+      });
+
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[3])
+        .to.equal('fallback-owner@example.com');
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[1]
+        .customer.brands[0].updatedBy).to.equal('fallback-owner@example.com');
+    });
+
     it('skips writing when the v2 config already exists', async () => {
       const existingConfig = {
         customer: {
