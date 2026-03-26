@@ -1,3 +1,10 @@
+# [1.379.0](https://github.com/adobe/spacecat-api-service/compare/v1.378.0...v1.379.0) (2026-03-26)
+
+
+### Features
+
+* create initial v2 customer config during LLMO onboarding ([#2040](https://github.com/adobe/spacecat-api-service/issues/2040)) ([4f42405](https://github.com/adobe/spacecat-api-service/commit/4f42405c8d76349e20c09fac443a997e7e51f11c))
+
 # [1.378.0](https://github.com/adobe/spacecat-api-service/compare/v1.377.1...v1.378.0) (2026-03-26)
 
 
