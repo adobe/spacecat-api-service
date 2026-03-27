@@ -515,6 +515,7 @@ describe('prompts-storage', () => {
 
     it('returns prompt when found', async () => {
       const row = {
+        id: 'prompt-pk-uuid',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
@@ -534,6 +535,7 @@ describe('prompts-storage', () => {
       });
       expect(result).to.not.be.null;
       expect(result.id).to.equal(PROMPT_ID);
+      expect(result.uuid).to.equal('prompt-pk-uuid');
       expect(result.prompt).to.equal('Prompt');
     });
 
