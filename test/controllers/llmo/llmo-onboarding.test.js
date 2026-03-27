@@ -27,6 +27,10 @@ describe('LLMO Onboarding Functions', () => {
   let mockSharePointFolder;
   let originalSetTimeout;
 
+  function restoreSetTimeout(original) {
+    global.setTimeout = original;
+  }
+
   beforeEach(() => {
     originalSetTimeout = null;
     // Create mock data access
@@ -115,10 +119,6 @@ describe('LLMO Onboarding Functions', () => {
       return 1;
     });
     return original;
-  };
-
-  const restoreSetTimeout = (original) => {
-    global.setTimeout = original;
   };
 
   const createMockConfig = (sandbox = sinon) => ({
@@ -1582,7 +1582,6 @@ describe('LLMO Onboarding Functions', () => {
       // Verify DRS was checked but not called
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping Brandalf flow');
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping prompt generation');
-
     });
 
     it('should handle Brandalf job submission failure gracefully', async () => {
@@ -1672,7 +1671,6 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify error was logged but didn't fail onboarding
       expect(mockLog.error).to.have.been.calledWith('Failed to start DRS Brandalf flow: Brandalf API connection failed');
-
     });
 
     it('should handle DRS prompt generation failure gracefully', async () => {
@@ -1764,7 +1762,6 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify error was logged but didn't fail onboarding
       expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: DRS API connection failed');
-
     });
 
     it('should create new organization when organization does not exist', async () => {
@@ -1807,7 +1804,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1859,9 +1856,6 @@ describe('LLMO Onboarding Functions', () => {
       // Verify result
       expect(result.organizationId).to.equal('new-org-123');
       expect(result.siteId).to.equal('site456');
-
-      // Restore setTimeout
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should swallow async publish enqueue failures and still complete onboarding', async () => {
@@ -1898,7 +1892,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1941,8 +1935,6 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Failed to enqueue trigger:llmo-onboarding-publish/),
       );
-
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should call cleanup functions when site.save() throws an error', async () => {
@@ -2021,7 +2013,7 @@ describe('LLMO Onboarding Functions', () => {
         json: async () => ({ name: 'unpreview-job-123' }),
       });
 
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const {
         mockClient: sharePointClientLocal,
@@ -2076,9 +2068,6 @@ describe('LLMO Onboarding Functions', () => {
       // Verify revokeEnrollment was called
       const tierClient = mockTierClient.createForSite.returnValues[0];
       expect(tierClient.revokeSiteEnrollment).to.have.been.called;
-
-      // Restore setTimeout
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should set overrideBaseURL when Ahrefs determines it is needed', async () => {
@@ -2135,7 +2124,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2202,9 +2191,6 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith(
         'Set overrideBaseURL to https://www.example.com for site site123',
       );
-
-      // Restore setTimeout
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should not set overrideBaseURL when Ahrefs determines it is not needed', async () => {
@@ -2261,7 +2247,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2312,9 +2298,6 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify updateFetchConfig was NOT called
       expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
-
-      // Restore setTimeout
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should respect existing overrideBaseURL and skip auto-detection', async () => {
@@ -2366,7 +2349,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2427,7 +2410,6 @@ describe('LLMO Onboarding Functions', () => {
       );
 
       // Restore setTimeout
-      restoreSetTimeout(originalSetTimeout);
     });
   });
 
