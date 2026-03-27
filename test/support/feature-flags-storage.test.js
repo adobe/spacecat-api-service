@@ -20,6 +20,7 @@ import {
   isValidFeatureFlagName,
   listFeatureFlagsByOrgAndProduct,
   normalizeFeatureFlagProduct,
+  readFeatureFlag,
   upsertFeatureFlag,
 } from '../../src/support/feature-flags-storage.js';
 
@@ -133,6 +134,113 @@ describe('feature-flags-storage', () => {
           postgrestClient: { from: fromStub },
         }),
       ).to.be.rejectedWith('Failed to upsert feature flag');
+    });
+  });
+
+  describe('readFeatureFlag', () => {
+    it('throws when client missing', async () => {
+      await expect(
+        readFeatureFlag({
+          organizationId: ORG,
+          product: 'LLMO',
+          flagName: 'brandalf',
+          postgrestClient: null,
+        }),
+      ).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('returns boolean true when flag is true', async () => {
+      const maybeSingle = sandbox.stub().resolves({ data: { flag_value: true }, error: null });
+      const eq3 = sandbox.stub().returns({ maybeSingle });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
+      const eq1 = sandbox.stub().returns({ eq: eq2 });
+      const selectStub = sandbox.stub().returns({ eq: eq1 });
+      const fromStub = sandbox.stub().returns({ select: selectStub });
+
+      const result = await readFeatureFlag({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'brandalf',
+        postgrestClient: { from: fromStub },
+      });
+
+      expect(result).to.equal(true);
+      expect(fromStub).to.have.been.calledWith('feature_flags');
+      expect(eq1).to.have.been.calledWith('organization_id', ORG);
+      expect(eq2).to.have.been.calledWith('product', 'LLMO');
+      expect(eq3).to.have.been.calledWith('flag_name', 'brandalf');
+    });
+
+    it('returns boolean false when flag is false', async () => {
+      const maybeSingle = sandbox.stub().resolves({ data: { flag_value: false }, error: null });
+      const eq3 = sandbox.stub().returns({ maybeSingle });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
+      const eq1 = sandbox.stub().returns({ eq: eq2 });
+      const selectStub = sandbox.stub().returns({ eq: eq1 });
+      const fromStub = sandbox.stub().returns({ select: selectStub });
+
+      const result = await readFeatureFlag({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'brandalf',
+        postgrestClient: { from: fromStub },
+      });
+
+      expect(result).to.equal(false);
+    });
+
+    it('returns null when no row found', async () => {
+      const maybeSingle = sandbox.stub().resolves({ data: null, error: null });
+      const eq3 = sandbox.stub().returns({ maybeSingle });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
+      const eq1 = sandbox.stub().returns({ eq: eq2 });
+      const selectStub = sandbox.stub().returns({ eq: eq1 });
+      const fromStub = sandbox.stub().returns({ select: selectStub });
+
+      const result = await readFeatureFlag({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'brandalf',
+        postgrestClient: { from: fromStub },
+      });
+
+      expect(result).to.be.null;
+    });
+
+    it('returns null when flag value is not a boolean', async () => {
+      const maybeSingle = sandbox.stub().resolves({ data: { flag_value: 'true' }, error: null });
+      const eq3 = sandbox.stub().returns({ maybeSingle });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
+      const eq1 = sandbox.stub().returns({ eq: eq2 });
+      const selectStub = sandbox.stub().returns({ eq: eq1 });
+      const fromStub = sandbox.stub().returns({ select: selectStub });
+
+      const result = await readFeatureFlag({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'brandalf',
+        postgrestClient: { from: fromStub },
+      });
+
+      expect(result).to.be.null;
+    });
+
+    it('throws on postgrest error', async () => {
+      const maybeSingle = sandbox.stub().resolves({ data: null, error: { message: 'boom' } });
+      const eq3 = sandbox.stub().returns({ maybeSingle });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
+      const eq1 = sandbox.stub().returns({ eq: eq2 });
+      const selectStub = sandbox.stub().returns({ eq: eq1 });
+      const fromStub = sandbox.stub().returns({ select: selectStub });
+
+      await expect(
+        readFeatureFlag({
+          organizationId: ORG,
+          product: 'LLMO',
+          flagName: 'brandalf',
+          postgrestClient: { from: fromStub },
+        }),
+      ).to.be.rejectedWith('Failed to read feature flag brandalf: boom');
     });
   });
 

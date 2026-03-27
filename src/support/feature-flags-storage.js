@@ -85,6 +85,41 @@ export async function upsertFeatureFlag({
 }
 
 /**
+ * Reads a single feature flag value by org, product, and flag name.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId
+ * @param {'ASO'|'LLMO'} params.product
+ * @param {string} params.flagName
+ * @param {object} params.postgrestClient
+ * @returns {Promise<boolean|null>} The flag value, or null if not found / not a boolean.
+ */
+export async function readFeatureFlag({
+  organizationId,
+  product,
+  flagName,
+  postgrestClient,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required for feature flags');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('feature_flags')
+    .select('flag_value')
+    .eq('organization_id', organizationId)
+    .eq('product', product)
+    .eq('flag_name', flagName)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to read feature flag ${flagName}: ${error.message}`);
+  }
+
+  return typeof data?.flag_value === 'boolean' ? data.flag_value : null;
+}
+
+/**
  * @param {object} params
  * @param {string} params.organizationId
  * @param {'ASO'|'LLMO'} params.product
