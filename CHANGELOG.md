@@ -1,3 +1,10 @@
+# [1.383.0](https://github.com/adobe/spacecat-api-service/compare/v1.382.0...v1.383.0) (2026-03-27)
+
+
+### Features
+
+* feature flags ([#2047](https://github.com/adobe/spacecat-api-service/issues/2047)) ([eeff8f0](https://github.com/adobe/spacecat-api-service/commit/eeff8f0aa4c046a8bd54dca807862a5d887482a4))
+
 # [1.382.0](https://github.com/adobe/spacecat-api-service/compare/v1.381.2...v1.382.0) (2026-03-27)
 
 
