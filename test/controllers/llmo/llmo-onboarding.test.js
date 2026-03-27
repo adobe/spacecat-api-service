@@ -1443,7 +1443,10 @@ describe('LLMO Onboarding Functions', () => {
       const mockTracingFetch = createMockTracingFetch();
       const originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
-      const { mockClient: sharePointClient } = createMockSharePointClient(sinon, { folderExists: false });
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
