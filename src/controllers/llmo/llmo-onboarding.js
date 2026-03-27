@@ -106,6 +106,7 @@ export async function triggerBrandalfOnboardingJob({
   return drsJob;
 }
 
+
 export function buildInitialCustomerConfigV2({
   brandName,
   imsOrgId,
@@ -1231,6 +1232,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
       say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
     }
+
 
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)

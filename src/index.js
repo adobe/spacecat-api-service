@@ -16,6 +16,7 @@ import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import {
   badRequest,
+  compressResponse,
   internalServerError,
   noContent,
   notFound,
@@ -324,4 +325,5 @@ export const main = wrappedMain
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(vaultSecrets)
+  .with(compressResponse)
   .with(helixStatus);
