@@ -201,7 +201,12 @@ Example:
         (t) => AUDIT_OPPORTUNITY_MAP[t]?.length > 0,
       );
       if (relevantPendingTypes.length > 0) {
-        const pendingList = relevantPendingTypes.map(getOpportunityTitle).join(', ');
+        // Expand audit types to their opportunity types so titles are accurate.
+        // Audit types like 'forms-opportunities' map to multiple distinct opp types.
+        const pendingOppTypes = [
+          ...new Set(relevantPendingTypes.flatMap((t) => AUDIT_OPPORTUNITY_MAP[t])),
+        ];
+        const pendingList = pendingOppTypes.map(getOpportunityTitle).join(', ');
         await say(
           `:warning: *Heads-up:* The following audit${relevantPendingTypes.length > 1 ? 's' : ''} `
           + `may still be in progress: *${pendingList}*.\n`

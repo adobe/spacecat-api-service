@@ -401,8 +401,9 @@ describe('OnboardStatusCommand', () => {
       expect(disclaimer).to.not.include('Scrape Top Pages');
     });
 
-    it('uses kebab-to-Title-Case conversion for audit types not in the title map', async () => {
+    it('expands multi-opp audit types to their opportunity titles in the disclaimer', async () => {
       // forms-opportunities record predates lastStartTime → pending
+      // Should show opportunity type titles, not the audit type name
       dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
       dataAccessStub.LatestAudit.allBySiteId.resolves([
         makeAudit('forms-opportunities', new Date(onboardTime - 1000).toISOString()),
@@ -413,7 +414,8 @@ describe('OnboardStatusCommand', () => {
 
       const calls = slackContext.say.args.map((a) => a[0]);
       const disclaimer = calls.find((m) => m.includes('may still be in progress'));
-      expect(disclaimer).to.include('Forms Opportunities');
+      // Opportunity type titles, not the audit type fallback "Forms Opportunities"
+      expect(disclaimer).to.include('High Form Views Low Conversions');
     });
   });
 
@@ -478,6 +480,16 @@ describe('computeAuditCompletion', () => {
       getAuditedAt: () => new Date(runTime - 1000).toISOString(),
     };
     const { pendingAuditTypes } = computeAuditCompletion(['cwv'], runTime, [staleAudit]);
+    expect(pendingAuditTypes).to.deep.equal(['cwv']);
+  });
+
+  it('marks audit as pending when auditedAt exactly equals lastStartTime (boundary)', () => {
+    const runTime = Date.now();
+    const boundaryAudit = {
+      getAuditType: () => 'cwv',
+      getAuditedAt: () => new Date(runTime).toISOString(),
+    };
+    const { pendingAuditTypes } = computeAuditCompletion(['cwv'], runTime, [boundaryAudit]);
     expect(pendingAuditTypes).to.deep.equal(['cwv']);
   });
 
