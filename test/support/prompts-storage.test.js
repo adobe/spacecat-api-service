@@ -176,6 +176,7 @@ describe('prompts-storage', () => {
 
     it('returns paginated result with items', async () => {
       const row = {
+        id: 'prompt-pk-uuid',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
@@ -201,6 +202,7 @@ describe('prompts-storage', () => {
       });
       expect(result.items).to.have.lengthOf(1);
       expect(result.items[0].id).to.equal(PROMPT_ID);
+      expect(result.items[0].uuid).to.equal('prompt-pk-uuid');
       expect(result.total).to.equal(1);
       expect(result.limit).to.equal(100);
       expect(result.page).to.equal(1);
@@ -436,6 +438,7 @@ describe('prompts-storage', () => {
 
     it('applies categoryId and topicId filters when provided', async () => {
       const row = {
+        id: 'prompt-pk-uuid-2',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
@@ -468,8 +471,12 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.items).to.have.lengthOf(1);
-      expect(result.items[0].category).to.deep.include({ id: 'photoshop', name: 'Photoshop', origin: 'human' });
-      expect(result.items[0].topic).to.deep.include({ id: 'editing', name: 'Editing', categoryId: 'photoshop' });
+      expect(result.items[0].category).to.deep.include({
+        id: 'photoshop', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
+      });
+      expect(result.items[0].topic).to.deep.include({
+        id: 'editing', uuid: 'topic-uuid', name: 'Editing', categoryId: 'photoshop',
+      });
     });
 
     it('throws on query error', async () => {
