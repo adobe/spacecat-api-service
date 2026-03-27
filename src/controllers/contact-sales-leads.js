@@ -1,0 +1,262 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import {
+  badRequest,
+  created,
+  createResponse,
+  internalServerError,
+  notFound,
+  ok,
+} from '@adobe/spacecat-shared-http-utils';
+import {
+  hasText,
+  isNonEmptyObject,
+  isValidEmail,
+  isValidUUID,
+} from '@adobe/spacecat-shared-utils';
+import { ContactSalesLead as ContactSalesLeadModel } from '@adobe/spacecat-shared-data-access';
+
+import { ContactSalesLeadDto } from '../dto/contact-sales-lead.js';
+
+/**
+ * ContactSalesLeads controller. Provides methods to create and query contact sales leads.
+ * @param {object} ctx - Context of the request.
+ * @returns {object} ContactSalesLeads controller.
+ * @constructor
+ */
+function ContactSalesLeadsController(ctx) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
+    throw new Error('Data access required');
+  }
+
+  const { ContactSalesLead, Organization } = dataAccess;
+
+  /**
+   * Resolves the internal organization ID from the authenticated user's IMS org.
+   * @param {object} context - Request context.
+   * @returns {Promise<string|null>} Organization ID or null.
+   */
+  const resolveOrganizationId = async (context) => {
+    const authInfo = context.attributes?.authInfo;
+    if (!authInfo) return null;
+
+    const profile = authInfo.getProfile();
+    const tenantId = profile?.tenants?.[0]?.id;
+    if (!hasText(tenantId)) return null;
+
+    const imsOrgId = tenantId.includes('@') ? tenantId : `${tenantId}@AdobeOrg`;
+
+    try {
+      const org = await Organization.findByImsOrgId(imsOrgId);
+      return org ? org.getId() : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Creates a new contact sales lead.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} ContactSalesLead response.
+   */
+  const create = async (context) => {
+    const {
+      name, email, domain, siteId,
+    } = context.data || {};
+
+    if (!hasText(name)) {
+      return badRequest('Name is required');
+    }
+
+    if (!hasText(email)) {
+      return badRequest('Email is required');
+    }
+
+    if (!isValidEmail(email)) {
+      return badRequest('A valid email address is required');
+    }
+
+    try {
+      const organizationId = await resolveOrganizationId(context);
+
+      if (organizationId) {
+        const leads = await ContactSalesLead.allByOrganizationId(organizationId);
+        if (hasText(siteId) && isValidUUID(siteId)) {
+          const duplicateForSite = leads.find((lead) => lead.getSiteId() === siteId);
+          if (duplicateForSite) {
+            return createResponse(
+              {
+                message:
+                  'A contact sales request has already been submitted for this site.',
+              },
+              409,
+            );
+          }
+        } else {
+          const duplicateEmailNoSite = leads.find(
+            (lead) => lead.getEmail() === email && !lead.getSiteId(),
+          );
+          if (duplicateEmailNoSite) {
+            return createResponse(
+              {
+                message:
+                  'A contact sales request has already been submitted for this email.',
+              },
+              409,
+            );
+          }
+        }
+      } else {
+        const existingLead = await ContactSalesLead.findByEmail(email);
+        if (existingLead) {
+          return createResponse(
+            {
+              message:
+                'A contact sales request has already been submitted for this email.',
+            },
+            409,
+          );
+        }
+      }
+
+      const leadData = {
+        name,
+        email,
+        status: ContactSalesLeadModel.STATUSES.NEW,
+      };
+
+      if (hasText(domain)) {
+        leadData.domain = domain;
+      }
+
+      if (hasText(siteId) && isValidUUID(siteId)) {
+        leadData.siteId = siteId;
+      }
+
+      if (organizationId) {
+        leadData.organizationId = organizationId;
+      }
+
+      const lead = await ContactSalesLead.create(leadData);
+      return created(ContactSalesLeadDto.toJSON(lead));
+    } catch (e) {
+      context.log.error(`Error creating contact sales lead: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
+  /**
+   * Gets contact sales leads by organization ID.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of contact sales leads.
+   */
+  const getByOrganizationId = async (context) => {
+    const { organizationId } = context.params;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    try {
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return badRequest('Organization not found');
+      }
+
+      const leads = await ContactSalesLead.allByOrganizationId(organizationId);
+      return ok(leads.map((lead) => ContactSalesLeadDto.toJSON(lead)));
+    } catch (e) {
+      context.log.error(`Error getting contact sales leads for org ${organizationId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
+  /**
+   * Checks if a contact sales lead exists for a given organization and site.
+   * Returns { exists: true/false } so the frontend can disable the button.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} { exists: boolean, lead?: object }
+   */
+  const checkBySite = async (context) => {
+    const { organizationId, siteId } = context.params;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    try {
+      const leads = await ContactSalesLead.allByOrganizationId(organizationId);
+      const match = leads.find((lead) => lead.getSiteId() === siteId);
+
+      if (match) {
+        return ok({ exists: true, lead: ContactSalesLeadDto.toJSON(match) });
+      }
+      return ok({ exists: false });
+    } catch (e) {
+      context.log.error(`Error checking contact sales lead for org ${organizationId}, site ${siteId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
+  const VALID_STATUSES = Object.values(ContactSalesLeadModel.STATUSES);
+
+  /**
+   * Updates the status of a contact sales lead.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Updated ContactSalesLead response.
+   */
+  const updateStatus = async (context) => {
+    const { contactSalesLeadId } = context.params;
+    const { status } = context.data || {};
+
+    if (!isValidUUID(contactSalesLeadId)) {
+      return badRequest('Contact sales lead ID required');
+    }
+
+    if (!hasText(status) || !VALID_STATUSES.includes(status)) {
+      return badRequest(`Status must be one of: ${VALID_STATUSES.join(', ')}`);
+    }
+
+    try {
+      const lead = await ContactSalesLead.findById(contactSalesLeadId);
+      if (!lead) {
+        return notFound('Contact sales lead not found');
+      }
+
+      lead.setStatus(status);
+      const updatedLead = await lead.save();
+      return ok(ContactSalesLeadDto.toJSON(updatedLead));
+    } catch (e) {
+      context.log.error(`Error updating contact sales lead ${contactSalesLeadId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
+  return {
+    create,
+    getByOrganizationId,
+    checkBySite,
+    updateStatus,
+  };
+}
+
+export default ContactSalesLeadsController;

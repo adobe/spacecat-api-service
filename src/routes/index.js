@@ -89,6 +89,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
+ * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -134,6 +135,7 @@ export default function getRouteHandlers(
   consumersController,
   plgOnboardingController,
   imsOrgAccessController,
+  contactSalesLeadsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -485,6 +487,12 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/ims-org-access': imsOrgAccessController.listGrants,
     'GET /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.getGrant,
     'DELETE /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.revokeGrant,
+
+    // Contact Sales Leads
+    'POST /contact-sales-leads': contactSalesLeadsController.create,
+    'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
+    'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
+    'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.updateStatus,
   };
 
   // Initialization of static and dynamic routes
