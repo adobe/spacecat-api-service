@@ -2839,6 +2839,143 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can onboard');
     });
+
+    it('should use imsOrgId from payload when provided and valid', async () => {
+      const payloadImsOrgId = 'abcdef123456789012345678@AdobeOrg';
+      const contextWithPayloadOrg = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, imsOrgId: payloadImsOrgId },
+        // No tenants in profile — proves JWT fallback is not used
+        attributes: {
+          authInfo: {
+            getProfile: sinon.stub().returns({ email: 'admin@example.com' }),
+          },
+        },
+      };
+
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(contextWithPayloadOrg);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.imsOrgId).to.equal(payloadImsOrgId);
+      expect(performLlmoOnboardingStub).to.have.been.calledOnceWith(
+        sinon.match({ imsOrgId: payloadImsOrgId }),
+        sinon.match.any,
+      );
+    });
+
+    it('should return bad request when payload imsOrgId has invalid format', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: () => 'dev/example-com',
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => `https://${domain}`,
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      for (const invalid of ['not-valid', 'tooshort@AdobeOrg', 'abcdef123456789012345678', 'abcdef123456789012345678@WrongSuffix']) {
+        const contextWithBadOrg = {
+          ...onboardingContext,
+          data: { ...onboardingContext.data, imsOrgId: invalid },
+        };
+        // eslint-disable-next-line no-await-in-loop
+        const result = await testController.onboardCustomer(contextWithBadOrg);
+        expect(result.status, `expected 400 for imsOrgId="${invalid}"`).to.equal(400);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await result.json();
+        expect(body.message).to.equal('Invalid imsOrgId');
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should fall back to JWT token when imsOrgId is not in payload (backward compat)', async () => {
+      // onboardingContext has no imsOrgId in data but has tenants in the profile
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      // JWT-derived org ID: tenants[0].id + '@AdobeOrg'
+      expect(responseBody.imsOrgId).to.equal('test-tenant-id@AdobeOrg');
+      expect(performLlmoOnboardingStub).to.have.been.calledOnceWith(
+        sinon.match({ imsOrgId: 'test-tenant-id@AdobeOrg' }),
+        sinon.match.any,
+      );
+    });
   });
 
   describe('offboardCustomer', () => {
