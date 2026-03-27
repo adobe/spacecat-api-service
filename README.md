@@ -79,6 +79,7 @@ Wait for PostgREST to become ready:
 curl -sf http://localhost:3300/ > /dev/null && echo "Ready" || echo "Not ready yet"
 ```
 
+
 #### 3. Create your `.env` file
 
 ```bash
