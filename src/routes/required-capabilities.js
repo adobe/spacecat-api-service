@@ -83,6 +83,9 @@ export const INTERNAL_ROUTES = [
 
   // Entitlement write - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
+  // Feature flags write - admin only, mysticat-backed org config
+  'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
+  'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
 
   // IMS org access (delegation grants) - admin-only, cross-org grant management
   'POST /sites/:siteId/ims-org-access',
@@ -412,6 +415,7 @@ const routeRequiredCapabilities = {
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
+  'GET /organizations/:organizationId/feature-flags': 'organization:read',
 
   // Sandbox
   'POST /sites/:siteId/sandbox/audit': 'site:write',
