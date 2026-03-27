@@ -5102,6 +5102,44 @@ Entitlement:
     updatedAt: "2024-01-15T10:30:00Z"
     updatedBy: "system"
 
+FeatureFlagProduct:
+  type: string
+  description: Product surface for org-scoped feature flags (matches mysticat enum)
+  enum: [ASO, LLMO]
+
+FeatureFlag:
+  type: object
+  description: Org-scoped boolean feature flag (mysticat `feature_flags`)
+  properties:
+    id:
+      description: Row id (UUIDv7)
+      $ref: '#/Id'
+    organizationId:
+      description: Organization id (SpaceCat / mysticat `organizations.id`)
+      $ref: '#/Id'
+    product:
+      $ref: '#/FeatureFlagProduct'
+    flagName:
+      description: Stable flag key
+      type: string
+    flagValue:
+      description: Whether the flag is enabled
+      type: boolean
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      description: IMS user id, service id, or similar; who last changed the row
+      oneOf:
+        - type: string
+        - type: 'null'
+
+FeatureFlagList:
+  type: array
+  items:
+    $ref: '#/FeatureFlag'
+
 SiteEnrollment:
   type: object
   description: A site enrollment represents a site's participation in a product or service

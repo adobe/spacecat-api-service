@@ -653,3 +653,39 @@ customer-config-v2-patch:
               source: "api"
               categoryId: "859b91c5-0420-4f3b-a464-8d6f6ac34f64"
               topicId: "topic-acrobat-features"
+
+FeatureFlagExample:
+  description: Example feature flag row returned from the API
+  value:
+    id: "018f3a1e-0000-7b2c-b000-000000000001"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    product: LLMO
+    flagName: enable_beta_ui
+    flagValue: true
+    createdAt: "2026-03-26T12:00:00Z"
+    updatedAt: "2026-03-26T12:30:00Z"
+    updatedBy: "admin@AdobeID"
+
+FeatureFlagDisabledExample:
+  description: Example response after DELETE (flag persisted as false)
+  value:
+    id: "018f3a1e-0000-7b2c-b000-000000000001"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    product: LLMO
+    flagName: enable_beta_ui
+    flagValue: false
+    createdAt: "2026-03-26T12:00:00Z"
+    updatedAt: "2026-03-26T13:00:00Z"
+    updatedBy: "admin@AdobeID"
+
+FeatureFlagListExample:
+  description: List response for one org and product (enabled flags only; `flagValue` is always true)
+  value:
+    - id: "018f3a1e-0000-7b2c-b000-000000000001"
+      organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+      product: LLMO
+      flagName: enable_beta_ui
+      flagValue: true
+      createdAt: "2026-03-26T12:00:00Z"
+      updatedAt: "2026-03-26T12:30:00Z"
+      updatedBy: "admin@AdobeID"
