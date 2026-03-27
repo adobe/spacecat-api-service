@@ -1,3 +1,10 @@
+## [1.381.2](https://github.com/adobe/spacecat-api-service/compare/v1.381.1...v1.381.2) (2026-03-27)
+
+
+### Bug Fixes
+
+* enhance llmo end point to accept imsOrgId from payload as well ([#2049](https://github.com/adobe/spacecat-api-service/issues/2049)) ([7a823c5](https://github.com/adobe/spacecat-api-service/commit/7a823c5ea4b27b6ff1e0c54b04e758b34252e033))
+
 ## [1.381.1](https://github.com/adobe/spacecat-api-service/compare/v1.381.0...v1.381.1) (2026-03-27)
 
 
