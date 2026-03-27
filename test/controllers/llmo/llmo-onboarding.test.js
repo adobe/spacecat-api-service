@@ -25,8 +25,10 @@ describe('LLMO Onboarding Functions', () => {
   let mockEnv;
   let mockSharePointClient;
   let mockSharePointFolder;
+  let originalSetTimeout;
 
   beforeEach(() => {
+    originalSetTimeout = null;
     // Create mock data access
     mockDataAccess = {
       Site: {
@@ -77,6 +79,13 @@ describe('LLMO Onboarding Functions', () => {
     };
 
     // _createSharePointClientStub = sinon.stub().resolves(mockSharePointClient);
+  });
+
+  afterEach(() => {
+    if (originalSetTimeout) {
+      restoreSetTimeout(originalSetTimeout);
+      originalSetTimeout = null;
+    }
   });
 
   // Helper functions for common mock setups
@@ -1260,7 +1269,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1393,10 +1402,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, baseURL https://example.com, brand Test Brand');
-      expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com');
-
-      // Restore setTimeout
-      restoreSetTimeout(originalSetTimeout);
+      expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com using LLMO onboarding mode v2');
     });
 
     it('should skip v2 initialization and Brandalf in v1 onboarding mode', async () => {
@@ -1441,7 +1447,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1489,7 +1495,6 @@ describe('LLMO Onboarding Functions', () => {
       expect(
         mockDrsClient.createFrom().submitJob.firstCall.args[0].parameters.metadata.onboarding_mode,
       ).to.equal('v1');
-      restoreSetTimeout(originalSetTimeout);
     }).timeout(10000);
 
     it('should skip DRS prompt generation when DRS client is not configured', async () => {
@@ -1530,7 +1535,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1578,7 +1583,6 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping Brandalf flow');
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping prompt generation');
 
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should handle Brandalf job submission failure gracefully', async () => {
@@ -1619,7 +1623,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1669,7 +1673,6 @@ describe('LLMO Onboarding Functions', () => {
       // Verify error was logged but didn't fail onboarding
       expect(mockLog.error).to.have.been.calledWith('Failed to start DRS Brandalf flow: Brandalf API connection failed');
 
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should handle DRS prompt generation failure gracefully', async () => {
@@ -1710,7 +1713,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      const originalSetTimeout = mockSetTimeoutImmediate();
+      originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -1762,7 +1765,6 @@ describe('LLMO Onboarding Functions', () => {
       // Verify error was logged but didn't fail onboarding
       expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: DRS API connection failed');
 
-      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should create new organization when organization does not exist', async () => {
