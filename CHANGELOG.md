@@ -1,3 +1,10 @@
+# [1.382.0](https://github.com/adobe/spacecat-api-service/compare/v1.381.2...v1.382.0) (2026-03-27)
+
+
+### Features
+
+* expose UUID PKs in prompts response (LLMO-3901) ([#2054](https://github.com/adobe/spacecat-api-service/issues/2054)) ([2745e1c](https://github.com/adobe/spacecat-api-service/commit/2745e1c68f6d3a5a910d928684423685e3a7ba2e)), closes [adobe-rnd/llmo-data-retrieval-service#1116](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1116)
+
 ## [1.381.2](https://github.com/adobe/spacecat-api-service/compare/v1.381.1...v1.381.2) (2026-03-27)
 
 
