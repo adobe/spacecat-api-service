@@ -1,3 +1,10 @@
+## [1.381.1](https://github.com/adobe/spacecat-api-service/compare/v1.381.0...v1.381.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* Update CONSUMER_INTEGRATION_GUIDE.md ([#2051](https://github.com/adobe/spacecat-api-service/issues/2051)) ([3e8ad2f](https://github.com/adobe/spacecat-api-service/commit/3e8ad2f08e8b4d16d82eb19e02f838fa0322df4c))
+
 # [1.381.0](https://github.com/adobe/spacecat-api-service/compare/v1.380.0...v1.381.0) (2026-03-27)
 
 
