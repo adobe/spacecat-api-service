@@ -4741,7 +4741,7 @@ describe('Suggestions Controller', () => {
         getId: () => JOB_ID,
         getStatus: () => 'IN_PROGRESS',
         getMetadata: () => ({
-          jobType: 'experiment-deploy',
+          jobType: 'geo-experiment',
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           deployStatus: 'pre_analysis_submitted',
@@ -5221,7 +5221,7 @@ describe('Suggestions Controller', () => {
       expect(mockSuggestionDataAccess.AsyncJob.create).to.have.been.calledOnce;
       const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
       expect(createArg.status).to.equal('IN_PROGRESS');
-      expect(createArg.metadata.jobType).to.equal('experiment-deploy');
+      expect(createArg.metadata.jobType).to.equal('geo-experiment');
       expect(createArg.metadata.siteId).to.equal(SITE_ID);
       expect(createArg.metadata.opportunityId).to.equal(OPPORTUNITY_ID);
       expect(createArg.metadata.deploymentExperimentId).to.equal('dep-exp-001');
@@ -5294,7 +5294,7 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(edgeSuggestions[0].setUpdatedBy.calledWith('experiment-deploy')).to.equal(true);
+      expect(edgeSuggestions[0].setUpdatedBy.calledWith('geo-experiment')).to.equal(true);
     });
 
     it('includes failedSuggestions in response when some are invalid', async () => {
