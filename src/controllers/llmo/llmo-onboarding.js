@@ -58,6 +58,18 @@ function resolveUpdatedBy(context) {
     || 'system';
 }
 
+function buildOnboardingMetadata({
+  siteId, imsOrgId, brandName, onboardingMode, extra = {},
+}) {
+  return {
+    site_id: siteId,
+    imsOrgId,
+    brand: brandName,
+    onboarding_mode: onboardingMode,
+    ...extra,
+  };
+}
+
 function buildBrandalfMetadata({
   organizationId,
   siteId,
@@ -67,15 +79,17 @@ function buildBrandalfMetadata({
   onboardingMode,
 }) {
   const { hostname } = new URL(companyWebsite);
-  return {
+  return buildOnboardingMetadata({
+    siteId,
     imsOrgId,
-    brand: brandName,
-    site: hostname,
-    site_id: siteId,
-    spaceCatId: organizationId,
-    company_website: companyWebsite,
-    onboarding_mode: onboardingMode,
-  };
+    brandName,
+    onboardingMode,
+    extra: {
+      site: hostname,
+      spaceCatId: organizationId,
+      company_website: companyWebsite,
+    },
+  });
 }
 
 export async function triggerBrandalfOnboardingJob({
@@ -123,14 +137,16 @@ function buildPromptGenerationMetadata({
   region,
   onboardingMode,
 }) {
-  return {
-    site_id: siteId,
+  return buildOnboardingMetadata({
+    siteId,
     imsOrgId,
-    base_url: baseUrl,
-    brand: brandName,
-    region,
-    onboarding_mode: onboardingMode,
-  };
+    brandName,
+    onboardingMode,
+    extra: {
+      base_url: baseUrl,
+      region,
+    },
+  });
 }
 
 export async function submitOnboardingPromptGenerationJob({

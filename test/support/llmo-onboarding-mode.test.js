@@ -79,7 +79,7 @@ describe('llmo-onboarding-mode', () => {
       await readBrandalfFlagOverride('org-1', postgrestClient);
       expect.fail('Expected readBrandalfFlagOverride to throw');
     } catch (error) {
-      expect(error.message).to.equal('Failed to read LLMO feature flag brandalf: boom');
+      expect(error.message).to.equal('Failed to read feature flag brandalf: boom');
     }
   });
 
@@ -206,7 +206,7 @@ describe('llmo-onboarding-mode', () => {
 
     expect(mode).to.equal('v2');
     expect(context.log.warn).to.have.been.calledWith(
-      'Failed to resolve brandalf feature flag for organization org-1: Failed to read LLMO feature flag brandalf: boom',
+      'Failed to resolve brandalf feature flag for organization org-1: Failed to read feature flag brandalf: boom',
     );
   });
 });

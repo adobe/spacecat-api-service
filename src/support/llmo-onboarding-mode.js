@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { readFeatureFlag } from './feature-flags-storage.js';
+
 export const LLMO_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const LLMO_BRANDALF_FLAG = 'brandalf';
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
@@ -24,19 +26,12 @@ export async function readBrandalfFlagOverride(organizationId, postgrestClient) 
     return null;
   }
 
-  const { data, error } = await postgrestClient
-    .from('feature_flags')
-    .select('flag_value')
-    .eq('organization_id', organizationId)
-    .eq('product', LLMO_FEATURE_FLAG_PRODUCT)
-    .eq('flag_name', LLMO_BRANDALF_FLAG)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to read LLMO feature flag ${LLMO_BRANDALF_FLAG}: ${error.message}`);
-  }
-
-  return typeof data?.flag_value === 'boolean' ? data.flag_value : null;
+  return readFeatureFlag({
+    organizationId,
+    product: LLMO_FEATURE_FLAG_PRODUCT,
+    flagName: LLMO_BRANDALF_FLAG,
+    postgrestClient,
+  });
 }
 
 export async function resolveLlmoOnboardingMode(organizationId, context) {
