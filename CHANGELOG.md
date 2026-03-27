@@ -1,3 +1,10 @@
+# [1.384.0](https://github.com/adobe/spacecat-api-service/compare/v1.383.0...v1.384.0) (2026-03-27)
+
+
+### Features
+
+* LLMO-3945 add onboarding Brandalf mode resolution ([#2055](https://github.com/adobe/spacecat-api-service/issues/2055)) ([3d6dec2](https://github.com/adobe/spacecat-api-service/commit/3d6dec24b48796f5a41b13e3fcefa779d629411e))
+
 # [1.383.0](https://github.com/adobe/spacecat-api-service/compare/v1.382.0...v1.383.0) (2026-03-27)
 
 
