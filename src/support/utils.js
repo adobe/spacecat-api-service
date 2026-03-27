@@ -1277,6 +1277,108 @@ export async function queueDetectCdnAudit(
 }
 
 /**
+ * Queues a delivery-config-writer job that runs CDN detection followed by redirect
+ * identification sequentially, eliminating race conditions during onboarding.
+ *
+ * Redirect identification is only included when the site's authoringType / deliveryType
+ * indicates AEM CS/CW and the site already has deliveryConfig.programId / environmentId.
+ *
+ * @param {Object} params
+ * @param {Object} params.site - The site object (must be non-null).
+ * @param {string} [params.baseURL] - URL to probe; falls back to site.getBaseURL().
+ * @param {number} [params.minutes=2000] - Splunk lookback window in minutes.
+ * @param {boolean} [params.updateRedirects=true] - Whether to persist the detected redirect mode.
+ * @param {Object} [params.slackContext] - Optional say, channelId, threadTs for Slack replies.
+ * @param {Object} context - Lambda context (env, sqs, log).
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function queueDeliveryConfigWriter(
+  {
+    site, baseURL, minutes = 2000, updateRedirects = true, slackContext,
+  },
+  context,
+) {
+  const { env, log, sqs } = context;
+  const { say, channelId, threadTs } = slackContext || {};
+
+  try {
+    if (!site) {
+      return { ok: false, error: `:x: No site found with base URL '${baseURL}'.` };
+    }
+
+    const resolvedBaseURL = (baseURL || site.getBaseURL() || '').trim();
+    if (!hasText(resolvedBaseURL)) {
+      return { ok: false, error: ':warning: delivery-config-writer: missing or invalid URL.' };
+    }
+
+    if (!sqs) {
+      return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
+    }
+
+    if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
+      return { ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' };
+    }
+
+    const siteId = site.getId();
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+
+    const validForRedirects = [
+      SiteModel.AUTHORING_TYPES.CS,
+      SiteModel.AUTHORING_TYPES.CS_CW,
+    ].includes(authoringType) || [
+      SiteModel.DELIVERY_TYPES.AEM_CS,
+    ].includes(deliveryType);
+
+    let redirectParams = {};
+    if (validForRedirects) {
+      const deliveryConfig = site.getDeliveryConfig?.() || {};
+      const { programId, environmentId } = deliveryConfig;
+      if (!hasText(programId) || !hasText(environmentId)) {
+        return {
+          ok: false,
+          error: ':x: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for redirect identification.',
+        };
+      }
+      redirectParams = {
+        programId: String(programId),
+        environmentId: String(environmentId),
+        minutes,
+        updateRedirects,
+      };
+    } else {
+      log.info(
+        `[delivery-config-writer] Site ${siteId} not valid for redirect identification`
+        + ` (authoringType=${authoringType}, deliveryType=${deliveryType}); CDN detection only.`,
+      );
+    }
+
+    const payload = {
+      type: 'delivery-config-writer',
+      siteId,
+      baseURL: resolvedBaseURL,
+      ...redirectParams,
+      ...(channelId != null && threadTs != null
+        ? { slackContext: { channelId, threadTs } }
+        : {}),
+    };
+
+    if (say) {
+      const redirectsNote = validForRedirects ? ' and redirect pattern detection' : '';
+      await say(
+        `:gear: Queued CDN detection${redirectsNote} for *${resolvedBaseURL}*. I'll reply here when it's ready.`,
+      );
+    }
+
+    await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, payload);
+    return { ok: true };
+  } catch (error) {
+    log.error(error);
+    throw error;
+  }
+}
+
+/**
  * Shared onboarding function used by both modal and command implementations.
  *
  * @param {string} baseURLInput - The site URL input
@@ -1514,54 +1616,21 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
-    const detectCdnResult = await queueDetectCdnAudit(
+    const deliveryConfigResult = await queueDeliveryConfigWriter(
       {
         site,
         baseURL: resolvedUrl,
+        minutes: 2000,
+        updateRedirects: true,
         slackContext,
       },
       context,
     );
-    if (!detectCdnResult.ok) {
-      log.warn(`[onboard] CDN detection queue failed for site ${siteID}: ${detectCdnResult.error}`);
-      await say(`:warning: ${detectCdnResult.error}`);
-    }
-
-    // configure redirectsmode and redirectssource
-    // check for valid authoringType and deliveryType
-    const authoringType = site.getAuthoringType();
-    const deliveryType = site.getDeliveryType();
-    let validForRedirects = true;
-    // check either authoringType or deliveryType is CS/CW
-    if (![
-      SiteModel.AUTHORING_TYPES.CS, // cs
-      SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
-    ].includes(authoringType)
-    && ![
-      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
-    ].includes(deliveryType)) {
-      validForRedirects = false;
-    }
-    if (!validForRedirects) {
-      // skip update-redirects if invalid for redirects
-      log.info(`skipping update-redirects, as the site ${baseURL} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`);
-    } else {
-      const updateRedirectsResult = await queueIdentifyRedirectsAudit(
-        {
-          site,
-          baseURL,
-          minutes: 2000,
-          updateRedirects: true,
-          slackContext,
-        },
-        context,
-      );
-      if (!updateRedirectsResult.ok) {
-        reportLine.errors = updateRedirectsResult.error;
-        reportLine.status = 'Failed';
-        await say(updateRedirectsResult.error);
-        return reportLine;
-      }
+    if (!deliveryConfigResult.ok) {
+      reportLine.errors = deliveryConfigResult.error;
+      reportLine.status = 'Failed';
+      await say(deliveryConfigResult.error);
+      return reportLine;
     }
 
     for (const importType of importTypes) {
