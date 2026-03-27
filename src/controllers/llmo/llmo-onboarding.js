@@ -20,6 +20,11 @@ import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
+import {
+  readCustomerConfigV2FromPostgres,
+  writeCustomerConfigV2ToPostgres,
+} from '../../support/customer-config-v2-storage.js';
+import { convertV1ToV2 } from '../../support/customer-config-mapper.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -41,6 +46,142 @@ export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
 export const ASO_CRITICAL_SITES = [];
 const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
+
+function resolveUpdatedBy(context) {
+  return context.attributes?.authInfo?.profile?.email
+    || context.attributes?.authInfo?.getProfile?.()?.email
+    || 'system';
+}
+
+function buildBrandalfMetadata({
+  organizationId,
+  siteId,
+  imsOrgId,
+  brandName,
+  companyWebsite,
+}) {
+  const { hostname } = new URL(companyWebsite);
+  return {
+    imsOrgId,
+    brand: brandName,
+    site: hostname,
+    site_id: siteId,
+    spaceCatId: organizationId,
+    company_website: companyWebsite,
+  };
+}
+
+export async function triggerBrandalfOnboardingJob({
+  drsClient,
+  organizationId,
+  siteId,
+  imsOrgId,
+  brandName,
+  companyWebsite,
+  log,
+  say = () => {},
+}) {
+  const metadata = buildBrandalfMetadata({
+    organizationId,
+    siteId,
+    imsOrgId,
+    brandName,
+    companyWebsite,
+  });
+
+  const drsJob = await drsClient.submitJob({
+    provider_id: 'single_shot_prompt',
+    priority: 'HIGH',
+    source: 'onboarding',
+    parameters: {
+      prompt_type: 'brandalf',
+      name: brandName,
+      company_website: companyWebsite,
+      metadata,
+    },
+  });
+
+  log.info(`Started DRS Brandalf flow: job=${drsJob.job_id}`);
+  say(`:label: Started DRS Brandalf job: ${drsJob.job_id}`);
+  return drsJob;
+}
+
+export function buildInitialCustomerConfigV2({
+  brandName,
+  imsOrgId,
+  siteId,
+  baseURL,
+  overrideBaseURL,
+  updatedBy = 'system',
+}) {
+  const primaryUrl = overrideBaseURL || baseURL;
+  const config = convertV1ToV2({
+    brands: {
+      aliases: [{
+        name: brandName,
+        regions: ['gl'],
+        status: 'active',
+      }],
+    },
+    competitors: { competitors: [] },
+    categories: {},
+    topics: {},
+  }, brandName, imsOrgId);
+
+  const [brand] = config.customer.brands;
+  const timestamp = new Date().toISOString();
+
+  brand.v1SiteId = siteId;
+  brand.baseUrl = primaryUrl;
+  brand.updatedAt = timestamp;
+  brand.updatedBy = updatedBy;
+  brand.urls = [{ value: primaryUrl, type: 'url' }];
+  brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
+
+  config.customer.customerName = brandName;
+
+  return config;
+}
+
+export async function ensureInitialCustomerConfigV2({
+  organizationId,
+  brandName,
+  imsOrgId,
+  siteId,
+  baseURL,
+  overrideBaseURL,
+  context,
+}) {
+  const postgrestClient = context.dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.from) {
+    throw new Error('V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)');
+  }
+
+  const existingConfig = await readCustomerConfigV2FromPostgres(organizationId, postgrestClient);
+  if (existingConfig) {
+    context.log.info(`V2 customer config already exists for organization ${organizationId}, skipping initialization`);
+    return existingConfig;
+  }
+
+  const config = buildInitialCustomerConfigV2({
+    brandName: brandName.trim(),
+    imsOrgId,
+    siteId,
+    baseURL,
+    overrideBaseURL,
+    updatedBy: resolveUpdatedBy(context),
+  });
+
+  await writeCustomerConfigV2ToPostgres(
+    organizationId,
+    config,
+    postgrestClient,
+    resolveUpdatedBy(context),
+  );
+  context.log.info(`Initialized V2 customer config for organization ${organizationId} during onboarding`);
+
+  return config;
+}
 
 /**
  * Generates the data folder name from a domain.
@@ -1056,6 +1197,40 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // update the site config object
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
+
+    await ensureInitialCustomerConfigV2({
+      organizationId: organization.getId(),
+      brandName,
+      imsOrgId,
+      siteId: site.getId(),
+      baseURL,
+      overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
+      context,
+    });
+
+    // Trigger Brandalf immediately after the v2 config exists so downstream
+    // brand sync can attach results to the newly created organization.
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+        await triggerBrandalfOnboardingJob({
+          drsClient,
+          organizationId: organization.getId(),
+          siteId: site.getId(),
+          imsOrgId,
+          brandName: brandName.trim(),
+          companyWebsite,
+          log,
+          say,
+        });
+      } else {
+        log.debug('DRS client not configured, skipping Brandalf flow');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+      say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+    }
 
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)

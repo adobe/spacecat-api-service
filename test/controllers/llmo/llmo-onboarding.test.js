@@ -40,6 +40,11 @@ describe('LLMO Onboarding Functions', () => {
       Configuration: {
         findLatest: sinon.stub(),
       },
+      services: {
+        postgrestClient: {
+          from: sinon.stub(),
+        },
+      },
     };
 
     // Create mock log
@@ -152,11 +157,13 @@ describe('LLMO Onboarding Functions', () => {
   const createMockDrsClient = (sandbox = sinon, options = {}) => {
     const {
       isConfigured = true,
+      submitJob = sandbox.stub().resolves({ job_id: 'test-brandalf-job-123' }),
       submitPromptGenerationJob = sandbox.stub().resolves({ job_id: 'test-drs-job-123' }),
     } = options;
 
     const instance = {
       isConfigured: sandbox.stub().returns(isConfigured),
+      submitJob,
       submitPromptGenerationJob,
     };
 
@@ -164,6 +171,13 @@ describe('LLMO Onboarding Functions', () => {
       createFrom: sandbox.stub().returns(instance),
     };
   };
+
+  const createMockCustomerConfigV2Storage = (sandbox = sinon, options = {}) => ({
+    readCustomerConfigV2FromPostgres: options.readCustomerConfigV2FromPostgres
+      || sandbox.stub().resolves(null),
+    writeCustomerConfigV2ToPostgres: options.writeCustomerConfigV2ToPostgres
+      || sandbox.stub().resolves(),
+  });
 
   const createCommonEsmockDependencies = (options = {}) => {
     const {
@@ -174,7 +188,10 @@ describe('LLMO Onboarding Functions', () => {
       mockSharePointClient: sharePointClient,
       mockOctokit,
       mockDrsClient,
+      mockCustomerConfigV2Storage,
     } = options;
+    const effectiveCustomerConfigV2Storage = mockCustomerConfigV2Storage
+      || createMockCustomerConfigV2Storage();
 
     const deps = {
       '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
@@ -210,6 +227,8 @@ describe('LLMO Onboarding Functions', () => {
     if (mockDrsClient) {
       deps['@adobe/spacecat-shared-drs-client'] = { default: mockDrsClient };
     }
+
+    deps['../../../src/support/customer-config-v2-storage.js'] = effectiveCustomerConfigV2Storage;
 
     return deps;
   };
@@ -1248,6 +1267,7 @@ describe('LLMO Onboarding Functions', () => {
       );
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
@@ -1260,6 +1280,7 @@ describe('LLMO Onboarding Functions', () => {
           mockSharePointClient: sharePointClient,
           mockOctokit,
           mockDrsClient,
+          mockCustomerConfigV2Storage,
         }),
       );
 
@@ -1279,6 +1300,27 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(mockDrsClient.createFrom().submitJob).to.have.been.calledWith(
+        sinon.match({
+          provider_id: 'single_shot_prompt',
+          priority: 'HIGH',
+          source: 'onboarding',
+          parameters: {
+            prompt_type: 'brandalf',
+            name: 'Test Brand',
+            company_website: 'https://example.com',
+            metadata: {
+              imsOrgId: 'ABC123@AdobeOrg',
+              brand: 'Test Brand',
+              site: 'example.com',
+              site_id: 'site123',
+              spaceCatId: 'org123',
+              company_website: 'https://example.com',
+            },
+          },
+        }),
+      );
 
       // Verify DRS job was submitted with audience from brand profile
       expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledWith(
@@ -1309,6 +1351,13 @@ describe('LLMO Onboarding Functions', () => {
       // Verify site was saved
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
       expect(mockSite.save).to.have.been.called;
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+
+      const writtenConfig = mockCustomerConfigV2Storage
+        .writeCustomerConfigV2ToPostgres.firstCall.args[1];
+      expect(writtenConfig.customer.customerName).to.equal('Test Brand');
+      expect(writtenConfig.customer.brands[0].v1SiteId).to.equal('site123');
+      expect(writtenConfig.customer.brands[0].baseUrl).to.equal('https://example.com');
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
@@ -1424,12 +1473,13 @@ describe('LLMO Onboarding Functions', () => {
       expect(result.message).to.equal('LLMO onboarding completed successfully');
 
       // Verify DRS was checked but not called
+      expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping Brandalf flow');
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping prompt generation');
 
       restoreSetTimeout(originalSetTimeout);
     });
 
-    it('should handle DRS job submission failure gracefully', async () => {
+    it('should handle Brandalf job submission failure gracefully', async () => {
       // Mock organization
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
@@ -1475,6 +1525,96 @@ describe('LLMO Onboarding Functions', () => {
       );
       const mockOctokit = createMockOctokit();
       // DRS client configured but job submission fails
+      const mockDrsClient = createMockDrsClient(sinon, {
+        isConfigured: true,
+        submitJob: sinon.stub().rejects(new Error('Brandalf API connection failed')),
+      });
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      // Verify onboarding completed successfully despite DRS failure
+      expect(result.siteId).to.equal('site123');
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+
+      // Verify error was logged but didn't fail onboarding
+      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS Brandalf flow: Brandalf API connection failed');
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should handle DRS prompt generation failure gracefully', async () => {
+      // Mock organization
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Mock configuration
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      // Setup mocks
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient(sinon, {
         isConfigured: true,
         submitPromptGenerationJob: sinon.stub().rejects(new Error('DRS API connection failed')),
@@ -2181,6 +2321,184 @@ describe('LLMO Onboarding Functions', () => {
 
       // Restore setTimeout
       restoreSetTimeout(originalSetTimeout);
+    });
+  });
+
+  describe('buildInitialCustomerConfigV2', () => {
+    it('builds a single active brand config for onboarding', async () => {
+      const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      const result = buildInitialCustomerConfigV2({
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        overrideBaseURL: 'https://www.example.com',
+        updatedBy: 'tester@example.com',
+      });
+
+      expect(result.customer.customerName).to.equal('Test Brand');
+      expect(result.customer.imsOrgID).to.equal('ABC123@AdobeOrg');
+      expect(result.customer.categories).to.deep.equal([]);
+      expect(result.customer.topics).to.deep.equal([]);
+      expect(result.customer.brands).to.have.lengthOf(1);
+      expect(result.customer.availableVerticals).to.be.an('array').that.is.not.empty;
+
+      const [brand] = result.customer.brands;
+      expect(brand.name).to.equal('Test Brand');
+      expect(brand.status).to.equal('active');
+      expect(brand.v1SiteId).to.equal('site-123');
+      expect(brand.baseUrl).to.equal('https://www.example.com');
+      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
+      expect(brand.updatedBy).to.equal('tester@example.com');
+      expect(brand.prompts).to.deep.equal([]);
+    });
+  });
+
+  describe('ensureInitialCustomerConfigV2', () => {
+    it('throws when PostgREST is not available', async () => {
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies(),
+      );
+
+      try {
+        await ensureInitialCustomerConfigV2({
+          organizationId: 'org-123',
+          brandName: 'Test Brand',
+          imsOrgId: 'ABC123@AdobeOrg',
+          siteId: 'site-123',
+          baseURL: 'https://example.com',
+          context: {
+            dataAccess: {
+              services: {},
+            },
+            log: mockLog,
+          },
+        });
+        expect.fail('Expected ensureInitialCustomerConfigV2 to throw');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+        );
+      }
+    });
+
+    it('creates and writes the initial v2 config when one does not exist', async () => {
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        attributes: {
+          authInfo: {
+            profile: {
+              email: 'owner@example.com',
+            },
+          },
+        },
+      };
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        overrideBaseURL: 'https://www.example.com',
+        context,
+      });
+
+      expect(mockCustomerConfigV2Storage.readCustomerConfigV2FromPostgres).to.have.been.calledWith(
+        'org-123',
+        mockDataAccess.services.postgrestClient,
+      );
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[0]).to.equal('org-123');
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[2])
+        .to.equal(mockDataAccess.services.postgrestClient);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[3])
+        .to.equal('owner@example.com');
+
+      const writtenConfig = mockCustomerConfigV2Storage
+        .writeCustomerConfigV2ToPostgres.firstCall.args[1];
+      expect(writtenConfig.customer.customerName).to.equal('Test Brand');
+      expect(writtenConfig.customer.brands[0].v1SiteId).to.equal('site-123');
+      expect(writtenConfig.customer.brands[0].baseUrl).to.equal('https://www.example.com');
+      expect(result).to.deep.equal(writtenConfig);
+      expect(mockLog.info).to.have.been.calledWith('Initialized V2 customer config for organization org-123 during onboarding');
+    });
+
+    it('uses authInfo.getProfile email when profile.email is not available', async () => {
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'fallback-owner@example.com',
+              }),
+            },
+          },
+        },
+      });
+
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[3])
+        .to.equal('fallback-owner@example.com');
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[1]
+        .customer.brands[0].updatedBy).to.equal('fallback-owner@example.com');
+    });
+
+    it('skips writing when the v2 config already exists', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'existing-brand' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result).to.equal(existingConfig);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWith(
+        'V2 customer config already exists for organization org-123, skipping initialization',
+      );
     });
   });
 
