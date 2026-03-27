@@ -2840,17 +2840,13 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal('Only LLMO administrators can onboard');
     });
 
-    it('should use imsOrgId from payload when provided and valid', async () => {
+    it('should use imsOrgId from payload when provided and valid, even with no authInfo', async () => {
       const payloadImsOrgId = 'abcdef123456789012345678@AdobeOrg';
       const contextWithPayloadOrg = {
         ...onboardingContext,
         data: { ...onboardingContext.data, imsOrgId: payloadImsOrgId },
-        // No tenants in profile — proves JWT fallback is not used
-        attributes: {
-          authInfo: {
-            getProfile: sinon.stub().returns({ email: 'admin@example.com' }),
-          },
-        },
+        // No authInfo at all — proves JWT fallback path is never reached
+        attributes: {},
       };
 
       const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -2918,7 +2914,15 @@ describe('LlmoController', () => {
       });
       const testController = LlmoControllerOnboard(mockContext);
 
-      for (const invalid of ['not-valid', 'tooshort@AdobeOrg', 'abcdef123456789012345678', 'abcdef123456789012345678@WrongSuffix']) {
+      for (const invalid of [
+        'not-valid',
+        'tooshort@AdobeOrg',
+        'abcdef123456789012345678',
+        'abcdef123456789012345678@WrongSuffix',
+        'PREFIXabcdef123456789012345678@AdobeOrg', // missing ^ anchor
+        'abcdef123456789012345678@AdobeOrg_SUFFIX', // missing $ anchor
+        'abcdef1234567890123456789@AdobeOrg', // 25 chars (off-by-one)
+      ]) {
         const contextWithBadOrg = {
           ...onboardingContext,
           data: { ...onboardingContext.data, imsOrgId: invalid },
@@ -2975,6 +2979,51 @@ describe('LlmoController', () => {
         sinon.match({ imsOrgId: 'test-tenant-id@AdobeOrg' }),
         sinon.match.any,
       );
+    });
+
+    it('should accept payload imsOrgId with uppercase letters (/i flag)', async () => {
+      const upperCaseImsOrgId = 'ABCDEF123456789012345678@ADOBEORG';
+      const contextWithUpperOrg = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, imsOrgId: upperCaseImsOrgId },
+        attributes: {},
+      };
+
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(contextWithUpperOrg);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.imsOrgId).to.equal(upperCaseImsOrgId);
     });
   });
 
