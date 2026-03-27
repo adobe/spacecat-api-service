@@ -1315,9 +1315,13 @@ export const onboardSingleSite = async (
     // A non-protected incoming profile cannot override a paid onboarding unless force=true.
     if (!profile.protected) {
       const siteConfig = prefetchedSite?.getConfig();
-      const hasPaidImport = isImportEnabled(PAID_PROFILE_IMPORT, siteConfig?.getImports());
-      const hasPaidOnboardConfig = siteConfig?.getOnboardConfig()?.lastProfile === 'paid';
-      if (hasPaidImport || hasPaidOnboardConfig) {
+      const onboardConfig = siteConfig?.getOnboardConfig();
+      // If onboardConfig exists, trust lastProfile as the authoritative signal.
+      // Fall back to the import check only for legacy sites that predate onboardConfig tracking.
+      const isPaidSite = onboardConfig
+        ? onboardConfig.lastProfile === 'paid'
+        : isImportEnabled(PAID_PROFILE_IMPORT, siteConfig?.getImports());
+      if (isPaidSite) {
         if (additionalParams.force) {
           log.warn(`Force re-onboarding ${baseURL}: overriding paid profile with "${profileName}"`);
           await say(`:warning: Force re-onboarding \`${baseURL}\` - overriding paid profile with *${profileName}*.`);
