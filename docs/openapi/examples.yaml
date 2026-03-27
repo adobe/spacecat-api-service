@@ -679,7 +679,7 @@ FeatureFlagDisabledExample:
     updatedBy: "admin@AdobeID"
 
 FeatureFlagListExample:
-  description: List response for one org and product
+  description: List response for one org and product (enabled flags only; `flagValue` is always true)
   value:
     - id: "018f3a1e-0000-7b2c-b000-000000000001"
       organizationId: "987fcdeb-51a2-43d7-9876-543210987654"

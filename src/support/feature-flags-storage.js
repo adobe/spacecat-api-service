@@ -89,7 +89,7 @@ export async function upsertFeatureFlag({
  * @param {string} params.organizationId
  * @param {'ASO'|'LLMO'} params.product
  * @param {object} params.postgrestClient
- * @returns {Promise<object[]>} Raw rows
+ * @returns {Promise<object[]>} Raw rows with `flag_value` true only (disabled rows are omitted).
  */
 export async function listFeatureFlagsByOrgAndProduct({
   organizationId,
@@ -105,6 +105,7 @@ export async function listFeatureFlagsByOrgAndProduct({
     .select('*')
     .eq('organization_id', organizationId)
     .eq('product', product)
+    .eq('flag_value', true)
     .order('flag_name', { ascending: true });
 
   if (error) {

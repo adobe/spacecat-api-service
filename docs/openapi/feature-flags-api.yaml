@@ -12,13 +12,14 @@ organization-feature-flags:
       - organization
     summary: List feature flags for an organization
     description: |
-      Returns persisted org-scoped boolean flags from mysticat (`feature_flags`) for the given product.
+      Returns enabled (`flag_value` true) org-scoped flags from mysticat (`feature_flags`) for the given product.
+      Rows disabled via `DELETE` (`flag_value` false) are not included.
       Requires query parameter `product` (`ASO` or `LLMO`). Organization members may read.
       Admins enable a flag with `PUT` (no body) and disable with `DELETE` (no body); both upsert the row and set `flag_value` to `true` or `false` for audit trail.
     operationId: listOrganizationFeatureFlags
     responses:
       '200':
-        description: Feature flags for the organization and product
+        description: Enabled feature flags for the organization and product (`flag_value` true only)
         content:
           application/json:
             schema:

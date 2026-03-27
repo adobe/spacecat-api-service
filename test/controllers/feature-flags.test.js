@@ -144,7 +144,8 @@ describe('FeatureFlagsController', () => {
         updated_by: 'x',
       }];
       const orderStub = sandbox.stub().resolves({ data: rows, error: null });
-      const eq2 = sandbox.stub().returns({ order: orderStub });
+      const eq3 = sandbox.stub().returns({ order: orderStub });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
       const eq1 = sandbox.stub().returns({ eq: eq2 });
       const selectStub = sandbox.stub().returns({ eq: eq1 });
       mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ select: selectStub });
@@ -175,7 +176,8 @@ describe('FeatureFlagsController', () => {
 
     it('handles query pairs without value segment', async () => {
       const orderStub = sandbox.stub().resolves({ data: [], error: null });
-      const eq2 = sandbox.stub().returns({ order: orderStub });
+      const eq3 = sandbox.stub().returns({ order: orderStub });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
       const eq1 = sandbox.stub().returns({ eq: eq2 });
       const selectStub = sandbox.stub().returns({ eq: eq1 });
       mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ select: selectStub });
@@ -191,7 +193,8 @@ describe('FeatureFlagsController', () => {
 
     it('decodes percent-encoded product query value', async () => {
       const orderStub = sandbox.stub().resolves({ data: [], error: null });
-      const eq2 = sandbox.stub().returns({ order: orderStub });
+      const eq3 = sandbox.stub().returns({ order: orderStub });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
       const eq1 = sandbox.stub().returns({ eq: eq2 });
       const selectStub = sandbox.stub().returns({ eq: eq1 });
       mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ select: selectStub });

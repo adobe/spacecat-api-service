@@ -149,7 +149,8 @@ describe('feature-flags-storage', () => {
 
     it('returns empty array when data is null', async () => {
       const orderStub = sandbox.stub().resolves({ data: null, error: null });
-      const eq2 = sandbox.stub().returns({ order: orderStub });
+      const eq3 = sandbox.stub().returns({ order: orderStub });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
       const eq1 = sandbox.stub().returns({ eq: eq2 });
       const selectStub = sandbox.stub().returns({ eq: eq1 });
       const fromStub = sandbox.stub().returns({ select: selectStub });
@@ -165,7 +166,8 @@ describe('feature-flags-storage', () => {
     it('returns rows', async () => {
       const rows = [{ id: '1', flag_name: 'a' }];
       const orderStub = sandbox.stub().resolves({ data: rows, error: null });
-      const eq2 = sandbox.stub().returns({ order: orderStub });
+      const eq3 = sandbox.stub().returns({ order: orderStub });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
       const eq1 = sandbox.stub().returns({ eq: eq2 });
       const selectStub = sandbox.stub().returns({ eq: eq1 });
       const fromStub = sandbox.stub().returns({ select: selectStub });
@@ -179,13 +181,15 @@ describe('feature-flags-storage', () => {
       expect(fromStub).to.have.been.calledWith('feature_flags');
       expect(eq1).to.have.been.calledWith('organization_id', ORG);
       expect(eq2).to.have.been.calledWith('product', 'ASO');
+      expect(eq3).to.have.been.calledWith('flag_value', true);
       expect(orderStub).to.have.been.calledWith('flag_name', { ascending: true });
       expect(out).to.deep.equal(rows);
     });
 
     it('throws on postgrest error', async () => {
       const orderStub = sandbox.stub().resolves({ data: null, error: { message: 'fail' } });
-      const eq2 = sandbox.stub().returns({ order: orderStub });
+      const eq3 = sandbox.stub().returns({ order: orderStub });
+      const eq2 = sandbox.stub().returns({ eq: eq3 });
       const eq1 = sandbox.stub().returns({ eq: eq2 });
       const selectStub = sandbox.stub().returns({ eq: eq1 });
       const fromStub = sandbox.stub().returns({ select: selectStub });
