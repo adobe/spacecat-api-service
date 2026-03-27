@@ -25,6 +25,11 @@ import {
   writeCustomerConfigV2ToPostgres,
 } from '../../support/customer-config-v2-storage.js';
 import { convertV1ToV2 } from '../../support/customer-config-mapper.js';
+import {
+  resolveLlmoOnboardingMode,
+  LLMO_ONBOARDING_MODE_V1,
+  LLMO_ONBOARDING_MODE_V2,
+} from '../../support/llmo-onboarding-mode.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -59,6 +64,7 @@ function buildBrandalfMetadata({
   imsOrgId,
   brandName,
   companyWebsite,
+  onboardingMode,
 }) {
   const { hostname } = new URL(companyWebsite);
   return {
@@ -68,6 +74,7 @@ function buildBrandalfMetadata({
     site_id: siteId,
     spaceCatId: organizationId,
     company_website: companyWebsite,
+    onboarding_mode: onboardingMode,
   };
 }
 
@@ -78,6 +85,7 @@ export async function triggerBrandalfOnboardingJob({
   imsOrgId,
   brandName,
   companyWebsite,
+  onboardingMode,
   log,
   say = () => {},
 }) {
@@ -87,6 +95,7 @@ export async function triggerBrandalfOnboardingJob({
     imsOrgId,
     brandName,
     companyWebsite,
+    onboardingMode,
   });
 
   const drsJob = await drsClient.submitJob({
@@ -104,6 +113,57 @@ export async function triggerBrandalfOnboardingJob({
   log.info(`Started DRS Brandalf flow: job=${drsJob.job_id}`);
   say(`:label: Started DRS Brandalf job: ${drsJob.job_id}`);
   return drsJob;
+}
+
+function buildPromptGenerationMetadata({
+  siteId,
+  imsOrgId,
+  baseUrl,
+  brandName,
+  region,
+  onboardingMode,
+}) {
+  return {
+    site_id: siteId,
+    imsOrgId,
+    base_url: baseUrl,
+    brand: brandName,
+    region,
+    onboarding_mode: onboardingMode,
+  };
+}
+
+export async function submitOnboardingPromptGenerationJob({
+  drsClient,
+  baseUrl,
+  brandName,
+  audience,
+  region = 'US',
+  numPrompts = 50,
+  siteId,
+  imsOrgId,
+  onboardingMode,
+}) {
+  return drsClient.submitJob({
+    provider_id: 'prompt_generation_base_url',
+    source: 'onboarding',
+    parameters: {
+      base_url: baseUrl,
+      brand: brandName,
+      audience,
+      region,
+      num_prompts: numPrompts,
+      model: 'gpt-5-nano',
+      metadata: buildPromptGenerationMetadata({
+        siteId,
+        imsOrgId,
+        baseUrl,
+        brandName,
+        region,
+        onboardingMode,
+      }),
+    },
+  });
 }
 
 export function buildInitialCustomerConfigV2({
@@ -1136,11 +1196,12 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
+    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
     // Create site
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
 
-    log.info(`Created site ${site.getId()} for ${baseURL}`);
+    log.info(`Created site ${site.getId()} for ${baseURL} using LLMO onboarding mode ${onboardingMode}`);
 
     // Create entitlement and enrollment
     await createEntitlementAndEnrollment(site, context, say);
@@ -1198,38 +1259,43 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
-    await ensureInitialCustomerConfigV2({
-      organizationId: organization.getId(),
-      brandName,
-      imsOrgId,
-      siteId: site.getId(),
-      baseURL,
-      overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
-      context,
-    });
+    if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
+      await ensureInitialCustomerConfigV2({
+        organizationId: organization.getId(),
+        brandName,
+        imsOrgId,
+        siteId: site.getId(),
+        baseURL,
+        overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
+        context,
+      });
 
-    // Trigger Brandalf immediately after the v2 config exists so downstream
-    // brand sync can attach results to the newly created organization.
-    try {
-      const drsClient = DrsClient.createFrom(context);
-      if (drsClient.isConfigured()) {
-        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
-        await triggerBrandalfOnboardingJob({
-          drsClient,
-          organizationId: organization.getId(),
-          siteId: site.getId(),
-          imsOrgId,
-          brandName: brandName.trim(),
-          companyWebsite,
-          log,
-          say,
-        });
-      } else {
-        log.debug('DRS client not configured, skipping Brandalf flow');
+      // Trigger Brandalf immediately after the v2 config exists so downstream
+      // brand sync can attach results to the newly created organization.
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        if (drsClient.isConfigured()) {
+          const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+          await triggerBrandalfOnboardingJob({
+            drsClient,
+            organizationId: organization.getId(),
+            siteId: site.getId(),
+            imsOrgId,
+            brandName: brandName.trim(),
+            companyWebsite,
+            onboardingMode,
+            log,
+            say,
+          });
+        } else {
+          log.debug('DRS client not configured, skipping Brandalf flow');
+        }
+      } catch (drsError) {
+        log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+        say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
       }
-    } catch (drsError) {
-      log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
-      say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+    } else {
+      log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
     }
 
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
@@ -1245,7 +1311,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         const audience = brandProfile?.main_profile?.target_audience
           || `General consumers interested in ${brandName} products and services`;
 
-        const drsJob = await drsClient.submitPromptGenerationJob({
+        const drsJob = await submitOnboardingPromptGenerationJob({
+          drsClient,
           baseUrl: baseURL,
           brandName: brandName.trim(),
           audience,
@@ -1253,6 +1320,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           numPrompts: 50,
           siteId: site.getId(),
           imsOrgId,
+          onboardingMode,
         });
         log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
         say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
