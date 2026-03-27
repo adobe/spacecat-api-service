@@ -25,7 +25,7 @@ import {
   isArray,
   isInteger,
 } from '@adobe/spacecat-shared-utils';
-
+import { Audit } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
 import { SentimentTopicDto } from '../dto/sentiment-topic.js';
 import { SentimentGuidelineDto } from '../dto/sentiment-guideline.js';
@@ -36,9 +36,10 @@ const MAX_LIMIT = 500;
 
 // Known audit types that can be assigned to guidelines
 const KNOWN_AUDIT_TYPES = [
-  'wikipedia-analysis',
-  'reddit-analysis',
-  'youtube-analysis',
+  Audit.AUDIT_TYPES.WIKIPEDIA_ANALYSIS,
+  Audit.AUDIT_TYPES.REDDIT_ANALYSIS,
+  Audit.AUDIT_TYPES.YOUTUBE_ANALYSIS,
+  Audit.AUDIT_TYPES.CITED_ANALYSIS,
   'twitter-analysis',
 ];
 

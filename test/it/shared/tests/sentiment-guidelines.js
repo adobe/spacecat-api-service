@@ -107,6 +107,8 @@ export default function sentimentGuidelineTests(getHttpClient, resetData, option
         expect(res.body.instruction).to.equal('Analyze Wikipedia articles for neutral tone');
         expect(res.body.audits).to.include('wikipedia-analysis');
         expect(res.body.audits).to.include('reddit-analysis');
+        expect(res.body.audits).to.include('youtube-analysis');
+        expect(res.body.audits).to.include('cited-analysis');
         expect(res.body.enabled).to.be.true;
       });
 
@@ -277,7 +279,8 @@ export default function sentimentGuidelineTests(getHttpClient, resetData, option
 
       it('user: unlinks audit types', async () => {
         const http = getHttpClient();
-        // GUIDELINE_1 has audits: ['wikipedia-analysis', 'reddit-analysis']
+        // GUIDELINE_1 has audits: ['wikipedia-analysis', 'reddit-analysis',
+        //   'youtube-analysis', 'cited-analysis']
         const res = await http.user.post(
           `/sites/${SITE_1_ID}/sentiment/guidelines/${GUIDELINE_1_ID}/audits/unlink`,
           { audits: ['reddit-analysis'] },

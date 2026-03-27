@@ -137,6 +137,10 @@ paths:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
     $ref: './entitlements-api.yaml#/entitlements-by-organization'
+  /organizations/{organizationId}/feature-flags:
+    $ref: './feature-flags-api.yaml#/organization-feature-flags'
+  /organizations/{organizationId}/feature-flags/{product}/{flagName}:
+    $ref: './feature-flags-api.yaml#/organization-feature-flag-by-product-and-name'
 
   /organizations/{organizationId}/trial-users:
     $ref: './trial-users-api.yaml#/trial-users-by-organization'

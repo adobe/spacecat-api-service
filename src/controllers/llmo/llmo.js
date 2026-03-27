@@ -64,6 +64,8 @@ const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
+const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
+
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -838,7 +840,22 @@ function LlmoController(ctx) {
    * Onboards a new customer to LLMO.
    * This endpoint handles the complete onboarding process for net new customers
    * including organization validation, site creation, and LLMO configuration.
+   * Requires LLMO administrator access.
+   *
+   * The IMS org ID is resolved in the following order of precedence:
+   * 1. `imsOrgId` field in the request payload — must match `/^[a-z0-9]{24}@AdobeOrg$/i`.
+   *    Useful when an LLMO administrator is onboarding on behalf of another org.
+   * 2. JWT token fallback — derived from `profile.tenants[0].id` appended with
+   *    `@AdobeOrg`. This is the original behaviour and is preserved for backward
+   *    compatibility with all existing callers that do not supply `imsOrgId`.
+   *
    * @param {object} context - The request context.
+   * @param {object} context.data - Request payload.
+   * @param {string} context.data.domain - Customer domain to onboard.
+   * @param {string} context.data.brandName - Brand name for the customer.
+   * @param {string} [context.data.imsOrgId] - Optional IMS org ID override
+   *   (must match `/^[a-z0-9]{24}@AdobeOrg$/i`). When omitted the org ID
+   *   is read from the authenticated user's JWT token.
    * @returns {Promise<Response>} The onboarding response.
    */
   const onboardCustomer = async (context) => {
@@ -855,27 +872,40 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
 
-      const { domain, brandName } = data;
+      const { domain, brandName, imsOrgId: payloadImsOrgId } = data;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
       }
 
-      const { authInfo } = attributes;
+      let imsOrgId;
 
-      if (!authInfo) {
-        return badRequest('Authentication information is required');
+      if (payloadImsOrgId) {
+        // Payload takes precedence — validate format before use
+        if (!IMS_ORG_ID_REGEX.test(payloadImsOrgId)) {
+          log.warn(`LLMO onboarding rejected invalid imsOrgId for domain ${domain}, brand ${brandName}`);
+          return badRequest('Invalid imsOrgId');
+        }
+        log.info(`LLMO onboarding using payload-supplied imsOrgId for domain ${domain}, brand ${brandName}`);
+        imsOrgId = payloadImsOrgId;
+      } else {
+        // Backward-compatible fallback: derive org ID from the JWT token
+        const { authInfo } = attributes;
+
+        if (!authInfo) {
+          return badRequest('Authentication information is required');
+        }
+
+        const profile = authInfo.getProfile();
+
+        if (!profile || !profile.tenants?.[0]?.id) {
+          const message = 'User profile or organization ID not found in authentication token';
+          log.warn(`LLMO onboarding validation failed for domain ${domain}, brand ${brandName}. Validation Error: ${message}`);
+          return badRequest(message);
+        }
+
+        imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
       }
-
-      const profile = authInfo.getProfile();
-
-      if (!profile || !profile.tenants?.[0]?.id) {
-        const message = 'User profile or organization ID not found in authentication token';
-        log.warn(`LLMO onboarding validation failed for domain ${domain}, brand ${brandName}. Validation Error: ${message}`);
-        return badRequest(message);
-      }
-
-      const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
 
       // Construct base URL and data folder name
       const baseURL = composeBaseURL(domain);
