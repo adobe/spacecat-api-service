@@ -906,27 +906,29 @@ describe('utils', () => {
       expect(context.log.info).to.have.been.calledWithMatch('CDN detection only');
     });
 
-    it('returns error when site is valid for redirects but programId is missing', async () => {
+    it('skips redirect params and logs info when programId is missing', async () => {
       const site = makeSite({ deliveryConfig: { programId: '', environmentId: 'e1' } });
       const result = await queueDeliveryConfigWriter(
         { site, baseURL: 'https://example.com', slackContext: {} },
         context,
       );
-      expect(result.ok).to.be.false;
-      expect(result.error).to.include('deliveryConfig.programId');
+      expect(result).to.deep.equal({ ok: true });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
+      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
     });
 
-    it('returns error when site is valid for redirects but environmentId is missing', async () => {
+    it('skips redirect params and logs info when environmentId is missing', async () => {
       const site = makeSite({ deliveryConfig: { programId: 'p1', environmentId: '' } });
       const result = await queueDeliveryConfigWriter(
         { site, baseURL: 'https://example.com', slackContext: {} },
         context,
       );
-      expect(result.ok).to.be.false;
-      expect(result.error).to.include('deliveryConfig.environmentId');
+      expect(result).to.deep.equal({ ok: true });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
+      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
     });
 
-    it('uses empty object when getDeliveryConfig is absent and returns error for missing ids', async () => {
+    it('skips redirect params and logs info when getDeliveryConfig is absent', async () => {
       const site = {
         getId: () => 'site-1',
         getBaseURL: () => 'https://example.com',
@@ -938,8 +940,9 @@ describe('utils', () => {
         { site, baseURL: 'https://example.com', slackContext: {} },
         context,
       );
-      expect(result.ok).to.be.false;
-      expect(result.error).to.include('deliveryConfig.programId');
+      expect(result).to.deep.equal({ ok: true });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
+      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
     });
 
     it('includes slackContext in payload when channelId and threadTs are present', async () => {
@@ -978,6 +981,15 @@ describe('utils', () => {
     it('calls say without redirect note when site is not valid for redirects', async () => {
       const say = sandbox.stub().resolves();
       const site = makeSite({ authoringType: NON_CS, deliveryType: 'AEM_AMS' });
+      const slackContext = { say, channelId: 'C123', threadTs: '1234.5' };
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
+      expect(say).to.have.been.calledOnce;
+      expect(say.firstCall.args[0]).to.not.include('redirect pattern detection');
+    });
+
+    it('calls say without redirect note when programId/environmentId are missing', async () => {
+      const say = sandbox.stub().resolves();
+      const site = makeSite({ deliveryConfig: { programId: '', environmentId: '' } });
       const slackContext = { say, channelId: 'C123', threadTs: '1234.5' };
       await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
       expect(say).to.have.been.calledOnce;

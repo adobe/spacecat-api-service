@@ -1335,23 +1335,23 @@ export async function queueDeliveryConfigWriter(
       const deliveryConfig = site.getDeliveryConfig?.() || {};
       const { programId, environmentId } = deliveryConfig;
       if (!hasText(programId) || !hasText(environmentId)) {
-        return {
-          ok: false,
-          error: ':x: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for redirect identification.',
+        log.info(`[delivery-config-writer] Site ${siteId} missing programId/environmentId; skipping redirect identification.`);
+      } else {
+        redirectParams = {
+          programId: String(programId),
+          environmentId: String(environmentId),
+          minutes,
+          updateRedirects,
         };
       }
-      redirectParams = {
-        programId: String(programId),
-        environmentId: String(environmentId),
-        minutes,
-        updateRedirects,
-      };
     } else {
       log.info(
         `[delivery-config-writer] Site ${siteId} not valid for redirect identification`
         + ` (authoringType=${authoringType}, deliveryType=${deliveryType}); CDN detection only.`,
       );
     }
+
+    const hasRedirectParams = Object.keys(redirectParams).length > 0;
 
     const payload = {
       type: 'delivery-config-writer',
@@ -1364,7 +1364,7 @@ export async function queueDeliveryConfigWriter(
     };
 
     if (say) {
-      const redirectsNote = validForRedirects ? ' and redirect pattern detection' : '';
+      const redirectsNote = hasRedirectParams ? ' and redirect pattern detection' : '';
       await say(
         `:gear: Queued CDN detection${redirectsNote} for *${resolvedBaseURL}*. I'll reply here when it's ready.`,
       );
