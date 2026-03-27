@@ -539,6 +539,7 @@ describe('prompts-storage', () => {
 
     it('returns prompt with category and topic when present', async () => {
       const row = {
+        id: 'prompt-pk-uuid-3',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
@@ -563,8 +564,13 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result).to.not.be.null;
-      expect(result.category).to.deep.equal({ id: 'photoshop', name: 'Photoshop', origin: 'human' });
-      expect(result.topic).to.deep.equal({ id: 'editing', name: 'Editing', categoryId: 'photoshop' });
+      expect(result.uuid).to.equal('prompt-pk-uuid-3');
+      expect(result.category).to.deep.equal({
+        id: 'photoshop', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
+      });
+      expect(result.topic).to.deep.equal({
+        id: 'editing', uuid: 'topic-uuid', name: 'Editing', categoryId: 'photoshop',
+      });
     });
 
     it('maps row with minimal fields and null category/topic', async () => {
