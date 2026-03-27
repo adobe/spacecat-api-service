@@ -1,3 +1,31 @@
+# [1.382.0](https://github.com/adobe/spacecat-api-service/compare/v1.381.2...v1.382.0) (2026-03-27)
+
+
+### Features
+
+* expose UUID PKs in prompts response (LLMO-3901) ([#2054](https://github.com/adobe/spacecat-api-service/issues/2054)) ([2745e1c](https://github.com/adobe/spacecat-api-service/commit/2745e1c68f6d3a5a910d928684423685e3a7ba2e)), closes [adobe-rnd/llmo-data-retrieval-service#1116](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1116)
+
+## [1.381.2](https://github.com/adobe/spacecat-api-service/compare/v1.381.1...v1.381.2) (2026-03-27)
+
+
+### Bug Fixes
+
+* enhance llmo end point to accept imsOrgId from payload as well ([#2049](https://github.com/adobe/spacecat-api-service/issues/2049)) ([7a823c5](https://github.com/adobe/spacecat-api-service/commit/7a823c5ea4b27b6ff1e0c54b04e758b34252e033))
+
+## [1.381.1](https://github.com/adobe/spacecat-api-service/compare/v1.381.0...v1.381.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* Update CONSUMER_INTEGRATION_GUIDE.md ([#2051](https://github.com/adobe/spacecat-api-service/issues/2051)) ([3e8ad2f](https://github.com/adobe/spacecat-api-service/commit/3e8ad2f08e8b4d16d82eb19e02f838fa0322df4c))
+
+# [1.381.0](https://github.com/adobe/spacecat-api-service/compare/v1.380.0...v1.381.0) (2026-03-27)
+
+
+### Features
+
+* trigger Brandalf during LLMO onboarding ([#2042](https://github.com/adobe/spacecat-api-service/issues/2042)) ([50b88a3](https://github.com/adobe/spacecat-api-service/commit/50b88a395d007b0af44c2f1ca9ca6d337de0d118))
+
 # [1.380.0](https://github.com/adobe/spacecat-api-service/compare/v1.379.0...v1.380.0) (2026-03-26)
 
 

@@ -53,6 +53,59 @@ function resolveUpdatedBy(context) {
     || 'system';
 }
 
+function buildBrandalfMetadata({
+  organizationId,
+  siteId,
+  imsOrgId,
+  brandName,
+  companyWebsite,
+}) {
+  const { hostname } = new URL(companyWebsite);
+  return {
+    imsOrgId,
+    brand: brandName,
+    site: hostname,
+    site_id: siteId,
+    spaceCatId: organizationId,
+    company_website: companyWebsite,
+  };
+}
+
+export async function triggerBrandalfOnboardingJob({
+  drsClient,
+  organizationId,
+  siteId,
+  imsOrgId,
+  brandName,
+  companyWebsite,
+  log,
+  say = () => {},
+}) {
+  const metadata = buildBrandalfMetadata({
+    organizationId,
+    siteId,
+    imsOrgId,
+    brandName,
+    companyWebsite,
+  });
+
+  const drsJob = await drsClient.submitJob({
+    provider_id: 'single_shot_prompt',
+    priority: 'HIGH',
+    source: 'onboarding',
+    parameters: {
+      prompt_type: 'brandalf',
+      name: brandName,
+      company_website: companyWebsite,
+      metadata,
+    },
+  });
+
+  log.info(`Started DRS Brandalf flow: job=${drsJob.job_id}`);
+  say(`:label: Started DRS Brandalf job: ${drsJob.job_id}`);
+  return drsJob;
+}
+
 export function buildInitialCustomerConfigV2({
   brandName,
   imsOrgId,
@@ -1154,6 +1207,30 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
       context,
     });
+
+    // Trigger Brandalf immediately after the v2 config exists so downstream
+    // brand sync can attach results to the newly created organization.
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+        await triggerBrandalfOnboardingJob({
+          drsClient,
+          organizationId: organization.getId(),
+          siteId: site.getId(),
+          imsOrgId,
+          brandName: brandName.trim(),
+          companyWebsite,
+          log,
+          say,
+        });
+      } else {
+        log.debug('DRS client not configured, skipping Brandalf flow');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+      say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+    }
 
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
