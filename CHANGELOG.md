@@ -1,3 +1,10 @@
+# [1.381.0](https://github.com/adobe/spacecat-api-service/compare/v1.380.0...v1.381.0) (2026-03-27)
+
+
+### Features
+
+* trigger Brandalf during LLMO onboarding ([#2042](https://github.com/adobe/spacecat-api-service/issues/2042)) ([50b88a3](https://github.com/adobe/spacecat-api-service/commit/50b88a395d007b0af44c2f1ca9ca6d337de0d118))
+
 # [1.380.0](https://github.com/adobe/spacecat-api-service/compare/v1.379.0...v1.380.0) (2026-03-26)
 
 
