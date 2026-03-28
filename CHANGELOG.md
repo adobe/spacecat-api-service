@@ -1,3 +1,10 @@
+# [1.385.0](https://github.com/adobe/spacecat-api-service/compare/v1.384.1...v1.385.0) (2026-03-28)
+
+
+### Features
+
+* add POST endpoint to create ASO enrollment for PLG-enabled sites ([#2059](https://github.com/adobe/spacecat-api-service/issues/2059)) ([2f470c7](https://github.com/adobe/spacecat-api-service/commit/2f470c7c85780fc5da0f808e9c432f5cbdc225b7))
+
 ## [1.384.1](https://github.com/adobe/spacecat-api-service/compare/v1.384.0...v1.384.1) (2026-03-28)
 
 
