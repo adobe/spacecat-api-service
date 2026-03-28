@@ -12,6 +12,7 @@
 
 import {
   badRequest,
+  created,
   notFound,
   ok,
   forbidden,
@@ -21,9 +22,15 @@ import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
+
+const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
+const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+const SUMMIT_PLG_HANDLER = 'summit-plg';
 
 /**
  * SiteEnrollments controller. Provides methods to read site enrollments.
@@ -41,7 +48,7 @@ function SiteEnrollmentsController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { SiteEnrollment, Site } = dataAccess;
+  const { SiteEnrollment, Site, Configuration } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -79,8 +86,48 @@ function SiteEnrollmentsController(ctx) {
     }
   };
 
+  /**
+   * Creates an ASO enrollment for a site if the summit-plg handler is enabled.
+   * Admin only.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Created site enrollment response.
+   */
+  const createEnrollmentForSite = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can create site enrollments');
+    }
+
+    const { siteId } = context.params;
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      const configuration = await Configuration.findLatest();
+      if (!configuration.isHandlerEnabledForSite(SUMMIT_PLG_HANDLER, site)) {
+        return badRequest(`PLG handler (${SUMMIT_PLG_HANDLER}) is not enabled for site ${siteId}`);
+      }
+
+      const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
+      const { siteEnrollment } = await tierClient.createEntitlement(ASO_TIER);
+      return created(SiteEnrollmentDto.toJSON(siteEnrollment));
+    } catch (e) {
+      if (e.message?.includes('already exists') || e.message?.includes('Already enrolled')) {
+        return badRequest('Site is already enrolled in ASO');
+      }
+      context.log.error(`Error creating enrollment for site ${siteId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getBySiteID,
+    createEnrollmentForSite,
   };
 }
 

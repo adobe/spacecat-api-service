@@ -443,6 +443,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+    'POST /sites/:siteId/site-enrollments': siteEnrollmentController.createEnrollmentForSite,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
