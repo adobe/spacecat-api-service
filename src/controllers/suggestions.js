@@ -1543,14 +1543,20 @@ function SuggestionsController(ctx, sqs, env) {
         .map((s) => s.getData()?.url)
         .filter(Boolean);
 
-      // domain - oppty type - timestamp
-      const experimentId = `exp-${site.getBaseURL()}-${opportunity.getType()}-${Date.now()}`; // this is now used across as unique identifier for all runs for a experiment
+      const geoExperimentId = crypto.randomUUID();
+
+      context.log.info('[geo-experiment] Initiating experiment', {
+        geoExperimentId,
+        opportunityId,
+        opportunityType: opportunity.getType(),
+        siteId,
+      });
 
       try {
         const drsClient = DrsClient.createFrom(context);
         const drsResult = await drsClient.createExperimentSchedule({
           siteId,
-          experimentId,
+          experimentId: geoExperimentId,
           experimentPhase: 'pre',
           cronExpression: '0 * * * *',
           expiresAt: new Date(Date.now() + 1 * 60 * 1000).toISOString(),
@@ -1565,7 +1571,7 @@ function SuggestionsController(ctx, sqs, env) {
         context.log.info(`[edge-deploy] DRS pre-analysis schedule created: ${preScheduleId}`);
 
         const geoExperiment = await GeoExperiment.create({
-          geoExperimentId: experimentId,
+          geoExperimentId,
           siteId,
           opportunityId,
           preScheduleId,
@@ -1579,8 +1585,7 @@ function SuggestionsController(ctx, sqs, env) {
           updatedBy: profile?.email || 'geo-experiment',
         });
 
-        const geoExperimentId = geoExperiment?.getId?.();
-        if (!geoExperimentId) {
+        if (!geoExperiment?.getId?.()) {
           throw new Error('GeoExperiment was not created');
         }
 
@@ -1591,7 +1596,6 @@ function SuggestionsController(ctx, sqs, env) {
             siteId,
             opportunityId,
             suggestionIds: validSuggestionIds,
-            experimentId,
             geoExperimentId,
             urls,
             profile: { email: profile?.email },
@@ -1616,7 +1620,6 @@ function SuggestionsController(ctx, sqs, env) {
         return accepted({
           jobId: job.getId(),
           status: GeoExperimentModel.STATUSES.PRE_ANALYSIS_SUBMITTED,
-          experimentId,
           experimentBatchId: preScheduleId,
           geoExperimentId,
           metadata: {
@@ -1754,7 +1757,6 @@ function SuggestionsController(ctx, sqs, env) {
       jobId: job.getId(),
       status: job.getStatus(),
       deployStatus: geoExperiment.getStatus(),
-      experimentId: metadata.experimentId,
       experimentIds: [
         geoExperiment.getPreScheduleId(),
         geoExperiment.getPostScheduleId(),

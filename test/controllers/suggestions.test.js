@@ -475,13 +475,13 @@ describe('Suggestions Controller', () => {
         create: sandbox.stub(),
         findById: sandbox.stub(),
       },
-      DeploymentExperiment: {
+      GeoExperiment: {
         create: sandbox.stub(),
         findById: sandbox.stub().resolves({
           getId: () => 'dep-exp-001',
           getStatus: () => 'pre_analysis_submitted',
-          getPreDeploymentId: () => 'batch-pre-001',
-          getPostDeploymentId: () => null,
+          getPreScheduleId: () => 'batch-pre-001',
+          getPostScheduleId: () => null,
           getError: () => null,
         }),
       },
@@ -4748,7 +4748,7 @@ describe('Suggestions Controller', () => {
           preExperimentBatchId: 'batch-pre-001',
         }),
       });
-      mockSuggestionDataAccess.DeploymentExperiment.create.resolves({
+      mockSuggestionDataAccess.GeoExperiment.create.resolves({
         getId: () => 'dep-exp-001',
       });
     });
@@ -4893,17 +4893,17 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 500 when DeploymentExperiment data access is missing', async () => {
-      const controllerWithoutDeploymentExperiment = SuggestionsController({
+    it('returns 500 when GeoExperiment data access is missing', async () => {
+      const controllerWithoutGeoExperiment = SuggestionsController({
         dataAccess: {
           ...mockSuggestionDataAccess,
-          DeploymentExperiment: undefined,
+          GeoExperiment: undefined,
         },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
       }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
 
-      const response = await controllerWithoutDeploymentExperiment.deploySuggestionToEdge({
+      const response = await controllerWithoutGeoExperiment.deploySuggestionToEdge({
         ...context,
         pathInfo: { headers: { prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -4913,11 +4913,11 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(500);
       const body = await response.json();
-      expect(body.message).to.include('DeploymentExperiment data access is not configured');
+      expect(body.message).to.include('GeoExperiment data access is not configured');
     });
 
-    it('returns 500 when DeploymentExperiment create returns no id', async () => {
-      mockSuggestionDataAccess.DeploymentExperiment.create.resolves({});
+    it('returns 500 when GeoExperiment create returns no id', async () => {
+      mockSuggestionDataAccess.GeoExperiment.create.resolves({});
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -4929,7 +4929,7 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(500);
       const body = await response.json();
-      expect(body.message).to.include('DeploymentExperiment was not created');
+      expect(body.message).to.include('GeoExperiment was not created');
     });
 
     it('filters out suggestions not in NEW status (non-domain-wide)', async () => {
@@ -5188,7 +5188,7 @@ describe('Suggestions Controller', () => {
       expect(body.jobId).to.equal(JOB_ID);
       expect(body.status).to.equal('pre_analysis_submitted');
       expect(body.experimentBatchId).to.equal('sched-pre-001');
-      expect(body.deploymentExperimentId).to.equal('dep-exp-001');
+      expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       expect(body.metadata.accepted).to.equal(2);
     });
 
@@ -5224,13 +5224,13 @@ describe('Suggestions Controller', () => {
       expect(createArg.metadata.jobType).to.equal('geo-experiment');
       expect(createArg.metadata.siteId).to.equal(SITE_ID);
       expect(createArg.metadata.opportunityId).to.equal(OPPORTUNITY_ID);
-      expect(createArg.metadata.deploymentExperimentId).to.equal('dep-exp-001');
-      expect(mockSuggestionDataAccess.DeploymentExperiment.create).to.have.been.calledOnce;
+      expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
+      expect(mockSuggestionDataAccess.GeoExperiment.create).to.have.been.calledOnce;
 
-      const depExpCreateArg = mockSuggestionDataAccess.DeploymentExperiment.create.firstCall.args[0];
+      const depExpCreateArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
       expect(depExpCreateArg.siteId).to.equal(SITE_ID);
       expect(depExpCreateArg.opportunityId).to.equal(OPPORTUNITY_ID);
-      expect(depExpCreateArg.preDeploymentId).to.equal('sched-pre-001');
+      expect(depExpCreateArg.preScheduleId).to.equal('sched-pre-001');
       expect(depExpCreateArg.status).to.equal('pre_analysis_submitted');
     });
 
@@ -5251,7 +5251,7 @@ describe('Suggestions Controller', () => {
       expect(body.experimentBatchId).to.equal('sched-pre-flat-001');
 
       const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
-      expect(createArg.metadata.deploymentExperimentId).to.equal('dep-exp-001');
+      expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
     });
 
     it('updates valid suggestions with deploy metadata', async () => {
@@ -5264,7 +5264,7 @@ describe('Suggestions Controller', () => {
 
       expect(edgeSuggestions[0].setData).to.have.been.calledOnce;
       const dataArg = edgeSuggestions[0].setData.firstCall.args[0];
-      expect(dataArg.deploymentExperimentId).to.equal('dep-exp-001');
+      expect(dataArg.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
 
       expect(edgeSuggestions[0].save).to.have.been.calledOnce;
       expect(edgeSuggestions[1].setData).to.have.been.calledOnce;
@@ -6228,17 +6228,17 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           experimentId: 'exp-test-123',
-          deploymentExperimentId: 'dep-exp-001',
+          geoExperimentId: 'dep-exp-001',
         }),
         getStartedAt: () => '2025-01-01T00:00:00Z',
         getEndedAt: () => null,
         getError: () => null,
       });
-      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves({
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
         getId: () => 'dep-exp-001',
         getStatus: () => 'pre_analysis_submitted',
-        getPreDeploymentId: () => 'batch-pre-001',
-        getPostDeploymentId: () => null,
+        getPreScheduleId: () => 'batch-pre-001',
+        getPostScheduleId: () => null,
         getError: () => null,
       });
 
@@ -6252,7 +6252,6 @@ describe('Suggestions Controller', () => {
       expect(body.jobId).to.equal(JOB_ID);
       expect(body.status).to.equal('IN_PROGRESS');
       expect(body.deployStatus).to.equal('pre_analysis_submitted');
-      expect(body.experimentId).to.equal('exp-test-123');
       expect(body.experimentIds).to.deep.equal(['batch-pre-001']);
       expect(body.startedAt).to.equal('2025-01-01T00:00:00Z');
       expect(body.endedAt).to.be.null;
@@ -6267,17 +6266,17 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           experimentId: 'exp-test-123',
-          deploymentExperimentId: 'dep-exp-001',
+          geoExperimentId: 'dep-exp-001',
         }),
         getStartedAt: () => '2025-01-01T00:00:00Z',
         getEndedAt: () => null,
         getError: () => null,
       });
-      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves({
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
         getId: () => 'dep-exp-001',
         getStatus: () => 'post_analysis_submitted',
-        getPreDeploymentId: () => 'batch-pre-001',
-        getPostDeploymentId: () => 'batch-post-002',
+        getPreScheduleId: () => 'batch-pre-001',
+        getPostScheduleId: () => 'batch-post-002',
         getError: () => null,
       });
 
@@ -6299,17 +6298,17 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           experimentId: 'exp-test-123',
-          deploymentExperimentId: 'dep-exp-001',
+          geoExperimentId: 'dep-exp-001',
         }),
         getStartedAt: () => '2025-01-01T00:00:00Z',
         getEndedAt: () => '2025-01-01T01:00:00Z',
         getError: () => 'Pre-analysis failed at DRS',
       });
-      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves({
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
         getId: () => 'dep-exp-001',
         getStatus: () => 'failed',
-        getPreDeploymentId: () => 'batch-pre-001',
-        getPostDeploymentId: () => null,
+        getPreScheduleId: () => 'batch-pre-001',
+        getPostScheduleId: () => null,
         getError: () => ({ message: 'Pre-analysis failed at DRS' }),
       });
 
@@ -6333,13 +6332,13 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           experimentId: 'exp-test-123',
-          deploymentExperimentId: 'dep-exp-404',
+          geoExperimentId: 'dep-exp-404',
         }),
         getStartedAt: () => '2025-01-01T00:00:00Z',
         getEndedAt: () => null,
         getError: () => null,
       });
-      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves(null);
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
 
       const response = await suggestionsController.getEdgeDeployStatus({
         ...context,
@@ -6351,7 +6350,7 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.equal('Deployment experiment not found');
     });
 
-    it('returns notFound when job metadata has no deploymentExperimentId', async () => {
+    it('returns notFound when job metadata has no geoExperimentId', async () => {
       mockSuggestionDataAccess.AsyncJob.findById.resolves({
         getId: () => JOB_ID,
         getStatus: () => 'IN_PROGRESS',
