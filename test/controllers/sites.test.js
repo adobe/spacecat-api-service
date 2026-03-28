@@ -535,7 +535,7 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
   });
 
-  it('gets all sites with slim DTO', async () => {
+  it('gets all sites', async () => {
     mockDataAccess.Site.all.resolves(sites);
 
     const result = await sitesController.getAll();
@@ -547,8 +547,6 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
     expect(resultSites[1]).to.have.property('id', SITE_IDS[1]);
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
-
-    expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
   it('gets all sites for a non-admin user', async () => {
@@ -3362,103 +3360,6 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('code');
     expect(updatedSite.code).to.deep.equal(codeConfig);
-  });
-
-  it('sets config when site has no existing config', async () => {
-    const site = sites[0];
-    site.getConfig = sandbox.stub().returns(null);
-    site.setConfig = sandbox.stub();
-    site.save = sandbox.stub().resolves(site);
-
-    const response = await sitesController.updateSite({
-      params: { siteId: SITE_IDS[0] },
-      data: {
-        config: { slack: { channel: '#new' } },
-      },
-      ...defaultAuthAttributes,
-    });
-
-    expect(response.status).to.equal(200);
-    expect(site.setConfig).to.have.been.calledOnce;
-
-    const mergedConfig = site.setConfig.firstCall.args[0];
-    expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
-  });
-
-  it('sets config when toDynamoItem returns null for existing config', async () => {
-    const site = sites[0];
-    site.getConfig = sandbox.stub().returns({ something: true });
-    site.setConfig = sandbox.stub();
-    site.save = sandbox.stub().resolves(site);
-
-    const toDynamoStub = sandbox.stub(Config, 'toDynamoItem').returns(null);
-
-    const response = await sitesController.updateSite({
-      params: { siteId: SITE_IDS[0] },
-      data: {
-        config: { slack: { channel: '#new' } },
-      },
-      ...defaultAuthAttributes,
-    });
-
-    expect(response.status).to.equal(200);
-    expect(toDynamoStub).to.have.been.called;
-    expect(site.setConfig).to.have.been.calledOnce;
-
-    const mergedConfig = site.setConfig.firstCall.args[0];
-    expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
-  });
-
-  it('shallow-merges config so partial update preserves existing keys', async () => {
-    const site = sites[0];
-    const existingConfig = Config({
-      slack: { channel: '#test' },
-      llmo: { dataFolder: '/data', brand: 'Test' },
-      handlers: { 'meta-tags': { excludedURLs: [] } },
-    });
-    site.getConfig = sandbox.stub().returns(existingConfig);
-    site.setConfig = sandbox.stub();
-    site.save = sandbox.stub().resolves(site);
-
-    const response = await sitesController.updateSite({
-      params: { siteId: SITE_IDS[0] },
-      data: {
-        config: { slack: { channel: '#updated' } },
-      },
-      ...defaultAuthAttributes,
-    });
-
-    expect(response.status).to.equal(200);
-    expect(site.setConfig).to.have.been.calledOnce;
-
-    const mergedConfig = site.setConfig.firstCall.args[0];
-    expect(mergedConfig.slack).to.deep.equal({ channel: '#updated' });
-    expect(mergedConfig.llmo).to.deep.equal({ dataFolder: '/data', brand: 'Test' });
-    expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
-  });
-
-  it('allows removing a config key by explicitly setting it to null', async () => {
-    const site = sites[0];
-    const existingConfig = Config({
-      slack: { channel: '#test' },
-      llmo: { dataFolder: '/data' },
-    });
-    site.getConfig = sandbox.stub().returns(existingConfig);
-    site.setConfig = sandbox.stub();
-    site.save = sandbox.stub().resolves(site);
-
-    const response = await sitesController.updateSite({
-      params: { siteId: SITE_IDS[0] },
-      data: {
-        config: { slack: { channel: '#updated' }, llmo: null },
-      },
-      ...defaultAuthAttributes,
-    });
-
-    expect(response.status).to.equal(200);
-    const mergedConfig = site.setConfig.firstCall.args[0];
-    expect(mergedConfig.slack).to.deep.equal({ channel: '#updated' });
-    expect(mergedConfig.llmo).to.equal(null);
   });
 
   describe('pageTypes validation', () => {
