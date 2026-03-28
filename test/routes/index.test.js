@@ -349,6 +349,7 @@ describe('getRouteHandlers', () => {
   const mockSiteEnrollmentController = {
     getBySiteID: () => null,
     createPlgEnrollment: () => null,
+    createEnrollmentForSite: () => null,
   };
 
   const mockTrialUserController = {
@@ -807,6 +808,20 @@ describe('getRouteHandlers', () => {
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/by-delivery-type/:deliveryType',
       'GET /sites/with-latest-audit/:auditType',
+      'GET /sites/:siteId/site-enrollments',
+      'POST /sites/:siteId/site-enrollments',
+      'GET /sites/:siteId/user-activities',
+      'POST /sites/:siteId/user-activities',
+      'DELETE /tools/api-keys/:id',
+      'GET /tools/import/jobs/:jobId',
+      'PATCH /tools/import/jobs/:jobId',
+      'POST /tools/import/jobs/:jobId/result',
+      'GET /tools/import/jobs/:jobId/progress',
+      'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
+      'DELETE /tools/import/jobs/:jobId',
+      'GET /sites/:siteId/brand-guidelines',
+      'GET /sites/:siteId/brand-profile',
+      'POST /sites/:siteId/brand-profile',
       'GET /sites/:siteId/opportunities',
       'GET /sites/:siteId/opportunities/top-paid',
       'GET /sites/:siteId/opportunities/by-status/:status',
