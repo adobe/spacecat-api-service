@@ -317,6 +317,7 @@ describe('getRouteHandlers', () => {
 
   const mockSiteEnrollmentController = {
     getBySiteID: () => null,
+    createPlgEnrollment: () => null,
   };
 
   const mockTrialUserController = {
@@ -590,6 +591,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'GET /sites/:siteId/site-enrollments',
+      'POST /sites/:siteId/site-enrollments',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'DELETE /tools/api-keys/:id',
