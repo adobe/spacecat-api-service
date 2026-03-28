@@ -383,17 +383,6 @@ describe('Site Enrollment Controller', () => {
       expect(body.organizationId).to.equal(orgId);
     });
 
-    it('returns 200 skipped when org has a paid entitlement', async () => {
-      const paidEntitlement = { getId: () => entitlementId, getTier: () => 'PAID' };
-      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(paidEntitlement);
-      const result = await siteEnrollmentController.createEnrollmentForSite(makeContext());
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.skipped).to.be.true;
-      expect(body.reason).to.equal('paid_entitlement');
-      expect(body.organizationId).to.equal(orgId);
-    });
-
     it('returns 200 skipped when site is already enrolled', async () => {
       const existingEnrollment = {
         getId: () => 'existing-1',

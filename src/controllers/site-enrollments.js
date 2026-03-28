@@ -29,7 +29,6 @@ import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
-const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const SUMMIT_PLG_HANDLER = 'summit-plg';
 
 /**
@@ -133,15 +132,6 @@ function SiteEnrollmentsController(ctx) {
         });
       }
 
-      if (entitlement.getTier() !== ASO_TIER) {
-        return ok({
-          skipped: true,
-          reason: 'paid_entitlement',
-          siteId,
-          organizationId: site.getOrganizationId(),
-        });
-      }
-
       // Check if site is already enrolled in this entitlement
       const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
       const alreadyEnrolled = existingEnrollments
@@ -157,7 +147,7 @@ function SiteEnrollmentsController(ctx) {
 
       // Create enrollment only (entitlement already exists)
       const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
-      const { siteEnrollment } = await tierClient.createEntitlement(ASO_TIER);
+      const { siteEnrollment } = await tierClient.createEntitlement(entitlement.getTier());
       return created(SiteEnrollmentDto.toJSON(siteEnrollment));
     } catch (e) {
       context.log.error(`Error creating enrollment for site ${siteId}: ${e.message}`);
