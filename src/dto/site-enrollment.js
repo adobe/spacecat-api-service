@@ -30,7 +30,6 @@ export const SiteEnrollmentDto = {
     id: siteEnrollment.getId(),
     siteId: siteEnrollment.getSiteId(),
     entitlementId: siteEnrollment.getEntitlementId(),
-    status: siteEnrollment.getStatus(),
     createdAt: siteEnrollment.getCreatedAt(),
     updatedAt: siteEnrollment.getUpdatedAt(),
     updatedBy: siteEnrollment.getUpdatedBy(),
