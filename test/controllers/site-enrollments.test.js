@@ -314,7 +314,7 @@ describe('Site Enrollment Controller', () => {
     });
   });
 
-  describe('createEnrollmentForSite', () => {
+  describe('createPlgEnrollment', () => {
     let mockConfiguration;
     let mockTierClientInstance;
 
@@ -343,12 +343,12 @@ describe('Site Enrollment Controller', () => {
         hasAdminAccess: sandbox.stub().returns(false),
       });
       const ctrl = SiteEnrollmentController({ dataAccess: mockDataAccess, attributes: {} });
-      const result = await ctrl.createEnrollmentForSite(makeContext());
+      const result = await ctrl.createPlgEnrollment(makeContext());
       expect(result.status).to.equal(403);
     });
 
     it('returns 400 for invalid site ID', async () => {
-      const result = await siteEnrollmentController.createEnrollmentForSite({
+      const result = await siteEnrollmentController.createPlgEnrollment({
         params: { siteId: 'not-a-uuid' },
         log: { error: sandbox.stub() },
       });
@@ -359,13 +359,13 @@ describe('Site Enrollment Controller', () => {
 
     it('returns 404 when site not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
-      const result = await siteEnrollmentController.createEnrollmentForSite(makeContext());
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
       expect(result.status).to.equal(404);
     });
 
     it('returns 400 when summit-plg handler is not enabled for site', async () => {
       mockConfiguration.isHandlerEnabledForSite.returns(false);
-      const result = await siteEnrollmentController.createEnrollmentForSite(makeContext());
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.include('summit-plg');
@@ -373,7 +373,7 @@ describe('Site Enrollment Controller', () => {
 
     it('returns 200 skipped when org has no ASO entitlement', async () => {
       mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
-      const result = await siteEnrollmentController.createEnrollmentForSite(makeContext());
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.skipped).to.be.true;
@@ -391,7 +391,7 @@ describe('Site Enrollment Controller', () => {
         getUpdatedBy: () => 'system',
       };
       mockDataAccess.SiteEnrollment.allBySiteId.resolves([existingEnrollment]);
-      const result = await siteEnrollmentController.createEnrollmentForSite(makeContext());
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.skipped).to.be.true;
@@ -400,7 +400,7 @@ describe('Site Enrollment Controller', () => {
     });
 
     it('creates enrollment and returns 201', async () => {
-      const result = await siteEnrollmentController.createEnrollmentForSite(makeContext());
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
       expect(result.status).to.equal(201);
       const body = await result.json();
       expect(body.siteId).to.equal(siteId);
@@ -410,7 +410,7 @@ describe('Site Enrollment Controller', () => {
     it('returns 500 on unexpected error', async () => {
       mockDataAccess.Configuration.findLatest.rejects(new Error('DB failure'));
       const context = makeContext();
-      const result = await siteEnrollmentController.createEnrollmentForSite(context);
+      const result = await siteEnrollmentController.createPlgEnrollment(context);
       expect(result.status).to.equal(500);
       expect(context.log.error).to.have.been.calledWithMatch(`Error creating enrollment for site ${siteId}`);
     });

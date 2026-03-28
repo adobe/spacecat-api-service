@@ -317,7 +317,7 @@ describe('getRouteHandlers', () => {
 
   const mockSiteEnrollmentController = {
     getBySiteID: () => null,
-    createEnrollmentForSite: () => null,
+    createPlgEnrollment: () => null,
   };
 
   const mockTrialUserController = {

@@ -96,7 +96,7 @@ function SiteEnrollmentsController(ctx) {
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Created enrollment, or skipped response.
    */
-  const createEnrollmentForSite = async (context) => {
+  const createPlgEnrollment = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create site enrollments');
     }
@@ -157,7 +157,7 @@ function SiteEnrollmentsController(ctx) {
 
   return {
     getBySiteID,
-    createEnrollmentForSite,
+    createPlgEnrollment,
   };
 }
 
