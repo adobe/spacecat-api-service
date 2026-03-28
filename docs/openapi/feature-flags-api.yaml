@@ -1,0 +1,128 @@
+organization-feature-flags:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+    - name: product
+      in: query
+      required: true
+      description: Product surface (must match mysticat `feature_flag_product` enum)
+      schema:
+        $ref: './schemas.yaml#/FeatureFlagProduct'
+  get:
+    tags:
+      - organization
+    summary: List feature flags for an organization
+    description: |
+      Returns enabled (`flag_value` true) org-scoped flags from mysticat (`feature_flags`) for the given product.
+      Rows disabled via `DELETE` (`flag_value` false) are not included.
+      Requires query parameter `product` (`ASO` or `LLMO`). Organization members may read.
+      Admins enable a flag with `PUT` (no body) and disable with `DELETE` (no body); both upsert the row and set `flag_value` to `true` or `false` for audit trail.
+    operationId: listOrganizationFeatureFlags
+    responses:
+      '200':
+        description: Enabled feature flags for the organization and product (`flag_value` true only)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FeatureFlagList'
+            examples:
+              featureFlagList:
+                $ref: './examples.yaml#/FeatureFlagListExample'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+organization-feature-flag-by-product-and-name:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+    - name: product
+      in: path
+      required: true
+      description: Product surface (`ASO` or `LLMO`)
+      schema:
+        $ref: './schemas.yaml#/FeatureFlagProduct'
+    - name: flagName
+      in: path
+      required: true
+      description: |
+        Stable flag key (`flag_name` in DB): lowercase snake_case, max 255 characters (`^[a-z][a-z0-9_]*$`).
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9_]*$'
+        maxLength: 255
+  put:
+    tags:
+      - organization
+    summary: Enable an organization feature flag
+    description: |
+      Upserts a row in mysticat `feature_flags` and sets `flag_value` to `true`.
+      Does not remove the row; use `DELETE` on this resource to set `flag_value` to `false`. Admin only. No request body.
+    operationId: putOrganizationFeatureFlag
+    responses:
+      '200':
+        description: Flag after upsert
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FeatureFlag'
+            examples:
+              featureFlag:
+                $ref: './examples.yaml#/FeatureFlagExample'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: [ ]
+  delete:
+    tags:
+      - organization
+    summary: Disable an organization feature flag
+    description: |
+      Upserts (or updates) the mysticat `feature_flags` row and sets `flag_value` to `false`.
+      The row remains for audit trail (`updated_at`, `updated_by`). Admin only. No request body.
+    operationId: deleteOrganizationFeatureFlag
+    responses:
+      '200':
+        description: Flag after update
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FeatureFlag'
+            examples:
+              featureFlagOff:
+                $ref: './examples.yaml#/FeatureFlagDisabledExample'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: [ ]

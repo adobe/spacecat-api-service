@@ -1,3 +1,31 @@
+# [1.385.0](https://github.com/adobe/spacecat-api-service/compare/v1.384.1...v1.385.0) (2026-03-28)
+
+
+### Features
+
+* add POST endpoint to create ASO enrollment for PLG-enabled sites ([#2059](https://github.com/adobe/spacecat-api-service/issues/2059)) ([2f470c7](https://github.com/adobe/spacecat-api-service/commit/2f470c7c85780fc5da0f808e9c432f5cbdc225b7))
+
+## [1.384.1](https://github.com/adobe/spacecat-api-service/compare/v1.384.0...v1.384.1) (2026-03-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.25.1 ([#2057](https://github.com/adobe/spacecat-api-service/issues/2057)) ([d17dda1](https://github.com/adobe/spacecat-api-service/commit/d17dda10cde38bce83421d450dd9fd88ecbbf096))
+
+# [1.384.0](https://github.com/adobe/spacecat-api-service/compare/v1.383.0...v1.384.0) (2026-03-27)
+
+
+### Features
+
+* LLMO-3945 add onboarding Brandalf mode resolution ([#2055](https://github.com/adobe/spacecat-api-service/issues/2055)) ([3d6dec2](https://github.com/adobe/spacecat-api-service/commit/3d6dec24b48796f5a41b13e3fcefa779d629411e))
+
+# [1.383.0](https://github.com/adobe/spacecat-api-service/compare/v1.382.0...v1.383.0) (2026-03-27)
+
+
+### Features
+
+* feature flags ([#2047](https://github.com/adobe/spacecat-api-service/issues/2047)) ([eeff8f0](https://github.com/adobe/spacecat-api-service/commit/eeff8f0aa4c046a8bd54dca807862a5d887482a4))
+
 # [1.382.0](https://github.com/adobe/spacecat-api-service/compare/v1.381.2...v1.382.0) (2026-03-27)
 
 
