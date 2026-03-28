@@ -48,7 +48,9 @@ function SiteEnrollmentsController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { SiteEnrollment, Site, Configuration } = dataAccess;
+  const {
+    SiteEnrollment, Site, Configuration, Entitlement,
+  } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -87,10 +89,13 @@ function SiteEnrollmentsController(ctx) {
   };
 
   /**
-   * Creates an ASO enrollment for a site if the summit-plg handler is enabled.
+   * Creates an ASO enrollment for a site if:
+   *   - The summit-plg handler is enabled for the site
+   *   - The site's org has an existing ASO entitlement
+   *   - The site is not already enrolled in that entitlement
    * Admin only.
    * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Created site enrollment response.
+   * @returns {Promise<Response>} Created enrollment, or skipped response.
    */
   const createEnrollmentForSite = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
@@ -108,18 +113,44 @@ function SiteEnrollmentsController(ctx) {
         return notFound('Site not found');
       }
 
+      // Only PLG sites (summit-plg handler must be enabled)
       const configuration = await Configuration.findLatest();
       if (!configuration.isHandlerEnabledForSite(SUMMIT_PLG_HANDLER, site)) {
         return badRequest(`PLG handler (${SUMMIT_PLG_HANDLER}) is not enabled for site ${siteId}`);
       }
 
+      // Only proceed if the org already has an ASO entitlement — never create one
+      const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
+        site.getOrganizationId(),
+        ASO_PRODUCT_CODE,
+      );
+      if (!entitlement) {
+        return ok({
+          skipped: true,
+          reason: 'no_aso_entitlement',
+          siteId,
+          organizationId: site.getOrganizationId(),
+        });
+      }
+
+      // Check if site is already enrolled in this entitlement
+      const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
+      const alreadyEnrolled = existingEnrollments
+        .find((e) => e.getEntitlementId() === entitlement.getId());
+      if (alreadyEnrolled) {
+        return ok({
+          skipped: true,
+          reason: 'already_enrolled',
+          siteId,
+          enrollment: SiteEnrollmentDto.toJSON(alreadyEnrolled),
+        });
+      }
+
+      // Create enrollment only (entitlement already exists)
       const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
       const { siteEnrollment } = await tierClient.createEntitlement(ASO_TIER);
       return created(SiteEnrollmentDto.toJSON(siteEnrollment));
     } catch (e) {
-      if (e.message?.includes('already exists') || e.message?.includes('Already enrolled')) {
-        return badRequest('Site is already enrolled in ASO');
-      }
       context.log.error(`Error creating enrollment for site ${siteId}: ${e.message}`);
       return internalServerError(e.message);
     }
