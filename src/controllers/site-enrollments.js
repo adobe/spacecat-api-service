@@ -133,6 +133,15 @@ function SiteEnrollmentsController(ctx) {
         });
       }
 
+      if (entitlement.getTier() !== ASO_TIER) {
+        return ok({
+          skipped: true,
+          reason: 'paid_entitlement',
+          siteId,
+          organizationId: site.getOrganizationId(),
+        });
+      }
+
       // Check if site is already enrolled in this entitlement
       const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
       const alreadyEnrolled = existingEnrollments
