@@ -289,6 +289,13 @@ describe('Projects Controller', () => {
       const responseBody = await response.json();
       expect(responseBody.message).to.equal('Only admins can view all projects');
     });
+
+    it('should allow read-only admin to get all projects', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+      const response = await projectsController.getAll(context);
+
+      expect(response.status).to.equal(200);
+    });
   });
 
   describe('getByID', () => {

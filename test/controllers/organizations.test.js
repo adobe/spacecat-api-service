@@ -453,6 +453,17 @@ describe('Organizations Controller', () => {
     expect(resultOrganizations[1]).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
   });
 
+  it('gets all organizations for read-only admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    mockDataAccess.Organization.all.resolves(organizations);
+
+    const result = await organizationsController.getAll();
+
+    expect(result.status).to.equal(200);
+    const resultOrgs = await result.json();
+    expect(resultOrgs).to.be.an('array').with.lengthOf(4);
+  });
+
   it('gets all organizations for non admin users', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Organization.all.resolves(organizations);

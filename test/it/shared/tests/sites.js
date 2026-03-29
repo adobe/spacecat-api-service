@@ -173,6 +173,26 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.delegatedUser.get(`/sites/${SITE_3_ID}`);
         expect(res.status).to.equal(403);
       });
+
+      // ── Read-only admin smoke tests ──
+      // readOnlyAdminWrapper is fail-closed: without a LaunchDarkly SDK key in the
+      // IT environment the feature-flag evaluation returns false, so ALL routes return
+      // 403 regardless of HTTP method. These tests verify:
+      //   1. The token is correctly parsed as a read-only admin identity.
+      //   2. The readOnlyAdminWrapper is wired and rejects the request (fail-closed).
+      // In an environment with the LD flag enabled, GET routes would return 200 and
+      // POST/mutating routes would return 403.
+      it('readOnlyAdmin: returns 403 for GET /sites/:siteId (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.get(`/sites/${SITE_1_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('readOnlyAdmin: returns 403 for POST /sites (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.post('/sites', { baseURL: 'https://ro-admin-test.example.com' });
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /sites/by-base-url/:baseURL', () => {

@@ -551,6 +551,17 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
+  it('gets all sites for a read-only admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    mockDataAccess.Site.all.resolves(sites);
+
+    const result = await sitesController.getAll();
+    const resultSites = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(resultSites).to.be.an('array').with.lengthOf(2);
+  });
+
   it('gets all sites for a non-admin user', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Site.all.resolves(sites);
