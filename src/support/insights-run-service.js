@@ -75,14 +75,14 @@ function resolvePayload(body) {
   const base = preset || { imports: { types: [] }, audits: { types: [] } };
 
   const imports = {
-    types: body.imports?.types || base.imports?.types || [],
+    types: body.imports?.types || base.imports.types,
     trafficAnalysisWeeks: body.imports?.trafficAnalysisWeeks
-      ?? base.imports?.trafficAnalysisWeeks
+      ?? base.imports.trafficAnalysisWeeks
       ?? 0,
   };
 
   const audits = {
-    types: body.audits?.types || base.audits?.types || [],
+    types: body.audits?.types || base.audits.types,
     autoSuggest: body.audits?.autoSuggest || base.audits?.autoSuggest || null,
   };
 
