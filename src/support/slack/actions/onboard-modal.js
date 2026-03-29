@@ -444,11 +444,11 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'Force re-onboard (overrides paid profile protection)',
+                      text: 'Force re-onboard',
                     },
                     description: {
                       type: 'plain_text',
-                      text: 'Check this to re-onboard a site that was previously onboarded with a paid profile.',
+                      text: 'Override if the site was last onboarded with the paid profile.',
                     },
                     value: 'force',
                   },
