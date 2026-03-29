@@ -28,7 +28,7 @@ use(sinonChai);
 describe('onboardSingleSite — paid profile guard', () => {
   const SITE_URL = 'https://example.com';
   const IMS_ORG_ID = 'ABCDEF1234567890ABCDEF12@AdobeOrg';
-  const GUARD_WARNING_PATTERN = /previously onboarded with the \*paid\* profile/;
+  const GUARD_WARNING_PATTERN = /last onboarded with the \*paid\* profile/;
 
   let sandbox;
   let onboardSingleSite;

@@ -1328,10 +1328,7 @@ export const onboardSingleSite = async (
         } else {
           reportLine.errors = 'Blocked: site already onboarded with paid profile';
           reportLine.status = 'Failed';
-          const msg = `:warning: Blocked: Site \`${baseURL}\` was previously onboarded with the *paid* profile. `
-            + `Re-onboarding with *${profileName}* is blocked to protect the paid configuration.\n`
-            + 'To override, re-run the onboard site command and select *Force Onboard* in the Onboard Site modal window.';
-          await say(msg);
+          await say(`:warning: Site \`${baseURL}\` was last onboarded with the *paid* profile. To override with non-paid profile, re-run the onboard site command and select *Force Onboard* in the Onboard Site modal window.`);
           return reportLine;
         }
       }
