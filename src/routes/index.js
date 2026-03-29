@@ -92,6 +92,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
+ * @param {Object} insightsController - The insights orchestration controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -141,6 +142,7 @@ export default function getRouteHandlers(
   imsOrgAccessController,
   contactSalesLeadsController,
   featureFlagsController,
+  insightsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -478,6 +480,11 @@ export default function getRouteHandlers(
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
+
+    // Insights orchestration routes
+    'POST /sites/:siteId/insights/run': insightsController.run,
+    'POST /insights/run/batch': insightsController.batchRun,
+    'GET /insights/run/batch/:batchId/status': insightsController.batchStatus,
 
     // Reports
     'POST /sites/:siteId/reports': reportsController.createReport,

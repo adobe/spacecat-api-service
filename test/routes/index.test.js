@@ -407,6 +407,11 @@ describe('getRouteHandlers', () => {
     deleteByOrganizationProductAndName: () => null,
   };
 
+  const mockInsightsController = {
+    run: () => null,
+    batchRun: () => null,
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -455,6 +460,7 @@ describe('getRouteHandlers', () => {
       mockImsOrgAccessController,
       mockContactSalesLeadsController,
       mockFeatureFlagsController,
+      mockInsightsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -492,6 +498,7 @@ describe('getRouteHandlers', () => {
       'PATCH /trial-users/email-preferences',
       'GET /consumers',
       'POST /consumers/register',
+      'POST /insights/run/batch',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -827,6 +834,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/contact-sales-leads',
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
+      'POST /sites/:siteId/insights/run',
+      'GET /insights/run/batch/:batchId/status',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
