@@ -91,6 +91,10 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
+  hasAdminReadAccess() {
+    return this.hasAdminAccess() || this.authInfo.isReadOnlyAdmin?.() === true;
+  }
+
   hasS2SAdminAccess() {
     return this.authInfo.isS2SAdmin();
   }
@@ -151,8 +155,8 @@ export default class AccessControlUtil {
     }
 
     const { authInfo } = this;
-    // Check admin access first - admins bypass product code validation
-    if (this.hasAdminAccess()) {
+    // Check admin read access first - full and read-only admins bypass org/product validation
+    if (this.hasAdminReadAccess()) {
       return true;
     }
 

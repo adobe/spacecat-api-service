@@ -101,6 +101,11 @@ export const INTERNAL_ROUTES = [
   'POST /consumers/register',
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
+
+  // API Keys - scoped API key management; end-user/admin flow, not exposed to S2S consumers
+  'POST /tools/api-keys',
+  'DELETE /tools/api-keys/:id',
+  'GET /tools/api-keys',
 ];
 
 /**
@@ -341,11 +346,6 @@ const routeRequiredCapabilities = {
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
 
-  // API Keys
-  'POST /tools/api-keys': 'apiKey:write',
-  'DELETE /tools/api-keys/:id': 'apiKey:write',
-  'GET /tools/api-keys': 'apiKey:read',
-
   // Import Jobs
   'POST /tools/import/jobs': 'importJob:write',
   'GET /tools/import/jobs/:jobId': 'importJob:read',
@@ -384,9 +384,9 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
-  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:write',
+  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data': 'site:read',
   'GET /sites/:siteId/llmo/data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': 'site:read',

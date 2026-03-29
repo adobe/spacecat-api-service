@@ -567,7 +567,7 @@ function PlgOnboardingController(ctx) {
 
     // Admin/API key holders can access any org's status
     const accessControlUtil = AccessControlUtil.fromContext(context);
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       // Non-admin: validate caller's IMS tenant matches requested imsOrgId
       const profile = authInfo.getProfile();
 

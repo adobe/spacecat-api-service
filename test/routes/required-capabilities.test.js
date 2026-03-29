@@ -71,6 +71,41 @@ describe('routeRequiredCapabilities', () => {
     });
   });
 
+  describe('API key routes', () => {
+    const API_KEY_ROUTES = [
+      'POST /tools/api-keys',
+      'DELETE /tools/api-keys/:id',
+      'GET /tools/api-keys',
+    ];
+
+    it('are in INTERNAL_ROUTES (not exposed to S2S consumers)', () => {
+      const internalSet = new Set(INTERNAL_ROUTES);
+      API_KEY_ROUTES.forEach((route) => {
+        expect(internalSet.has(route), `${route} must be in INTERNAL_ROUTES`).to.be.true;
+      });
+    });
+
+    it('are not in routeRequiredCapabilities', () => {
+      API_KEY_ROUTES.forEach((route) => {
+        expect(routeRequiredCapabilities).to.not.have.property(route);
+      });
+    });
+  });
+
+  describe('sheet-data POST routes', () => {
+    const SHEET_DATA_POST_ROUTES = [
+      'POST /sites/:siteId/llmo/sheet-data/:dataSource',
+      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
+    ];
+
+    it('are mapped to site:read (not site:write)', () => {
+      SHEET_DATA_POST_ROUTES.forEach((route) => {
+        expect(routeRequiredCapabilities[route], `${route} must map to site:read`).to.equal('site:read');
+      });
+    });
+  });
+
   describe('route coverage', () => {
     it('every route from routes/index.js must be in routeRequiredCapabilities or INTERNAL_ROUTES', () => {
       const routesPath = join(testDir, '../../src/routes/index.js');

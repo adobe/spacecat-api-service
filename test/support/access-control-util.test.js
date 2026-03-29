@@ -1742,4 +1742,73 @@ describe('Access Control Util', () => {
         .to.not.have.been.called;
     });
   });
+
+  describe('hasAdminReadAccess', () => {
+    function makeContext(authInfoOverrides) {
+      const authInfo = {
+        getType: () => 'jwt',
+        isAdmin: () => false,
+        isReadOnlyAdmin: () => false,
+        getScopes: () => [],
+        hasOrganization: sinon.stub().returns(false),
+        hasScope: sinon.stub().returns(false),
+        ...authInfoOverrides,
+      };
+      return {
+        log: {
+          info: () => {}, error: () => {}, warn: () => {}, debug: () => {},
+        },
+        pathInfo: { headers: { 'x-product': 'test' } },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+    }
+
+    it('returns true when user is a full admin', () => {
+      const ctx = makeContext({ isAdmin: () => true, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.true;
+    });
+
+    it('returns true when user is a read-only admin', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.true;
+    });
+
+    it('returns false when user is neither admin nor read-only admin', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.false;
+    });
+
+    it('hasAdminAccess returns false for read-only admin (write guard is unchanged)', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminAccess()).to.be.false;
+    });
+
+    it('hasAccess bypasses org check for read-only admin', async () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      const org = { getImsOrgId: () => 'some-org-id' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      const result = await util.hasAccess(org);
+      expect(result).to.be.true;
+    });
+
+    it('hasAccess still enforces org check for regular non-admin user', async () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      const org = { getImsOrgId: () => 'some-org-id' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      // hasOrganization is stubbed to return false → access denied
+      const result = await util.hasAccess(org);
+      expect(result).to.be.false;
+    });
+  });
 });

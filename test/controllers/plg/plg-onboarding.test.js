@@ -321,7 +321,7 @@ describe('PlgOnboardingController', () => {
         },
         '../../../src/support/access-control-util.js': {
           default: {
-            fromContext: () => ({ hasAdminAccess: () => false }),
+            fromContext: () => ({ hasAdminAccess: () => false, hasAdminReadAccess: () => false }),
           },
         },
       },
@@ -1799,7 +1799,7 @@ describe('PlgOnboardingController', () => {
           },
           '../../../src/support/access-control-util.js': {
             default: {
-              fromContext: () => ({ hasAdminAccess: () => true }),
+              fromContext: () => ({ hasAdminAccess: () => true, hasAdminReadAccess: () => true }),
             },
           },
         },

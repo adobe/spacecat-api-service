@@ -84,7 +84,7 @@ function OrganizationsController(ctx, env) {
    * @returns {Promise<Response>} Array of organizations response.
    */
   const getAll = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all Organizations');
     }
 
@@ -150,7 +150,7 @@ function OrganizationsController(ctx, env) {
    * @throws {Error} If IMS org ID is not provided, org not found, or Slack config not found.
    */
   const getSlackConfigByImsOrgID = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view Slack configurations');
     }
     const response = await getByImsOrgID(context);
