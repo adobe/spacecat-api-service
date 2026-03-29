@@ -42,6 +42,7 @@ import {
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
 //    after onboardConfig tracking was introduced.
 const PAID_PROFILE_IMPORT = 'ahref-paid-pages';
+const MAX_ONBOARD_HISTORY = 10;
 
 /**
  * Step Functions execution names must be 1–80 chars and may only contain
@@ -1492,7 +1493,7 @@ export const onboardSingleSite = async (
       lastProfile: profileName.toLowerCase(),
       lastStartTime: onboardStartTime,
       ...(additionalParams.force ? { forcedOverride: true } : {}),
-    });
+    }, { maxHistory: MAX_ONBOARD_HISTORY });
 
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {

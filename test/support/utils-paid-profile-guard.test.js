@@ -328,10 +328,11 @@ describe('onboardSingleSite — paid profile guard', () => {
       }
 
       expect(updateOnboardConfigStub).to.have.been.calledOnce;
-      const [payload] = updateOnboardConfigStub.firstCall.args;
+      const [payload, options] = updateOnboardConfigStub.firstCall.args;
       expect(payload).to.have.property('lastProfile', 'demo');
       expect(payload).to.have.property('lastStartTime').that.is.a('number');
       expect(payload).to.not.have.property('forcedOverride');
+      expect(options).to.deep.equal({ maxHistory: 10 });
     });
 
     it('includes forcedOverride:true in updateOnboardConfig payload when force=true', async () => {
@@ -356,8 +357,9 @@ describe('onboardSingleSite — paid profile guard', () => {
       }
 
       expect(updateOnboardConfigStub).to.have.been.calledOnce;
-      const [payload] = updateOnboardConfigStub.firstCall.args;
+      const [payload, options] = updateOnboardConfigStub.firstCall.args;
       expect(payload).to.have.property('forcedOverride', true);
+      expect(options).to.deep.equal({ maxHistory: 10 });
     });
   });
 });
