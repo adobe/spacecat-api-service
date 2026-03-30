@@ -1277,5 +1277,37 @@ describe('Opportunities Controller', () => {
       const opportunities = await response.json();
       expect(opportunities).to.be.an('array').with.lengthOf(allTypes.length);
     });
+
+    it('passes request context to getIsSummitPlgEnabled for getAllForSite', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID } };
+      await ctrl.getAllForSite(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+
+    it('passes request context to getIsSummitPlgEnabled for getByStatus', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID, status: 'NEW' } };
+      await ctrl.getByStatus(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
   });
 });

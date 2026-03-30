@@ -62,8 +62,8 @@ function OpportunitiesController(ctx) {
    * @param {Array} opportunities - Array of opportunity entities
    * @returns {Promise<Array>} Filtered (or unfiltered) opportunities
    */
-  async function filterForSummitPlg(site, opportunities) {
-    if (await getIsSummitPlgEnabled(site, ctx)) {
+  async function filterForSummitPlg(site, opportunities, requestContext) {
+    if (await getIsSummitPlgEnabled(site, ctx, requestContext)) {
       return opportunities.filter(
         (oppty) => SUMMIT_PLG_ALLOWED_TYPES.includes(oppty.getType()),
       );
@@ -110,7 +110,7 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteId(siteId);
-    const opptys = (await filterForSummitPlg(site, allOpptys))
+    const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -141,7 +141,7 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
-    const opptys = (await filterForSummitPlg(site, allOpptys))
+    const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
