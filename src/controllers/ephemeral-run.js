@@ -14,6 +14,7 @@ import {
   isNonEmptyObject,
   isValidUUID,
   isArray,
+  isObject,
 } from '@adobe/spacecat-shared-utils';
 import {
   accepted,
@@ -33,6 +34,9 @@ import { readBatchStatus } from '../support/ephemeral-run-batch-store.js';
 
 /**
  * Ephemeral run — time-boxed imports + audits via batch API; teardown via Step Functions.
+ *
+ * Batch body may include optional `slack: { channelId?, threadTs? }` for workflow/audit Slack
+ * updates; omit `slack` to use env defaults, or set empty strings to skip posting.
  *
  * @param {Object} ctx - Application context with dataAccess, sqs, env, log.
  * @returns {Object} Controller with batchRun and batchStatus.
@@ -67,6 +71,10 @@ function EphemeralRunController(ctx) {
 
     if (body.preset && !PRESETS[body.preset]) {
       return badRequest(`Unknown preset: ${body.preset}. Available: ${Object.keys(PRESETS).join(', ')}`);
+    }
+
+    if (body.slack !== undefined && body.slack !== null && !isObject(body.slack)) {
+      return badRequest('slack must be an object with optional channelId and threadTs');
     }
 
     const accessControlUtil = AccessControlUtil.fromContext(ctx);

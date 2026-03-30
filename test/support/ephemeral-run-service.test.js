@@ -22,6 +22,7 @@ import {
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,
+  buildEphemeralOnboardWorkflowInput,
   runEphemeralRunBatch,
   PRESETS,
   MAX_BATCH_SITES,
@@ -109,7 +110,7 @@ function createMockContext(overrides = {}) {
     },
     env: {
       AUDIT_JOBS_QUEUE_URL: 'audit-queue-url',
-      INSIGHTS_TEARDOWN_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123:stateMachine:teardown',
+      EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123:stateMachine:teardown',
     },
     log: {
       info: sinon.stub(),
@@ -136,16 +137,16 @@ describe('ephemeral-run-service', () => {
   // resolvePayload
   // -----------------------------------------------------------------------
   describe('resolvePayload()', () => {
-    it('resolves plg-full preset with defaults', () => {
-      const result = resolvePayload({ preset: 'plg-full' });
-      expect(result.imports.types).to.deep.equal(PRESETS['plg-full'].imports.types);
-      expect(result.audits.types).to.deep.equal(PRESETS['plg-full'].audits.types);
+    it('resolves insights-report-default preset with defaults', () => {
+      const result = resolvePayload({ preset: 'insights-report-default' });
+      expect(result.imports.types).to.deep.equal(PRESETS['insights-report-default'].imports.types);
+      expect(result.audits.types).to.deep.equal(PRESETS['insights-report-default'].audits.types);
       expect(result.teardownDelaySeconds).to.equal(14400);
     });
 
     it('uses explicit types over preset', () => {
       const result = resolvePayload({
-        preset: 'plg-full',
+        preset: 'insights-report-default',
         imports: { types: ['top-pages'] },
         audits: { types: ['lhs-mobile'] },
       });
@@ -155,10 +156,10 @@ describe('ephemeral-run-service', () => {
 
     it('falls back to preset import types when body imports.types is null', () => {
       const result = resolvePayload({
-        preset: 'plg-full',
+        preset: 'insights-report-default',
         imports: { types: null },
       });
-      expect(result.imports.types).to.deep.equal(PRESETS['plg-full'].imports.types);
+      expect(result.imports.types).to.deep.equal(PRESETS['insights-report-default'].imports.types);
     });
 
     it('uses empty arrays when no preset and no explicit types', () => {
@@ -192,8 +193,8 @@ describe('ephemeral-run-service', () => {
       expect(result.imports.trafficAnalysisWeeks).to.equal(0);
     });
 
-    it('resolves plg-full traffic-analysis options from optionsByImportType', () => {
-      const result = resolvePayload({ preset: 'plg-full' });
+    it('resolves insights-report-default traffic-analysis options from optionsByImportType', () => {
+      const result = resolvePayload({ preset: 'insights-report-default' });
       expect(result.imports.types).to.include('traffic-analysis');
       expect(result.imports.trafficAnalysisWeeks).to.equal(5);
       expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
@@ -201,7 +202,7 @@ describe('ephemeral-run-service', () => {
 
     it('body optionsByImportType overrides preset traffic-analysis backfillWeeks', () => {
       const result = resolvePayload({
-        preset: 'plg-full',
+        preset: 'insights-report-default',
         imports: {
           optionsByImportType: {
             'traffic-analysis': { backfillWeeks: 12 },
@@ -214,7 +215,7 @@ describe('ephemeral-run-service', () => {
 
     it('ignores preset traffic-analysis backfill when types omit traffic-analysis', () => {
       const result = resolvePayload({
-        preset: 'plg-full',
+        preset: 'insights-report-default',
         imports: { types: ['top-pages'] },
       });
       expect(result.imports.trafficAnalysisWeeks).to.equal(0);
@@ -408,6 +409,68 @@ describe('ephemeral-run-service', () => {
       expect(result.skipped.every((s) => s.reason === 'Missing audit jobs queue URL')).to.be.true;
       expect(ctx.sqs.sendMessage).to.not.have.been.called;
     });
+
+    it('normalizes undefined channelId and null threadTs on audit slackContext', async () => {
+      const ctx = createMockContext();
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['lhs-mobile'] } });
+      await enqueueSiteJobs('s-1', resolved, config, ctx, {
+        channelId: undefined,
+        threadTs: null,
+      });
+      const auditCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[0] === 'audit-queue-url');
+      expect(auditCall.args[1].auditContext.slackContext).to.deep.equal({
+        channelId: '',
+        threadTs: '',
+      });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // buildEphemeralOnboardWorkflowInput
+  // -----------------------------------------------------------------------
+  describe('buildEphemeralOnboardWorkflowInput()', () => {
+    const baseParams = {
+      siteId: 's-1',
+      siteUrl: 'https://example.com',
+      imsOrgId: 'ims@test',
+      organizationId: 'org-1',
+      opportunityStatusAuditTypes: ['lhs-mobile'],
+      importTypesToDisable: ['top-pages'],
+      auditTypesToDisable: ['lhs-mobile'],
+      profileName: 'insights-report-default',
+      workflowWaitTime: 3600,
+    };
+
+    it('fills slack with empty strings when slackContext omits channelId and threadTs', () => {
+      const input = buildEphemeralOnboardWorkflowInput({
+        ...baseParams,
+        slackContext: {},
+        env: {},
+      });
+      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+        channelId: '',
+        threadTs: '',
+      });
+    });
+
+    it('uses default experience URL when EXPERIENCE_URL is unset', () => {
+      const input = buildEphemeralOnboardWorkflowInput({
+        ...baseParams,
+        slackContext: { channelId: 'C1', threadTs: 't1' },
+        env: {},
+      });
+      expect(input.demoURLJob.taskContext.experienceUrl).to.equal('https://experience.adobe.com');
+    });
+
+    it('uses env EXPERIENCE_URL when set', () => {
+      const input = buildEphemeralOnboardWorkflowInput({
+        ...baseParams,
+        slackContext: { channelId: 'C1', threadTs: 't1' },
+        env: { EXPERIENCE_URL: 'https://custom.experience' },
+      });
+      expect(input.demoURLJob.taskContext.experienceUrl).to.equal('https://custom.experience');
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -443,14 +506,14 @@ describe('ephemeral-run-service', () => {
       expect(body.status).to.equal('completed');
     });
 
-    it('single-site plg-full sends full onboard-shaped SFN input', async () => {
+    it('single-site insights-report-default sends full onboard-shaped SFN input', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runEphemeralRunBatch(['s-1'], { preset: 'plg-full' }, ctx);
+      await runEphemeralRunBatch(['s-1'], { preset: 'insights-report-default' }, ctx);
 
       expect(sfnSendStub).to.have.been.called;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
@@ -462,6 +525,7 @@ describe('ephemeral-run-service', () => {
         'workflowWaitTime',
       );
       expect(input.disableImportAndAuditJob.type).to.equal('disable-import-audit-processor');
+      expect(input.cwvDemoSuggestionsJob.taskContext.profile).to.equal('insights-report-default');
     });
 
     it('does not schedule teardown when nothing is newly enabled', async () => {
@@ -496,7 +560,6 @@ describe('ephemeral-run-service', () => {
     it('uses fallback state machine ARN when primary teardown ARNs unset', async () => {
       const ctx = createMockContext();
       delete ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN;
-      delete ctx.env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN;
       ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN = 'arn:fallback';
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -663,6 +726,184 @@ describe('ephemeral-run-service', () => {
       expect(body.error.code).to.equal('ENQUEUE_FAILURE');
     });
 
+    it('passes body.slack channelId and threadTs into SFN workflow and audit enqueue', async () => {
+      const ctx = createMockContext();
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        audits: { types: ['lhs-mobile'] },
+        slack: { channelId: 'C-payload', threadTs: 'ts-payload' },
+      }, ctx);
+
+      const auditCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[0] === 'audit-queue-url');
+      expect(auditCall).to.exist;
+      expect(auditCall.args[1].auditContext.slackContext).to.deep.equal({
+        channelId: 'C-payload',
+        threadTs: 'ts-payload',
+      });
+
+      expect(sfnSendStub).to.have.been.calledOnce;
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+        channelId: 'C-payload',
+        threadTs: 'ts-payload',
+      });
+      expect(input.demoURLJob.taskContext.slackContext).to.deep.equal({
+        channelId: '',
+        threadTs: '',
+      });
+    });
+
+    it('uses env threadTs when body.slack sets only channelId', async () => {
+      const ctx = createMockContext();
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        audits: { types: ['lhs-mobile'] },
+        slack: { channelId: 'C-only' },
+      }, ctx);
+
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+        channelId: 'C-only',
+        threadTs: 'ts-env',
+      });
+    });
+
+    it('allows explicit empty slack strings to skip posting despite env', async () => {
+      const ctx = createMockContext();
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        audits: { types: ['lhs-mobile'] },
+        slack: { channelId: '', threadTs: '' },
+      }, ctx);
+
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+        channelId: '',
+        threadTs: '',
+      });
+    });
+
+    it('coerces null and undefined slack fields via coerceSlackField', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        audits: { types: ['lhs-mobile'] },
+        slack: { channelId: null, threadTs: undefined },
+      }, ctx);
+
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+        channelId: '',
+        threadTs: '',
+      });
+    });
+
+    it('uses INSIGHTS_WORKFLOW_SLACK_THREAD_TS when ephemeral thread env is unset', async () => {
+      const ctx = createMockContext();
+      delete ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS;
+      ctx.env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS = 'ts-insights';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        audits: { types: ['lhs-mobile'] },
+        slack: { channelId: 'C1' },
+      }, ctx);
+
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.opportunityStatusJob.taskContext.slackContext.threadTs).to.equal('ts-insights');
+    });
+
+    it('uses env channel when body.slack sets only threadTs', async () => {
+      const ctx = createMockContext();
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        audits: { types: ['lhs-mobile'] },
+        slack: { threadTs: 'ts-only' },
+      }, ctx);
+
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+        channelId: 'C-env',
+        threadTs: 'ts-only',
+      });
+    });
+
+    it('prefers EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN over ONBOARD_WORKFLOW_STATE_MACHINE_ARN', async () => {
+      const ctx = createMockContext();
+      ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN = 'arn:aws:states:ephemeral';
+      ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN = 'arn:aws:states:onboard';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
+
+      expect(sfnSendStub.firstCall.args[0].input.stateMachineArn).to.equal('arn:aws:states:ephemeral');
+    });
+
+    it('uses default experience URL in SFN input when EXPERIENCE_URL is unset', async () => {
+      const ctx = createMockContext();
+      delete ctx.env.EXPERIENCE_URL;
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
+
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.demoURLJob.taskContext.experienceUrl).to.equal('https://experience.adobe.com');
+    });
+
+    it('logs when teardown delay resolves to a non-finite workflow wait time', async () => {
+      const ctx = createMockContext();
+      ctx.env.WORKFLOW_WAIT_TIME_IN_SECONDS = 3600;
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        teardown: { delaySeconds: NaN },
+      }, ctx);
+
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
+    });
+
     it('schedules single onboard-shaped teardown when only imports were enabled', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
@@ -725,7 +966,7 @@ describe('ephemeral-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       sfnSendStub.rejects(new Error('SFN down'));
 
-      await runEphemeralRunBatch(['s-1'], { preset: 'plg-full' }, ctx);
+      await runEphemeralRunBatch(['s-1'], { preset: 'insights-report-default' }, ctx);
 
       expect(ctx.log.error).to.have.been.called;
     });
@@ -733,7 +974,6 @@ describe('ephemeral-run-service', () => {
     it('logs when teardown state machine ARN is missing', async () => {
       const ctx = createMockContext();
       delete ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN;
-      delete ctx.env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN;
       delete ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -782,12 +1022,12 @@ describe('ephemeral-run-service', () => {
   // Constants
   // -----------------------------------------------------------------------
   describe('constants', () => {
-    it('exports PRESETS with plg-full', () => {
-      expect(PRESETS).to.have.property('plg-full');
-      expect(PRESETS['plg-full'].imports.types).to.be.an('array').that.is.not.empty;
-      expect(PRESETS['plg-full'].imports.optionsByImportType).to.be.an('object');
-      expect(PRESETS['plg-full'].imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
-      expect(PRESETS['plg-full'].audits.types).to.be.an('array').that.is.not.empty;
+    it('exports PRESETS with insights-report-default', () => {
+      expect(PRESETS).to.have.property('insights-report-default');
+      expect(PRESETS['insights-report-default'].imports.types).to.be.an('array').that.is.not.empty;
+      expect(PRESETS['insights-report-default'].imports.optionsByImportType).to.be.an('object');
+      expect(PRESETS['insights-report-default'].imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
+      expect(PRESETS['insights-report-default'].audits.types).to.be.an('array').that.is.not.empty;
     });
 
     it('exports MAX_BATCH_SITES', () => {

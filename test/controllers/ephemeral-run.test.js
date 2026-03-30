@@ -38,7 +38,7 @@ describe('ephemeral-run controller', () => {
       '../../src/support/ephemeral-run-service.js': {
         runEphemeralRunBatch: runEphemeralRunBatchStub,
         MAX_BATCH_SITES: 600,
-        PRESETS: { 'plg-full': {} },
+        PRESETS: { 'insights-report-default': {} },
       },
       '../../src/support/ephemeral-run-batch-store.js': {
         readBatchStatus: readBatchStatusStub,
@@ -134,6 +134,16 @@ describe('ephemeral-run controller', () => {
 
       const response = await batchRun({
         data: { siteIds: [VALID_UUID], preset: 'bad-preset' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when slack is not an object', async () => {
+      const ctx = createCtx();
+      const { batchRun } = EphemeralRunController(ctx);
+
+      const response = await batchRun({
+        data: { siteIds: [VALID_UUID], slack: 'not-an-object' },
       });
       expect(response.status).to.equal(400);
     });

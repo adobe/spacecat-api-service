@@ -12,12 +12,12 @@
 
 import { randomUUID } from 'crypto';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { isObject } from '@adobe/spacecat-shared-utils';
 import {
   triggerImportRun,
   triggerTrafficAnalysisBackfill,
   sendAuditMessage,
   sanitizeExecutionName,
-  buildOnboardWorkflowInput,
 } from './utils.js';
 import { writeBatchManifest, writeSiteResult, BATCH_TTL_DAYS } from './ephemeral-run-batch-store.js';
 
@@ -39,15 +39,15 @@ const TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY = 'backfillWeeks';
  * Legacy: top-level `imports.trafficAnalysisWeeks` still overrides traffic-analysis backfill weeks.
  */
 const PRESETS = {
-  'plg-full': {
+  'insights-report-default': {
     imports: {
       types: [
-        'top-pages',
         'organic-traffic',
+        'top-pages',
         'organic-keywords',
         'all-traffic',
-        'code',
         'traffic-analysis',
+        'code',
       ],
       optionsByImportType: {
         [TRAFFIC_ANALYSIS_IMPORT_TYPE]: {
@@ -57,17 +57,25 @@ const PRESETS = {
     },
     audits: {
       types: [
-        'lhs-mobile',
-        'accessibility',
         'broken-backlinks',
+        'broken-backlinks-auto-suggest',
         'broken-internal-links',
+        'broken-internal-links-auto-suggest',
+        'cwv',
+        'meta-tags',
+        'meta-tags-auto-suggest',
+        'alt-text',
         'forms-opportunities',
         'experimentation-opportunities',
+        'accessibility',
         'paid',
         'no-cta-above-the-fold',
-        'broken-backlinks-auto-suggest',
-        'broken-internal-links-auto-suggest',
-        'meta-tags-auto-suggest',
+        'security-vulnerabilities',
+        'security-vulnerabilities-auto-suggest',
+        'security-permissions',
+        'security-permissions-redundant',
+        'security-csp-auto-suggest',
+        'lhs-mobile',
       ],
     },
   },
@@ -232,19 +240,121 @@ async function rollbackImports(Site, perSiteSetup, log) {
 
 function getStateMachineArn(env) {
   return env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN
-    || env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN
     || env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
 }
 
-function ephemeralRunWorkflowSlackContext(env) {
-  return {
-    channelId: env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID
-      || env.INSIGHTS_WORKFLOW_SLACK_CHANNEL_ID
-      || '',
-    threadTs: env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS
-      || env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS
-      || '',
+const EMPTY_SLACK_CONTEXT = { channelId: '', threadTs: '' };
+
+/**
+ * Same shape as buildOnboardWorkflowInput in utils.js (onboard-workflow SFN), but
+ * demo-url-processor always gets empty slackContext so ephemeral runs do not post there.
+ */
+function buildEphemeralOnboardWorkflowInput({
+  siteId,
+  siteUrl,
+  imsOrgId,
+  organizationId,
+  slackContext = EMPTY_SLACK_CONTEXT,
+  opportunityStatusAuditTypes,
+  importTypesToDisable = [],
+  auditTypesToDisable = [],
+  scheduledRun = false,
+  profileName,
+  env,
+  workflowWaitTime,
+  onboardStartTime = Date.now(),
+}) {
+  const sc = slackContext;
+  const slack = { channelId: sc.channelId ?? '', threadTs: sc.threadTs ?? '' };
+  const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+
+  const opportunityStatusJob = {
+    type: 'opportunity-status-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      auditTypes: opportunityStatusAuditTypes,
+      onboardStartTime,
+      slackContext: slack,
+    },
   };
+
+  const disableImportAndAuditJob = {
+    type: 'disable-import-audit-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      importTypes: importTypesToDisable,
+      auditTypes: auditTypesToDisable,
+      scheduledRun,
+      slackContext: slack,
+    },
+  };
+
+  const demoURLJob = {
+    type: 'demo-url-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      experienceUrl,
+      slackContext: EMPTY_SLACK_CONTEXT,
+    },
+  };
+
+  const cwvDemoSuggestionsJob = {
+    type: 'cwv-demo-suggestions-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      profile: profileName,
+      slackContext: slack,
+    },
+  };
+
+  return {
+    opportunityStatusJob,
+    disableImportAndAuditJob,
+    demoURLJob,
+    cwvDemoSuggestionsJob,
+    workflowWaitTime,
+  };
+}
+
+function coerceSlackField(value) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return String(value).trim();
+}
+
+/**
+ * Slack context for ephemeral-run teardown (Step Functions) and audit enqueue.
+ * Omit `body.slack` to use env only. Pass `body.slack` with optional keys:
+ * each key present uses its value (empty string skips posting for that field pair via say()).
+ * Keys omitted on `body.slack` fall back to env for that field.
+ */
+function ephemeralRunWorkflowSlackContext(body, env) {
+  const envChannel = env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID || '';
+  const envThread = env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS
+    || env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS
+    || '';
+
+  const slack = body?.slack;
+  if (isObject(slack)) {
+    return {
+      channelId: 'channelId' in slack ? coerceSlackField(slack.channelId) : envChannel,
+      threadTs: 'threadTs' in slack ? coerceSlackField(slack.threadTs) : envThread,
+    };
+  }
+  return { channelId: envChannel, threadTs: envThread };
 }
 
 async function scheduleTeardown(params) {
@@ -258,6 +368,7 @@ async function scheduleTeardown(params) {
     opportunityStatusAuditTypes,
     profileName,
     delaySeconds,
+    slackContext,
     env,
     log,
   } = params;
@@ -265,8 +376,8 @@ async function scheduleTeardown(params) {
   const stateMachineArn = getStateMachineArn(env);
   if (!stateMachineArn) {
     throw new Error(
-      'Ephemeral run teardown requires EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN, '
-      + 'INSIGHTS_TEARDOWN_STATE_MACHINE_ARN (legacy), or ONBOARD_WORKFLOW_STATE_MACHINE_ARN',
+      'Ephemeral run teardown requires EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN '
+      + 'or ONBOARD_WORKFLOW_STATE_MACHINE_ARN',
     );
   }
 
@@ -285,12 +396,12 @@ async function scheduleTeardown(params) {
     throw new Error('Workflow wait time must be a finite non-negative number');
   }
 
-  const workflowInput = buildOnboardWorkflowInput({
+  const workflowInput = buildEphemeralOnboardWorkflowInput({
     siteId,
     siteUrl: baseURL,
     imsOrgId,
     organizationId,
-    slackContext: ephemeralRunWorkflowSlackContext(env),
+    slackContext,
     opportunityStatusAuditTypes,
     importTypesToDisable: importsEnabled,
     auditTypesToDisable: auditsEnabled,
@@ -325,7 +436,13 @@ async function scheduleTeardown(params) {
 // Job enqueuing (ephemeral run batch)
 // ---------------------------------------------------------------------------
 
-async function enqueueSiteJobs(siteId, resolvedPayload, configuration, context) {
+async function enqueueSiteJobs(
+  siteId,
+  resolvedPayload,
+  configuration,
+  context,
+  slackContext = { channelId: '', threadTs: '' },
+) {
   const { log, env } = context;
   const { imports, audits } = resolvedPayload;
   const enqueued = { imports: [], audits: [] };
@@ -358,7 +475,10 @@ async function enqueueSiteJobs(siteId, resolvedPayload, configuration, context) 
   const auditQueueUrl = env.AUDIT_JOBS_QUEUE_URL;
   const auditContext = {
     onDemand: true,
-    slackContext: { channelId: '', threadTs: '' },
+    slackContext: {
+      channelId: slackContext.channelId ?? '',
+      threadTs: slackContext.threadTs ?? '',
+    },
   };
   if (audits.types.length > 0 && !auditQueueUrl) {
     log.error('No audit queue URL: set env AUDIT_JOBS_QUEUE_URL');
@@ -400,6 +520,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
 
   const { imports, audits, teardownDelaySeconds } = resolvePayload(body);
   const auditTypes = audits.types;
+  const workflowSlackContext = ephemeralRunWorkflowSlackContext(body, env);
   const configuration = await Configuration.findLatest();
 
   const now = new Date();
@@ -417,6 +538,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
       imports: body.imports,
       audits: body.audits,
       teardown: body.teardown,
+      slack: body.slack,
     },
   });
 
@@ -485,7 +607,13 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
     let result;
     try {
       // eslint-disable-next-line no-await-in-loop
-      const jobResult = await enqueueSiteJobs(siteId, { imports, audits }, configuration, context);
+      const jobResult = await enqueueSiteJobs(
+        siteId,
+        { imports, audits },
+        configuration,
+        context,
+        workflowSlackContext,
+      );
       result = {
         siteId,
         batchId,
@@ -510,7 +638,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
   }
 
   // Phase 4: One onboard-compatible teardown execution per site (imports and/or audits)
-  const profileName = body.preset ?? 'plg-full';
+  const profileName = body.preset ?? 'insights-report-default';
   for (const [siteId, setup] of Object.entries(perSiteSetup)) {
     if (setup.importsEnabled.length === 0 && setup.auditsEnabled.length === 0) {
       // eslint-disable-next-line no-continue
@@ -540,6 +668,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
         opportunityStatusAuditTypes: auditTypes,
         profileName,
         delaySeconds: teardownDelaySeconds,
+        slackContext: workflowSlackContext,
         env,
         log,
       });
@@ -562,6 +691,7 @@ export {
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,
+  buildEphemeralOnboardWorkflowInput,
   PRESETS,
   MAX_BATCH_SITES,
 };
