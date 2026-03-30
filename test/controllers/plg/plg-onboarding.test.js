@@ -52,6 +52,7 @@ describe('PlgOnboardingController', () => {
   let tierClientCreateForSiteStub;
   let tierClientCreateEntitlementStub;
   let configToDynamoItemStub;
+  let enrichPlgOnboardingWithSiteMetadataStub;
 
   // Mock objects
   let mockLog;
@@ -134,6 +135,8 @@ describe('PlgOnboardingController', () => {
       getCompletedAt: sandbox.stub().returns(record.completedAt),
       getCreatedAt: sandbox.stub().returns(record.createdAt),
       getUpdatedAt: sandbox.stub().returns(record.updatedAt),
+      getSiteTitle: sandbox.stub().returns(record.siteTitle ?? null),
+      getSiteDescription: sandbox.stub().returns(record.siteDescription ?? null),
       setStatus: sandbox.stub(),
       setSiteId: sandbox.stub(),
       setOrganizationId: sandbox.stub(),
@@ -142,6 +145,8 @@ describe('PlgOnboardingController', () => {
       setBotBlocker: sandbox.stub(),
       setWaitlistReason: sandbox.stub(),
       setCompletedAt: sandbox.stub(),
+      setSiteTitle: sandbox.stub(),
+      setSiteDescription: sandbox.stub(),
       save: sandbox.stub().resolves(),
     };
   }
@@ -250,6 +255,8 @@ describe('PlgOnboardingController', () => {
       DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID,
     };
 
+    enrichPlgOnboardingWithSiteMetadataStub = sandbox.stub().resolves();
+
     PlgOnboardingController = (await esmock(
       '../../../src/controllers/plg/plg-onboarding.js',
       {
@@ -318,6 +325,9 @@ describe('PlgOnboardingController', () => {
         },
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+        },
+        '../../../src/support/plg-site-metadata.js': {
+          enrichPlgOnboardingWithSiteMetadata: enrichPlgOnboardingWithSiteMetadataStub,
         },
         '../../../src/support/access-control-util.js': {
           default: {
@@ -532,6 +542,7 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(enrichPlgOnboardingWithSiteMetadataStub).to.have.been.called;
     });
 
     it('throws when create fails and record still not found', async () => {
@@ -1796,6 +1807,9 @@ describe('PlgOnboardingController', () => {
           },
           '../../../src/support/brand-profile-trigger.js': {
             triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+          },
+          '../../../src/support/plg-site-metadata.js': {
+            enrichPlgOnboardingWithSiteMetadata: sandbox.stub().resolves(),
           },
           '../../../src/support/access-control-util.js': {
             default: {

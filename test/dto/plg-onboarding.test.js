@@ -30,6 +30,8 @@ describe('PlgOnboardingDto', () => {
       getBotBlocker: () => null,
       getWaitlistReason: () => null,
       getCompletedAt: () => '2026-03-09T15:00:00.000Z',
+      getSiteTitle: () => 'Example',
+      getSiteDescription: () => 'Example desc',
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
     };
@@ -49,6 +51,8 @@ describe('PlgOnboardingDto', () => {
       botBlocker: null,
       waitlistReason: null,
       completedAt: '2026-03-09T15:00:00.000Z',
+      siteTitle: 'Example',
+      siteDescription: 'Example desc',
       createdAt: '2026-03-09T12:00:00.000Z',
       updatedAt: '2026-03-09T15:00:00.000Z',
     });
@@ -72,6 +76,8 @@ describe('PlgOnboardingDto', () => {
       }),
       getWaitlistReason: () => null,
       getCompletedAt: () => null,
+      getSiteTitle: () => null,
+      getSiteDescription: () => null,
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T12:05:00.000Z',
     };
@@ -86,5 +92,7 @@ describe('PlgOnboardingDto', () => {
     });
     expect(result.siteId).to.be.null;
     expect(result.completedAt).to.be.null;
+    expect(result.siteTitle).to.be.null;
+    expect(result.siteDescription).to.be.null;
   });
 });

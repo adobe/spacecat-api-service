@@ -43,6 +43,7 @@ import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { enrichPlgOnboardingWithSiteMetadata } from '../../support/plg-site-metadata.js';
 
 const { STATUSES } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
@@ -201,6 +202,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     const site = await Site.findById(onboarding.getSiteId());
     if (site) {
       await ensureAsoEntitlement(site, context);
+      await enrichPlgOnboardingWithSiteMetadata({
+        onboarding, site, domain: onboarding.getDomain(), env, log,
+      });
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setSteps(steps);
@@ -239,7 +243,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       if (cachedDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
         log.info(`Domain ${domain} is not an AEM site, moving to waitlist`);
         onboarding.setStatus(STATUSES.WAITLISTED);
-        onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
+        onboarding.setWaitlistReason('This domain is currently managed under another organization.');
         onboarding.setSteps(steps);
         await onboarding.save();
         return onboarding;
@@ -418,6 +422,10 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
     steps.configUpdated = true;
+
+    await enrichPlgOnboardingWithSiteMetadata({
+      onboarding, site, domain, env, log,
+    });
 
     // Step 7: Enable audits from PLG profile
     const auditTypes = Object.keys(profile.audits || {});

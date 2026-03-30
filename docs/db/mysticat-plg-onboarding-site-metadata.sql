@@ -1,0 +1,3 @@
+-- Superseded by mysticat-data-service migration:
+--   db/migrations/20260330100013_plg_onboardings_site_metadata.sql
+-- (includes postgrest_writer column grants). Kept for historical reference only.

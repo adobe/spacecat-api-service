@@ -6792,6 +6792,18 @@ PlgOnboarding:
         - 'null'
       description: Reason for waitlisting, if applicable
       example: null
+    siteTitle:
+      type:
+        - string
+        - 'null'
+      description: Site title
+      example: 'Example Corp'
+    siteDescription:
+      type:
+        - string
+        - 'null'
+      description: Site description
+      example: 'Official site for Example Corp products and support.'
     completedAt:
       $ref: '#/DateTime'
     createdAt:
