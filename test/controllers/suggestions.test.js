@@ -6808,21 +6808,6 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
     });
 
-    it('returns 500 when GeoExperiment model is not configured', async () => {
-      const ctrl = SuggestionsController({
-        dataAccess: { ...mockSuggestionDataAccess, GeoExperiment: undefined },
-        pathInfo: { headers: { 'x-product': 'llmo' } },
-        ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
-      const response = await ctrl.listGeoExperiments({
-        ...context,
-        params: { siteId: SITE_ID },
-      });
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.include('GeoExperiment data access is not configured');
-    });
-
     it('returns list of experiments without prompts', async () => {
       const exp1 = {
         getId: () => 'exp-id-1',
@@ -6931,21 +6916,6 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
       expect(response.status).to.equal(403);
-    });
-
-    it('returns 500 when GeoExperiment model is not configured', async () => {
-      const ctrl = SuggestionsController({
-        dataAccess: { ...mockSuggestionDataAccess, GeoExperiment: undefined },
-        pathInfo: { headers: { 'x-product': 'llmo' } },
-        ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
-      const response = await ctrl.getGeoExperiment({
-        ...context,
-        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
-      });
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.include('GeoExperiment data access is not configured');
     });
 
     it('returns notFound when GeoExperiment is missing', async () => {

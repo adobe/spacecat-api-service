@@ -1918,10 +1918,6 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not have access to this site');
     }
 
-    if (!GeoExperiment || typeof GeoExperiment.findById !== 'function') {
-      return createResponse({ message: 'GeoExperiment data access is not configured' }, 500);
-    }
-
     const geoExperiment = await GeoExperiment.findById(geoExperimentId);
     if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
       return notFound('GeoExperiment not found');
