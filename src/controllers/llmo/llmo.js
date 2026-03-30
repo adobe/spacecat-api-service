@@ -549,7 +549,7 @@ function LlmoController(ctx) {
         await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
           type: 'llmo-config-db-sync',
           siteId,
-          dryRun: true,
+          dryRun: true, // temporary, should be false
         });
       } else {
         log.info(`[llmo-config-db-sync] Skipping S3-to-DB config sync for siteId: ${siteId} because it is not in ALLOWED_SITE_IDS`);
