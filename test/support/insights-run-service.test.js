@@ -22,7 +22,6 @@ import {
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,
-  runInsightsForSite,
   runInsightsBatch,
   PRESETS,
   MAX_BATCH_SITES,
@@ -44,6 +43,14 @@ class MockListObjectsV2Command {
 // Helpers
 // ---------------------------------------------------------------------------
 
+function createMockOrganization(overrides = {}) {
+  return {
+    getId: () => overrides.spacecatOrgId || 'org-sc-1',
+    getImsOrgId: () => overrides.imsOrgId || 'ims-org-test@AdobeOrg',
+    ...overrides,
+  };
+}
+
 function createMockSite(siteId = 's-1', baseURL = 'https://example.com') {
   const importsState = [];
   const siteConfig = {
@@ -57,6 +64,7 @@ function createMockSite(siteId = 's-1', baseURL = 'https://example.com') {
   return {
     getId: () => siteId,
     getBaseURL: () => baseURL,
+    getOrganizationId: () => 'org-sc-1',
     getConfig: () => siteConfig,
     save: sinon.stub().resolves(),
     importsState,
@@ -77,16 +85,19 @@ function createMockConfiguration() {
       enabled.delete(`${type}:${site.getId()}`);
     },
     save: sinon.stub().resolves(),
-    getQueues: () => ({ imports: 'import-queue-url' }),
+    getQueues: () => ({ imports: 'import-queue-url', audits: 'audit-queue-from-config' }),
     _enabled: enabled,
   };
 }
 
 function createMockContext(overrides = {}) {
+  const { dataAccess: dataAccessOverrides, ...restOverrides } = overrides;
   return {
     dataAccess: {
       Site: { findById: sinon.stub() },
       Configuration: { findLatest: sinon.stub() },
+      Organization: { findById: sinon.stub().resolves(createMockOrganization()) },
+      ...(dataAccessOverrides || {}),
     },
     sqs: { sendMessage: sinon.stub().resolves() },
     s3: {
@@ -106,7 +117,7 @@ function createMockContext(overrides = {}) {
       warn: sinon.stub(),
       debug: sinon.stub(),
     },
-    ...overrides,
+    ...restOverrides,
   };
 }
 
@@ -146,6 +157,58 @@ describe('insights-run-service', () => {
       const result = resolvePayload({});
       expect(result.imports.types).to.deep.equal([]);
       expect(result.audits.types).to.deep.equal([]);
+      expect(result.imports.trafficAnalysisWeeks).to.equal(0);
+    });
+
+    it('defaults trafficAnalysisWeeks when traffic-analysis is requested without weeks', () => {
+      const result = resolvePayload({ imports: { types: ['traffic-analysis'] } });
+      expect(result.imports.trafficAnalysisWeeks).to.equal(5);
+    });
+
+    it('does not override explicit trafficAnalysisWeeks 0 when traffic-analysis is requested', () => {
+      const result = resolvePayload({
+        imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 0 },
+      });
+      expect(result.imports.trafficAnalysisWeeks).to.equal(0);
+    });
+
+    it('does not override explicit optionsByImportType backfillWeeks 0', () => {
+      const result = resolvePayload({
+        imports: {
+          types: ['traffic-analysis'],
+          optionsByImportType: {
+            'traffic-analysis': { backfillWeeks: 0 },
+          },
+        },
+      });
+      expect(result.imports.trafficAnalysisWeeks).to.equal(0);
+    });
+
+    it('resolves plg-full traffic-analysis options from optionsByImportType', () => {
+      const result = resolvePayload({ preset: 'plg-full' });
+      expect(result.imports.types).to.include('traffic-analysis');
+      expect(result.imports.trafficAnalysisWeeks).to.equal(5);
+      expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
+    });
+
+    it('body optionsByImportType overrides preset traffic-analysis backfillWeeks', () => {
+      const result = resolvePayload({
+        preset: 'plg-full',
+        imports: {
+          optionsByImportType: {
+            'traffic-analysis': { backfillWeeks: 12 },
+          },
+        },
+      });
+      expect(result.imports.trafficAnalysisWeeks).to.equal(12);
+      expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(12);
+    });
+
+    it('ignores preset traffic-analysis backfill when types omit traffic-analysis', () => {
+      const result = resolvePayload({
+        preset: 'plg-full',
+        imports: { types: ['top-pages'] },
+      });
       expect(result.imports.trafficAnalysisWeeks).to.equal(0);
     });
 
@@ -241,6 +304,12 @@ describe('insights-run-service', () => {
       expect(result.enqueued.imports).to.have.length(1);
       expect(result.enqueued.audits).to.have.length(1);
       expect(result.skipped).to.be.empty;
+      const auditCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[0] === 'audit-queue-url');
+      expect(auditCall).to.exist;
+      expect(auditCall.args[1].auditContext).to.deep.equal({
+        onDemand: true,
+        slackContext: { channelId: '', threadTs: '' },
+      });
     });
 
     it('enqueues traffic analysis backfill', async () => {
@@ -252,6 +321,17 @@ describe('insights-run-service', () => {
 
       const trafficEntries = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
       expect(trafficEntries).to.have.length(3);
+    });
+
+    it('enqueues traffic-analysis import and default backfill when only type is traffic-analysis', async () => {
+      const ctx = createMockContext();
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: ['traffic-analysis'] } });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      const trafficEntries = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
+      expect(trafficEntries).to.have.length(6); // one import run + 5 default backfill weeks
     });
 
     it('records skipped imports on failure', async () => {
@@ -288,114 +368,20 @@ describe('insights-run-service', () => {
 
       expect(result.skipped.some((s) => s.type === 'traffic-analysis')).to.be.true;
     });
-  });
 
-  // -----------------------------------------------------------------------
-  // runInsightsForSite
-  // -----------------------------------------------------------------------
-  describe('runInsightsForSite()', () => {
-    it('returns not_found when site does not exist', async () => {
+    it('uses AUDIT_JOBS_QUEUE_URL for audits, not configuration.getQueues().audits', async () => {
       const ctx = createMockContext();
-      ctx.dataAccess.Site.findById.resolves(null);
-
-      const result = await runInsightsForSite('s-1', { preset: 'plg-full' }, ctx);
-
-      expect(result.status).to.equal('not_found');
-      expect(result.siteId).to.equal('s-1');
-    });
-
-    it('runs full orchestration for a valid site', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
       const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      const result = await runInsightsForSite('s-1', { preset: 'plg-full' }, ctx);
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['lhs-mobile'] } });
+      await enqueueSiteJobs('s-1', resolved, config, ctx);
 
-      expect(result.status).to.equal('accepted');
-      expect(result.setup.imports.enabled.length).to.be.greaterThan(0);
-      expect(result.setup.audits.enabled.length).to.be.greaterThan(0);
-      expect(result.teardown.mode).to.equal('deferred');
-      expect(site.save).to.have.been.called;
-      expect(config.save).to.have.been.called;
-      expect(sfnSendStub).to.have.been.called;
-    });
-
-    it('does not schedule teardown when nothing is newly enabled', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      const result = await runInsightsForSite('s-1', {}, ctx);
-
-      expect(result.status).to.equal('accepted');
-      expect(result.teardown.mode).to.equal('none');
-    });
-
-    it('aborts and disables on sync failure', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-      // Make config save succeed but SFN fail
-      sfnSendStub.rejects(new Error('SFN down'));
-
-      const result = await runInsightsForSite('s-1', { preset: 'plg-full' }, ctx);
-
-      expect(result.status).to.equal('failed');
-      expect(result.teardown.mode).to.equal('abort');
-      expect(result.error.code).to.equal('SYNC_FAILURE');
-      expect(result.error.message).to.equal('Insights run failed');
-    });
-
-    it('handles abort-disable failure gracefully', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      site.save.onSecondCall().rejects(new Error('DB down'));
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-      sfnSendStub.rejects(new Error('SFN down'));
-
-      const result = await runInsightsForSite('s-1', { preset: 'plg-full' }, ctx);
-
-      expect(result.status).to.equal('failed');
-      expect(result.teardown.mode).to.equal('abort');
-      expect(result.teardown.disabledImmediately).to.be.false;
-    });
-
-    it('uses WORKFLOW_WAIT_TIME_IN_SECONDS when delaySeconds is 0', async () => {
-      const ctx = createMockContext();
-      ctx.env.WORKFLOW_WAIT_TIME_IN_SECONDS = 7200;
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runInsightsForSite('s-1', { imports: { types: ['top-pages'] }, teardown: { delaySeconds: 0 } }, ctx);
-
-      const cmd = sfnSendStub.firstCall.args[0];
-      const input = JSON.parse(cmd.input.input);
-      expect(input.workflowWaitTime).to.equal(7200);
-    });
-
-    it('uses fallback state machine ARN', async () => {
-      const ctx = createMockContext();
-      delete ctx.env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN;
-      ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN = 'arn:fallback';
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runInsightsForSite('s-1', { imports: { types: ['top-pages'] } }, ctx);
-
-      const cmd = sfnSendStub.firstCall.args[0];
-      expect(cmd.input.stateMachineArn).to.equal('arn:fallback');
+      const auditCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[0] === 'audit-queue-url');
+      expect(auditCall).to.exist;
+      const configQueueCall = ctx.sqs.sendMessage.getCalls().find(
+        (c) => c.args[0] === 'audit-queue-from-config',
+      );
+      expect(configQueueCall).to.be.undefined;
     });
   });
 
@@ -430,6 +416,85 @@ describe('insights-run-service', () => {
       expect(putCalls).to.have.length.greaterThan(0);
       const body = JSON.parse(putCalls[0].args[0].input.Body);
       expect(body.status).to.equal('completed');
+    });
+
+    it('single-site plg-full sends full onboard-shaped SFN input', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runInsightsBatch(['s-1'], { preset: 'plg-full' }, ctx);
+
+      expect(sfnSendStub).to.have.been.called;
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input).to.have.keys(
+        'cwvDemoSuggestionsJob',
+        'opportunityStatusJob',
+        'disableImportAndAuditJob',
+        'demoURLJob',
+        'workflowWaitTime',
+      );
+      expect(input.disableImportAndAuditJob.type).to.equal('disable-import-audit-processor');
+    });
+
+    it('does not schedule teardown when nothing is newly enabled', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runInsightsBatch(['s-1'], {}, ctx);
+
+      expect(sfnSendStub).to.not.have.been.called;
+    });
+
+    it('uses WORKFLOW_WAIT_TIME_IN_SECONDS when teardown delaySeconds is 0 (imports)', async () => {
+      const ctx = createMockContext();
+      ctx.env.WORKFLOW_WAIT_TIME_IN_SECONDS = 7200;
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runInsightsBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        teardown: { delaySeconds: 0 },
+      }, ctx);
+
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.workflowWaitTime).to.equal(7200);
+    });
+
+    it('uses fallback state machine ARN when INSIGHTS teardown ARN unset', async () => {
+      const ctx = createMockContext();
+      delete ctx.env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN;
+      ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN = 'arn:fallback';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runInsightsBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+
+      const cmd = sfnSendStub.firstCall.args[0];
+      expect(cmd.input.stateMachineArn).to.equal('arn:fallback');
+    });
+
+    it('logs and skips SFN teardown when site has no organization', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      site.getOrganizationId = () => null;
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runInsightsBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+
+      expect(sfnSendStub).to.not.have.been.called;
+      expect(ctx.log.error).to.have.been.calledWithMatch(/no organization/);
     });
 
     it('deduplicates siteIds', async () => {
@@ -530,7 +595,7 @@ describe('insights-run-service', () => {
       expect(ctx.log.error).to.have.been.called;
     });
 
-    it('skips audit teardown when no audits were enabled', async () => {
+    it('schedules single onboard-shaped teardown when only imports were enabled', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -542,14 +607,13 @@ describe('insights-run-service', () => {
         audits: { types: [] },
       }, ctx);
 
-      const sfnCalls = sfnSendStub.getCalls();
-      const batchTeardown = sfnCalls.find(
-        (c) => JSON.parse(c.args[0].input.input).type === 'batch-disable-audits',
-      );
-      expect(batchTeardown).to.be.undefined;
+      expect(sfnSendStub).to.have.been.calledOnce;
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.disableImportAndAuditJob.taskContext.auditTypes).to.deep.equal([]);
+      expect(input.disableImportAndAuditJob.taskContext.importTypes).to.include('top-pages');
     });
 
-    it('skips import teardown when no imports were enabled', async () => {
+    it('schedules single onboard-shaped teardown when only audits were enabled', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -561,14 +625,13 @@ describe('insights-run-service', () => {
         audits: { types: ['lhs-mobile'] },
       }, ctx);
 
-      const sfnCalls = sfnSendStub.getCalls();
-      const importTeardown = sfnCalls.find(
-        (c) => JSON.parse(c.args[0].input.input)?.disableImportAndAuditJob,
-      );
-      expect(importTeardown).to.be.undefined;
+      expect(sfnSendStub).to.have.been.calledOnce;
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.disableImportAndAuditJob.taskContext.importTypes).to.deep.equal([]);
+      expect(input.disableImportAndAuditJob.taskContext.auditTypes).to.include('lhs-mobile');
     });
 
-    it('uses WORKFLOW_WAIT_TIME_IN_SECONDS for batch audit teardown when delay is 0', async () => {
+    it('uses WORKFLOW_WAIT_TIME_IN_SECONDS for batch teardown when delay is 0', async () => {
       const ctx = createMockContext();
       ctx.env.WORKFLOW_WAIT_TIME_IN_SECONDS = 3600;
       const site = createMockSite();
@@ -581,12 +644,8 @@ describe('insights-run-service', () => {
         teardown: { delaySeconds: 0 },
       }, ctx);
 
-      const batchTeardownCall = sfnSendStub.getCalls().find((c) => {
-        const input = JSON.parse(c.args[0].input.input);
-        return input.type === 'batch-disable-audits';
-      });
-      expect(batchTeardownCall).to.exist;
-      const input = JSON.parse(batchTeardownCall.args[0].input.input);
+      expect(sfnSendStub).to.have.been.calledOnce;
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
       expect(input.workflowWaitTime).to.equal(3600);
     });
 
@@ -611,11 +670,13 @@ describe('insights-run-service', () => {
     it('exports PRESETS with plg-full', () => {
       expect(PRESETS).to.have.property('plg-full');
       expect(PRESETS['plg-full'].imports.types).to.be.an('array').that.is.not.empty;
+      expect(PRESETS['plg-full'].imports.optionsByImportType).to.be.an('object');
+      expect(PRESETS['plg-full'].imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
       expect(PRESETS['plg-full'].audits.types).to.be.an('array').that.is.not.empty;
     });
 
     it('exports MAX_BATCH_SITES', () => {
-      expect(MAX_BATCH_SITES).to.equal(500);
+      expect(MAX_BATCH_SITES).to.equal(600);
     });
   });
 });

@@ -17,15 +17,27 @@ import {
   triggerTrafficAnalysisBackfill,
   sendAuditMessage,
   sanitizeExecutionName,
+  buildOnboardWorkflowInput,
 } from './utils.js';
 import { writeBatchManifest, writeSiteResult, BATCH_TTL_DAYS } from './insights-batch-store.js';
 
 const sfnClient = new SFNClient();
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+/** Import type key for traffic-analysis jobs and backfill. */
+const TRAFFIC_ANALYSIS_IMPORT_TYPE = 'traffic-analysis';
 
+/** Option key for how many weeks of traffic-analysis backfill to queue. */
+const TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY = 'backfillWeeks';
+
+/**
+ * Preset / request `imports` may include:
+ * - `types`: string[]
+ * - `optionsByImportType`: map of import type → options object (shallow merge per type; body wins).
+ *   Example: `optionsByImportType['traffic-analysis'] = { backfillWeeks: 5 }`.
+ * Add sibling keys under an import type when that import gains more tunables.
+ *
+ * Legacy: top-level `imports.trafficAnalysisWeeks` still overrides traffic-analysis backfill weeks.
+ */
 const PRESETS = {
   'plg-full': {
     imports: {
@@ -34,11 +46,14 @@ const PRESETS = {
         'organic-traffic',
         'organic-keywords',
         'all-traffic',
-        'cwv-weekly',
         'code',
         'traffic-analysis',
       ],
-      trafficAnalysisWeeks: 5,
+      optionsByImportType: {
+        [TRAFFIC_ANALYSIS_IMPORT_TYPE]: {
+          [TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY]: 5,
+        },
+      },
     },
     audits: {
       types: [
@@ -58,24 +73,88 @@ const PRESETS = {
   },
 };
 
+const DEFAULT_TRAFFIC_ANALYSIS_BACKFILL_WEEKS = 5;
 const DEFAULT_TEARDOWN_DELAY_SECONDS = 14400; // 4 hours
 const MAX_TEARDOWN_DELAY_SECONDS = 86400; // 24 hours
-const MAX_BATCH_SITES = 500;
+const MAX_BATCH_SITES = 600;
 
-// ---------------------------------------------------------------------------
-// Payload resolution
-// ---------------------------------------------------------------------------
+function mergeOptionsByImportType(baseMap = {}, bodyMap = {}) {
+  const keys = new Set([
+    ...Object.keys(baseMap),
+    ...Object.keys(bodyMap),
+  ]);
+  const out = {};
+  for (const importType of keys) {
+    out[importType] = {
+      ...(baseMap[importType] || {}),
+      ...(bodyMap[importType] || {}),
+    };
+  }
+  return out;
+}
+
+function resolveImportsFromPreset(baseImports, bodyImports) {
+  const types = bodyImports?.types ?? baseImports?.types ?? [];
+
+  let optionsByImportType = mergeOptionsByImportType(
+    baseImports?.optionsByImportType,
+    bodyImports?.optionsByImportType,
+  );
+
+  const explicitLegacyTaWeeks = bodyImports
+    && Object.prototype.hasOwnProperty.call(bodyImports, 'trafficAnalysisWeeks');
+  if (explicitLegacyTaWeeks) {
+    const prev = optionsByImportType[TRAFFIC_ANALYSIS_IMPORT_TYPE] || {};
+    optionsByImportType = {
+      ...optionsByImportType,
+      [TRAFFIC_ANALYSIS_IMPORT_TYPE]: {
+        ...prev,
+        [TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY]: bodyImports.trafficAnalysisWeeks,
+      },
+    };
+  }
+
+  const taBodyOpts = bodyImports?.optionsByImportType?.[TRAFFIC_ANALYSIS_IMPORT_TYPE];
+  const explicitNestedTaWeeks = taBodyOpts
+    && Object.prototype.hasOwnProperty.call(taBodyOpts, TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY);
+  const explicitTaWeeks = explicitLegacyTaWeeks || explicitNestedTaWeeks;
+
+  let trafficAnalysisWeeks = optionsByImportType[TRAFFIC_ANALYSIS_IMPORT_TYPE]
+    ?.[TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY];
+  trafficAnalysisWeeks = trafficAnalysisWeeks ?? 0;
+
+  if (!explicitTaWeeks && !types.includes(TRAFFIC_ANALYSIS_IMPORT_TYPE)) {
+    trafficAnalysisWeeks = 0;
+  }
+
+  if (
+    types.includes(TRAFFIC_ANALYSIS_IMPORT_TYPE)
+    && trafficAnalysisWeeks === 0
+    && !explicitTaWeeks
+  ) {
+    trafficAnalysisWeeks = DEFAULT_TRAFFIC_ANALYSIS_BACKFILL_WEEKS;
+    const prev = optionsByImportType[TRAFFIC_ANALYSIS_IMPORT_TYPE] || {};
+    optionsByImportType = {
+      ...optionsByImportType,
+      [TRAFFIC_ANALYSIS_IMPORT_TYPE]: {
+        ...prev,
+        [TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY]: trafficAnalysisWeeks,
+      },
+    };
+  }
+
+  return {
+    types,
+    optionsByImportType,
+    trafficAnalysisWeeks,
+  };
+}
 
 function resolvePayload(body) {
   const preset = PRESETS[body.preset];
   const base = preset || { imports: { types: [] }, audits: { types: [] } };
 
-  const imports = {
-    types: body.imports?.types || base.imports.types,
-    trafficAnalysisWeeks: body.imports?.trafficAnalysisWeeks
-      ?? base.imports.trafficAnalysisWeeks
-      ?? 0,
-  };
+  const imports = resolveImportsFromPreset(base.imports, body.imports);
 
   const audits = {
     types: body.audits?.types || base.audits.types,
@@ -89,10 +168,6 @@ function resolvePayload(body) {
 
   return { imports, audits, teardownDelaySeconds };
 }
-
-// ---------------------------------------------------------------------------
-// Delta-enable helpers
-// ---------------------------------------------------------------------------
 
 function isImportEnabled(importType, imports) {
   const found = imports?.find((cfg) => cfg.type === importType);
@@ -133,32 +208,6 @@ function deltaEnableAudits(configuration, site, auditTypes) {
   return { auditsEnabled, auditsAlreadyEnabled };
 }
 
-// ---------------------------------------------------------------------------
-// Abort / rollback
-// ---------------------------------------------------------------------------
-
-async function abortDisable(site, configuration, importsEnabled, auditsEnabled, log) {
-  try {
-    if (importsEnabled.length > 0) {
-      const siteConfig = site.getConfig();
-      for (const importType of importsEnabled) {
-        siteConfig.disableImport(importType);
-      }
-      await site.save();
-    }
-    if (auditsEnabled.length > 0) {
-      for (const auditType of auditsEnabled) {
-        configuration.disableHandlerForSite(auditType, site);
-      }
-      await configuration.save();
-    }
-    return true;
-  } catch (disableError) {
-    log.error('Failed to abort-disable imports/audits after failure', disableError);
-    return false;
-  }
-}
-
 async function rollbackImports(Site, perSiteSetup, log) {
   for (const [siteId, setup] of Object.entries(perSiteSetup)) {
     if (setup.importsEnabled.length > 0) {
@@ -180,74 +229,84 @@ async function rollbackImports(Site, perSiteSetup, log) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Step Functions teardown scheduling
-// ---------------------------------------------------------------------------
-
 function getStateMachineArn(env) {
   return env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN || env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
 }
 
+function insightsWorkflowSlackContext(env) {
+  return {
+    channelId: env.INSIGHTS_WORKFLOW_SLACK_CHANNEL_ID || '',
+    threadTs: env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS || '',
+  };
+}
+
 async function scheduleTeardown(params) {
   const {
-    siteId, baseURL, importsEnabled, auditsEnabled, delaySeconds, env, log,
+    siteId,
+    baseURL,
+    imsOrgId,
+    organizationId,
+    importsEnabled,
+    auditsEnabled,
+    opportunityStatusAuditTypes,
+    profileName,
+    delaySeconds,
+    env,
+    log,
   } = params;
 
-  const workflowInput = {
-    disableImportAndAuditJob: {
-      type: 'disable-import-audit-processor',
-      siteId,
-      siteUrl: baseURL,
-      taskContext: {
-        importTypes: importsEnabled,
-        auditTypes: auditsEnabled,
-        scheduledRun: false,
-      },
-    },
-    workflowWaitTime: delaySeconds || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
-  };
+  const stateMachineArn = getStateMachineArn(env);
+  if (!stateMachineArn) {
+    throw new Error(
+      'Insights teardown requires INSIGHTS_TEARDOWN_STATE_MACHINE_ARN or ONBOARD_WORKFLOW_STATE_MACHINE_ARN',
+    );
+  }
+
+  const rawWait = delaySeconds || env.WORKFLOW_WAIT_TIME_IN_SECONDS;
+  if (rawWait == null || rawWait === '') {
+    throw new Error(
+      'Insights teardown requires teardown.delaySeconds or env WORKFLOW_WAIT_TIME_IN_SECONDS',
+    );
+  }
+  const workflowWaitTime = Number(rawWait);
+  if (!Number.isFinite(workflowWaitTime) || workflowWaitTime < 0) {
+    throw new Error('Workflow wait time must be a finite non-negative number');
+  }
+
+  const workflowInput = buildOnboardWorkflowInput({
+    siteId,
+    siteUrl: baseURL,
+    imsOrgId,
+    organizationId,
+    slackContext: insightsWorkflowSlackContext(env),
+    opportunityStatusAuditTypes,
+    importTypesToDisable: importsEnabled,
+    auditTypesToDisable: auditsEnabled,
+    scheduledRun: false,
+    profileName,
+    env,
+    workflowWaitTime,
+    onboardStartTime: Date.now(),
+  });
 
   const workflowName = sanitizeExecutionName(
     `insights-${siteId.slice(0, 8)}-${Date.now()}`,
   );
 
   await sfnClient.send(new StartExecutionCommand({
-    stateMachineArn: getStateMachineArn(env),
+    stateMachineArn,
     input: JSON.stringify(workflowInput),
     name: workflowName,
   }));
 
-  log.info(`Scheduled teardown for site ${siteId}, delay=${delaySeconds}s`);
+  log.info(`Scheduled teardown for site ${siteId}, workflowWaitTime=${workflowWaitTime}s`);
 
   return {
     mode: 'deferred',
-    delaySeconds,
-    disableAfter: new Date(Date.now() + delaySeconds * 1000).toISOString(),
+    delaySeconds: workflowWaitTime,
+    disableAfter: new Date(Date.now() + workflowWaitTime * 1000).toISOString(),
     scheduled: true,
   };
-}
-
-async function scheduleBatchAuditTeardown(params) {
-  const {
-    batchId, allAuditsEnabled, delaySeconds, env, log,
-  } = params;
-
-  const workflowName = sanitizeExecutionName(
-    `insights-batch-${batchId.slice(0, 8)}-${Date.now()}`,
-  );
-
-  await sfnClient.send(new StartExecutionCommand({
-    stateMachineArn: getStateMachineArn(env),
-    input: JSON.stringify({
-      type: 'batch-disable-audits',
-      batchId,
-      allAuditsEnabled,
-      workflowWaitTime: delaySeconds || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
-    }),
-    name: workflowName,
-  }));
-
-  log.info(`Scheduled batch audit teardown for ${Object.keys(allAuditsEnabled).length} sites, delay=${delaySeconds}s`);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,10 +344,24 @@ async function enqueueSiteJobs(siteId, resolvedPayload, configuration, context) 
   }
 
   const auditQueueUrl = env.AUDIT_JOBS_QUEUE_URL;
+  const auditContext = {
+    onDemand: true,
+    slackContext: { channelId: '', threadTs: '' },
+  };
   for (const auditType of audits.types) {
+    if (!auditQueueUrl) {
+      log.error('No audit queue URL: set env AUDIT_JOBS_QUEUE_URL');
+      skipped.push({
+        type: auditType,
+        kind: 'audit',
+        reason: 'Missing audit jobs queue URL',
+      });
+      // eslint-disable-next-line no-continue
+      continue;
+    }
     try {
       // eslint-disable-next-line no-await-in-loop
-      await sendAuditMessage(context.sqs, auditQueueUrl, auditType, { onDemand: true }, siteId);
+      await sendAuditMessage(context.sqs, auditQueueUrl, auditType, auditContext, siteId);
       enqueued.audits.push({ type: auditType, status: 'queued' });
     } catch (e) {
       log.error(`Failed to enqueue audit ${auditType} for site ${siteId}`, e);
@@ -300,96 +373,14 @@ async function enqueueSiteJobs(siteId, resolvedPayload, configuration, context) 
 }
 
 // ---------------------------------------------------------------------------
-// Single-site endpoint
-// ---------------------------------------------------------------------------
-
-export async function runInsightsForSite(siteId, body, context) {
-  const { dataAccess, log } = context;
-  const { Site, Configuration } = dataAccess;
-  const runId = randomUUID();
-
-  const site = await Site.findById(siteId);
-  if (!site) {
-    return { siteId, runId, status: 'not_found' };
-  }
-
-  const { imports, audits, teardownDelaySeconds } = resolvePayload(body);
-  const auditTypes = audits.types;
-  const configuration = await Configuration.findLatest();
-
-  const { importsEnabled, importsAlreadyEnabled } = deltaEnableImports(site, imports.types);
-  const auditDelta = deltaEnableAudits(configuration, site, auditTypes);
-  const { auditsEnabled, auditsAlreadyEnabled } = auditDelta;
-
-  let teardownResult = { mode: 'none' };
-  let syncError = null;
-  const enqueued = { imports: [], audits: [] };
-  const skipped = [];
-
-  try {
-    if (importsEnabled.length > 0) {
-      await site.save();
-      log.info(`Enabled imports for site ${siteId}: ${importsEnabled.join(', ')}`);
-    }
-    if (auditsEnabled.length > 0) {
-      await configuration.save();
-      log.info(`Enabled audits for site ${siteId}: ${auditsEnabled.join(', ')}`);
-    }
-
-    const jobResult = await enqueueSiteJobs(siteId, { imports, audits }, configuration, context);
-    enqueued.imports.push(...jobResult.enqueued.imports);
-    enqueued.audits.push(...jobResult.enqueued.audits);
-    skipped.push(...jobResult.skipped);
-
-    if (importsEnabled.length > 0 || auditsEnabled.length > 0) {
-      teardownResult = await scheduleTeardown({
-        siteId,
-        baseURL: site.getBaseURL(),
-        importsEnabled,
-        auditsEnabled,
-        delaySeconds: teardownDelaySeconds,
-        env: context.env,
-        log,
-      });
-    }
-  } catch (error) {
-    syncError = error;
-    log.error(`Insights run failed for site ${siteId}, aborting`, error);
-  } finally {
-    if (syncError) {
-      const disableOk = await abortDisable(site, configuration, importsEnabled, auditsEnabled, log);
-      teardownResult = {
-        mode: 'abort',
-        disabledImmediately: disableOk,
-        disabledTypes: [...importsEnabled, ...auditsEnabled],
-      };
-    }
-  }
-
-  return {
-    runId,
-    siteId,
-    status: syncError ? 'failed' : 'accepted',
-    setup: {
-      imports: { enabled: importsEnabled, alreadyEnabled: importsAlreadyEnabled },
-      audits: { enabled: auditsEnabled, alreadyEnabled: auditsAlreadyEnabled },
-    },
-    enqueued,
-    skipped,
-    teardown: teardownResult,
-    ...(syncError ? { error: { code: 'SYNC_FAILURE', message: 'Insights run failed' } } : {}),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Batch endpoint (POST handler)
+// Batch endpoint (POST handler; also used for single-site via [siteId])
 // ---------------------------------------------------------------------------
 
 export async function runInsightsBatch(siteIds, body, context) {
   const {
     dataAccess, s3, env, log,
   } = context;
-  const { Site, Configuration } = dataAccess;
+  const { Site, Configuration, Organization } = dataAccess;
   const batchId = randomUUID();
   const uniqueSiteIds = [...new Set(siteIds)];
   const effectiveSiteIds = uniqueSiteIds.slice(0, MAX_BATCH_SITES);
@@ -440,6 +431,7 @@ export async function runInsightsBatch(siteIds, body, context) {
           importsEnabled,
           auditsEnabled,
           baseURL: site.getBaseURL(),
+          organizationId: site.getOrganizationId(),
         };
       }
     } catch (error) {
@@ -504,44 +496,42 @@ export async function runInsightsBatch(siteIds, body, context) {
       .catch((e) => log.error(`Failed to write result for ${siteId}`, e));
   }
 
-  // Phase 4: Schedule teardowns
-  const allAuditsEnabled = {};
+  // Phase 4: One onboard-compatible teardown execution per site (imports and/or audits)
+  const profileName = body.preset ?? 'plg-full';
   for (const [siteId, setup] of Object.entries(perSiteSetup)) {
-    if (setup.auditsEnabled.length > 0) {
-      allAuditsEnabled[siteId] = setup.auditsEnabled;
+    if (setup.importsEnabled.length === 0 && setup.auditsEnabled.length === 0) {
+      // eslint-disable-next-line no-continue
+      continue;
     }
-  }
-
-  if (Object.keys(allAuditsEnabled).length > 0) {
+    if (!setup.organizationId) {
+      log.error(`Batch ${batchId}: site ${siteId} has no organization; skipping teardown schedule`);
+      // eslint-disable-next-line no-continue
+      continue;
+    }
     try {
-      await scheduleBatchAuditTeardown({
-        batchId,
-        allAuditsEnabled,
+      // eslint-disable-next-line no-await-in-loop
+      const organization = await Organization.findById(setup.organizationId);
+      if (!organization) {
+        log.error(`Batch ${batchId}: organization not found for site ${siteId}; skipping teardown`);
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await scheduleTeardown({
+        siteId,
+        baseURL: setup.baseURL,
+        imsOrgId: organization.getImsOrgId(),
+        organizationId: organization.getId(),
+        importsEnabled: setup.importsEnabled,
+        auditsEnabled: setup.auditsEnabled,
+        opportunityStatusAuditTypes: auditTypes,
+        profileName,
         delaySeconds: teardownDelaySeconds,
         env,
         log,
       });
     } catch (error) {
-      log.error(`Batch ${batchId}: failed to schedule audit teardown`, error);
-    }
-  }
-
-  for (const [siteId, setup] of Object.entries(perSiteSetup)) {
-    if (setup.importsEnabled.length > 0) {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await scheduleTeardown({
-          siteId,
-          baseURL: setup.baseURL,
-          importsEnabled: setup.importsEnabled,
-          auditsEnabled: [],
-          delaySeconds: teardownDelaySeconds,
-          env,
-          log,
-        });
-      } catch (error) {
-        log.error(`Batch ${batchId}: failed to schedule import teardown for site ${siteId}`, error);
-      }
+      log.error(`Batch ${batchId}: failed to schedule teardown for site ${siteId}`, error);
     }
   }
 

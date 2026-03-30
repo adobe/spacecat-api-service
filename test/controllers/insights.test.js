@@ -21,7 +21,6 @@ use(sinonChai);
 
 describe('Insights Controller', () => {
   let InsightsController;
-  let runInsightsForSiteStub;
   let runInsightsBatchStub;
   let readBatchStatusStub;
   let accessControlStub;
@@ -29,19 +28,16 @@ describe('Insights Controller', () => {
   const VALID_UUID = '123e4567-e89b-12d3-a456-426614174000';
 
   beforeEach(async () => {
-    runInsightsForSiteStub = sinon.stub();
     runInsightsBatchStub = sinon.stub();
     readBatchStatusStub = sinon.stub();
     accessControlStub = {
-      hasAccess: sinon.stub().resolves(true),
       hasAdminAccess: sinon.stub().returns(true),
     };
 
     const mod = await esmock('../../src/controllers/insights.js', {
       '../../src/support/insights-run-service.js': {
-        runInsightsForSite: runInsightsForSiteStub,
         runInsightsBatch: runInsightsBatchStub,
-        MAX_BATCH_SITES: 500,
+        MAX_BATCH_SITES: 600,
         PRESETS: { 'plg-full': {} },
       },
       '../../src/support/insights-batch-store.js': {
@@ -63,7 +59,7 @@ describe('Insights Controller', () => {
   function createCtx(overrides = {}) {
     return {
       dataAccess: {
-        Site: { findById: sinon.stub().resolves({ getId: () => VALID_UUID }) },
+        Site: {},
       },
       log: {
         info: sinon.stub(),
@@ -82,103 +78,6 @@ describe('Insights Controller', () => {
 
     it('throws when dataAccess is null', () => {
       expect(() => InsightsController({ dataAccess: null })).to.throw();
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // run()
-  // -----------------------------------------------------------------------
-  describe('run()', () => {
-    it('returns 400 for invalid siteId', async () => {
-      const ctx = createCtx();
-      const { run } = InsightsController(ctx);
-
-      const response = await run({ params: { siteId: 'not-a-uuid' } });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 404 when site not found', async () => {
-      const ctx = createCtx();
-      ctx.dataAccess.Site.findById.resolves(null);
-      const { run } = InsightsController(ctx);
-
-      const response = await run({ params: { siteId: VALID_UUID } });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns 403 when access denied', async () => {
-      const ctx = createCtx();
-      accessControlStub.hasAccess.resolves(false);
-      const { run } = InsightsController(ctx);
-
-      const response = await run({ params: { siteId: VALID_UUID } });
-      expect(response.status).to.equal(403);
-    });
-
-    it('returns 400 for invalid preset', async () => {
-      const ctx = createCtx();
-      const { run } = InsightsController(ctx);
-
-      const response = await run({
-        params: { siteId: VALID_UUID },
-        data: { preset: 'invalid-preset' },
-      });
-      expect(response.status).to.equal(400);
-      const body = await response.json();
-      expect(body.message).to.include('Unknown preset');
-    });
-
-    it('returns 200 on success', async () => {
-      const ctx = createCtx();
-      runInsightsForSiteStub.resolves({ status: 'accepted', siteId: VALID_UUID });
-      const { run } = InsightsController(ctx);
-
-      const response = await run({
-        params: { siteId: VALID_UUID },
-        data: { preset: 'plg-full' },
-      });
-      expect(response.status).to.equal(200);
-    });
-
-    it('returns 500 when service returns failed', async () => {
-      const ctx = createCtx();
-      runInsightsForSiteStub.resolves({ status: 'failed' });
-      const { run } = InsightsController(ctx);
-
-      const response = await run({
-        params: { siteId: VALID_UUID },
-        data: {},
-      });
-      expect(response.status).to.equal(500);
-    });
-
-    it('returns 500 on unexpected error', async () => {
-      const ctx = createCtx();
-      runInsightsForSiteStub.rejects(new Error('unexpected'));
-      const { run } = InsightsController(ctx);
-
-      const response = await run({
-        params: { siteId: VALID_UUID },
-        data: {},
-      });
-      expect(response.status).to.equal(500);
-    });
-
-    it('handles missing params gracefully', async () => {
-      const ctx = createCtx();
-      const { run } = InsightsController(ctx);
-
-      const response = await run({});
-      expect(response.status).to.equal(400);
-    });
-
-    it('handles missing data gracefully', async () => {
-      const ctx = createCtx();
-      runInsightsForSiteStub.resolves({ status: 'accepted' });
-      const { run } = InsightsController(ctx);
-
-      const response = await run({ params: { siteId: VALID_UUID } });
-      expect(response.status).to.equal(200);
     });
   });
 
@@ -213,7 +112,7 @@ describe('Insights Controller', () => {
     it('returns 400 when siteIds exceeds max', async () => {
       const ctx = createCtx();
       const { batchRun } = InsightsController(ctx);
-      const ids = Array.from({ length: 501 }, () => VALID_UUID);
+      const ids = Array.from({ length: 601 }, () => VALID_UUID);
 
       const response = await batchRun({ data: { siteIds: ids } });
       expect(response.status).to.equal(400);

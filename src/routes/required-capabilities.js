@@ -442,7 +442,6 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/sandbox/audit': 'site:write',
 
   // Insights orchestration
-  'POST /sites/:siteId/insights/run': 'site:write',
   'POST /insights/run/batch': 'site:write',
   'GET /insights/run/batch/:batchId/status': 'site:read',
 

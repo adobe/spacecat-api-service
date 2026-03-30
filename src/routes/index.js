@@ -482,7 +482,6 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
 
     // Insights orchestration routes
-    'POST /sites/:siteId/insights/run': insightsController.run,
     'POST /insights/run/batch': insightsController.batchRun,
     'GET /insights/run/batch/:batchId/status': insightsController.batchStatus,
 

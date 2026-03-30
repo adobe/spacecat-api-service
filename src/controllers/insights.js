@@ -22,11 +22,9 @@ import {
   forbidden,
   internalServerError,
   ok,
-  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import {
-  runInsightsForSite,
   runInsightsBatch,
   MAX_BATCH_SITES,
   PRESETS,
@@ -34,55 +32,17 @@ import {
 import { readBatchStatus } from '../support/insights-batch-store.js';
 
 /**
- * Insights Controller — orchestrates one-shot imports + audits for a site or batch of sites.
+ * Insights Controller — one-shot imports + audits via batch API only.
  *
  * @param {Object} ctx - Application context with dataAccess, sqs, env, log.
- * @returns {Object} Controller with run and batchRun methods.
+ * @returns {Object} Controller with batchRun and batchStatus.
  */
 function InsightsController(ctx) {
   if (!isNonEmptyObject(ctx?.dataAccess)) {
     throw new Error('Valid data access configuration required');
   }
 
-  const { dataAccess, log } = ctx;
-  const { Site } = dataAccess;
-
-  /**
-   * POST /sites/:siteId/insights/run
-   * Trigger a one-shot insights run for a single site.
-   */
-  const run = async (context) => {
-    const { siteId } = context.params || {};
-    if (!isValidUUID(siteId)) {
-      return badRequest('Valid siteId path parameter is required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!isNonEmptyObject(site)) {
-      return notFound(`Site not found: ${siteId}`);
-    }
-
-    const accessControlUtil = AccessControlUtil.fromContext(ctx);
-    const hasAccess = await accessControlUtil.hasAccess(site);
-    if (!hasAccess) {
-      return forbidden('Insufficient access to this site');
-    }
-
-    const body = context.data || {};
-    if (body.preset && !PRESETS[body.preset]) {
-      return badRequest(`Unknown preset: ${body.preset}. Available: ${Object.keys(PRESETS).join(', ')}`);
-    }
-
-    try {
-      const result = await runInsightsForSite(siteId, body, ctx);
-
-      const statusCode = result.status === 'failed' ? 500 : 200;
-      return createResponse(result, statusCode);
-    } catch (error) {
-      log.error('Insights run failed', error);
-      return internalServerError('Failed to run insights');
-    }
-  };
+  const { log } = ctx;
 
   /**
    * POST /insights/run/batch
@@ -150,7 +110,7 @@ function InsightsController(ctx) {
     }
   };
 
-  return { run, batchRun, batchStatus };
+  return { batchRun, batchStatus };
 }
 
 export default InsightsController;

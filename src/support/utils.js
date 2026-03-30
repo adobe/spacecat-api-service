@@ -1415,6 +1415,104 @@ export async function queueDeliveryConfigWriter(
 }
 
 /**
+ * Builds Step Functions input for onboard-workflow.json (four task-processor jobs + wait time).
+ *
+ * @param {Object} params
+ * @param {string} params.siteId
+ * @param {string} params.siteUrl
+ * @param {string} params.imsOrgId
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {{ channelId?: string, threadTs?: string }} [params.slackContext]
+ * @param {string[]} params.opportunityStatusAuditTypes - for opportunity-status-processor
+ * @param {string[]} params.importTypesToDisable - imports disable-import-audit should turn off
+ * @param {string[]} params.auditTypesToDisable - audits disable-import-audit should turn off
+ * @param {boolean} [params.scheduledRun]
+ * @param {string} params.profileName - profile label for cwv-demo-suggestions-processor
+ * @param {Object} params.env - EXPERIENCE_URL, WORKFLOW_WAIT_TIME_IN_SECONDS
+ * @param {number} params.workflowWaitTime - seconds before first workflow step
+ * @param {number} [params.onboardStartTime] - defaults to Date.now()
+ * @returns {Object} workflowInput for StartExecutionCommand
+ */
+export function buildOnboardWorkflowInput({
+  siteId,
+  siteUrl,
+  imsOrgId,
+  organizationId,
+  slackContext = { channelId: '', threadTs: '' },
+  opportunityStatusAuditTypes,
+  importTypesToDisable = [],
+  auditTypesToDisable = [],
+  scheduledRun = false,
+  profileName,
+  env,
+  workflowWaitTime,
+  onboardStartTime = Date.now(),
+}) {
+  const sc = slackContext;
+  const slack = { channelId: sc.channelId ?? '', threadTs: sc.threadTs ?? '' };
+  const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+
+  const opportunityStatusJob = {
+    type: 'opportunity-status-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      auditTypes: opportunityStatusAuditTypes,
+      onboardStartTime,
+      slackContext: slack,
+    },
+  };
+
+  const disableImportAndAuditJob = {
+    type: 'disable-import-audit-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      importTypes: importTypesToDisable,
+      auditTypes: auditTypesToDisable,
+      scheduledRun,
+      slackContext: slack,
+    },
+  };
+
+  const demoURLJob = {
+    type: 'demo-url-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      experienceUrl,
+      slackContext: slack,
+    },
+  };
+
+  const cwvDemoSuggestionsJob = {
+    type: 'cwv-demo-suggestions-processor',
+    siteId,
+    siteUrl,
+    imsOrgId,
+    organizationId,
+    taskContext: {
+      profile: profileName,
+      slackContext: slack,
+    },
+  };
+
+  return {
+    opportunityStatusJob,
+    disableImportAndAuditJob,
+    demoURLJob,
+    cwvDemoSuggestionsJob,
+    workflowWaitTime,
+  };
+}
+
+/**
  * Shared onboarding function used by both modal and command implementations.
  *
  * @param {string} baseURLInput - The site URL input
@@ -1808,70 +1906,31 @@ export const onboardSingleSite = async (
       },
     };
 
+
     const scheduledRun = additionalParams.scheduledRun !== undefined
       ? additionalParams.scheduledRun
       : (profile.config?.scheduledRun || false);
 
     await say(`:information_source: Scheduled run: ${scheduledRun}`);
 
-    // Disable imports and audits job - only disable what was enabled during onboarding
-    const disableImportAndAuditJob = {
-      type: 'disable-import-audit-processor',
+    const workflowInput = buildOnboardWorkflowInput({
       siteId: siteID,
       siteUrl: baseURL,
       imsOrgId: imsOrgID,
       organizationId,
-      taskContext: {
-        importTypes: importsEnabled || [],
-        auditTypes: auditsEnabled || [],
-        scheduledRun,
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
+      slackContext: {
+        channelId: slackContext.channelId,
+        threadTs: slackContext.threadTs,
       },
-    };
-
-    // Demo URL job
-    const demoURLJob = {
-      type: 'demo-url-processor',
-      siteId: siteID,
-      siteUrl: baseURL,
-      imsOrgId: imsOrgID,
-      organizationId,
-      taskContext: {
-        experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
-      },
-    };
-
-    // CWV Demo Suggestions job - add generic CWV suggestions to opportunities
-    const cwvDemoSuggestionsJob = {
-      type: 'cwv-demo-suggestions-processor',
-      siteId: siteID,
-      siteUrl: baseURL,
-      imsOrgId: imsOrgID,
-      organizationId,
-      taskContext: {
-        profile: profileName,
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
-      },
-    };
-
-    // Prepare and start step function workflow with the necessary parameters
-    const workflowInput = {
-      opportunityStatusJob,
-      disableImportAndAuditJob,
-      demoURLJob,
-      cwvDemoSuggestionsJob,
+      opportunityStatusAuditTypes: auditTypes,
+      importTypesToDisable: importsEnabled || [],
+      auditTypesToDisable: auditsEnabled || [],
+      scheduledRun,
+      profileName,
+      env,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
-    };
+      onboardStartTime: Date.now(),
+    });
 
     const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${onboardStartTime}`);
 
