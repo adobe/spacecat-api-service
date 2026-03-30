@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-const BATCH_PREFIX = 'insights-batches';
+const BATCH_PREFIX = 'ephemeral-runs';
 const BATCH_TTL_DAYS = 7;
 const S3_GET_CONCURRENCY = 50;
 const TERMINAL_STATUSES = ['failed', 'not_found', 'enqueue_failed'];
@@ -47,7 +47,7 @@ export async function writeBatchManifest(s3, batchId, manifest) {
 }
 
 /**
- * Write a per-site result to S3 after the worker processes it.
+ * Write a per-site batch outcome to S3 (API writes after setup/enqueue/teardown scheduling).
  * Each site gets its own key — no read-modify-write contention.
  */
 export async function writeSiteResult(s3, batchId, siteId, result) {

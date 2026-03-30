@@ -13,14 +13,17 @@
 /* eslint-env mocha */
 /* eslint-disable max-classes-per-file */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
 import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
 import {
   writeBatchManifest,
   writeSiteResult,
   readBatchStatus,
   BATCH_TTL_DAYS,
-} from '../../src/support/insights-batch-store.js';
+} from '../../src/support/ephemeral-run-batch-store.js';
+
+use(sinonChai);
 
 class MockPutObjectCommand {
   constructor(p) { this.input = p; }
@@ -48,7 +51,7 @@ function makeBody(data) {
   return { Body: { transformToString: () => Promise.resolve(JSON.stringify(data)) } };
 }
 
-describe('insights-batch-store', () => {
+describe('ephemeral-run-batch-store', () => {
   let s3;
 
   beforeEach(() => {
@@ -75,7 +78,7 @@ describe('insights-batch-store', () => {
       expect(s3.sendStub).to.have.been.calledOnce;
       const cmd = s3.sendStub.firstCall.args[0];
       expect(cmd.input.Bucket).to.equal('test-bucket');
-      expect(cmd.input.Key).to.equal('insights-batches/b-1/manifest.json');
+      expect(cmd.input.Key).to.equal('ephemeral-runs/b-1/manifest.json');
       expect(cmd.input.ContentType).to.equal('application/json');
       expect(JSON.parse(cmd.input.Body)).to.deep.equal(manifest);
     });
@@ -90,7 +93,7 @@ describe('insights-batch-store', () => {
 
       expect(s3.sendStub).to.have.been.calledOnce;
       const cmd = s3.sendStub.firstCall.args[0];
-      expect(cmd.input.Key).to.equal('insights-batches/b-1/results/s-1.json');
+      expect(cmd.input.Key).to.equal('ephemeral-runs/b-1/results/s-1.json');
       expect(JSON.parse(cmd.input.Body)).to.deep.equal(result);
     });
   });
@@ -162,7 +165,7 @@ describe('insights-batch-store', () => {
         if (callCount === 1) return Promise.resolve(makeBody(manifest));
         if (callCount === 2) {
           return Promise.resolve({
-            Contents: [{ Key: 'insights-batches/b-1/results/s-1.json' }],
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
             IsTruncated: false,
           });
         }
@@ -199,8 +202,8 @@ describe('insights-batch-store', () => {
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [
-              { Key: 'insights-batches/b-1/results/s-1.json' },
-              { Key: 'insights-batches/b-1/results/s-2.json' },
+              { Key: 'ephemeral-runs/b-1/results/s-1.json' },
+              { Key: 'ephemeral-runs/b-1/results/s-2.json' },
             ],
             IsTruncated: false,
           });
@@ -235,7 +238,7 @@ describe('insights-batch-store', () => {
         if (callCount === 1) return Promise.resolve(makeBody(manifest));
         if (callCount === 2) {
           return Promise.resolve({
-            Contents: [{ Key: 'insights-batches/b-1/results/s-1.json' }],
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
             IsTruncated: false,
           });
         }
@@ -267,7 +270,7 @@ describe('insights-batch-store', () => {
         if (callCount === 1) return Promise.resolve(makeBody(manifest));
         if (callCount === 2) {
           return Promise.resolve({
-            Contents: [{ Key: 'insights-batches/b-1/results/s-1.json' }],
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
             IsTruncated: false,
           });
         }
@@ -296,14 +299,14 @@ describe('insights-batch-store', () => {
         if (callCount === 1) return Promise.resolve(makeBody(manifest));
         if (callCount === 2) {
           return Promise.resolve({
-            Contents: [{ Key: 'insights-batches/b-1/results/s-1.json' }],
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
             IsTruncated: true,
             NextContinuationToken: 'token-1',
           });
         }
         if (callCount === 3) {
           return Promise.resolve({
-            Contents: [{ Key: 'insights-batches/b-1/results/s-2.json' }],
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-2.json' }],
             IsTruncated: false,
           });
         }
@@ -354,7 +357,7 @@ describe('insights-batch-store', () => {
         if (callCount === 1) return Promise.resolve(makeBody(manifest));
         if (callCount === 2) {
           return Promise.resolve({
-            Contents: [{ Key: 'insights-batches/b-1/results/s-1.json' }],
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
             IsTruncated: false,
           });
         }
@@ -383,7 +386,7 @@ describe('insights-batch-store', () => {
         if (callCount === 1) return Promise.resolve(makeBody(manifest));
         if (callCount === 2) {
           return Promise.resolve({
-            Contents: [{ Key: 'insights-batches/b-1/results/s-1.json' }],
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
             IsTruncated: false,
           });
         }

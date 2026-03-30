@@ -25,19 +25,19 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import {
-  runInsightsBatch,
+  runEphemeralRunBatch,
   MAX_BATCH_SITES,
   PRESETS,
-} from '../support/insights-run-service.js';
-import { readBatchStatus } from '../support/insights-batch-store.js';
+} from '../support/ephemeral-run-service.js';
+import { readBatchStatus } from '../support/ephemeral-run-batch-store.js';
 
 /**
- * Insights Controller — one-shot imports + audits via batch API only.
+ * Ephemeral run — time-boxed imports + audits via batch API; teardown via Step Functions.
  *
  * @param {Object} ctx - Application context with dataAccess, sqs, env, log.
  * @returns {Object} Controller with batchRun and batchStatus.
  */
-function InsightsController(ctx) {
+function EphemeralRunController(ctx) {
   if (!isNonEmptyObject(ctx?.dataAccess)) {
     throw new Error('Valid data access configuration required');
   }
@@ -45,8 +45,8 @@ function InsightsController(ctx) {
   const { log } = ctx;
 
   /**
-   * POST /insights/run/batch
-   * Trigger a one-shot insights run for up to MAX_BATCH_SITES sites.
+   * POST /ephemeral-run/batch
+   * Start an ephemeral run for up to MAX_BATCH_SITES sites.
    */
   const batchRun = async (context) => {
     const body = context.data || {};
@@ -71,20 +71,20 @@ function InsightsController(ctx) {
 
     const accessControlUtil = AccessControlUtil.fromContext(ctx);
     if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Batch insights run requires admin access');
+      return forbidden('Ephemeral run batch requires admin access');
     }
 
     try {
-      const result = await runInsightsBatch(siteIds, body, ctx);
+      const result = await runEphemeralRunBatch(siteIds, body, ctx);
       return accepted(result);
     } catch (error) {
-      log.error('Batch insights run failed', error);
-      return internalServerError('Failed to run batch insights');
+      log.error('Ephemeral run batch failed', error);
+      return internalServerError('Failed to run ephemeral run batch');
     }
   };
 
   /**
-   * GET /insights/run/batch/:batchId/status
+   * GET /ephemeral-run/batch/:batchId/status
    * Poll batch progress and per-site results.
    */
   const batchStatus = async (context) => {
@@ -95,7 +95,7 @@ function InsightsController(ctx) {
 
     const accessControlUtil = AccessControlUtil.fromContext(ctx);
     if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Batch status requires admin access');
+      return forbidden('Ephemeral run batch status requires admin access');
     }
 
     try {
@@ -105,7 +105,7 @@ function InsightsController(ctx) {
       }
       return ok(result);
     } catch (error) {
-      log.error(`Failed to read batch status for ${batchId}`, error);
+      log.error(`Failed to read ephemeral run batch status for ${batchId}`, error);
       return internalServerError('Failed to read batch status');
     }
   };
@@ -113,4 +113,4 @@ function InsightsController(ctx) {
   return { batchRun, batchStatus };
 }
 
-export default InsightsController;
+export default EphemeralRunController;

@@ -19,7 +19,7 @@ import {
   sanitizeExecutionName,
   buildOnboardWorkflowInput,
 } from './utils.js';
-import { writeBatchManifest, writeSiteResult, BATCH_TTL_DAYS } from './insights-batch-store.js';
+import { writeBatchManifest, writeSiteResult, BATCH_TTL_DAYS } from './ephemeral-run-batch-store.js';
 
 const sfnClient = new SFNClient();
 
@@ -157,7 +157,7 @@ function resolvePayload(body) {
   const imports = resolveImportsFromPreset(base.imports, body.imports);
 
   const audits = {
-    types: body.audits?.types || base.audits.types,
+    types: body.audits?.types ?? base.audits.types,
   };
 
   const rawDelay = body.teardown?.delaySeconds ?? DEFAULT_TEARDOWN_DELAY_SECONDS;
@@ -230,13 +230,19 @@ async function rollbackImports(Site, perSiteSetup, log) {
 }
 
 function getStateMachineArn(env) {
-  return env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN || env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
+  return env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN
+    || env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN
+    || env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
 }
 
-function insightsWorkflowSlackContext(env) {
+function ephemeralRunWorkflowSlackContext(env) {
   return {
-    channelId: env.INSIGHTS_WORKFLOW_SLACK_CHANNEL_ID || '',
-    threadTs: env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS || '',
+    channelId: env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID
+      || env.INSIGHTS_WORKFLOW_SLACK_CHANNEL_ID
+      || '',
+    threadTs: env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS
+      || env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS
+      || '',
   };
 }
 
@@ -258,14 +264,19 @@ async function scheduleTeardown(params) {
   const stateMachineArn = getStateMachineArn(env);
   if (!stateMachineArn) {
     throw new Error(
-      'Insights teardown requires INSIGHTS_TEARDOWN_STATE_MACHINE_ARN or ONBOARD_WORKFLOW_STATE_MACHINE_ARN',
+      'Ephemeral run teardown requires EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN, '
+      + 'INSIGHTS_TEARDOWN_STATE_MACHINE_ARN (legacy), or ONBOARD_WORKFLOW_STATE_MACHINE_ARN',
     );
   }
 
-  const rawWait = delaySeconds || env.WORKFLOW_WAIT_TIME_IN_SECONDS;
+  // API delay is 0..MAX; 0 means use WORKFLOW_WAIT_TIME_IN_SECONDS (operational default).
+  const rawWait = delaySeconds === 0
+    ? env.WORKFLOW_WAIT_TIME_IN_SECONDS
+    : delaySeconds;
   if (rawWait == null || rawWait === '') {
     throw new Error(
-      'Insights teardown requires teardown.delaySeconds or env WORKFLOW_WAIT_TIME_IN_SECONDS',
+      'Ephemeral run teardown requires a positive teardown.delaySeconds or env WORKFLOW_WAIT_TIME_IN_SECONDS '
+      + '(delaySeconds 0 defers to WORKFLOW_WAIT_TIME_IN_SECONDS)',
     );
   }
   const workflowWaitTime = Number(rawWait);
@@ -278,7 +289,7 @@ async function scheduleTeardown(params) {
     siteUrl: baseURL,
     imsOrgId,
     organizationId,
-    slackContext: insightsWorkflowSlackContext(env),
+    slackContext: ephemeralRunWorkflowSlackContext(env),
     opportunityStatusAuditTypes,
     importTypesToDisable: importsEnabled,
     auditTypesToDisable: auditsEnabled,
@@ -290,7 +301,7 @@ async function scheduleTeardown(params) {
   });
 
   const workflowName = sanitizeExecutionName(
-    `insights-${siteId.slice(0, 8)}-${Date.now()}`,
+    `ephemeral-run-${siteId.slice(0, 8)}-${Date.now()}`,
   );
 
   await sfnClient.send(new StartExecutionCommand({
@@ -310,7 +321,7 @@ async function scheduleTeardown(params) {
 }
 
 // ---------------------------------------------------------------------------
-// Job enqueuing (shared by single-site and batch flows)
+// Job enqueuing (ephemeral run batch)
 // ---------------------------------------------------------------------------
 
 async function enqueueSiteJobs(siteId, resolvedPayload, configuration, context) {
@@ -348,24 +359,25 @@ async function enqueueSiteJobs(siteId, resolvedPayload, configuration, context) 
     onDemand: true,
     slackContext: { channelId: '', threadTs: '' },
   };
-  for (const auditType of audits.types) {
-    if (!auditQueueUrl) {
-      log.error('No audit queue URL: set env AUDIT_JOBS_QUEUE_URL');
+  if (audits.types.length > 0 && !auditQueueUrl) {
+    log.error('No audit queue URL: set env AUDIT_JOBS_QUEUE_URL');
+    for (const auditType of audits.types) {
       skipped.push({
         type: auditType,
         kind: 'audit',
         reason: 'Missing audit jobs queue URL',
       });
-      // eslint-disable-next-line no-continue
-      continue;
     }
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await sendAuditMessage(context.sqs, auditQueueUrl, auditType, auditContext, siteId);
-      enqueued.audits.push({ type: auditType, status: 'queued' });
-    } catch (e) {
-      log.error(`Failed to enqueue audit ${auditType} for site ${siteId}`, e);
-      skipped.push({ type: auditType, kind: 'audit', reason: e.message });
+  } else {
+    for (const auditType of audits.types) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await sendAuditMessage(context.sqs, auditQueueUrl, auditType, auditContext, siteId);
+        enqueued.audits.push({ type: auditType, status: 'queued' });
+      } catch (e) {
+        log.error(`Failed to enqueue audit ${auditType} for site ${siteId}`, e);
+        skipped.push({ type: auditType, kind: 'audit', reason: e.message });
+      }
     }
   }
 
@@ -373,10 +385,10 @@ async function enqueueSiteJobs(siteId, resolvedPayload, configuration, context) 
 }
 
 // ---------------------------------------------------------------------------
-// Batch endpoint (POST handler; also used for single-site via [siteId])
+// Batch endpoint (POST handler)
 // ---------------------------------------------------------------------------
 
-export async function runInsightsBatch(siteIds, body, context) {
+export async function runEphemeralRunBatch(siteIds, body, context) {
   const {
     dataAccess, s3, env, log,
   } = context;

@@ -22,10 +22,10 @@ import {
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,
-  runInsightsBatch,
+  runEphemeralRunBatch,
   PRESETS,
   MAX_BATCH_SITES,
-} from '../../src/support/insights-run-service.js';
+} from '../../src/support/ephemeral-run-service.js';
 
 use(sinonChai);
 
@@ -121,7 +121,7 @@ function createMockContext(overrides = {}) {
   };
 }
 
-describe('insights-run-service', () => {
+describe('ephemeral-run-service', () => {
   let sfnSendStub;
 
   beforeEach(() => {
@@ -386,9 +386,9 @@ describe('insights-run-service', () => {
   });
 
   // -----------------------------------------------------------------------
-  // runInsightsBatch
+  // runEphemeralRunBatch
   // -----------------------------------------------------------------------
-  describe('runInsightsBatch()', () => {
+  describe('runEphemeralRunBatch()', () => {
     it('enables imports/audits, enqueues jobs, and schedules teardowns inline', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
@@ -396,7 +396,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      const result = await runInsightsBatch(['s-1'], {
+      const result = await runEphemeralRunBatch(['s-1'], {
         imports: { types: ['top-pages'] },
         audits: { types: ['lhs-mobile'] },
       }, ctx);
@@ -425,7 +425,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], { preset: 'plg-full' }, ctx);
+      await runEphemeralRunBatch(['s-1'], { preset: 'plg-full' }, ctx);
 
       expect(sfnSendStub).to.have.been.called;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
@@ -446,7 +446,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], {}, ctx);
+      await runEphemeralRunBatch(['s-1'], {}, ctx);
 
       expect(sfnSendStub).to.not.have.been.called;
     });
@@ -459,7 +459,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], {
+      await runEphemeralRunBatch(['s-1'], {
         imports: { types: ['top-pages'] },
         teardown: { delaySeconds: 0 },
       }, ctx);
@@ -468,8 +468,9 @@ describe('insights-run-service', () => {
       expect(input.workflowWaitTime).to.equal(7200);
     });
 
-    it('uses fallback state machine ARN when INSIGHTS teardown ARN unset', async () => {
+    it('uses fallback state machine ARN when primary teardown ARNs unset', async () => {
       const ctx = createMockContext();
+      delete ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN;
       delete ctx.env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN;
       ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN = 'arn:fallback';
       const site = createMockSite();
@@ -477,7 +478,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
 
       const cmd = sfnSendStub.firstCall.args[0];
       expect(cmd.input.stateMachineArn).to.equal('arn:fallback');
@@ -491,7 +492,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
 
       expect(sfnSendStub).to.not.have.been.called;
       expect(ctx.log.error).to.have.been.calledWithMatch(/no organization/);
@@ -502,7 +503,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(createMockSite());
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
 
-      const result = await runInsightsBatch(['s-1', 's-1', 's-2'], {}, ctx);
+      const result = await runEphemeralRunBatch(['s-1', 's-1', 's-2'], {}, ctx);
 
       expect(result.total).to.equal(2);
     });
@@ -513,7 +514,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
       const ids = Array.from({ length: 600 }, (_, i) => `s-${i}`);
 
-      const result = await runInsightsBatch(ids, {}, ctx);
+      const result = await runEphemeralRunBatch(ids, {}, ctx);
 
       expect(result.total).to.equal(MAX_BATCH_SITES);
     });
@@ -523,7 +524,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(null);
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
 
-      await runInsightsBatch(['s-missing'], {}, ctx);
+      await runEphemeralRunBatch(['s-missing'], {}, ctx);
 
       const putCall = ctx.s3.s3Client.send.getCalls().find(
         (c) => c.args[0].input?.Key?.includes('results/s-missing.json'),
@@ -541,7 +542,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      const result = await runInsightsBatch(['s-1'], {
+      const result = await runEphemeralRunBatch(['s-1'], {
         imports: { types: ['top-pages'] },
       }, ctx);
 
@@ -560,7 +561,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], {
+      await runEphemeralRunBatch(['s-1'], {
         imports: { types: ['top-pages'] },
       }, ctx);
 
@@ -575,7 +576,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.rejects(new Error('DB error'));
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
 
-      await runInsightsBatch(['s-1'], {}, ctx);
+      await runEphemeralRunBatch(['s-1'], {}, ctx);
 
       expect(ctx.s3.s3Client.send).to.have.been.called;
     });
@@ -588,7 +589,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       ctx.sqs.sendMessage.rejects(new Error('SQS down'));
 
-      await runInsightsBatch(['s-1'], {
+      await runEphemeralRunBatch(['s-1'], {
         imports: { types: ['top-pages'] },
       }, ctx);
 
@@ -602,7 +603,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], {
+      await runEphemeralRunBatch(['s-1'], {
         imports: { types: ['top-pages'] },
         audits: { types: [] },
       }, ctx);
@@ -620,7 +621,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], {
+      await runEphemeralRunBatch(['s-1'], {
         imports: { types: [] },
         audits: { types: ['lhs-mobile'] },
       }, ctx);
@@ -639,7 +640,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runInsightsBatch(['s-1'], {
+      await runEphemeralRunBatch(['s-1'], {
         audits: { types: ['lhs-mobile'] },
         teardown: { delaySeconds: 0 },
       }, ctx);
@@ -657,7 +658,7 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       sfnSendStub.rejects(new Error('SFN down'));
 
-      await runInsightsBatch(['s-1'], { preset: 'plg-full' }, ctx);
+      await runEphemeralRunBatch(['s-1'], { preset: 'plg-full' }, ctx);
 
       expect(ctx.log.error).to.have.been.called;
     });

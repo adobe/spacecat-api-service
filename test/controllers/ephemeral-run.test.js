@@ -19,28 +19,28 @@ import esmock from 'esmock';
 
 use(sinonChai);
 
-describe('Insights Controller', () => {
-  let InsightsController;
-  let runInsightsBatchStub;
+describe('ephemeral-run controller', () => {
+  let EphemeralRunController;
+  let runEphemeralRunBatchStub;
   let readBatchStatusStub;
   let accessControlStub;
 
   const VALID_UUID = '123e4567-e89b-12d3-a456-426614174000';
 
   beforeEach(async () => {
-    runInsightsBatchStub = sinon.stub();
+    runEphemeralRunBatchStub = sinon.stub();
     readBatchStatusStub = sinon.stub();
     accessControlStub = {
       hasAdminAccess: sinon.stub().returns(true),
     };
 
-    const mod = await esmock('../../src/controllers/insights.js', {
-      '../../src/support/insights-run-service.js': {
-        runInsightsBatch: runInsightsBatchStub,
+    const mod = await esmock('../../src/controllers/ephemeral-run.js', {
+      '../../src/support/ephemeral-run-service.js': {
+        runEphemeralRunBatch: runEphemeralRunBatchStub,
         MAX_BATCH_SITES: 600,
         PRESETS: { 'plg-full': {} },
       },
-      '../../src/support/insights-batch-store.js': {
+      '../../src/support/ephemeral-run-batch-store.js': {
         readBatchStatus: readBatchStatusStub,
       },
       '../../src/support/access-control-util.js': {
@@ -49,7 +49,7 @@ describe('Insights Controller', () => {
         },
       },
     });
-    InsightsController = mod.default;
+    EphemeralRunController = mod.default;
   });
 
   afterEach(() => {
@@ -73,11 +73,11 @@ describe('Insights Controller', () => {
 
   describe('constructor', () => {
     it('throws when dataAccess is missing', () => {
-      expect(() => InsightsController({})).to.throw('Valid data access configuration required');
+      expect(() => EphemeralRunController({})).to.throw('Valid data access configuration required');
     });
 
     it('throws when dataAccess is null', () => {
-      expect(() => InsightsController({ dataAccess: null })).to.throw();
+      expect(() => EphemeralRunController({ dataAccess: null })).to.throw();
     });
   });
 
@@ -87,7 +87,7 @@ describe('Insights Controller', () => {
   describe('batchRun()', () => {
     it('returns 400 when siteIds is missing', async () => {
       const ctx = createCtx();
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({ data: {} });
       expect(response.status).to.equal(400);
@@ -95,7 +95,7 @@ describe('Insights Controller', () => {
 
     it('returns 400 when siteIds is empty', async () => {
       const ctx = createCtx();
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({ data: { siteIds: [] } });
       expect(response.status).to.equal(400);
@@ -103,7 +103,7 @@ describe('Insights Controller', () => {
 
     it('returns 400 when siteIds is not an array', async () => {
       const ctx = createCtx();
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({ data: { siteIds: 'not-array' } });
       expect(response.status).to.equal(400);
@@ -111,7 +111,7 @@ describe('Insights Controller', () => {
 
     it('returns 400 when siteIds exceeds max', async () => {
       const ctx = createCtx();
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
       const ids = Array.from({ length: 601 }, () => VALID_UUID);
 
       const response = await batchRun({ data: { siteIds: ids } });
@@ -120,7 +120,7 @@ describe('Insights Controller', () => {
 
     it('returns 400 for invalid UUIDs in siteIds', async () => {
       const ctx = createCtx();
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({ data: { siteIds: ['not-uuid', VALID_UUID] } });
       expect(response.status).to.equal(400);
@@ -130,7 +130,7 @@ describe('Insights Controller', () => {
 
     it('returns 400 for invalid preset', async () => {
       const ctx = createCtx();
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({
         data: { siteIds: [VALID_UUID], preset: 'bad-preset' },
@@ -141,7 +141,7 @@ describe('Insights Controller', () => {
     it('returns 403 when not admin', async () => {
       const ctx = createCtx();
       accessControlStub.hasAdminAccess.returns(false);
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({ data: { siteIds: [VALID_UUID] } });
       expect(response.status).to.equal(403);
@@ -149,8 +149,8 @@ describe('Insights Controller', () => {
 
     it('returns 202 on success', async () => {
       const ctx = createCtx();
-      runInsightsBatchStub.resolves({ batchId: 'b-1', total: 1 });
-      const { batchRun } = InsightsController(ctx);
+      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({ data: { siteIds: [VALID_UUID] } });
       expect(response.status).to.equal(202);
@@ -158,8 +158,8 @@ describe('Insights Controller', () => {
 
     it('returns 500 on service error', async () => {
       const ctx = createCtx();
-      runInsightsBatchStub.rejects(new Error('fail'));
-      const { batchRun } = InsightsController(ctx);
+      runEphemeralRunBatchStub.rejects(new Error('fail'));
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({ data: { siteIds: [VALID_UUID] } });
       expect(response.status).to.equal(500);
@@ -167,7 +167,7 @@ describe('Insights Controller', () => {
 
     it('handles undefined context.data', async () => {
       const ctx = createCtx();
-      const { batchRun } = InsightsController(ctx);
+      const { batchRun } = EphemeralRunController(ctx);
 
       const response = await batchRun({});
       expect(response.status).to.equal(400);
@@ -180,7 +180,7 @@ describe('Insights Controller', () => {
   describe('batchStatus()', () => {
     it('returns 400 for invalid batchId', async () => {
       const ctx = createCtx();
-      const { batchStatus } = InsightsController(ctx);
+      const { batchStatus } = EphemeralRunController(ctx);
 
       const response = await batchStatus({ params: { batchId: 'bad' } });
       expect(response.status).to.equal(400);
@@ -189,7 +189,7 @@ describe('Insights Controller', () => {
     it('returns 403 when not admin', async () => {
       const ctx = createCtx();
       accessControlStub.hasAdminAccess.returns(false);
-      const { batchStatus } = InsightsController(ctx);
+      const { batchStatus } = EphemeralRunController(ctx);
 
       const response = await batchStatus({ params: { batchId: VALID_UUID } });
       expect(response.status).to.equal(403);
@@ -198,7 +198,7 @@ describe('Insights Controller', () => {
     it('returns 404 when batch not found', async () => {
       const ctx = createCtx();
       readBatchStatusStub.resolves(null);
-      const { batchStatus } = InsightsController(ctx);
+      const { batchStatus } = EphemeralRunController(ctx);
 
       const response = await batchStatus({ params: { batchId: VALID_UUID } });
       expect(response.status).to.equal(404);
@@ -207,7 +207,7 @@ describe('Insights Controller', () => {
     it('returns 200 with status data', async () => {
       const ctx = createCtx();
       readBatchStatusStub.resolves({ batchId: VALID_UUID, status: 'completed' });
-      const { batchStatus } = InsightsController(ctx);
+      const { batchStatus } = EphemeralRunController(ctx);
 
       const response = await batchStatus({ params: { batchId: VALID_UUID } });
       expect(response.status).to.equal(200);
@@ -218,7 +218,7 @@ describe('Insights Controller', () => {
     it('returns 500 on read error', async () => {
       const ctx = createCtx();
       readBatchStatusStub.rejects(new Error('S3 down'));
-      const { batchStatus } = InsightsController(ctx);
+      const { batchStatus } = EphemeralRunController(ctx);
 
       const response = await batchStatus({ params: { batchId: VALID_UUID } });
       expect(response.status).to.equal(500);
@@ -226,7 +226,7 @@ describe('Insights Controller', () => {
 
     it('handles missing params', async () => {
       const ctx = createCtx();
-      const { batchStatus } = InsightsController(ctx);
+      const { batchStatus } = EphemeralRunController(ctx);
 
       const response = await batchStatus({});
       expect(response.status).to.equal(400);
