@@ -16,8 +16,7 @@ import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
-import { AUDIT_OPPORTUNITY_MAP } from '@adobe/spacecat-shared-utils';
-import { computeAuditCompletion } from '../../../../src/support/slack/commands/onboard-status.js';
+import { AUDIT_OPPORTUNITY_MAP, computeAuditCompletion } from '@adobe/spacecat-shared-utils';
 
 use(sinonChai);
 

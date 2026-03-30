@@ -14,55 +14,12 @@ import {
   getAuditsForOpportunity,
   getOpportunityTitle,
   AUDIT_OPPORTUNITY_MAP,
+  computeAuditCompletion,
 } from '@adobe/spacecat-shared-utils';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import BaseCommand from './base.js';
 
 const PHRASES = ['onboard status'];
-
-/**
- * Computes which audit types are pending vs completed from already-fetched audit records.
- * Uses onboardConfig.lastStartTime (persisted during onboarding) as the trigger anchor —
- * the same value the task processor reads as onboardStartTime from the message context.
- * An audit is pending if its record predates the trigger or doesn't exist yet.
- * If lastStartTime is absent (site onboarded before this feature), any existing record
- * is treated as completed — only a missing record counts as pending.
- * Pure function — no DB calls.
- *
- * @param {string[]} auditTypes
- * @param {number|undefined} lastStartTime - onboardConfig.lastStartTime from site config
- * @param {Array} latestAudits - records from LatestAudit.allBySiteId
- * @returns {{pendingAuditTypes: string[], completedAuditTypes: string[]}}
- */
-export function computeAuditCompletion(auditTypes, lastStartTime, latestAudits) {
-  const pendingAuditTypes = [];
-  const completedAuditTypes = [];
-  const auditsByType = {};
-  if (latestAudits) {
-    for (const audit of latestAudits) {
-      auditsByType[audit.getAuditType()] = audit;
-    }
-  }
-  for (const auditType of auditTypes) {
-    const audit = auditsByType[auditType];
-    if (!audit) {
-      pendingAuditTypes.push(auditType);
-    } else if (lastStartTime) {
-      const auditedAt = new Date(audit.getAuditedAt()).getTime();
-      // auditedAt <= lastStartTime means the record predates or ties with the trigger —
-      // treat as pending. An exact match is rare but indicates an in-flight audit.
-      if (auditedAt <= lastStartTime) {
-        pendingAuditTypes.push(auditType);
-      } else {
-        completedAuditTypes.push(auditType);
-      }
-    } else {
-      // No onboard start time recorded — treat existing record as completed.
-      completedAuditTypes.push(auditType);
-    }
-  }
-  return { pendingAuditTypes, completedAuditTypes };
-}
 
 /**
  * Factory function to create the OnboardStatusCommand object.
