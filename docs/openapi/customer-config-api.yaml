@@ -605,8 +605,41 @@ v2-prompts-by-brand:
                   type: integer
                 prompts:
                   type: array
+                  description: Simplified prompt objects (no uuid, category, or topic — use GET to fetch full details)
                   items:
-                    $ref: './schemas.yaml#/V2Prompt'
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        description: Business key (prompt_id)
+                      prompt:
+                        type: string
+                      regions:
+                        type: array
+                        items:
+                          type: string
+                      categoryId:
+                        type:
+                          - string
+                          - 'null'
+                      topicId:
+                        type:
+                          - string
+                          - 'null'
+                      status:
+                        type: string
+                      origin:
+                        type: string
+                      source:
+                        type: string
+                      updatedBy:
+                        type:
+                          - string
+                          - 'null'
+                      updatedAt:
+                        type:
+                          - string
+                          - 'null'
       '400':
         $ref: './responses.yaml#/400'
       '404':
