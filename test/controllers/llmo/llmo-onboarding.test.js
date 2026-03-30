@@ -53,6 +53,21 @@ describe('LLMO Onboarding Functions', () => {
       },
     };
 
+    // Default feature_flags stub so all v2-path tests get a working postgrestClient.
+    // Individual tests can override with .withArgs('feature_flags') for specific assertions.
+    const defaultUpsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+    const defaultUpsertSelect = sinon.stub().returns({ single: defaultUpsertSingle });
+    const defaultUpsert = sinon.stub().returns({ select: defaultUpsertSelect });
+    const defaultMaybeSingle = sinon.stub().resolves({ data: null, error: null });
+    const defaultEq3 = sinon.stub().returns({ maybeSingle: defaultMaybeSingle });
+    const defaultEq2 = sinon.stub().returns({ eq: defaultEq3 });
+    const defaultEq1 = sinon.stub().returns({ eq: defaultEq2 });
+    const defaultSelect = sinon.stub().returns({ eq: defaultEq1 });
+    mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+      select: defaultSelect,
+      upsert: defaultUpsert,
+    });
+
     // Create mock log
     mockLog = {
       info: sinon.stub(),
@@ -1265,6 +1280,26 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
+      // Stub postgrestClient for feature flag read (resolveLlmoOnboardingMode)
+      // and upsert (enabling brandalf during v2 onboarding)
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({
+        data: {
+          organization_id: 'org123', product: 'LLMO', flag_name: 'brandalf', flag_value: true,
+        },
+        error: null,
+      });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
@@ -1376,6 +1411,17 @@ describe('LLMO Onboarding Functions', () => {
       expect(writtenConfig.customer.customerName).to.equal('Test Brand');
       expect(writtenConfig.customer.brands[0].v1SiteId).to.equal('site123');
       expect(writtenConfig.customer.brands[0].baseUrl).to.equal('https://example.com');
+
+      // Verify brandalf feature flag was enabled during v2 onboarding
+      expect(upsertStub).to.have.been.calledOnce;
+      expect(upsertStub.firstCall.args[0]).to.deep.include({
+        organization_id: 'org123',
+        product: 'LLMO',
+        flag_name: 'brandalf',
+        flag_value: true,
+        updated_by: 'llmo-onboarding',
+      });
+      expect(mockLog.info).to.have.been.calledWith('Enabled brandalf feature flag for organization org123');
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
