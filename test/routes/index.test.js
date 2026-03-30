@@ -317,6 +317,7 @@ describe('getRouteHandlers', () => {
 
   const mockSiteEnrollmentController = {
     getBySiteID: () => null,
+    createPlgEnrollment: () => null,
   };
 
   const mockTrialUserController = {
@@ -385,6 +386,12 @@ describe('getRouteHandlers', () => {
     revokeGrant: sinon.stub(),
   };
 
+  const mockFeatureFlagsController = {
+    listByOrganization: () => null,
+    putByOrganizationProductAndName: () => null,
+    deleteByOrganizationProductAndName: () => null,
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -430,6 +437,7 @@ describe('getRouteHandlers', () => {
       mockConsumersController,
       mockPlgOnboardingController,
       mockImsOrgAccessController,
+      mockFeatureFlagsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -546,6 +554,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/entitlements',
+      'GET /organizations/:organizationId/feature-flags',
       'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
       'GET /organizations/:organizationId/userDetails/:externalUserId',
@@ -554,6 +563,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
+      'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
+      'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
       'DELETE /organizations/:organizationId',
       'GET /preflight/jobs/:jobId',
       'GET /projects/:projectId',
@@ -580,6 +591,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'GET /sites/:siteId/site-enrollments',
+      'POST /sites/:siteId/site-enrollments',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'DELETE /tools/api-keys/:id',
@@ -799,8 +811,14 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId/slack-config'].paramNames).to.deep.equal(['imsOrgId']);
     expect(dynamicRoutes['GET /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.getByOrganizationID);
     expect(dynamicRoutes['GET /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].handler).to.equal(mockFeatureFlagsController.listByOrganization);
+    expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.createEntitlement);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.putByOrganizationProductAndName);
+    expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].paramNames).to.deep.equal(['organizationId', 'product', 'flagName']);
+    expect(dynamicRoutes['DELETE /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.deleteByOrganizationProductAndName);
+    expect(dynamicRoutes['DELETE /organizations/:organizationId/feature-flags/:product/:flagName'].paramNames).to.deep.equal(['organizationId', 'product', 'flagName']);
     expect(dynamicRoutes['GET /sites/:siteId'].handler).to.equal(mockSitesController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].handler).to.equal(mockSitesController.getAllByDeliveryType);
