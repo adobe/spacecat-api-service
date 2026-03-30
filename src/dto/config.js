@@ -27,6 +27,45 @@ const sanitizeConfig = (config) => {
   return json;
 };
 
+const toListJSON = (config) => {
+  if (!isNonEmptyObject(config)) {
+    return null;
+  }
+  const json = Config.toDynamoItem(config);
+  if (!json) {
+    return null;
+  }
+
+  const result = {};
+  if (isNonEmptyObject(json.llmo)) {
+    result.llmo = {};
+    const {
+      dataFolder, brand, tags, customerIntent,
+    } = json.llmo;
+    if (dataFolder) result.llmo.dataFolder = dataFolder;
+    if (brand) result.llmo.brand = brand;
+    if (tags) result.llmo.tags = tags;
+    if (customerIntent) result.llmo.customerIntent = customerIntent;
+  }
+  if (isNonEmptyObject(json.edgeOptimizeConfig)) {
+    result.edgeOptimizeConfig = json.edgeOptimizeConfig;
+  }
+  if (isNonEmptyObject(json.slack)) {
+    result.slack = json.slack;
+  }
+  if (isNonEmptyObject(json.brandConfig)) {
+    result.brandConfig = json.brandConfig;
+  }
+  if (isNonEmptyObject(json.fetchConfig)) {
+    result.fetchConfig = json.fetchConfig;
+  }
+  if (isNonEmptyObject(json.handlers)) {
+    result.handlers = json.handlers;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+};
+
 export const ConfigDto = {
   toJSON: sanitizeConfig,
+  toListJSON,
 };

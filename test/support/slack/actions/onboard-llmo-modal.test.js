@@ -124,6 +124,17 @@ describe('onboard-llmo-modal', () => {
     sendMessage: sinonSandbox.stub(),
   });
 
+  const createDefaultMockPostgrestClient = (sinonSandbox) => ({
+    from: sinonSandbox.stub().callsFake(() => ({
+      select: sinonSandbox.stub().returns({
+        eq: sinonSandbox.stub().returns({
+          maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
+        }),
+      }),
+      upsert: sinonSandbox.stub().resolves({ error: null }),
+    })),
+  });
+
   const createDefaultMockLambdaCtx = (sinonSandbox, overrides = {}) => {
     const mockSite = overrides.mockSite || createDefaultMockSite(sinonSandbox);
     const mockConfiguration = overrides.mockConfiguration
@@ -140,6 +151,8 @@ describe('onboard-llmo-modal', () => {
     const mockImsClient = overrides.mockImsClient
       || createDefaultMockImsClient(sinonSandbox);
     const mockSqs = overrides.mockSqs || createDefaultMockSqs(sinonSandbox);
+    const mockPostgrestClient = overrides.mockPostgrestClient
+      || createDefaultMockPostgrestClient(sinonSandbox);
 
     return {
       log: {
@@ -154,7 +167,9 @@ describe('onboard-llmo-modal', () => {
         Organization: mockOrganization,
         Entitlement: mockEntitlement,
         SiteEnrollment: mockSiteEnrollment,
-
+        services: {
+          postgrestClient: mockPostgrestClient,
+        },
       },
       env: {
         ENV: 'prod',
@@ -902,7 +917,7 @@ describe('onboard-llmo-modal', () => {
       );
     });
 
-    it('should not require HLX_ADMIN_TOKEN for async publish enqueue path', async () => {
+    it('should not require HLX_ONBOARDING_TOKEN for async publish enqueue path', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -917,8 +932,8 @@ describe('onboard-llmo-modal', () => {
       const slackCtx = createDefaultMockSlackCtx(sandbox);
 
       // Store and clear token to verify onboarding still succeeds
-      const originalToken = process.env.HLX_ADMIN_TOKEN;
-      delete process.env.HLX_ADMIN_TOKEN;
+      const originalToken = process.env.HLX_ONBOARDING_TOKEN;
+      delete process.env.HLX_ONBOARDING_TOKEN;
       try {
         await onboardSite(input, lambdaCtx, slackCtx);
 
@@ -934,9 +949,9 @@ describe('onboard-llmo-modal', () => {
         );
       } finally {
         if (originalToken !== undefined) {
-          process.env.HLX_ADMIN_TOKEN = originalToken;
+          process.env.HLX_ONBOARDING_TOKEN = originalToken;
         } else {
-          delete process.env.HLX_ADMIN_TOKEN;
+          delete process.env.HLX_ONBOARDING_TOKEN;
         }
       }
     });

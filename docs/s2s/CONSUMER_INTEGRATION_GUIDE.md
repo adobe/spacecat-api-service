@@ -65,7 +65,10 @@ Technical Contact:
 - Slack Handle:
 ```
 
-> ⚠️ **IMPORTANT**: Every permission is subject to approval. The SpaceCat Security Team reserves the right to grant or deny access based on security requirements and business justification.
+> ⚠️ **IMPORTANT**:
+- Add `mysticat-s2s-request` lable on ticket.
+- Share ticket on channel [#aem-sites-optimizer-engineering](https://adobe.enterprise.slack.com/archives/C05A45JBP9N) with taging group `@mysticat-s2s-admin`.
+- Permission is subject to approval. The SpaceCat Security Team reserves the right to grant or deny access based on security requirements and business justification.
 
 ### Step 2: Capability Review & Approval
 
@@ -74,7 +77,7 @@ The S2S Admin and SpaceCat Security Team will review your JIRA request:
 - **Read capabilities** (`*:read`): Generally approved quickly
 - **Write capabilities** (`*:write`): Require business justification and scrutiny
 - **Restricted capabilities**: The following are typically denied:
-  - `fix:write` - Never granted
+  - `fixEntity:write` - Never granted
   - `site:write` - Rarely granted, requires executive approval
   - `organization:write` - Rarely granted, requires executive approval
 
@@ -593,7 +596,7 @@ PATCH /organizations/{id}               → organization:write
 
 ### Restricted Capabilities (Typically Denied)
 
-- `fix:write` - Never granted, internal use only
+- `fixEntity:write` - Never granted, internal use only
 - `site:write` - Rarely granted, requires executive approval
 - `organization:write` - Rarely granted, requires executive approval
 

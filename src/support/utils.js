@@ -587,17 +587,35 @@ export async function resolveWwwUrl(site, context) {
  * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
  * @param {Object} site - Site entity
  * @param {Object} context - Request context with dataAccess, log
+ * @param {Object} [requestContext] - Optional per-request context; when provided, the check
+ *   is gated on the x-client-type header being 'sites-optimizer-ui'.
  * @returns {Promise<boolean>}
  */
-export async function getIsSummitPlgEnabled(site, context) {
+export async function getIsSummitPlgEnabled(site, context, requestContext) {
   try {
-    const { Configuration } = context.dataAccess || {};
+    if (requestContext) {
+      const clientType = requestContext.pathInfo?.headers?.['x-client-type'];
+      if (clientType !== 'sites-optimizer-ui') return false;
+    }
+    const { Configuration, Entitlement } = context.dataAccess || {};
     if (!Configuration) return false;
     const configuration = await Configuration.findLatest();
     if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
       return false;
     }
-    return configuration.isHandlerEnabledForSite('summit-plg', site);
+    if (!configuration.isHandlerEnabledForSite('summit-plg', site)) {
+      return false;
+    }
+
+    const organizationId = site.getOrganizationId();
+    if (!Entitlement || !organizationId) return false;
+
+    const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
+      organizationId,
+      EntitlementModel.PRODUCT_CODES.ASO,
+    );
+
+    return entitlement?.getTier() === EntitlementModel.TIERS.FREE_TRIAL;
   } catch (err) {
     context.log?.error?.('Error checking audit summit-plg for site:', err);
     return false;
@@ -670,6 +688,33 @@ export async function exchangePromiseToken(context, promiseToken) {
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   )).access_token;
   return accessToken;
+}
+
+/**
+ * Parses and retrieves a specific cookie value by name from the request context.
+ * Uses indexOf-based splitting to correctly handle values containing '='
+ * (e.g. base64-encoded or encrypted tokens).
+ * @param {Object} context - The request context with pathInfo.headers.cookie
+ * @param {string} name - The cookie name to look up
+ * @returns {string|null} The cookie value, or null if not found
+ */
+export function getCookieValue(context, name) {
+  const cookieString = context.pathInfo?.headers?.cookie || '';
+  if (!cookieString) return null;
+
+  const cookies = cookieString.split(';');
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+    const idx = trimmed.indexOf('=');
+    if (idx !== -1) {
+      const cookieName = trimmed.substring(0, idx).trim();
+      const cookieValue = trimmed.substring(idx + 1).trim();
+      if (cookieName === name) {
+        return cookieValue;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -1085,6 +1130,94 @@ export const createEntitlementAndEnrollment = async (
   }
 };
 
+/*
+* Queues an identify redirects audit for a site.
+* @param {Object} site - The site to queue an identify redirects audit for.
+* @param {string} baseURL? - The base URL of the site.
+* @param {number} minutes? - The number of minutes to audit for.
+* @param {boolean} updateRedirects? - Whether to update the redirects.
+* @param {Object} slackContext - The Slack context object.
+* @param {Object} context - The Lambda context containing dataAccess, log, etc.
+* @returns {Promise<{ok: boolean, error?: string}>} - ok: true or { ok: false, error }.
+*/
+export async function queueIdentifyRedirectsAudit(
+  {
+    site, baseURL, minutes = 2000, updateRedirects = false, slackContext,
+  },
+  context,
+) {
+  const {
+    env,
+    log,
+    sqs,
+  } = context;
+
+  const { say, channelId, threadTs } = slackContext || {};
+  try {
+    if (!site) {
+      return { ok: false, error: `:x: No site found with base URL '${baseURL}'.` };
+    }
+
+    const resolvedBaseURL = baseURL || site.getBaseURL();
+    if (!resolvedBaseURL) {
+      return { ok: false, error: 'missing_base_url' };
+    }
+
+    // check for SQS client to talk to audit worker
+    if (!sqs) {
+      return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
+    }
+
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+    // check either authoringType or deliveryType is CS/CW
+    if (![
+      SiteModel.AUTHORING_TYPES.CS, // cs
+      SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
+    ].includes(authoringType)
+    && ![
+      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
+    ].includes(deliveryType)) {
+      return {
+        ok: false,
+        error: ':warning: identify-redirects currently supports AEM CS/CW only. '
+          + `This site authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`,
+      };
+    }
+
+    const deliveryConfig = site.getDeliveryConfig?.() || {};
+    const { programId, environmentId } = deliveryConfig;
+    if (!hasText(programId) || !hasText(environmentId)) {
+      return { ok: false, error: ':x: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for Splunk queries.' };
+    }
+
+    if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
+      return { ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' };
+    }
+    if (say) {
+      const updateRedirectsMessage = updateRedirects ? 'and update' : '';
+      await say(`:mag: Queued redirect pattern detection ${updateRedirectsMessage} for *${resolvedBaseURL}* (last ${minutes}m). I’ll reply here when it’s ready.`);
+    }
+
+    await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+      type: 'identify-redirects',
+      siteId: site.getId(),
+      baseURL: resolvedBaseURL,
+      programId: String(programId),
+      environmentId: String(environmentId),
+      minutes,
+      updateRedirects,
+      slackContext: channelId != null && threadTs != null
+        ? { channelId, threadTs }
+        : undefined,
+    });
+    return { ok: true };
+  } catch (error) {
+    log.error(error);
+    throw error;
+  }
+}
+
 /**
  * Shared onboarding function used by both modal and command implementations.
  *
@@ -1321,6 +1454,52 @@ export const onboardSingleSite = async (
       reportLine.status = 'Failed';
       await say(`:x: *Error saving site configuration:* ${error.message}`);
       return reportLine;
+    }
+
+    // Configure redirectsmode and redirectssource
+    // check for authoringType, deliveryType, environmentID, and programID
+    // skip update-redirects if invalid
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+    const deliveryConfig = site.getDeliveryConfig?.() || {};
+    const { programId, environmentId } = deliveryConfig;
+    let validForRedirects = true;
+    let skipMessage = '';
+    if (![
+      SiteModel.AUTHORING_TYPES.CS, // cs
+      SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
+    ].includes(authoringType)
+    && ![
+      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
+    ].includes(deliveryType)) {
+      validForRedirects = false;
+      skipMessage = `the site ${baseURL} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`;
+    } else if (!hasText(programId) || !hasText(environmentId)) {
+      // Check for environmentID and ProgramID, skip update-redirects if missing
+      validForRedirects = false;
+      skipMessage = `the site ${baseURL} is not valid for redirects because environmentID and/or programID is missing.`;
+    }
+
+    if (!validForRedirects) {
+      // skip update-redirects if invalid for redirects
+      log.info(skipMessage);
+    } else {
+      const updateRedirectsResult = await queueIdentifyRedirectsAudit(
+        {
+          site,
+          baseURL,
+          minutes: 2000,
+          updateRedirects: true,
+          slackContext,
+        },
+        context,
+      );
+      if (!updateRedirectsResult.ok) {
+        reportLine.errors = updateRedirectsResult.error;
+        reportLine.status = 'Failed';
+        await say(updateRedirectsResult.error);
+        return reportLine;
+      }
     }
 
     for (const importType of importTypes) {

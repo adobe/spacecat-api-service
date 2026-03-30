@@ -75,6 +75,8 @@ tags:
     description: Site URL tracking and management operations
   - name: sentiment
     description: Brand sentiment analysis topics and guidelines management
+  - name: plg
+    description: PLG (Product-Led Growth) ASO onboarding operations
 
 paths:
   /audits/latest/{auditType}:
@@ -125,10 +127,20 @@ paths:
     $ref: './customer-config-api.yaml#/llmo-topics-by-space-cat-id-v2'
   /v2/orgs/{spaceCatId}/llmo-prompts:
     $ref: './customer-config-api.yaml#/llmo-prompts-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/prompts:
+    $ref: './customer-config-api.yaml#/v2-prompts-by-brand'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/{promptId}:
+    $ref: './customer-config-api.yaml#/v2-prompts-by-brand-and-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
+    $ref: './customer-config-api.yaml#/v2-prompts-by-brand-bulk-delete'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
     $ref: './entitlements-api.yaml#/entitlements-by-organization'
+  /organizations/{organizationId}/feature-flags:
+    $ref: './feature-flags-api.yaml#/organization-feature-flags'
+  /organizations/{organizationId}/feature-flags/{product}/{flagName}:
+    $ref: './feature-flags-api.yaml#/organization-feature-flag-by-product-and-name'
 
   /organizations/{organizationId}/trial-users:
     $ref: './trial-users-api.yaml#/trial-users-by-organization'
@@ -404,6 +416,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-fix'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}/suggestions:
     $ref: './site-opportunities.yaml#/site-opportunity-fix-suggestions'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}/actions/rolled_back:
+    $ref: './site-opportunities.yaml#/site-opportunity-fix-rollback'
   /sites/{siteId}/opportunities/{opportunityId}/status:
     $ref: './site-opportunities.yaml#/site-opportunity-status'
   /slack/channels/invite-by-user-id:
@@ -462,6 +476,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
   /sites/{siteId}/llmo/brand-claims:
     $ref: './llmo-api.yaml#/llmo-brand-claims'
+  /sites/{siteId}/llmo/strategy/demo/brand-presence:
+    $ref: './llmo-api.yaml#/llmo-opportunity-workspace-demo-brand-presence'
+  /sites/{siteId}/llmo/strategy/demo/recommendations:
+    $ref: './llmo-api.yaml#/llmo-opportunity-workspace-demo-recommendations'
   /sites/{siteId}/llmo/edge-optimize-config:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:
@@ -492,6 +510,10 @@ paths:
     $ref: './guidelines-api.yaml#/guideline-audits-unlink'
   /sites/{siteId}/sentiment/config:
     $ref: './guidelines-api.yaml#/sentiment-config'
+  /plg/onboard:
+    $ref: './plg-onboarding-api.yaml#/plg-onboard'
+  /plg/onboard/status/{imsOrgId}:
+    $ref: './plg-onboarding-api.yaml#/plg-onboard-status'
 
 components:
   securitySchemes:
