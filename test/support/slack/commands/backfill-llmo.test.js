@@ -24,6 +24,7 @@ const AUDIT_TYPES = {
   CDN_LOGS_ANALYSIS: 'cdn-logs-analysis',
   CDN_LOGS_REPORT: 'cdn-logs-report',
   LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
+  LLM_ERROR_PAGES: 'llm-error-pages',
 };
 
 describe('BackfillLlmoCommand', () => {
@@ -148,6 +149,18 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage.callCount).to.equal(2);
     });
 
+    it('adds a 5-second gap between multi-day cdn-logs-analysis messages for the same site', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=3'], slackContext);
+
+      expect(sqsStub.sendMessage.callCount).to.equal(3);
+      expect(sqsStub.sendMessage.firstCall.args[3]).to.deep.equal({ delaySeconds: 0 });
+      expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 5 });
+      expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 10 });
+    });
+
     it('sends correct SQS message structure for cdn-logs-report', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
@@ -215,6 +228,50 @@ describe('BackfillLlmoCommand', () => {
       expect(message.auditContext.year).to.be.at.least(2024);
     });
 
+    it('triggers llm-error-pages backfill with default weeks', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLM_ERROR_PAGES}`], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.LLM_ERROR_PAGES} for https://example.com (4 previous weeks)...`);
+      expect(sqsStub.sendMessage.callCount).to.equal(4);
+    });
+
+    it('triggers llm-error-pages backfill for current week only when weeks=0', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLM_ERROR_PAGES}`, 'weeks=0'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.LLM_ERROR_PAGES} for https://example.com (current week only)...`);
+      expect(sqsStub.sendMessage.callCount).to.equal(1);
+      const [, message] = sqsStub.sendMessage.firstCall.args;
+      expect(message.auditContext.weekOffset).to.equal(0);
+    });
+
+    it('sends correct SQS message structure for llm-error-pages', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLM_ERROR_PAGES}`, 'weeks=2'], slackContext);
+
+      expect(sqsStub.sendMessage.callCount).to.equal(2);
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('test-audits-queue-url');
+      expect(message).to.have.property('type', AUDIT_TYPES.LLM_ERROR_PAGES);
+      expect(message).to.have.property('siteId', 'test-site-id');
+      expect(message.auditContext).to.have.property('weekOffset', -1);
+    });
+
+    it('rejects weeks parameter greater than 4 for llm-error-pages', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLM_ERROR_PAGES}`, 'weeks=5'], slackContext);
+
+      expect(slackContext.say.calledWith(`:warning: Max 4 weeks for ${AUDIT_TYPES.LLM_ERROR_PAGES}`)).to.be.true;
+    });
+
     it('responds with usage when no arguments provided', async () => {
       const command = BackfillLlmoCommand(context);
 
@@ -261,7 +318,7 @@ describe('BackfillLlmoCommand', () => {
 
       await command.handleExecution(['baseurl=https://example.com', 'audit=unsupported'], slackContext);
 
-      expect(slackContext.say.calledWith(`:warning: Supported audits: ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`)).to.be.true;
+      expect(slackContext.say.calledWith(`:warning: Supported audits: ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLM_ERROR_PAGES}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`)).to.be.true;
     });
 
     it('logs errors when they occur', async () => {

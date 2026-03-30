@@ -22,7 +22,6 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
-import esmock from 'esmock';
 
 import BrandsController from '../../src/controllers/brands.js';
 
@@ -136,6 +135,16 @@ describe('Brands Controller', () => {
       },
       Site: {
         findById: sinon.stub().resolves(sites[0]),
+      },
+      services: {
+        postgrestClient: {
+          from: sinon.stub().returns({
+            select: sinon.stub().returnsThis(),
+            eq: sinon.stub().returnsThis(),
+            maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+            upsert: sinon.stub().resolves({ error: null }),
+          }),
+        },
       },
     };
 
@@ -412,222 +421,147 @@ describe('Brands Controller', () => {
     });
   });
 
-  describe('getCustomerConfig', () => {
-    it('loads config from S3 successfully', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          brands: [],
+  describe('listPromptsByBrand (brand-scoped prompts CRUD)', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+    const PROMPT_ID = 'prompt-1';
+
+    beforeEach(() => {
+      const promptRow = {
+        id: BRAND_UUID,
+        prompt_id: PROMPT_ID,
+        name: 'Test Prompt',
+        text: 'What is the best product?',
+        regions: ['us'],
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Test Brand' },
+        categories: {
+          id: 'cat-uuid', category_id: 'cat-1', name: 'Category', origin: 'human',
+        },
+        topics: {
+          id: 'topic-uuid', topic_id: 'topic-1', name: 'Topic', category_id: 'cat-1',
         },
       };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      expect(config.customer.customerName).to.equal('From S3');
-    });
-
-    it('returns 404 when S3 config does not exist', async () => {
-      const mockGetFromS3 = sinon.stub().resolves(null);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('filters by status query parameter', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                { id: 'p1', status: 'active' },
-                { id: 'p2', status: 'deleted' },
-              ],
-            },
-          ],
-          categories: [
-            { id: 'c1', name: 'Cat 1', status: 'active' },
-            { id: 'c2', name: 'Cat 2', status: 'deleted' },
-          ],
-          topics: [
-            { id: 't1', name: 'Topic 1', status: 'active' },
-            { id: 't2', name: 'Topic 2', status: 'deleted' },
-          ],
-        },
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            update: sandbox.stub().returnsThis(),
+            or: sandbox.stub().returnsThis(),
+            contains: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({
+              data: table === 'prompts' ? [promptRow] : [],
+              error: null,
+              count: 1,
+            }),
+            maybeSingle: sandbox.stub().callsFake(() => {
+              if (table === 'brands') {
+                return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              }
+              if (table === 'llmo_customer_config') {
+                return Promise.resolve({
+                  data: {
+                    config: {
+                      customer: {
+                        brands: [{ id: 'chevrolet', name: 'Chevrolet' }],
+                      },
+                    },
+                  },
+                  error: null,
+                });
+              }
+              if (table === 'prompts') {
+                return Promise.resolve({
+                  data: {
+                    prompt_id: PROMPT_ID,
+                    name: 'Test',
+                    text: 'Prompt text',
+                    regions: [],
+                    status: 'active',
+                    origin: 'human',
+                    updated_at: '2026-01-01T00:00:00Z',
+                    updated_by: 'system',
+                    brands: { id: BRAND_UUID, name: 'Test Brand' },
+                    categories: null,
+                    topics: null,
+                  },
+                  error: null,
+                });
+              }
+              return Promise.resolve({ data: null, error: null });
+            }),
+          };
+          return chain;
+        }),
       };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-        invocation: {
-          event: {
-            rawQueryString: 'status=deleted',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      expect(config.customer.brands[0].prompts).to.have.lengthOf(1);
-      expect(config.customer.categories).to.have.lengthOf(1);
-      expect(config.customer.topics).to.have.lengthOf(1);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
     });
 
-    it('excludes deleted items when no status parameter provided', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                { id: 'p1', status: 'active' },
-                { id: 'p2', status: 'deleted' },
-              ],
-            },
-          ],
-          categories: [
-            { id: 'c1', name: 'Cat 1', status: 'active' },
-            { id: 'c2', name: 'Cat 2', status: 'deleted' },
-          ],
-          topics: [
-            { id: 't1', name: 'Topic 1', status: 'active' },
-            { id: 't2', name: 'Topic 2', status: 'deleted' },
-          ],
-        },
-      };
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
 
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfig({
+      const response = await brandsController.listPromptsByBrand({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
       });
 
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      // Should only have active items, deleted items filtered out
-      expect(config.customer.brands[0].prompts).to.have.lengthOf(1);
-      expect(config.customer.brands[0].prompts[0].id).to.equal('p1');
-      expect(config.customer.categories).to.have.lengthOf(1);
-      expect(config.customer.categories[0].id).to.equal('c1');
-      expect(config.customer.topics).to.have.lengthOf(1);
-      expect(config.customer.topics[0].id).to.equal('t1');
+      expect(response.status).to.equal(503);
     });
 
-    it('handles S3 error and still returns 404 when config not found', async () => {
-      const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfig({
+    it('returns bad request when spaceCatId is missing', async () => {
+      const response = await brandsController.listPromptsByBrand({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(404);
-      expect(loggerStub.warn).to.have.been.called;
-    });
-
-    it('returns bad request if organization ID is not provided', async () => {
-      const response = await brandsController.getCustomerConfig({
-        ...context,
-        params: {},
+        params: { brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(400);
-      const error = await response.json();
-      expect(error).to.have.property('message', 'Organization ID required');
+      const body = await response.json();
+      expect(body.message).to.include('Organization ID');
     });
 
-    it('returns not found if organization does not exist', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
-
-      const response = await brandsController.getCustomerConfig({
+    it('returns bad request when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.listPromptsByBrand({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
       });
 
-      expect(response.status).to.equal(404);
-      const error = await response.json();
-      expect(error).to.have.property('message', `Organization not found: ${ORGANIZATION_ID}`);
+      expect(response.status).to.equal(400);
     });
 
-    it('returns forbidden if user does not have access', async () => {
+    it('returns bad request when brandId is missing', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Brand ID');
+    });
+
+    it('returns bad request when limit is invalid', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'limit=99999' } },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Limit');
+    });
+
+    it('listPromptsByBrand returns 403 when user lacks access', async () => {
       const authContextUser = {
         attributes: {
           authInfo: new AuthInfo()
@@ -637,1765 +571,65 @@ describe('Brands Controller', () => {
             .withAuthenticated(true),
         },
       };
-      const unauthorizedBrandsController = BrandsController({
+      const unauthorizedController = BrandsController({
         dataAccess: mockDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       }, loggerStub, mockEnv);
 
-      const response = await unauthorizedBrandsController.getCustomerConfig({
-        params: { spaceCatId: ORGANIZATION_ID },
+      const response = await unauthorizedController.listPromptsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(403);
     });
 
-    it('handles error and returns error response', async () => {
-      const errorMockDataAccess = {
-        Organization: {
-          findById: sinon.stub().rejects(new Error('DB error')),
-        },
-      };
-
-      const errorContext = {
+    it('returns 200 with paginated prompts when brand exists', async () => {
+      const response = await brandsController.listPromptsByBrand({
         ...context,
-        dataAccess: errorMockDataAccess,
-      };
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
 
-      const errorBrandsController = BrandsController(errorContext, loggerStub, mockEnv);
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('items').that.is.an('array');
+      expect(body).to.have.property('total');
+      expect(body).to.have.property('limit');
+      expect(body).to.have.property('page');
+    });
 
-      const response = await errorBrandsController.getCustomerConfig({
-        ...errorContext,
-        params: { spaceCatId: ORGANIZATION_ID },
+    it('listPromptsByBrand returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          or: sandbox.stub().returnsThis(),
+          contains: sandbox.stub().returnsThis(),
+          range: sandbox.stub().rejects(new Error('DB connection lost')),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(500);
     });
 
-    it('handles missing context.params gracefully', async () => {
-      const response = await brandsController.getCustomerConfig({
-        ...context,
-        // params is undefined
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('handles config with null prompts, categories, and topics', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: null, // null prompts
-            },
-          ],
-          categories: null, // null categories
-          topics: null, // null topics
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      // When input has null values, they get spread from the original object
-      expect(config.customer.brands[0].prompts).to.equal(null);
-      expect(config.customer.categories).to.equal(null);
-      expect(config.customer.topics).to.equal(null);
-    });
-
-    it('filters config with status query parameter when arrays are null', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: null, // null prompts - won't be filtered
-            },
-          ],
-          categories: null, // null - protected by conditional spread
-          topics: null, // null - protected by conditional spread
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-        invocation: {
-          event: {
-            rawQueryString: 'status=active',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-    });
-  });
-
-  describe('getCustomerConfigLean', () => {
-    it('loads config from S3 and returns lean format', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          brands: [{
-            id: 'b1',
-            name: 'Brand',
-            prompts: [{
-              id: 'p1', status: 'active', categoryId: 'c1', topicId: 't1',
-            }],
-          }],
-          categories: [{ id: 'c1', name: 'Cat' }],
-          topics: [{ id: 't1', name: 'Topic' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      expect(config.customer.brands[0]).to.not.have.property('prompts');
-      expect(config.customer.brands[0]).to.have.property('totalPrompts', 1);
-      expect(config.customer.brands[0]).to.have.property('totalCategories', 1);
-      expect(config.customer.brands[0]).to.have.property('totalTopics', 1);
-    });
-
-    it('returns bad request if organization ID is missing', async () => {
-      const response = await brandsController.getCustomerConfigLean({
-        ...context,
-        params: {},
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns not found if organization does not exist', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
-
-      const response = await brandsController.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('filters prompts by status when provided', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1', status: 'active', categoryId: 'c1', topicId: 't1',
-                },
-                {
-                  id: 'p2', status: 'deleted', categoryId: 'c2', topicId: 't2',
-                },
-              ],
-            },
-          ],
-          categories: [
-            { id: 'c1', name: 'Category 1' },
-            { id: 'c2', name: 'Category 2' },
-          ],
-          topics: [
-            { id: 't1', name: 'Topic 1' },
-            { id: 't2', name: 'Topic 2' },
-          ],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'status=deleted',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      expect(config.customer.brands[0].totalPrompts).to.equal(1);
-    });
-
-    it('loads config from S3 successfully', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          brands: [{
-            id: 'b1',
-            name: 'Brand',
-            prompts: [{
-              id: 'p1', status: 'active', categoryId: 'c1', topicId: 't1',
-            }],
-          }],
-          categories: [{ id: 'c1', name: 'Cat' }],
-          topics: [{ id: 't1', name: 'Topic' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      expect(config.customer.customerName).to.equal('From S3');
-    });
-
-    it('returns 404 when S3 config does not exist', async () => {
-      const mockGetFromS3 = sinon.stub().resolves(null);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('handles S3 error and still returns 404 when config not found', async () => {
-      const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(404);
-      expect(loggerStub.warn).to.have.been.called;
-    });
-
-    it('handles error and returns error response', async () => {
-      const errorMockDataAccess = {
-        Organization: {
-          findById: sinon.stub().rejects(new Error('DB error')),
-        },
-      };
-
-      const errorContext = {
-        ...context,
-        dataAccess: errorMockDataAccess,
-      };
-
-      const errorBrandsController = BrandsController(errorContext, loggerStub, mockEnv);
-
-      const response = await errorBrandsController.getCustomerConfigLean({
-        ...errorContext,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-
-      expect(response.status).to.equal(500);
-    });
-
-    it('handles missing context.params gracefully', async () => {
-      const response = await brandsController.getCustomerConfigLean({
-        ...context,
-        // params is undefined
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('handles config with missing categories and topics arrays', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          brands: [{
-            id: 'b1',
-            name: 'Brand',
-            prompts: [{
-              id: 'p1', status: 'active', categoryId: 'c1', topicId: 't1',
-            }],
-          }],
-          // No categories or topics arrays
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      expect(config.customer.brands[0].totalPrompts).to.equal(1);
-      // counts categoryId 'c1' from prompt
-      expect(config.customer.brands[0].totalCategories).to.equal(1);
-      // counts topicId 't1' from prompt
-      expect(config.customer.brands[0].totalTopics).to.equal(1);
-    });
-
-    it('handles brands without prompts array', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          brands: [
-            {
-              id: 'b1',
-              name: 'Brand without prompts',
-              // No prompts array
-            },
-            {
-              id: 'b2',
-              name: 'Brand with prompts',
-              prompts: [{
-                id: 'p1', status: 'active', categoryId: 'c1', topicId: 't1',
-              }],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Cat' }],
-          topics: [{ id: 't1', name: 'Topic' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getCustomerConfigLean({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const config = await response.json();
-      expect(config.customer.brands[0].totalPrompts).to.equal(0);
-      expect(config.customer.brands[0].totalCategories).to.equal(0);
-      expect(config.customer.brands[0].totalTopics).to.equal(0);
-      expect(config.customer.brands[1].totalPrompts).to.equal(1);
-    });
-  });
-
-  describe('getTopics', () => {
-    it('loads config from S3 successfully', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          topics: [
-            { id: 't1', name: 'Topic 1', status: 'active' },
-            { id: 't2', name: 'Topic 2', status: 'deleted' },
-          ],
-          brands: [],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.topics).to.have.lengthOf(1);
-      expect(result.topics[0].id).to.equal('t1');
-    });
-
-    it('returns bad request if organization ID is missing', async () => {
-      const response = await brandsController.getTopics({
-        ...context,
-        params: {},
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns not found if organization does not exist', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
-
-      const response = await brandsController.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('filters topics by brandId', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          topics: [
-            { id: 't1', name: 'Topic 1', status: 'active' },
-            { id: 't2', name: 'Topic 2', status: 'active' },
-          ],
-          brands: [
-            {
-              id: 'brand-1',
-              prompts: [{ topicId: 't1' }],
-            },
-          ],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'brandId=brand-1',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.topics).to.have.lengthOf(1);
-      expect(result.topics[0].id).to.equal('t1');
-    });
-
-    it('filters topics by status', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          topics: [
-            { id: 't1', name: 'Topic 1', status: 'active' },
-            { id: 't2', name: 'Topic 2', status: 'deleted' },
-          ],
-          brands: [],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'status=deleted',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.topics).to.have.lengthOf(1);
-      expect(result.topics[0].id).to.equal('t2');
-    });
-
-    it('returns not found if brand not found', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          topics: [],
-          brands: [],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'brandId=nonexistent',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('loads config from S3 successfully', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          topics: [{ id: 't1', name: 'Topic 1', status: 'active' }],
-          brands: [],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.topics).to.have.lengthOf(1);
-    });
-
-    it('returns 404 when S3 config does not exist', async () => {
-      const mockGetFromS3 = sinon.stub().resolves(null);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('handles S3 error and still returns 404 when config not found', async () => {
-      const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(404);
-      expect(loggerStub.warn).to.have.been.called;
-    });
-
-    it('handles error and returns error response', async () => {
-      const errorMockDataAccess = {
-        Organization: {
-          findById: sinon.stub().rejects(new Error('DB error')),
-        },
-      };
-
-      const errorContext = {
-        ...context,
-        dataAccess: errorMockDataAccess,
-      };
-
-      const errorBrandsController = BrandsController(errorContext, loggerStub, mockEnv);
-
-      const response = await errorBrandsController.getTopics({
-        ...errorContext,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-
-      expect(response.status).to.equal(500);
-    });
-
-    it('handles missing context.params gracefully', async () => {
-      const response = await brandsController.getTopics({
-        ...context,
-        // params is undefined
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('handles missing topics array in customer config', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [],
-          // No topics array
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.topics).to.have.lengthOf(0);
-    });
-
-    it('handles brand without prompts array when filtering by brandId', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          topics: [
-            { id: 't1', name: 'Topic 1', status: 'active' },
-            { id: 't2', name: 'Topic 2', status: 'active' },
-          ],
-          brands: [
-            {
-              id: 'brand-1',
-              // No prompts array
-            },
-          ],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getTopics({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'brandId=brand-1',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.topics).to.have.lengthOf(0);
-    });
-  });
-
-  describe('getPrompts', () => {
-    it('loads config from S3 and returns prompts', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Test prompt',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Category 1' }],
-          topics: [{ id: 't1', name: 'Topic 1', categoryId: 'c1' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].prompt).to.equal('Test prompt');
-    });
-
-    it('returns bad request if organization ID is missing', async () => {
-      const response = await brandsController.getPrompts({
-        ...context,
-        params: {},
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns not found if organization does not exist', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
-
-      const response = await brandsController.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('filters prompts by brandId, categoryId, topicId, and status', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Active prompt',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-                {
-                  id: 'p2',
-                  prompt: 'Deleted prompt',
-                  status: 'deleted',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-                {
-                  id: 'p3',
-                  prompt: 'Other category',
-                  status: 'active',
-                  categoryId: 'c2',
-                  topicId: 't2',
-                },
-              ],
-            },
-            {
-              id: 'brand-2',
-              name: 'Brand 2',
-              prompts: [
-                {
-                  id: 'p4',
-                  prompt: 'Brand 2 prompt',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          categories: [
-            { id: 'c1', name: 'Category 1' },
-            { id: 'c2', name: 'Category 2' },
-          ],
-          topics: [
-            { id: 't1', name: 'Topic 1', categoryId: 'c1' },
-            { id: 't2', name: 'Topic 2', categoryId: 'c2' },
-          ],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'brandId=brand-1&categoryId=c1&topicId=t1&status=active',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].id).to.equal('p1');
-    });
-
-    it('enriches prompts with category and topic info', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Test',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Cat 1', origin: 'human' }],
-          topics: [{ id: 't1', name: 'Topic 1', categoryId: 'c1' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts[0].category).to.deep.equal({
-        id: 'c1',
-        name: 'Cat 1',
-        origin: 'human',
-      });
-      expect(result.prompts[0].topic).to.deep.equal({
-        id: 't1',
-        name: 'Topic 1',
-        categoryId: 'c1',
-      });
-    });
-
-    it('handles missing categories and topics arrays gracefully', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Test prompt',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          // No categories or topics arrays
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].category).to.be.null;
-      expect(result.prompts[0].topic).to.be.null;
-    });
-
-    it('handles prompts with non-existent category and topic IDs', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Test prompt',
-                  status: 'active',
-                  categoryId: 'non-existent-category',
-                  topicId: 'non-existent-topic',
-                },
-              ],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Category 1' }],
-          topics: [{ id: 't1', name: 'Topic 1', categoryId: 'c1' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].category).to.be.null;
-      expect(result.prompts[0].topic).to.be.null;
-    });
-
-    it('filters out prompts that do not match categoryId filter', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Matching category',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-                {
-                  id: 'p2',
-                  prompt: 'Different category',
-                  status: 'active',
-                  categoryId: 'c2',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          categories: [
-            { id: 'c1', name: 'Category 1' },
-            { id: 'c2', name: 'Category 2' },
-          ],
-          topics: [{ id: 't1', name: 'Topic 1', categoryId: 'c1' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'categoryId=c1',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].id).to.equal('p1');
-    });
-
-    it('filters out prompts that do not match topicId filter', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Matching topic',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-                {
-                  id: 'p2',
-                  prompt: 'Different topic',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't2',
-                },
-              ],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Category 1' }],
-          topics: [
-            { id: 't1', name: 'Topic 1', categoryId: 'c1' },
-            { id: 't2', name: 'Topic 2', categoryId: 'c1' },
-          ],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'topicId=t1',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].id).to.equal('p1');
-    });
-
-    it('filters out prompts that do not match status filter', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Active prompt',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-                {
-                  id: 'p2',
-                  prompt: 'Draft prompt',
-                  status: 'draft',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Category 1' }],
-          topics: [{ id: 't1', name: 'Topic 1', categoryId: 'c1' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        invocation: {
-          event: {
-            rawQueryString: 'status=draft',
-          },
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].id).to.equal('p2');
-    });
-
-    it('excludes deleted prompts by default when no status filter is provided', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Active prompt',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-                {
-                  id: 'p2',
-                  prompt: 'Deleted prompt',
-                  status: 'deleted',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Category 1' }],
-          topics: [{ id: 't1', name: 'Topic 1', categoryId: 'c1' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-        // No status filter in query string
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].id).to.equal('p1');
-      expect(result.prompts[0].status).to.equal('active');
-    });
-
-    it('handles brands with no prompts array', async () => {
-      const mockCustomerConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand 1',
-              // No prompts array at all
-            },
-            {
-              id: 'brand-2',
-              name: 'Brand 2',
-              prompts: [
-                {
-                  id: 'p1',
-                  prompt: 'Test prompt',
-                  status: 'active',
-                  categoryId: 'c1',
-                  topicId: 't1',
-                },
-              ],
-            },
-          ],
-          categories: [{ id: 'c1', name: 'Category 1' }],
-          topics: [{ id: 't1', name: 'Topic 1', categoryId: 'c1' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-      expect(result.prompts[0].id).to.equal('p1');
-    });
-
-    it('handles missing context.params gracefully', async () => {
-      const response = await brandsController.getPrompts({
-        ...context,
-        // params is undefined
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('loads config from S3 successfully', async () => {
-      const mockS3Config = {
-        customer: {
-          customerName: 'From S3',
-          brands: [{
-            id: 'b1',
-            name: 'Brand',
-            prompts: [{
-              id: 'p1', prompt: 'Test', status: 'active', categoryId: 'c1', topicId: 't1',
-            }],
-          }],
-          categories: [{ id: 'c1', name: 'Cat' }],
-          topics: [{ id: 't1', name: 'Topic' }],
-        },
-      };
-
-      const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.prompts).to.have.lengthOf(1);
-    });
-
-    it('returns 404 when S3 config does not exist', async () => {
-      const mockGetFromS3 = sinon.stub().resolves(null);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('handles S3 error and still returns 404 when config not found', async () => {
-      const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.getPrompts({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        s3: { s3Client: {}, s3Bucket: 'test' },
-      });
-
-      expect(response.status).to.equal(404);
-      expect(loggerStub.warn).to.have.been.called;
-    });
-
-    it('handles error and returns error response', async () => {
-      const errorMockDataAccess = {
-        Organization: {
-          findById: sinon.stub().rejects(new Error('DB error')),
-        },
-      };
-
-      const errorContext = {
-        ...context,
-        dataAccess: errorMockDataAccess,
-      };
-
-      const errorBrandsController = BrandsController(errorContext, loggerStub, mockEnv);
-
-      const response = await errorBrandsController.getPrompts({
-        ...errorContext,
-        params: { spaceCatId: ORGANIZATION_ID },
-      });
-
-      expect(response.status).to.equal(500);
-    });
-  });
-
-  describe('saveCustomerConfig', () => {
-    it('saves customer config to S3', async () => {
-      const mockS3Client = { send: sinon.stub().resolves({}) };
-      const mockConfig = {
-        customer: {
-          customerName: 'Adobe',
-          brands: [],
-        },
-      };
-
-      const response = await brandsController.saveCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: mockConfig,
-        s3: {
-          s3Client: mockS3Client,
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.message).to.include('saved successfully');
-    });
-
-    it('returns bad request if organization ID is missing', async () => {
-      const response = await brandsController.saveCustomerConfig({
-        ...context,
-        params: {},
-        data: { customer: { customerName: 'Test' } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns not found if organization does not exist', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
-
-      const response = await brandsController.saveCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: { customer: { customerName: 'Test' } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns bad request if no data provided', async () => {
-      const response = await brandsController.saveCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: null,
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns bad request if invalid structure', async () => {
-      const response = await brandsController.saveCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {},
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('handles S3 save error', async () => {
-      const mockS3Save = sinon.stub().rejects(new Error('S3 error'));
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            writeCustomerConfigV2: mockS3Save,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.saveCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {
-            customerName: 'Adobe',
-            brands: [],
-          },
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(500);
-    });
-
-    it('handles missing context.params gracefully', async () => {
-      const response = await brandsController.saveCustomerConfig({
-        ...context,
-        // params is undefined
-        data: { customer: { customerName: 'Test' } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-  });
-
-  describe('patchCustomerConfig', () => {
-    it('successfully patches customer config', async () => {
-      const existingConfig = {
-        customer: {
-          customerName: 'Adobe',
-          imsOrgID: IMS_ORG_ID,
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand One',
-              status: 'active',
-            },
-          ],
-        },
-      };
-
-      const mockS3Get = sinon.stub().resolves(existingConfig);
-      const mockS3Save = sinon.stub().resolves();
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.patchCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {
-            brands: [
-              {
-                id: 'brand-2',
-                name: 'Brand Two',
-                status: 'active',
-              },
-            ],
-          },
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.message).to.equal('Customer configuration updated successfully');
-      expect(result.stats).to.exist;
-      expect(result.stats.brands).to.exist;
-      expect(mockS3Get).to.have.been.calledOnce;
-      expect(mockS3Save).to.have.been.calledOnce;
-    });
-
-    it('creates new config when no existing config exists', async () => {
-      const mockS3Get = sinon.stub().resolves(null);
-      const mockS3Save = sinon.stub().resolves();
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.patchCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {
-            customerName: 'New Customer',
-            imsOrgID: IMS_ORG_ID,
-            brands: [
-              {
-                id: 'brand-1',
-                name: 'Brand One',
-                status: 'active',
-              },
-            ],
-          },
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.stats.brands.total).to.equal(1);
-      expect(result.stats.brands.modified).to.equal(1);
-    });
-
-    it('returns bad request if organization ID is not provided', async () => {
-      const response = await brandsController.patchCustomerConfig({
-        ...context,
-        params: {},
-        data: { customer: { brands: [] } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns not found if organization does not exist', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
-
-      const response = await brandsController.patchCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: { customer: { brands: [] } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns forbidden if user does not have access', async () => {
+    it('getPromptByBrandAndId returns 403 when user lacks access', async () => {
       const authContextUser = {
         attributes: {
           authInfo: new AuthInfo()
@@ -2405,296 +639,2522 @@ describe('Brands Controller', () => {
             .withAuthenticated(true),
         },
       };
-      const unauthorizedBrandsController = BrandsController({
-        ...context,
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       }, loggerStub, mockEnv);
 
-      const response = await unauthorizedBrandsController.patchCustomerConfig({
-        ...context,
-        ...authContextUser,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: { customer: { brands: [] } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
+      const response = await unauthorizedController.getPromptByBrandAndId({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(403);
     });
 
-    it('returns bad request if no data provided', async () => {
-      const response = await brandsController.patchCustomerConfig({
+    it('getPromptByBrandAndId returns 200 when prompt exists', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: null,
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns bad request if empty data provided', async () => {
-      const response = await brandsController.patchCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {},
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns bad request if merged config is invalid', async () => {
-      const existingConfig = {
-        customer: {
-          customerName: 'Adobe',
-          imsOrgID: IMS_ORG_ID,
-          brands: [],
-        },
-      };
-
-      const mockS3Get = sinon.stub().resolves(existingConfig);
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-          },
-        },
-        '../../src/support/customer-config-v2-metadata.js': {
-          mergeCustomerConfigV2: sinon.stub().returns({
-            mergedConfig: { customer: {} }, // Missing required fields
-            stats: {},
-          }),
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.patchCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {
-            brands: [{ id: 'brand-1', name: 'Brand One' }],
-          },
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-    });
-
-    it('continues if S3 get fails and treats as no existing config', async () => {
-      const mockS3Get = sinon.stub().rejects(new Error('S3 get error'));
-      const mockS3Save = sinon.stub().resolves();
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
-        },
-      });
-
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.patchCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {
-            customerName: 'New Customer',
-            imsOrgID: IMS_ORG_ID,
-            brands: [
-              {
-                id: 'brand-1',
-                name: 'Brand One',
-                status: 'active',
-              },
-            ],
-          },
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(200);
-      expect(loggerStub.warn).to.have.been.called;
+      const body = await response.json();
+      expect(body.id).to.equal(PROMPT_ID);
+      expect(body.prompt).to.equal('Prompt text');
     });
 
-    it('handles S3 save error', async () => {
-      const existingConfig = {
-        customer: {
-          customerName: 'Adobe',
-          imsOrgID: IMS_ORG_ID,
-          brands: [],
-        },
-      };
+    it('getPromptByBrandAndId returns 404 when prompt not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        neq: sandbox.stub().returnsThis(),
+        order: sandbox.stub().returnsThis(),
+        range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+        maybeSingle: sandbox.stub().callsFake(() => {
+          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: null });
+        }),
+      }));
 
-      const mockS3Get = sinon.stub().resolves(existingConfig);
-      const mockS3Save = sinon.stub().rejects(new Error('S3 save error'));
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
-        },
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: 'nonexistent' },
+        dataAccess: mockDataAccess,
       });
 
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.patchCustomerConfig({
+      expect(response.status).to.equal(404);
+    });
+
+    it('getPromptByBrandAndId returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.getPromptByBrandAndId({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {
-            brands: [
-              {
-                id: 'brand-1',
-                name: 'Brand One',
-                status: 'active',
-              },
-            ],
-          },
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(500);
     });
 
-    it('preserves metadata for unchanged items', async () => {
-      const existingConfig = {
-        customer: {
-          customerName: 'Adobe',
-          imsOrgID: IMS_ORG_ID,
-          brands: [
-            {
-              id: 'brand-1',
-              name: 'Brand One',
-              status: 'active',
-              updatedBy: 'old-user@example.com',
-              updatedAt: '2026-01-01T00:00:00.000Z',
-            },
-          ],
+    it('createPromptsByBrand returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
         },
       };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
 
-      const mockS3Get = sinon.stub().resolves(existingConfig);
-      const mockS3Save = sinon.stub().resolves();
-      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
-        },
+      const response = await unauthorizedController.createPromptsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
       });
 
-      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
-      const response = await controller.patchCustomerConfig({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        data: {
-          customer: {
-            brands: [
-              {
-                id: 'brand-1',
-                name: 'Brand One',
-                status: 'active',
-              },
-            ],
-          },
-        },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
-      });
-
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result.stats.brands.modified).to.equal(0);
+      expect(response.status).to.equal(403);
     });
 
-    it('handles missing context.params gracefully', async () => {
-      const response = await brandsController.patchCustomerConfig({
+    it('createPromptsByBrand returns 201 with created/updated counts', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const contextWithEmail = {
         ...context,
-        // params is undefined
-        data: { customer: { brands: [] } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      };
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          const insertChain = { select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) };
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: () => insertChain,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        };
+        if (table === 'brands') chain.maybeSingle = sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null });
+        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...contextWithEmail,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New prompt text', regions: ['us'] }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const body = await response.json();
+      expect(body).to.have.property('created');
+      expect(body).to.have.property('updated');
+      expect(body).to.have.property('prompts');
+    });
+
+    it('createPromptsByBrand returns 400 when prompts not an array', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {},
+        dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(400);
     });
 
-    it('handles missing context.attributes gracefully', async () => {
-      const response = await brandsController.patchCustomerConfig({
+    it('createPromptsByBrand returns 400 when prompts is empty array', async () => {
+      const response = await brandsController.createPromptsByBrand({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        attributes: undefined, // attributes is undefined
-        data: { customer: { brands: [] } },
-        s3: {
-          s3Client: {},
-          s3Bucket: 'test-bucket',
-        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [],
+        dataAccess: mockDataAccess,
       });
 
-      // Should still proceed (defaults to 'system' as userId)
-      expect(response.status).to.not.equal(undefined);
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when prompts exceed 3000', async () => {
+      const manyPrompts = Array.from({ length: 3001 }, (_, i) => ({ prompt: `Prompt ${i}`, regions: [] }));
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: manyPrompts,
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 500 when storage throws', async () => {
+      const rejectingThenable = { then: (resolve, reject) => reject(new Error('Insert failed')) };
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => rejectingThenable }) }),
+            insert: () => ({ select: () => rejectingThenable }),
+            update: () => ({ eq: () => rejectingThenable }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('updatePromptByBrandAndId returns 200 when prompt updated', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated text' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.id).to.equal(PROMPT_ID);
+    });
+
+    it('updatePromptByBrandAndId uses empty object when data is undefined', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('updatePromptByBrandAndId uses system when no auth email', async () => {
+      const contextNoEmail = { ...context, attributes: undefined };
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...contextNoEmail,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('updatePromptByBrandAndId returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.updatePromptByBrandAndId({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('updatePromptByBrandAndId returns 404 when prompt not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        neq: sandbox.stub().returnsThis(),
+        order: sandbox.stub().returnsThis(),
+        update: sandbox.stub().returnsThis(),
+        range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+        maybeSingle: sandbox.stub().callsFake(() => {
+          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: null });
+        }),
+      }));
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: 'nonexistent' },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('deletePromptByBrandAndId returns 204 when prompt deleted', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(204);
+    });
+
+    it('deletePromptByBrandAndId returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.deletePromptByBrandAndId({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('deletePromptByBrandAndId returns 404 when prompt not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        neq: sandbox.stub().returnsThis(),
+        order: sandbox.stub().returnsThis(),
+        update: sandbox.stub().returnsThis(),
+        range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+        maybeSingle: sandbox.stub().callsFake(() => {
+          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: null });
+        }),
+      }));
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: 'nonexistent' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('updatePromptByBrandAndId returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('deletePromptByBrandAndId returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    // --- listPromptsByBrand: params undefined & org not found ---
+
+    it('listPromptsByBrand returns 400 when params is undefined', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('listPromptsByBrand returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('listPromptsByBrand returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- getPromptByBrandAndId: validation, org not found, postgrest ---
+
+    it('getPromptByBrandAndId returns 400 when params is undefined', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when brandId is missing', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 400 when promptId is missing', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('getPromptByBrandAndId returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('getPromptByBrandAndId returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('getPromptByBrandAndId returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent', promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- createPromptsByBrand: validation, org not found, postgrest ---
+
+    it('createPromptsByBrand returns 400 when params is undefined', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: undefined,
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when brandId is missing', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('createPromptsByBrand returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('createPromptsByBrand returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent' },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- updatePromptByBrandAndId: validation, org not found, postgrest ---
+
+    it('updatePromptByBrandAndId returns 400 when params is undefined', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: undefined,
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when brandId is missing', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 400 when promptId is missing', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('updatePromptByBrandAndId returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('updatePromptByBrandAndId returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('updatePromptByBrandAndId returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent', promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    // --- deletePromptByBrandAndId: validation, org not found, postgrest ---
+
+    it('deletePromptByBrandAndId returns 400 when params is undefined', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when brandId is missing', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 400 when promptId is missing', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('deletePromptByBrandAndId returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('deletePromptByBrandAndId returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('deletePromptByBrandAndId returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent', promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
     });
   });
 
-  describe('filterByStatus (exported for testing)', () => {
-    it('should return empty array when items is null', () => {
-      const controller = BrandsController(context, loggerStub, mockEnv);
-      const result = controller.filterByStatus(null);
-      expect(result).to.deep.equal([]);
+  describe('bulkDeletePromptsByBrand', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            update: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+            maybeSingle: sandbox.stub().callsFake(() => {
+              if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              if (table === 'llmo_customer_config') {
+                return Promise.resolve({
+                  data: { config: { customer: { brands: [] } } },
+                  error: null,
+                });
+              }
+              if (table === 'prompts') return Promise.resolve({ data: { id: 'row-id' }, error: null });
+              return Promise.resolve({ data: null, error: null });
+            }),
+          };
+          return chain;
+        }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
     });
 
-    it('should return empty array when items is undefined', () => {
-      const controller = BrandsController(context, loggerStub, mockEnv);
-      const result = controller.filterByStatus(undefined);
-      expect(result).to.deep.equal([]);
+    it('returns 400 when promptIds is missing', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('promptIds');
     });
 
-    it('should filter by status when status is provided', () => {
-      const controller = BrandsController(context, loggerStub, mockEnv);
-      const items = [
-        { id: '1', status: 'active' },
-        { id: '2', status: 'deleted' },
-      ];
-      const result = controller.filterByStatus(items, 'active');
-      expect(result).to.have.lengthOf(1);
-      expect(result[0].id).to.equal('1');
+    it('returns 400 when promptIds is empty', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: [] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
     });
 
-    it('should exclude deleted items when no status is provided', () => {
-      const controller = BrandsController(context, loggerStub, mockEnv);
-      const items = [
-        { id: '1', status: 'active' },
-        { id: '2', status: 'deleted' },
-      ];
-      const result = controller.filterByStatus(items);
-      expect(result).to.have.lengthOf(1);
-      expect(result[0].id).to.equal('1');
+    it('returns 400 when promptIds exceeds 100', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: Array.from({ length: 101 }, (_, i) => `p${i}`) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: undefined,
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 200 with bulk delete result', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1', 'p2'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('metadata');
+      expect(body.metadata).to.have.property('total', 2);
+      expect(body.metadata).to.have.property('success');
+      expect(body).to.have.property('failures').that.is.an('array');
+    });
+
+    it('returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: null, error: null });
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({
+                data: { config: { customer: { brands: [] } } },
+                error: null,
+              });
+            }
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent' },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.bulkDeletePromptsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB error')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+
+    it('returns 400 when both params and data are undefined', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: undefined,
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+  });
+
+  describe('listBrandsForOrg', () => {
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: [], error: null }),
+          then: (resolve) => resolve({ data: [], error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 with brands list', async () => {
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 404 when organization not found', async () => {
+      mockDataAccess.Organization.findById = sinon.stub().resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.listBrandsForOrg({
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB error')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('getBrandForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Test Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-01T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 with the brand', async () => {
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand not found during resolve', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when getBrandById returns null', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // First call: resolveBrandUuid succeeds
+      maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // Second call: getBrandById finds nothing
+      maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.getBrandForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB connection lost')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.getBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('listCategoriesForOrg', () => {
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          then: (resolve) => resolve({ data: [], error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 with categories list', async () => {
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.listCategoriesForOrg({
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB error')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listCategoriesForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('createCategoryForOrg', () => {
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({
+            data: {
+              id: 'cat-uuid',
+              category_id: 'my-category',
+              name: 'My Category',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-01T00:00:00Z',
+              updated_by: 'user@test.com',
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 201 when category is created', async () => {
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'My Category' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(201);
+      const body = await response.json();
+      expect(body).to.have.property('name', 'My Category');
+    });
+
+    it('returns 400 when category data is missing', async () => {
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: null,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when category name is missing', async () => {
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { origin: 'human' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: undefined,
+        data: { name: 'Test' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid' },
+        data: { name: 'Test' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Test' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.createCategoryForOrg({
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Test' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Test' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB error')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Test' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('updateCategoryForOrg', () => {
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: 'cat-uuid',
+              category_id: 'my-category',
+              name: 'Updated Category',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 when category is updated', async () => {
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated Category' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('name', 'Updated Category');
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: undefined,
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when categoryId is missing', async () => {
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when category not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'nonexistent' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.updateCategoryForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB error')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('deleteCategoryForOrg', () => {
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: 'cat-uuid' }, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 204 when category is deleted', async () => {
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(204);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when categoryId is missing', async () => {
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when category not found', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'nonexistent' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.deleteCategoryForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB connection lost')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('listPromptsByBrand - query params forwarding', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      const promptRow = {
+        id: BRAND_UUID,
+        prompt_id: 'prompt-1',
+        name: 'Test Prompt',
+        text: 'What is the best product?',
+        regions: ['us'],
+        status: 'active',
+        origin: 'human',
+        source: 'config',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Test Brand' },
+        categories: null,
+        topics: null,
+      };
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            update: sandbox.stub().returnsThis(),
+            or: sandbox.stub().returnsThis(),
+            contains: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({
+              data: table === 'prompts' ? [promptRow] : [],
+              error: null,
+              count: 1,
+            }),
+            maybeSingle: sandbox.stub().callsFake(() => {
+              if (table === 'brands') {
+                return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              }
+              return Promise.resolve({ data: null, error: null });
+            }),
+          };
+          return chain;
+        }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('forwards search param and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'search=product' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.items).to.be.an('array');
+    });
+
+    it('forwards sort and order params and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'sort=topic&order=asc' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('forwards region param and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'region=us' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('forwards origin param and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'origin=ai' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns prompt items from normalized tables', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.items[0]).to.have.property('id');
+    });
+  });
+
+  describe('createBrandForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({
+            data: { id: BRAND_UUID, name: 'New Brand' },
+            error: null,
+          }),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'New Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-01T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 201 when brand is created', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(201);
+    });
+
+    it('returns 400 when brand data is missing', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: null,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brand name is missing', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { description: 'No name' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: undefined,
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid' },
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.createBrandForOrg({
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB error')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('updateBrandForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Updated Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 when brand is updated', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: undefined,
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand not found during resolve', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when updateBrand returns null', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // First call: resolveBrandUuid succeeds
+      maybeSingleStub.onFirstCall().resolves({
+        data: { id: BRAND_UUID },
+        error: null,
+      });
+      // Second call: updateBrand returns null (brand update returns no data)
+      maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.updateBrandForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB connection lost')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('deleteBrandForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 204 when brand is deleted', async () => {
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(204);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand not found during resolve', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when deleteBrand returns false', async () => {
+      const maybeSingleStub = sandbox.stub();
+      // First call: resolveBrandUuid succeeds
+      maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // Second call: deleteBrand returns null (not found)
+      maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.deleteBrandForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB connection lost')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.deleteBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
     });
   });
 });
