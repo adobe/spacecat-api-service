@@ -565,6 +565,29 @@ describe('ScrapeController', () => {
       });
     });
 
+    it('should return null for empty string tag values', async () => {
+      mockS3.s3Client.send.resolves({
+        Body: {
+          transformToString: sinon.stub().resolves(JSON.stringify({
+            scrapeResult: { tags: { title: '', description: '', h1: '' } },
+          })),
+        },
+      });
+
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: {},
+      });
+
+      expect(response.status).to.equal(200);
+      const data = await response.json();
+      expect(data).to.deep.equal({
+        title: null,
+        description: null,
+        h1: null,
+      });
+    });
+
     it('should default to empty object when context.data is undefined', async () => {
       const response = await scrapeController.getMetadata({
         ...requestContext,
