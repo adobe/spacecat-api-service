@@ -215,6 +215,7 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
 
     // Revoke old grants from previous cycle and re-grant with new token
     if (grantedIds?.length > 0) {
+      // grantIds from splitSuggestionsByGrantStatus are already unique per grant
       await revokeGrants(SuggestionGrant, grantIds);
 
       const grantedEntities = newSuggestions
@@ -233,9 +234,8 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
 
     if (tokenGrants?.length > 0) {
       const grantedSuggestionIds = tokenGrants.map((g) => g.getSuggestionId());
-      const grantedSuggestions = await Promise.all(
-        grantedSuggestionIds.map((id) => Suggestion.findById(id)),
-      );
+      const { data: grantedSuggestions } = await Suggestion
+        .batchGetByKeys(grantedSuggestionIds.map((id) => ({ suggestionId: id })));
 
       const hasStale = grantedSuggestions.some(
         (s) => s && (s.getStatus() === STATUSES.OUTDATED
@@ -259,9 +259,8 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   if (remaining <= 0) return;
 
   // Re-fetch grant status since revokes may have changed it
-  const freshNewIds = newSuggestions.map((s) => s.getId());
   const { notGrantedIds: currentNotGrantedIds } = await SuggestionGrant
-    .splitSuggestionsByGrantStatus(freshNewIds);
+    .splitSuggestionsByGrantStatus(newSuggestionIds);
 
   const notGrantedEntities = newSuggestions
     .filter((s) => currentNotGrantedIds.includes(s.getId()));

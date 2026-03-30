@@ -561,11 +561,11 @@ describe('grant-suggestions-handler', () => {
 
         const Suggestion = {
           allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
-          findById: sandbox.stub(),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Granted, sugg3Granted],
+            unprocessed: [],
+          }),
         };
-        Suggestion.findById
-          .withArgs('sugg-2').resolves(sugg2Granted)
-          .withArgs('sugg-3').resolves(sugg3Granted);
 
         const SuggestionGrant = {
           splitSuggestionsByGrantStatus: sandbox.stub().resolves({
@@ -614,7 +614,10 @@ describe('grant-suggestions-handler', () => {
 
         const Suggestion = {
           allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
-          findById: sandbox.stub().withArgs('sugg-2').resolves(sugg2Rejected),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Rejected],
+            unprocessed: [],
+          }),
         };
 
         const SuggestionGrant = {
@@ -660,7 +663,10 @@ describe('grant-suggestions-handler', () => {
 
         const Suggestion = {
           allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
-          findById: sandbox.stub().withArgs('sugg-2').resolves(sugg2Approved),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Approved],
+            unprocessed: [],
+          }),
         };
 
         const SuggestionGrant = {
@@ -737,7 +743,10 @@ describe('grant-suggestions-handler', () => {
 
         const Suggestion = {
           allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
-          findById: sandbox.stub().withArgs('sugg-2').resolves(sugg2Outdated),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Outdated],
+            unprocessed: [],
+          }),
         };
 
         const SuggestionGrant = {
