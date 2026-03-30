@@ -811,6 +811,7 @@ function BrandsController(ctx, log, env) {
   const ALLOWED_SITE_IDS = [
     '00000000-0000-0000-0000-000000000001', // dev
     '00000000-0000-0000-0000-000000000002', // prod
+    'c2473d89-e997-458d-a86d-b4096649c12b', // dev
   ];
 
   function isSyncEnabledForSite(siteId) {
