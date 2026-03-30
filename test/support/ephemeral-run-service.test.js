@@ -681,6 +681,28 @@ describe('ephemeral-run-service', () => {
       await runEphemeralRunBatch(['s-1'], {}, ctx);
 
       expect(ctx.s3.s3Client.send).to.have.been.called;
+      const putCall = ctx.s3.s3Client.send.getCalls().find(
+        (c) => c.args[0].input?.Key?.includes('results/s-1.json'),
+      );
+      expect(putCall).to.exist;
+      const body = JSON.parse(putCall.args[0].input.Body);
+      expect(body.status).to.equal('failed');
+      expect(body.error.code).to.equal('SETUP_FAILURE');
+      expect(body.error.details).to.equal('DB error');
+    });
+
+    it('writes SETUP_FAILURE details when thrown value is not an Error', async () => {
+      const ctx = createMockContext();
+      ctx.dataAccess.Site.findById.rejects('lookup failed');
+      ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
+
+      await runEphemeralRunBatch(['s-1'], {}, ctx);
+
+      const putCall = ctx.s3.s3Client.send.getCalls().find(
+        (c) => c.args[0].input?.Key?.includes('results/s-1.json'),
+      );
+      const body = JSON.parse(putCall.args[0].input.Body);
+      expect(body.error.details).to.equal('lookup failed');
     });
 
     it('handles enqueue failure gracefully and writes failed result', async () => {

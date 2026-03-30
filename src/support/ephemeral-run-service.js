@@ -47,7 +47,6 @@ const PRESETS = {
         'organic-keywords',
         'all-traffic',
         'traffic-analysis',
-        'code',
       ],
       optionsByImportType: {
         [TRAFFIC_ANALYSIS_IMPORT_TYPE]: {
@@ -571,13 +570,18 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
       }
     } catch (error) {
       log.error(`Setup: failed to enable for site ${siteId}`, error);
+      const detail = error?.message || String(error);
       // eslint-disable-next-line no-await-in-loop
       await writeSiteResult(s3, batchId, siteId, {
         siteId,
         batchId,
         status: 'failed',
         completedAt: new Date().toISOString(),
-        error: { code: 'SETUP_FAILURE', message: 'Failed to enable site' },
+        error: {
+          code: 'SETUP_FAILURE',
+          message: 'Failed to enable site',
+          details: detail.slice(0, 2000),
+        },
       }).catch((e) => log.error(`Failed to write setup failure for ${siteId}`, e));
     }
   }
