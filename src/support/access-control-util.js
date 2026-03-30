@@ -68,6 +68,7 @@ export default class AccessControlUtil {
     this.context = context;
     // Always assign the log property
     this.log = log;
+    this._lastAccessWasDelegated = false;
   }
 
   isAccessTypeJWT() {
@@ -97,7 +98,7 @@ export default class AccessControlUtil {
   }
 
   isLLMOAdministrator() {
-    return this.authInfo.isLLMOAdministrator();
+    return this.authInfo.isLLMOAdministrator() && !this._lastAccessWasDelegated;
   }
 
   canManageImsOrgAccess() {
@@ -246,6 +247,8 @@ export default class AccessControlUtil {
         }
       }
     }
+
+    this._lastAccessWasDelegated = isDelegatedAccess;
 
     if (hasOrgAccess && productCode.length > 0) {
       let org;
