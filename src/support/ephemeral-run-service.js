@@ -94,6 +94,7 @@ function mergeOptionsByImportType(baseMap = {}, bodyMap = {}) {
 }
 
 function resolveImportsFromPreset(baseImports, bodyImports) {
+  /* c8 ignore next -- final ?? [] only when both sides omit types; presets always define types */
   const types = bodyImports?.types ?? baseImports?.types ?? [];
 
   let optionsByImportType = mergeOptionsByImportType(

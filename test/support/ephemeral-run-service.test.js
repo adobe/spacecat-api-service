@@ -153,6 +153,14 @@ describe('ephemeral-run-service', () => {
       expect(result.audits.types).to.deep.equal(['lhs-mobile']);
     });
 
+    it('falls back to preset import types when body imports.types is null', () => {
+      const result = resolvePayload({
+        preset: 'plg-full',
+        imports: { types: null },
+      });
+      expect(result.imports.types).to.deep.equal(PRESETS['plg-full'].imports.types);
+    });
+
     it('uses empty arrays when no preset and no explicit types', () => {
       const result = resolvePayload({});
       expect(result.imports.types).to.deep.equal([]);
@@ -383,6 +391,23 @@ describe('ephemeral-run-service', () => {
       );
       expect(configQueueCall).to.be.undefined;
     });
+
+    it('records skipped audits when AUDIT_JOBS_QUEUE_URL is missing', async () => {
+      const ctx = createMockContext();
+      delete ctx.env.AUDIT_JOBS_QUEUE_URL;
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({
+        imports: { types: [] },
+        audits: { types: ['lhs-mobile', 'accessibility'] },
+      });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      expect(ctx.log.error).to.have.been.calledWithMatch(/No audit queue URL/);
+      expect(result.skipped).to.have.length(2);
+      expect(result.skipped.every((s) => s.reason === 'Missing audit jobs queue URL')).to.be.true;
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -498,6 +523,20 @@ describe('ephemeral-run-service', () => {
       expect(ctx.log.error).to.have.been.calledWithMatch(/no organization/);
     });
 
+    it('logs and skips SFN teardown when Organization.findById returns null', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.dataAccess.Organization.findById.resolves(null);
+
+      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+
+      expect(sfnSendStub).to.not.have.been.called;
+      expect(ctx.log.error).to.have.been.calledWithMatch(/organization not found/);
+    });
+
     it('deduplicates siteIds', async () => {
       const ctx = createMockContext();
       ctx.dataAccess.Site.findById.resolves(createMockSite());
@@ -596,6 +635,34 @@ describe('ephemeral-run-service', () => {
       expect(ctx.log.error).to.have.been.called;
     });
 
+    it('writes ENQUEUE_FAILURE when enqueueSiteJobs throws (e.g. log.error rethrows in inner catch)', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.sqs.sendMessage.rejects(new Error('SQS down'));
+      ctx.log.error = sinon.stub().callsFake((msg) => {
+        if (String(msg).includes('Failed to enqueue import')) {
+          throw new Error('inner catch could not log');
+        }
+      });
+
+      await runEphemeralRunBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+      }, ctx);
+
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to enqueue jobs for site/);
+
+      const putCall = ctx.s3.s3Client.send.getCalls().find(
+        (c) => c.args[0].input?.Key?.includes('results/s-1.json'),
+      );
+      expect(putCall).to.exist;
+      const body = JSON.parse(putCall.args[0].input.Body);
+      expect(body.status).to.equal('failed');
+      expect(body.error.code).to.equal('ENQUEUE_FAILURE');
+    });
+
     it('schedules single onboard-shaped teardown when only imports were enabled', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
@@ -661,6 +728,53 @@ describe('ephemeral-run-service', () => {
       await runEphemeralRunBatch(['s-1'], { preset: 'plg-full' }, ctx);
 
       expect(ctx.log.error).to.have.been.called;
+    });
+
+    it('logs when teardown state machine ARN is missing', async () => {
+      const ctx = createMockContext();
+      delete ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN;
+      delete ctx.env.INSIGHTS_TEARDOWN_STATE_MACHINE_ARN;
+      delete ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
+    });
+
+    it('logs when delaySeconds is 0 but WORKFLOW_WAIT_TIME_IN_SECONDS is unset', async () => {
+      const ctx = createMockContext();
+      delete ctx.env.WORKFLOW_WAIT_TIME_IN_SECONDS;
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        teardown: { delaySeconds: 0 },
+      }, ctx);
+
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
+    });
+
+    it('logs when WORKFLOW_WAIT_TIME_IN_SECONDS is not a finite wait time', async () => {
+      const ctx = createMockContext();
+      ctx.env.WORKFLOW_WAIT_TIME_IN_SECONDS = 'not-a-number';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        teardown: { delaySeconds: 0 },
+      }, ctx);
+
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
     });
   });
 
