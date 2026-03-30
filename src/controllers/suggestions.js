@@ -1491,6 +1491,8 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const suggestionIds = [...new Set(rawSuggestionIds)];
 
+    // No productCode is passed to hasAccess(); the delegation block is not entered.
+    // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(
         `[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`,
@@ -1955,6 +1957,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
+    // No productCode is passed to hasAccess(); the delegation block is not entered.
+    // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(`[edge-rollback-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
       return forbidden('User does not belong to the organization');

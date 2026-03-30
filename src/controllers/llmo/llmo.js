@@ -474,7 +474,7 @@ function LlmoController(ctx) {
     const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
 
     try {
-      // Validate site and LLMO access (sets _lastAccessWasDelegated before isLLMOAdministrator)
+      // hasAccess() must precede isLLMOAdministrator() for delegation-aware checks
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) return siteValidation;
 
@@ -1149,6 +1149,8 @@ function LlmoController(ctx) {
         return notFound('Site not found');
       }
 
+      // No productCode is passed to hasAccess(); the delegation block is not entered.
+      // Org membership is the intended access gate for this endpoint.
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
       }
@@ -1689,6 +1691,8 @@ function LlmoController(ctx) {
       if (!site) {
         return notFound('Site not found');
       }
+      // No productCode is passed to hasAccess(); the delegation block is not entered.
+      // Org membership is the intended access gate for this endpoint.
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
       }

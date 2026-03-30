@@ -4972,6 +4972,33 @@ describe('LlmoController', () => {
       expect(calledMessage).to.include('• Site: https://www.example.com');
       expect(calledMessage).to.not.include('cc:');
     });
+
+    it('should call hasAccess before isLLMOAdministrator before isOwnerOfSite', async () => {
+      const hasAccessStub = sinon.stub().resolves(true);
+      const isLLMOAdminStub = sinon.stub().returns(true);
+      const isOwnerStub = sinon.stub().resolves(false);
+
+      const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: hasAccessStub,
+              hasAdminAccess: () => false,
+              isLLMOAdministrator: isLLMOAdminStub,
+              isOwnerOfSite: isOwnerStub,
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const result = await OrderedController(mockContext)
+        .createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+    });
   });
 
   describe('createOrUpdateStageEdgeConfig', () => {
@@ -5223,6 +5250,31 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.be.an('array').with.lengthOf(1);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+    });
+
+    it('should call hasAccess before isLLMOAdministrator', async () => {
+      const hasAccessStub = sinon.stub().resolves(true);
+      const isLLMOAdminStub = sinon.stub().returns(false);
+
+      const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: hasAccessStub,
+              hasAdminAccess: () => false,
+              isLLMOAdministrator: isLLMOAdminStub,
+              isOwnerOfSite: sinon.stub().resolves(true),
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const result = await OrderedController(mockContext)
+        .createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
     });
   });
 

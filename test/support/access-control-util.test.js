@@ -1841,7 +1841,7 @@ describe('Access Control Util', () => {
       };
     });
 
-    it('defaults to false before any hasAccess call', () => {
+    it('returns true (JWT claim) before any hasAccess call when delegation flag defaults to false', () => {
       const util = AccessControlUtil.fromContext(delegationContext);
       // JWT says true, but _lastAccessWasDelegated is false → JWT wins
       expect(util.isLLMOAdministrator()).to.be.true;
