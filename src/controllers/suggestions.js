@@ -1026,10 +1026,9 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Block auto-deploy on non-granted suggestions for summit-plg users
     if (await getIsSummitPlgEnabled(site, ctx, context)) {
-      const { grantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
-      const ungrantedIds = suggestionIds.filter((id) => !grantedIds.includes(id));
-      if (ungrantedIds.length > 0) {
-        return forbidden(`The following suggestions are not granted: ${ungrantedIds.join(', ')}`);
+      const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
+      if (notGrantedIds.length > 0) {
+        return forbidden(`The following suggestions are not granted: ${notGrantedIds.join(', ')}`);
       }
     }
 

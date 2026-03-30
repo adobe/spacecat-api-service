@@ -3645,6 +3645,7 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('not granted');
       expect(body.message).to.include(SUGGESTION_IDS[2]);
+      expect(body.message).to.not.include(SUGGESTION_IDS[0]);
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
