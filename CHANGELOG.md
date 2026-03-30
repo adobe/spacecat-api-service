@@ -1,3 +1,10 @@
+# [1.387.0](https://github.com/adobe/spacecat-api-service/compare/v1.386.1...v1.387.0) (2026-03-30)
+
+
+### Features
+
+* LLMO-3956 enable brandalf feature flag during v2 onboarding ([#2066](https://github.com/adobe/spacecat-api-service/issues/2066)) ([e3d2c8f](https://github.com/adobe/spacecat-api-service/commit/e3d2c8fc6f1555b94630d48870d91026b9d30e4b))
+
 ## [1.386.1](https://github.com/adobe/spacecat-api-service/compare/v1.386.0...v1.386.1) (2026-03-30)
 
 
