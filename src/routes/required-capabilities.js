@@ -81,8 +81,9 @@ export const INTERNAL_ROUTES = [
   'GET /trial-users/email-preferences',
   'PATCH /trial-users/email-preferences',
 
-  // Entitlement write - admin/manual provisioning only, not S2S
+  // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
+  'POST /sites/:siteId/site-enrollments',
   // Feature flags write - admin only, mysticat-backed org config
   'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
   'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
