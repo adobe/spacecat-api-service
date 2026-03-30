@@ -1024,6 +1024,15 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('variations must be an array');
     }
 
+    // Block auto-deploy on non-granted suggestions for summit-plg users
+    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+      const { grantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
+      const ungrantedIds = suggestionIds.filter((id) => !grantedIds.includes(id));
+      if (ungrantedIds.length > 0) {
+        return forbidden(`The following suggestions are not granted: ${ungrantedIds.join(', ')}`);
+      }
+    }
+
     const configuration = await Configuration.findLatest();
     if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
       return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
