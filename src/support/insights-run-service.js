@@ -36,6 +36,7 @@ const PRESETS = {
         'all-traffic',
         'cwv-weekly',
         'code',
+        'traffic-analysis',
       ],
       trafficAnalysisWeeks: 5,
     },
@@ -49,15 +50,10 @@ const PRESETS = {
         'experimentation-opportunities',
         'paid',
         'no-cta-above-the-fold',
+        'broken-backlinks-auto-suggest',
+        'broken-internal-links-auto-suggest',
+        'meta-tags-auto-suggest',
       ],
-      autoSuggest: {
-        mode: 'match',
-        forTypes: [
-          'broken-backlinks',
-          'broken-internal-links',
-          'meta-tags',
-        ],
-      },
     },
   },
 };
@@ -83,7 +79,6 @@ function resolvePayload(body) {
 
   const audits = {
     types: body.audits?.types || base.audits.types,
-    autoSuggest: body.audits?.autoSuggest || base.audits?.autoSuggest || null,
   };
 
   const rawDelay = body.teardown?.delaySeconds ?? DEFAULT_TEARDOWN_DELAY_SECONDS;
@@ -93,23 +88,6 @@ function resolvePayload(body) {
   );
 
   return { imports, audits, teardownDelaySeconds };
-}
-
-function resolveAuditHandlers(audits) {
-  const handlers = [...audits.types];
-  const { autoSuggest } = audits;
-  if (autoSuggest) {
-    const suggestTypes = autoSuggest.mode === 'match'
-      ? (autoSuggest.forTypes || [])
-      : audits.types;
-    for (const type of suggestTypes) {
-      const suggestHandler = `${type}-auto-suggest`;
-      if (!handlers.includes(suggestHandler)) {
-        handlers.push(suggestHandler);
-      }
-    }
-  }
-  return handlers;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,11 +117,11 @@ function deltaEnableImports(site, importTypes) {
   return { importsEnabled, importsAlreadyEnabled };
 }
 
-function deltaEnableAudits(configuration, site, auditHandlers) {
+function deltaEnableAudits(configuration, site, auditTypes) {
   const auditsEnabled = [];
   const auditsAlreadyEnabled = [];
 
-  for (const auditType of auditHandlers) {
+  for (const auditType of auditTypes) {
     if (configuration.isHandlerEnabledForSite(auditType, site)) {
       auditsAlreadyEnabled.push(auditType);
     } else {
@@ -336,11 +314,11 @@ export async function runInsightsForSite(siteId, body, context) {
   }
 
   const { imports, audits, teardownDelaySeconds } = resolvePayload(body);
-  const auditHandlers = resolveAuditHandlers(audits);
+  const auditTypes = audits.types;
   const configuration = await Configuration.findLatest();
 
   const { importsEnabled, importsAlreadyEnabled } = deltaEnableImports(site, imports.types);
-  const auditDelta = deltaEnableAudits(configuration, site, auditHandlers);
+  const auditDelta = deltaEnableAudits(configuration, site, auditTypes);
   const { auditsEnabled, auditsAlreadyEnabled } = auditDelta;
 
   let teardownResult = { mode: 'none' };
@@ -407,31 +385,21 @@ export async function runInsightsForSite(siteId, body, context) {
 // Batch endpoint (POST handler)
 // ---------------------------------------------------------------------------
 
-function requireEnvVar(env, name) {
-  const value = env[name];
-  if (!value) {
-    throw new Error(`${name} is not configured`);
-  }
-  return value;
-}
-
 export async function runInsightsBatch(siteIds, body, context) {
   const {
-    sqs, s3, env, log,
+    dataAccess, s3, env, log,
   } = context;
-  const queueUrl = requireEnvVar(env, 'INSIGHTS_RUN_QUEUE_URL');
+  const { Site, Configuration } = dataAccess;
   const batchId = randomUUID();
   const uniqueSiteIds = [...new Set(siteIds)];
   const effectiveSiteIds = uniqueSiteIds.slice(0, MAX_BATCH_SITES);
 
+  const { imports, audits, teardownDelaySeconds } = resolvePayload(body);
+  const auditTypes = audits.types;
+  const configuration = await Configuration.findLatest();
+
   const now = new Date();
   const expiresAt = new Date(now.getTime() + BATCH_TTL_DAYS * 24 * 60 * 60 * 1000);
-  const payload = {
-    preset: body.preset,
-    imports: body.imports,
-    audits: body.audits,
-    teardown: body.teardown,
-  };
 
   await writeBatchManifest(s3, batchId, {
     batchId,
@@ -440,33 +408,17 @@ export async function runInsightsBatch(siteIds, body, context) {
     totalSites: effectiveSiteIds.length,
     enqueuedSiteIds: effectiveSiteIds,
     failedToEnqueue: [],
-    payload,
+    payload: {
+      preset: body.preset,
+      imports: body.imports,
+      audits: body.audits,
+      teardown: body.teardown,
+    },
   });
 
-  // SQS max message size is 256KB. 500 UUIDs + payload ≈ 20KB, well within limit.
-  await sqs.sendMessage(queueUrl, {
-    type: 'insights-batch-setup',
-    batchId,
-    siteIds: effectiveSiteIds,
-    payload,
-  });
-
-  log.info(`Batch ${batchId}: enqueued setup for ${effectiveSiteIds.length} sites`);
-
-  return { batchId, total: effectiveSiteIds.length };
-}
-
-// ---------------------------------------------------------------------------
-// Batch Phase 1: Setup worker (sequential enable + fan-out)
-// ---------------------------------------------------------------------------
-
-async function enableAllSites(params) {
-  const {
-    siteIds, imports, auditHandlers, configuration, Site, s3, batchId, log,
-  } = params;
+  // Phase 1: Sequential delta-enable for all sites
   const perSiteSetup = {};
-
-  for (const siteId of siteIds) {
+  for (const siteId of effectiveSiteIds) {
     try {
       // eslint-disable-next-line no-await-in-loop
       const site = await Site.findById(siteId);
@@ -482,7 +434,7 @@ async function enableAllSites(params) {
           await site.save();
         }
 
-        const { auditsEnabled } = deltaEnableAudits(configuration, site, auditHandlers);
+        const { auditsEnabled } = deltaEnableAudits(configuration, site, auditTypes);
 
         perSiteSetup[siteId] = {
           importsEnabled,
@@ -503,36 +455,56 @@ async function enableAllSites(params) {
     }
   }
 
-  return perSiteSetup;
-}
-
-async function fanOutSiteMessages(perSiteSetup, sqs, queueUrl, batchId, payload, s3, log) {
-  for (const siteId of Object.keys(perSiteSetup)) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await sqs.sendMessage(queueUrl, {
-        type: 'insights-run-site',
-        batchId,
-        siteId,
-        payload,
-        setup: perSiteSetup[siteId],
-      });
-    } catch (error) {
-      log.error(`Setup: failed to enqueue site ${siteId}`, error);
+  // Phase 2: Persist global configuration (one save for all audit changes)
+  try {
+    await configuration.save();
+    log.info(`Batch ${batchId}: saved config for ${Object.keys(perSiteSetup).length} sites`);
+  } catch (error) {
+    log.error(`Batch ${batchId}: config save failed, rolling back imports`, error);
+    await rollbackImports(Site, perSiteSetup, log);
+    for (const siteId of Object.keys(perSiteSetup)) {
       // eslint-disable-next-line no-await-in-loop
       await writeSiteResult(s3, batchId, siteId, {
         siteId,
         batchId,
         status: 'failed',
         completedAt: new Date().toISOString(),
-        error: { code: 'ENQUEUE_FAILURE', message: 'Failed to enqueue site job' },
-      }).catch((e) => log.error(`Failed to write enqueue failure for ${siteId}`, e));
+        error: { code: 'CONFIG_SAVE_FAILURE', message: 'Failed to save configuration' },
+      }).catch((e) => log.error(`Failed to write config failure for ${siteId}`, e));
     }
+    return { batchId, total: effectiveSiteIds.length };
   }
-}
 
-async function scheduleTeardowns(perSiteSetup, teardownDelaySeconds, batchId, env, log) {
-  // Batch audit teardown: ONE Step Function for all sites
+  // Phase 3: Enqueue jobs for each site directly
+  for (const siteId of Object.keys(perSiteSetup)) {
+    let result;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const jobResult = await enqueueSiteJobs(siteId, { imports, audits }, configuration, context);
+      result = {
+        siteId,
+        batchId,
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        enqueued: jobResult.enqueued,
+        skipped: jobResult.skipped,
+      };
+    } catch (error) {
+      log.error(`Batch ${batchId}: failed to enqueue jobs for site ${siteId}`, error);
+      result = {
+        siteId,
+        batchId,
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        error: { code: 'ENQUEUE_FAILURE', message: 'Failed to enqueue site jobs' },
+      };
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await writeSiteResult(s3, batchId, siteId, result)
+      .catch((e) => log.error(`Failed to write result for ${siteId}`, e));
+  }
+
+  // Phase 4: Schedule teardowns
   const allAuditsEnabled = {};
   for (const [siteId, setup] of Object.entries(perSiteSetup)) {
     if (setup.auditsEnabled.length > 0) {
@@ -554,7 +526,6 @@ async function scheduleTeardowns(perSiteSetup, teardownDelaySeconds, batchId, en
     }
   }
 
-  // Per-site import teardown (safe — each site has its own config record)
   for (const [siteId, setup] of Object.entries(perSiteSetup)) {
     if (setup.importsEnabled.length > 0) {
       try {
@@ -569,105 +540,14 @@ async function scheduleTeardowns(perSiteSetup, teardownDelaySeconds, batchId, en
           log,
         });
       } catch (error) {
-        log.error(`Setup: failed to schedule import teardown for site ${siteId}`, error);
+        log.error(`Batch ${batchId}: failed to schedule import teardown for site ${siteId}`, error);
       }
     }
   }
-}
 
-export async function processInsightsBatchSetup(message, context) {
-  const { batchId, siteIds, payload } = message;
-  const {
-    dataAccess, sqs, s3, env, log,
-  } = context;
-  const { Site, Configuration } = dataAccess;
-  const queueUrl = requireEnvVar(env, 'INSIGHTS_RUN_QUEUE_URL');
+  log.info(`Batch ${batchId}: complete, processed ${Object.keys(perSiteSetup).length} sites`);
 
-  const { imports, audits, teardownDelaySeconds } = resolvePayload(payload);
-  const auditHandlers = resolveAuditHandlers(audits);
-  const configuration = await Configuration.findLatest();
-
-  // Phase 1a: Sequential delta-enable for all sites
-  const perSiteSetup = await enableAllSites({
-    siteIds, imports, auditHandlers, configuration, Site, s3, batchId, log,
-  });
-
-  // Phase 1b: Persist global configuration (one save for all audit changes)
-  try {
-    await configuration.save();
-    log.info(`Batch ${batchId}: saved config for ${Object.keys(perSiteSetup).length} sites`);
-  } catch (error) {
-    log.error(`Batch ${batchId}: config save failed, rolling back imports`, error);
-    await rollbackImports(Site, perSiteSetup, log);
-    for (const siteId of Object.keys(perSiteSetup)) {
-      // eslint-disable-next-line no-await-in-loop
-      await writeSiteResult(s3, batchId, siteId, {
-        siteId,
-        batchId,
-        status: 'failed',
-        completedAt: new Date().toISOString(),
-        error: { code: 'CONFIG_SAVE_FAILURE', message: 'Failed to save configuration' },
-      }).catch((e) => log.error(`Failed to write config failure for ${siteId}`, e));
-    }
-    return;
-  }
-
-  // Phase 1c: Fan-out individual site messages
-  await fanOutSiteMessages(perSiteSetup, sqs, queueUrl, batchId, payload, s3, log);
-
-  // Phase 1d: Schedule teardowns
-  await scheduleTeardowns(perSiteSetup, teardownDelaySeconds, batchId, env, log);
-
-  log.info(`Batch ${batchId}: setup complete, fanned out ${Object.keys(perSiteSetup).length} sites`);
-}
-
-// ---------------------------------------------------------------------------
-// Batch Phase 2: Site worker (enqueue jobs, write result)
-// ---------------------------------------------------------------------------
-
-export async function processInsightsBatchSiteWorker(message, context) {
-  const { batchId, siteId, payload } = message;
-  const {
-    dataAccess, s3, log,
-  } = context;
-  const { Site, Configuration } = dataAccess;
-
-  let result;
-  try {
-    const site = await Site.findById(siteId);
-    if (!site) {
-      result = {
-        siteId, batchId, status: 'not_found', completedAt: new Date().toISOString(),
-      };
-    } else {
-      const resolved = resolvePayload(payload);
-      const configuration = await Configuration.findLatest();
-      const { enqueued, skipped } = await enqueueSiteJobs(siteId, resolved, configuration, context);
-      result = {
-        siteId,
-        batchId,
-        status: 'completed',
-        completedAt: new Date().toISOString(),
-        enqueued,
-        skipped,
-      };
-    }
-  } catch (error) {
-    log.error(`Worker: unexpected error for site ${siteId} in batch ${batchId}`, error);
-    result = {
-      siteId,
-      batchId,
-      status: 'failed',
-      completedAt: new Date().toISOString(),
-      error: { code: 'UNEXPECTED_ERROR', message: 'Worker processing failed' },
-    };
-  }
-
-  try {
-    await writeSiteResult(s3, batchId, siteId, result);
-  } catch (error) {
-    log.error(`Worker: failed to write result for site ${siteId} in batch ${batchId}`, error);
-  }
+  return { batchId, total: effectiveSiteIds.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -676,7 +556,6 @@ export async function processInsightsBatchSiteWorker(message, context) {
 
 export {
   resolvePayload,
-  resolveAuditHandlers,
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,

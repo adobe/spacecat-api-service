@@ -19,14 +19,11 @@ import sinonChai from 'sinon-chai';
 import { SFNClient } from '@aws-sdk/client-sfn';
 import {
   resolvePayload,
-  resolveAuditHandlers,
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,
   runInsightsForSite,
   runInsightsBatch,
-  processInsightsBatchSetup,
-  processInsightsBatchSiteWorker,
   PRESETS,
   MAX_BATCH_SITES,
 } from '../../src/support/insights-run-service.js';
@@ -101,7 +98,6 @@ function createMockContext(overrides = {}) {
     },
     env: {
       AUDIT_JOBS_QUEUE_URL: 'audit-queue-url',
-      INSIGHTS_RUN_QUEUE_URL: 'insights-queue-url',
       INSIGHTS_TEARDOWN_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123:stateMachine:teardown',
     },
     log: {
@@ -172,67 +168,6 @@ describe('insights-run-service', () => {
     it('uses explicit trafficAnalysisWeeks', () => {
       const result = resolvePayload({ imports: { trafficAnalysisWeeks: 3 } });
       expect(result.imports.trafficAnalysisWeeks).to.equal(3);
-    });
-
-    it('uses explicit autoSuggest over preset', () => {
-      const result = resolvePayload({
-        preset: 'plg-full',
-        audits: { types: ['lhs-mobile'], autoSuggest: { mode: 'all' } },
-      });
-      expect(result.audits.autoSuggest.mode).to.equal('all');
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // resolveAuditHandlers
-  // -----------------------------------------------------------------------
-  describe('resolveAuditHandlers()', () => {
-    it('returns audit types without auto-suggest when not configured', () => {
-      const result = resolveAuditHandlers({ types: ['lhs-mobile'], autoSuggest: null });
-      expect(result).to.deep.equal(['lhs-mobile']);
-    });
-
-    it('adds auto-suggest handlers in match mode', () => {
-      const result = resolveAuditHandlers({
-        types: ['lhs-mobile', 'broken-backlinks'],
-        autoSuggest: { mode: 'match', forTypes: ['broken-backlinks'] },
-      });
-      expect(result).to.include('broken-backlinks-auto-suggest');
-      expect(result).to.not.include('lhs-mobile-auto-suggest');
-    });
-
-    it('adds auto-suggest for all types when mode is not match', () => {
-      const result = resolveAuditHandlers({
-        types: ['lhs-mobile', 'broken-backlinks'],
-        autoSuggest: { mode: 'all' },
-      });
-      expect(result).to.include('lhs-mobile-auto-suggest');
-      expect(result).to.include('broken-backlinks-auto-suggest');
-    });
-
-    it('does not duplicate auto-suggest handlers', () => {
-      const result = resolveAuditHandlers({
-        types: ['broken-backlinks'],
-        autoSuggest: { mode: 'match', forTypes: ['broken-backlinks', 'broken-backlinks'] },
-      });
-      const autoSuggestCount = result.filter((h) => h === 'broken-backlinks-auto-suggest').length;
-      expect(autoSuggestCount).to.equal(1);
-    });
-
-    it('handles empty forTypes in match mode', () => {
-      const result = resolveAuditHandlers({
-        types: ['lhs-mobile'],
-        autoSuggest: { mode: 'match', forTypes: [] },
-      });
-      expect(result).to.deep.equal(['lhs-mobile']);
-    });
-
-    it('handles undefined forTypes in match mode', () => {
-      const result = resolveAuditHandlers({
-        types: ['lhs-mobile'],
-        autoSuggest: { mode: 'match' },
-      });
-      expect(result).to.deep.equal(['lhs-mobile']);
     });
   });
 
@@ -468,32 +403,49 @@ describe('insights-run-service', () => {
   // runInsightsBatch
   // -----------------------------------------------------------------------
   describe('runInsightsBatch()', () => {
-    it('writes manifest and enqueues setup message', async () => {
+    it('enables imports/audits, enqueues jobs, and schedules teardowns inline', async () => {
       const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      const result = await runInsightsBatch(['s-1', 's-2'], { preset: 'plg-full' }, ctx);
+      const result = await runInsightsBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        audits: { types: ['lhs-mobile'] },
+      }, ctx);
 
       expect(result.batchId).to.be.a('string');
-      expect(result.total).to.equal(2);
-      expect(ctx.s3.s3Client.send).to.have.been.calledOnce;
-      expect(ctx.sqs.sendMessage).to.have.been.calledOnce;
-      const msg = ctx.sqs.sendMessage.firstCall.args[1];
-      expect(msg.type).to.equal('insights-batch-setup');
-      expect(msg.siteIds).to.deep.equal(['s-1', 's-2']);
+      expect(result.total).to.equal(1);
+      expect(site.save).to.have.been.called;
+      expect(config.save).to.have.been.called;
+      // Import jobs enqueued directly
+      expect(ctx.sqs.sendMessage).to.have.been.called;
+      // Teardown scheduled
+      expect(sfnSendStub).to.have.been.called;
+      // Site result written to S3
+      const putCalls = ctx.s3.s3Client.send.getCalls().filter(
+        (c) => c.args[0].input?.Key?.includes('results/s-1.json'),
+      );
+      expect(putCalls).to.have.length.greaterThan(0);
+      const body = JSON.parse(putCalls[0].args[0].input.Body);
+      expect(body.status).to.equal('completed');
     });
 
     it('deduplicates siteIds', async () => {
       const ctx = createMockContext();
+      ctx.dataAccess.Site.findById.resolves(createMockSite());
+      ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
 
-      const result = await runInsightsBatch(['s-1', 's-1', 's-2'], { preset: 'plg-full' }, ctx);
+      const result = await runInsightsBatch(['s-1', 's-1', 's-2'], {}, ctx);
 
       expect(result.total).to.equal(2);
-      const msg = ctx.sqs.sendMessage.firstCall.args[1];
-      expect(msg.siteIds).to.deep.equal(['s-1', 's-2']);
     });
 
     it('caps at MAX_BATCH_SITES', async () => {
       const ctx = createMockContext();
+      ctx.dataAccess.Site.findById.resolves(createMockSite());
+      ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
       const ids = Array.from({ length: 600 }, (_, i) => `s-${i}`);
 
       const result = await runInsightsBatch(ids, {}, ctx);
@@ -501,61 +453,19 @@ describe('insights-run-service', () => {
       expect(result.total).to.equal(MAX_BATCH_SITES);
     });
 
-    it('throws when INSIGHTS_RUN_QUEUE_URL is missing', async () => {
-      const ctx = createMockContext();
-      delete ctx.env.INSIGHTS_RUN_QUEUE_URL;
-
-      try {
-        await runInsightsBatch(['s-1'], {}, ctx);
-        expect.fail('Expected error');
-      } catch (e) {
-        expect(e.message).to.equal('INSIGHTS_RUN_QUEUE_URL is not configured');
-      }
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // processInsightsBatchSetup
-  // -----------------------------------------------------------------------
-  describe('processInsightsBatchSetup()', () => {
-    it('enables imports and audits, fans out, schedules teardowns', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { imports: { types: ['top-pages'] }, audits: { types: ['lhs-mobile'] } },
-      }, ctx);
-
-      expect(site.save).to.have.been.called;
-      expect(config.save).to.have.been.called;
-      // Fan-out message + original call are separate
-      const siteMsg = ctx.sqs.sendMessage.getCalls().find(
-        (c) => c.args[1]?.type === 'insights-run-site',
-      );
-      expect(siteMsg).to.exist;
-      expect(siteMsg.args[1].siteId).to.equal('s-1');
-      // Import teardown scheduled
-      expect(sfnSendStub).to.have.been.called;
-    });
-
     it('writes not_found for missing sites', async () => {
       const ctx = createMockContext();
       ctx.dataAccess.Site.findById.resolves(null);
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-missing'],
-        payload: {},
-      }, ctx);
+      await runInsightsBatch(['s-missing'], {}, ctx);
 
-      // S3 write for not_found result
-      expect(ctx.s3.s3Client.send).to.have.been.called;
+      const putCall = ctx.s3.s3Client.send.getCalls().find(
+        (c) => c.args[0].input?.Key?.includes('results/s-missing.json'),
+      );
+      expect(putCall).to.exist;
+      const body = JSON.parse(putCall.args[0].input.Body);
+      expect(body.status).to.equal('not_found');
     });
 
     it('rolls back imports when config save fails', async () => {
@@ -566,19 +476,13 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { imports: { types: ['top-pages'] } },
+      const result = await runInsightsBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
       }, ctx);
 
+      expect(result.batchId).to.be.a('string');
       // site.save called twice: once for enable, once for rollback
       expect(site.save.callCount).to.be.greaterThanOrEqual(2);
-      // No fan-out messages should be sent
-      const siteMsgs = ctx.sqs.sendMessage.getCalls().filter(
-        (c) => c.args[1]?.type === 'insights-run-site',
-      );
-      expect(siteMsgs).to.be.empty;
     });
 
     it('handles rollback failure when config save and site rollback both fail', async () => {
@@ -586,19 +490,15 @@ describe('insights-run-service', () => {
       const site = createMockSite();
       const config = createMockConfiguration();
       config.save.rejects(new Error('DB down'));
-      // First save succeeds (enable), second save fails (rollback)
       site.save.onFirstCall().resolves();
       site.save.onSecondCall().rejects(new Error('Rollback failed'));
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { imports: { types: ['top-pages'] } },
+      await runInsightsBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
       }, ctx);
 
-      // Should log the rollback failure but not throw
       const rollbackError = ctx.log.error.getCalls().find(
         (c) => c.args[0].includes('rollback'),
       );
@@ -610,17 +510,12 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.rejects(new Error('DB error'));
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: {},
-      }, ctx);
+      await runInsightsBatch(['s-1'], {}, ctx);
 
-      // Should write failure result to S3
       expect(ctx.s3.s3Client.send).to.have.been.called;
     });
 
-    it('handles fan-out enqueue failure gracefully', async () => {
+    it('handles enqueue failure gracefully and writes failed result', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -628,13 +523,10 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       ctx.sqs.sendMessage.rejects(new Error('SQS down'));
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { imports: { types: ['top-pages'] } },
+      await runInsightsBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
       }, ctx);
 
-      // Should still complete without throwing
       expect(ctx.log.error).to.have.been.called;
     });
 
@@ -645,14 +537,11 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { imports: { types: ['top-pages'] }, audits: { types: [] } },
+      await runInsightsBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        audits: { types: [] },
       }, ctx);
 
-      // Only import teardown, which uses scheduleTeardown (SFN)
-      // Audit batch teardown not called
       const sfnCalls = sfnSendStub.getCalls();
       const batchTeardown = sfnCalls.find(
         (c) => JSON.parse(c.args[0].input.input).type === 'batch-disable-audits',
@@ -667,13 +556,11 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { imports: { types: [] }, audits: { types: ['lhs-mobile'] } },
+      await runInsightsBatch(['s-1'], {
+        imports: { types: [] },
+        audits: { types: ['lhs-mobile'] },
       }, ctx);
 
-      // Only audit batch teardown, no per-site import teardown
       const sfnCalls = sfnSendStub.getCalls();
       const importTeardown = sfnCalls.find(
         (c) => JSON.parse(c.args[0].input.input)?.disableImportAndAuditJob,
@@ -689,10 +576,9 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { audits: { types: ['lhs-mobile'] }, teardown: { delaySeconds: 0 } },
+      await runInsightsBatch(['s-1'], {
+        audits: { types: ['lhs-mobile'] },
+        teardown: { delaySeconds: 0 },
       }, ctx);
 
       const batchTeardownCall = sfnSendStub.getCalls().find((c) => {
@@ -712,109 +598,8 @@ describe('insights-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       sfnSendStub.rejects(new Error('SFN down'));
 
-      await processInsightsBatchSetup({
-        batchId: 'b-1',
-        siteIds: ['s-1'],
-        payload: { preset: 'plg-full' },
-      }, ctx);
+      await runInsightsBatch(['s-1'], { preset: 'plg-full' }, ctx);
 
-      // Should still complete without throwing
-      expect(ctx.log.error).to.have.been.called;
-    });
-
-    it('throws when INSIGHTS_RUN_QUEUE_URL is missing', async () => {
-      const ctx = createMockContext();
-      delete ctx.env.INSIGHTS_RUN_QUEUE_URL;
-      ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
-
-      try {
-        await processInsightsBatchSetup({
-          batchId: 'b-1',
-          siteIds: ['s-1'],
-          payload: {},
-        }, ctx);
-        expect.fail('Expected error');
-      } catch (e) {
-        expect(e.message).to.equal('INSIGHTS_RUN_QUEUE_URL is not configured');
-      }
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // processInsightsBatchSiteWorker
-  // -----------------------------------------------------------------------
-  describe('processInsightsBatchSiteWorker()', () => {
-    it('enqueues jobs and writes completed result', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await processInsightsBatchSiteWorker({
-        batchId: 'b-1',
-        siteId: 's-1',
-        payload: { imports: { types: ['top-pages'] }, audits: { types: ['lhs-mobile'] } },
-      }, ctx);
-
-      // S3 write for result
-      expect(ctx.s3.s3Client.send).to.have.been.called;
-      const putCall = ctx.s3.s3Client.send.getCalls().find(
-        (c) => c.args[0].input?.Key?.includes('results/s-1.json'),
-      );
-      expect(putCall).to.exist;
-      const body = JSON.parse(putCall.args[0].input.Body);
-      expect(body.status).to.equal('completed');
-    });
-
-    it('writes not_found for missing site', async () => {
-      const ctx = createMockContext();
-      ctx.dataAccess.Site.findById.resolves(null);
-
-      await processInsightsBatchSiteWorker({
-        batchId: 'b-1',
-        siteId: 's-missing',
-        payload: {},
-      }, ctx);
-
-      const putCall = ctx.s3.s3Client.send.getCalls().find(
-        (c) => c.args[0].input?.Key?.includes('results/s-missing.json'),
-      );
-      expect(putCall).to.exist;
-      const body = JSON.parse(putCall.args[0].input.Body);
-      expect(body.status).to.equal('not_found');
-    });
-
-    it('writes failed result on unexpected error', async () => {
-      const ctx = createMockContext();
-      ctx.dataAccess.Site.findById.rejects(new Error('DB crash'));
-
-      await processInsightsBatchSiteWorker({
-        batchId: 'b-1',
-        siteId: 's-1',
-        payload: {},
-      }, ctx);
-
-      const putCall = ctx.s3.s3Client.send.getCalls().find(
-        (c) => c.args[0].input?.Key?.includes('results/s-1.json'),
-      );
-      const body = JSON.parse(putCall.args[0].input.Body);
-      expect(body.status).to.equal('failed');
-      expect(body.error.code).to.equal('UNEXPECTED_ERROR');
-    });
-
-    it('handles S3 write failure gracefully', async () => {
-      const ctx = createMockContext();
-      ctx.dataAccess.Site.findById.resolves(null);
-      ctx.s3.s3Client.send.rejects(new Error('S3 down'));
-
-      await processInsightsBatchSiteWorker({
-        batchId: 'b-1',
-        siteId: 's-1',
-        payload: {},
-      }, ctx);
-
-      // Should not throw
       expect(ctx.log.error).to.have.been.called;
     });
   });
