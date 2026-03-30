@@ -1,3 +1,10 @@
+# [1.386.0](https://github.com/adobe/spacecat-api-service/compare/v1.385.3...v1.386.0) (2026-03-30)
+
+
+### Features
+
+* Create plg_tier_requirement_and_design.md ([#2050](https://github.com/adobe/spacecat-api-service/issues/2050)) ([a934522](https://github.com/adobe/spacecat-api-service/commit/a93452280ec102c597b4cc101bb4a1499709a65b))
+
 ## [1.385.3](https://github.com/adobe/spacecat-api-service/compare/v1.385.2...v1.385.3) (2026-03-30)
 
 
