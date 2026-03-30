@@ -547,6 +547,7 @@ function LlmoController(ctx) {
         await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
           type: 'llmo-config-db-sync',
           siteId,
+          dryRun: true,
         });
       }
 

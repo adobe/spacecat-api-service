@@ -834,7 +834,7 @@ function BrandsController(ctx, log, env) {
       const params = Object.fromEntries(
         rawQueryString.split('&').filter(Boolean).map((p) => p.split('=')),
       );
-      const { siteId } = params;
+      const { siteId, dryRun } = params;
 
       if (!hasText(siteId) || !isValidUUID(siteId)) {
         return badRequest('Query parameter siteId (valid UUID) is required');
@@ -850,13 +850,15 @@ function BrandsController(ctx, log, env) {
         return badRequest(`Config sync is not enabled for site ${siteId}`);
       }
 
+      const isDryRun = dryRun === 'true';
       await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
         type: 'llmo-config-db-sync',
         siteId,
+        ...(isDryRun && { dryRun: true }),
       });
 
-      log.info(`On-demand config DB sync triggered for site ${siteId}`);
-      return ok({ message: 'Config sync triggered', siteId });
+      log.info(`[llmo-config-db-sync] On-demand config DB sync${isDryRun ? ' (dry run)' : ''} triggered for site ${siteId}`);
+      return ok({ message: `Config sync${isDryRun ? ' (dry run)' : ''} triggered`, siteId, ...(isDryRun && { dryRun: true }) });
     } catch (error) {
       log.error(`Error triggering config sync for org ${spaceCatId}:`, error);
       return createErrorResponse(error);
