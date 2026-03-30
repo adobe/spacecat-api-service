@@ -340,6 +340,7 @@ export default function getRouteHandlers(
     'POST /consent-banner': consentBannerController.takeScreenshots,
     'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
+    'GET /sites/:siteId/metadata': scrapeController.getMetadata,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
 
     // Scrape Jobs

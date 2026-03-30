@@ -399,4 +399,184 @@ describe('ScrapeController', () => {
       expect(s3Call.args[0].input.Prefix).to.equal(`scrapes/${TEST_SITE.id}/`);
     });
   });
+
+  describe('getMetadata', () => {
+    const mockScrapeData = {
+      scrapeResult: {
+        tags: {
+          title: 'Test Page Title',
+          description: 'Test page description for SEO',
+          h1: ['Main Heading'],
+        },
+      },
+    };
+
+    beforeEach(() => {
+      mockS3.s3Client.send.resolves({
+        Body: {
+          transformToString: sinon.stub().resolves(JSON.stringify(mockScrapeData)),
+        },
+      });
+    });
+
+    it('should return metadata for the homepage when no path is provided', async () => {
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: {},
+      });
+
+      expect(response.status).to.equal(200);
+      const data = await response.json();
+      expect(data).to.deep.equal({
+        title: 'Test Page Title',
+        description: 'Test page description for SEO',
+        h1: ['Main Heading'],
+      });
+
+      const s3Args = mockS3.GetObjectCommand.getCall(0).args[0];
+      expect(s3Args).to.deep.equal({
+        Bucket: 'test-bucket',
+        Key: `scrapes/${TEST_SITE.id}/scrape.json`,
+      });
+    });
+
+    it('should return metadata for a specific page path', async () => {
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: { path: '/products/item' },
+      });
+
+      expect(response.status).to.equal(200);
+      const data = await response.json();
+      expect(data.title).to.equal('Test Page Title');
+
+      const s3Args = mockS3.GetObjectCommand.getCall(0).args[0];
+      expect(s3Args).to.deep.equal({
+        Bucket: 'test-bucket',
+        Key: `scrapes/${TEST_SITE.id}/products/item/scrape.json`,
+      });
+    });
+
+    it('should strip trailing slash from path', async () => {
+      await scrapeController.getMetadata({
+        ...requestContext,
+        data: { path: '/about/' },
+      });
+
+      const s3Args = mockS3.GetObjectCommand.getCall(0).args[0];
+      expect(s3Args).to.deep.equal({
+        Bucket: 'test-bucket',
+        Key: `scrapes/${TEST_SITE.id}/about/scrape.json`,
+      });
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await scrapeController.getMetadata(requestContext);
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error.message).to.equal('Site not found');
+    });
+
+    it('should return 403 when user has no access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const response = await scrapeController.getMetadata(requestContext);
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error.message).to.equal('Only users belonging to the organization can access site metadata');
+    });
+
+    it('should return 400 when siteId is invalid', async () => {
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        params: { siteId: 'invalid' },
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error.message).to.equal('Site ID required');
+    });
+
+    it('should return 404 when no scraped data exists in S3', async () => {
+      const error = new Error('Not found');
+      error.name = 'NoSuchKey';
+      mockS3.s3Client.send.rejects(error);
+
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: {},
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('No scraped data found for the requested page');
+    });
+
+    it('should return 404 when scrapeResult has no tags', async () => {
+      mockS3.s3Client.send.resolves({
+        Body: {
+          transformToString: sinon.stub().resolves(JSON.stringify({ scrapeResult: {} })),
+        },
+      });
+
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: {},
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('No metadata found for the requested page');
+    });
+
+    it('should return 500 on unexpected S3 errors', async () => {
+      mockS3.s3Client.send.rejects(new Error('Connection timeout'));
+
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: {},
+      });
+
+      expect(response.status).to.equal(500);
+      expect(mockContext.log.error.called).to.be.true;
+    });
+
+    it('should handle missing fields gracefully', async () => {
+      mockS3.s3Client.send.resolves({
+        Body: {
+          transformToString: sinon.stub().resolves(JSON.stringify({
+            scrapeResult: { tags: { title: 'Only Title' } },
+          })),
+        },
+      });
+
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: {},
+      });
+
+      expect(response.status).to.equal(200);
+      const data = await response.json();
+      expect(data).to.deep.equal({
+        title: 'Only Title',
+        description: null,
+        h1: null,
+      });
+    });
+
+    it('should default to empty object when context.data is undefined', async () => {
+      const response = await scrapeController.getMetadata({
+        ...requestContext,
+        data: undefined,
+      });
+
+      expect(response.status).to.equal(200);
+      const s3Args = mockS3.GetObjectCommand.getCall(0).args[0];
+      expect(s3Args).to.deep.equal({
+        Bucket: 'test-bucket',
+        Key: `scrapes/${TEST_SITE.id}/scrape.json`,
+      });
+    });
+  });
 });
