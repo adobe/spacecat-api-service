@@ -545,7 +545,7 @@ function LlmoController(ctx) {
       }
 
       if (isSyncEnabledForSite(siteId)) {
-        log.info(`[[llmo-config-db-sync] Triggering S3-to-DB config sync for siteId: ${siteId}`);
+        log.info(`[llmo-config-db-sync] Triggering S3-to-DB config sync for siteId: ${siteId}`);
         await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
           type: 'llmo-config-db-sync',
           siteId,
