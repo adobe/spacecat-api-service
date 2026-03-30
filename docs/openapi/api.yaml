@@ -510,6 +510,8 @@ paths:
     $ref: './guidelines-api.yaml#/guideline-audits-unlink'
   /sites/{siteId}/sentiment/config:
     $ref: './guidelines-api.yaml#/sentiment-config'
+  /sites/{siteId}/tokens/by-type/{tokenType}:
+    $ref: './tokens-api.yaml#/site-token-by-type'
   /plg/onboard:
     $ref: './plg-onboarding-api.yaml#/plg-onboard'
   /plg/onboard/status/{imsOrgId}:

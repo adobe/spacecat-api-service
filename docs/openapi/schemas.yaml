@@ -6799,6 +6799,49 @@ PlgOnboarding:
     updatedAt:
       $ref: '#/DateTime'
 
+Token:
+  type: object
+  description: A token allocation for a site within a billing cycle
+  properties:
+    id:
+      $ref: '#/Id'
+    siteId:
+      $ref: '#/Id'
+    tokenType:
+      type: string
+      description: Token type key, e.g. `grant_cwv`, `grant_broken_backlinks`
+      example: grant_cwv
+    cycle:
+      type: string
+      description: Billing cycle identifier, e.g. `2025-03`
+      example: '2025-03'
+    total:
+      type: integer
+      description: Total tokens allocated for this cycle
+      example: 3
+    used:
+      type: integer
+      description: Tokens consumed so far in this cycle
+      example: 1
+    remaining:
+      type: integer
+      description: Tokens remaining (total - used)
+      example: 2
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+  required:
+    - id
+    - siteId
+    - tokenType
+    - cycle
+    - total
+    - used
+    - remaining
+    - createdAt
+    - updatedAt
+
 PresignedUrlResponse:
   type: object
   description: A short-lived presigned S3 URL and its expiry time
