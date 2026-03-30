@@ -40,6 +40,8 @@ export const mochaHooks = {
     const baseUrl = await startServer(env);
 
     ctx.httpClient = createHttpClient(baseUrl, tokens);
+    ctx.baseUrl = baseUrl;
+    ctx.tokens = tokens;
   },
 
   async afterAll() {

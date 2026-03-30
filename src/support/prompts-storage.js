@@ -189,6 +189,7 @@ function mapRowToPrompt(row) {
   const topic = row.topics;
   return {
     id: row.prompt_id,
+    uuid: row.id,
     prompt: row.text,
     name: row.name,
     regions: row.regions || [],
@@ -202,10 +203,20 @@ function mapRowToPrompt(row) {
     brandId: brand?.id ?? null,
     brandName: brand?.name ?? null,
     category: category
-      ? { id: category.category_id, name: category.name, origin: category.origin }
+      ? {
+        id: category.category_id,
+        uuid: category.id,
+        name: category.name,
+        origin: category.origin,
+      }
       : null,
     topic: topic
-      ? { id: topic.topic_id, name: topic.name, categoryId: category?.category_id ?? null }
+      ? {
+        id: topic.topic_id,
+        uuid: topic.id,
+        name: topic.name,
+        categoryId: category?.category_id ?? null,
+      }
       : null,
   };
 }

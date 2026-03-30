@@ -7391,7 +7391,7 @@ describe('Suggestions Controller', () => {
         statusText: 'OK',
         headers: {
           get: (headerName) => {
-            if (headerName === 'x-edge-optimize-cache') {
+            if (headerName === 'x-edgeoptimize-cache') {
               return 'hit';
             }
             return null;
