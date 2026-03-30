@@ -29,7 +29,10 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V1,
   LLMO_ONBOARDING_MODE_V2,
+  LLMO_FEATURE_FLAG_PRODUCT,
+  LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
+import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1285,6 +1288,18 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
         context,
       });
+
+      // Enable brandalf flag so DRS scheduler uses v2 prompts for this org
+      const postgrestClient = context.dataAccess?.services?.postgrestClient;
+      await upsertFeatureFlag({
+        organizationId: organization.getId(),
+        product: LLMO_FEATURE_FLAG_PRODUCT,
+        flagName: LLMO_BRANDALF_FLAG,
+        value: true,
+        updatedBy: 'llmo-onboarding',
+        postgrestClient,
+      });
+      log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
 
       // Trigger Brandalf immediately after the v2 config exists so downstream
       // brand sync can attach results to the newly created organization.
