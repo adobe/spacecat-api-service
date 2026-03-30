@@ -3188,6 +3188,26 @@ describe('Brands Controller', () => {
       );
     });
 
+    it('enqueues SQS message with dryRun flag when dryRun=true query param is provided', async () => {
+      const response = await brandsController.triggerConfigSync({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        invocation: { event: { rawQueryString: `siteId=${SYNC_SITE_ID}&dryRun=true` } },
+        sqs: { sendMessage: sqsStub },
+        env: mockEnv,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.message).to.equal('Config sync (dry run) triggered');
+      expect(body.siteId).to.equal(SYNC_SITE_ID);
+      expect(body.dryRun).to.be.true;
+      expect(sqsStub).to.have.been.calledWith(
+        'https://sqs.example.com/queue',
+        { type: 'llmo-config-db-sync', siteId: SYNC_SITE_ID, dryRun: true },
+      );
+    });
+
     it('returns 400 when organization ID is missing', async () => {
       const response = await brandsController.triggerConfigSync({
         ...context,
