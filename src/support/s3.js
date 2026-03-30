@@ -33,10 +33,19 @@ export function s3ClientWrapper(fn) {
       const { region } = context.runtime;
       const {
         S3_BUCKET_NAME: bucket,
+        AWS_ENDPOINT_URL_S3: endpointUrl,
       } = context.env;
 
+      const clientConfig = { region };
+      if (endpointUrl) {
+        // Local S3-compatible override (e.g. MinIO in IT tests). Path-style addressing
+        // is required because virtual-hosted subdomains don't resolve on localhost.
+        clientConfig.endpoint = endpointUrl;
+        clientConfig.forcePathStyle = true;
+      }
+
       context.s3 = {
-        s3Client: new S3Client({ region }),
+        s3Client: new S3Client(clientConfig),
         s3Bucket: bucket,
         getSignedUrl,
         GetObjectCommand,

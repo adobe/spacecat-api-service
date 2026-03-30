@@ -1,4 +1,0 @@
-timeout: 120000
-exit: true
-require: test/it/dynamo/harness.js
-spec: test/it/dynamo/*.test.js

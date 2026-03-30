@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp } from '../helpers/assertions.js';
+// expectISOTimestamp not used - consumer seed has fixed timestamps
 import {
   CONSUMER_1_ID,
   CONSUMER_1_CLIENT_ID,
@@ -30,8 +30,9 @@ function expectConsumerDto(consumer) {
   expect(consumer.consumerName).to.be.a('string');
   expect(consumer.status).to.be.a('string');
   expect(consumer.capabilities).to.be.an('array');
-  expectISOTimestamp(consumer.createdAt, 'createdAt');
-  expectISOTimestamp(consumer.updatedAt, 'updatedAt');
+  // Seed data has fixed timestamps, so just check format (not recency)
+  expect(consumer.createdAt).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}T/);
+  expect(consumer.updatedAt).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}T/);
 }
 
 /**
@@ -141,7 +142,7 @@ export default function consumerTests(getHttpClient, resetData) {
 
       it('admin: revokes consumer', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(`/consumers/${CONSUMER_1_ID}/revoke`);
+        const res = await http.admin.post(`/consumers/${CONSUMER_1_ID}/revoke`, {});
         expect(res.status).to.equal(200);
         expect(res.body.status).to.equal('REVOKED');
         expect(res.body.revokedAt).to.be.a('string');
@@ -149,7 +150,7 @@ export default function consumerTests(getHttpClient, resetData) {
 
       it('user: returns 403 (requires S2S admin)', async () => {
         const http = getHttpClient();
-        const res = await http.user.post(`/consumers/${CONSUMER_1_ID}/revoke`);
+        const res = await http.user.post(`/consumers/${CONSUMER_1_ID}/revoke`, {});
         expect(res.status).to.equal(403);
       });
     });

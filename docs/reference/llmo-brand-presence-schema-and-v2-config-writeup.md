@@ -73,7 +73,7 @@ Partitioned by execution_date. organization_id is set from site on insert (trigg
 | id                     | uuid    | no       | Default uuid_generate_v7(). PK is (id, execution_date). |
 | site_id                | uuid    | yes      | FK sites(id). |
 | execution_date         | date    | yes      | Partition key. |
-| model                  | text    | yes      | e.g. chatgpt, gemini, copilot. |
+| model                  | llm_model | yes   | Enum: chatgpt-paid, chatgpt-free, google-ai-overview, perplexity, google-ai-mode, copilot, gemini, google, microsoft, mistral, anthropic, amazon. |
 | brand_id               | uuid    | no       | FK brands(id). |
 | brand_name             | text    | yes      | Denormalized. |
 | category_id            | uuid    | no       | FK categories(id). |

@@ -101,11 +101,11 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         expect(res.status).to.equal(400);
       });
 
-      it('returns 403 when caller org does not match requested org', async () => {
-        // admin token has ORG_1 tenant; requesting ORG_2 status should be forbidden
+      it('admin: returns 404 for org with no onboarding records', async () => {
+        // admin bypasses org check but ORG_2 has no PlgOnboarding records
         const http = getHttpClient();
         const res = await http.admin.get(`/plg/onboard/status/${ORG_2_IMS_ORG_ID}`);
-        expect(res.status).to.equal(403);
+        expect(res.status).to.equal(404);
       });
 
       it('returns 403 for non-admin user with mismatched org', async () => {
