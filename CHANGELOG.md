@@ -1,3 +1,10 @@
+# [1.392.0](https://github.com/adobe/spacecat-api-service/compare/v1.391.0...v1.392.0) (2026-03-31)
+
+
+### Features
+
+* Adding a slack command for detecting CDN for customers ([#1978](https://github.com/adobe/spacecat-api-service/issues/1978)) ([6ca33f3](https://github.com/adobe/spacecat-api-service/commit/6ca33f3e07f21ca75dea99653e705ced26dc33be))
+
 # [1.391.0](https://github.com/adobe/spacecat-api-service/compare/v1.390.2...v1.391.0) (2026-03-31)
 
 
