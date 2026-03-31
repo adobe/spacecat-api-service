@@ -1,3 +1,10 @@
+# [1.390.0](https://github.com/adobe/spacecat-api-service/compare/v1.389.1...v1.390.0) (2026-03-31)
+
+
+### Features
+
+* LLMO-3956 write initial brand to normalized table during v2 onboarding ([#2082](https://github.com/adobe/spacecat-api-service/issues/2082)) ([5d84d20](https://github.com/adobe/spacecat-api-service/commit/5d84d2033a8a7d5f7511b712d5be5f421e9479ef))
+
 ## [1.389.1](https://github.com/adobe/spacecat-api-service/compare/v1.389.0...v1.389.1) (2026-03-31)
 
 
