@@ -17,9 +17,11 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import nock from 'nock';
 
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import {
   createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig, getIsSummitPlgEnabled,
-  getCookieValue,
+  getCookieValue, filterSitesForProductCode,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -659,6 +661,112 @@ describe('utils', () => {
     it('returns null for empty cookie string', () => {
       const context = { pathInfo: { headers: { cookie: '' } } };
       expect(getCookieValue(context, 'promiseToken')).to.equal(null);
+    });
+  });
+
+  describe('filterSitesForProductCode', () => {
+    let mockTierClient;
+    let mockContext;
+    let mockOrg;
+    let mockSites;
+    let sandbox2;
+
+    beforeEach(() => {
+      sandbox2 = sinon.createSandbox();
+
+      mockSites = [
+        { getId: () => 'site-1' },
+        { getId: () => 'site-2' },
+      ];
+
+      mockOrg = { getId: () => 'org-1' };
+
+      mockTierClient = {
+        checkValidEntitlement: sandbox2.stub(),
+      };
+      sandbox2.stub(TierClient, 'createForOrg').returns(mockTierClient);
+
+      mockContext = {
+        dataAccess: {
+          SiteEnrollment: {
+            allByEntitlementId: sandbox2.stub(),
+          },
+        },
+        log: { error: sinon.stub() },
+      };
+    });
+
+    afterEach(() => {
+      sandbox2.restore();
+    });
+
+    it('returns empty array when no entitlement exists', async () => {
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: null });
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns empty array for PLG-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PLG,
+        },
+      });
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.deep.equal([]);
+      expect(mockContext.dataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
+    });
+
+    it('returns enrolled sites for FREE_TRIAL-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].getId()).to.equal('site-1');
+    });
+
+    it('returns enrolled sites for PAID-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PAID,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+        { getSiteId: () => 'site-2' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.have.lengthOf(2);
+    });
+
+    it('returns empty array for any unrecognized future tier (allow-list pattern)', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => 'FUTURE_TIER',
+        },
+      });
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.deep.equal([]);
     });
   });
 });

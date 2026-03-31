@@ -41,7 +41,9 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled } from '../support/utils.js';
+import {
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
+} from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -1134,7 +1136,6 @@ function SitesController(ctx, log, env) {
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
     const productCode = pathInfo.headers[X_PRODUCT_HEADER];
-
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }
@@ -1164,7 +1165,9 @@ function SitesController(ctx, log, env) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
 
-              if (entitlement && enrollments?.length) {
+              const tierVisible = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (tierVisible && enrollments?.length) {
                 const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
                 const data = {
                   organization: OrganizationDto.toJSON(organization),
@@ -1183,9 +1186,10 @@ function SitesController(ctx, log, env) {
         organization = await Organization.findById(organizationId);
         if (organization && await accessControlUtil.hasAccess(organization)) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+          const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
+            .getFirstEnrollment();
 
-          if (enrolledSite) {
+          if (enrolledSite && CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier())) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
@@ -1200,9 +1204,10 @@ function SitesController(ctx, log, env) {
         organization = await Organization.findByImsOrgId(imsOrg);
         if (organization && await accessControlUtil.hasAccess(organization)) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+          const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
+            .getFirstEnrollment();
 
-          if (enrolledSite) {
+          if (enrolledSite && CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier())) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
