@@ -1,3 +1,10 @@
+## [1.390.1](https://github.com/adobe/spacecat-api-service/compare/v1.390.0...v1.390.1) (2026-03-31)
+
+
+### Bug Fixes
+
+* forms auto fix adding in ungrouped oppty type ([#2083](https://github.com/adobe/spacecat-api-service/issues/2083)) ([2293110](https://github.com/adobe/spacecat-api-service/commit/2293110c7f1a131ef7bd9eab85abb27d68732884))
+
 # [1.390.0](https://github.com/adobe/spacecat-api-service/compare/v1.389.1...v1.390.0) (2026-03-31)
 
 
