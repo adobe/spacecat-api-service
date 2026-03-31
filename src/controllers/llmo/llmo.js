@@ -59,24 +59,16 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
+import {
+  LLMO_CONFIG_DB_SYNC_TYPE,
+  isSyncEnabledForSite,
+} from './llmo-config-sync-constants.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
-
-// Temporary: hardcoded site IDs for which the S3-to-DB config sync is enabled.
-// TODO: replace with actual site UUIDs per environment.
-const ALLOWED_SITE_IDS = [
-  '00000000-0000-0000-0000-000000000001', // dev
-  '00000000-0000-0000-0000-000000000002', // prod
-  'c2473d89-e997-458d-a86d-b4096649c12b', // dev
-];
-
-function isSyncEnabledForSite(siteId) {
-  return ALLOWED_SITE_IDS.includes(siteId);
-}
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -547,7 +539,7 @@ function LlmoController(ctx) {
       if (isSyncEnabledForSite(siteId)) {
         log.info(`[llmo-config-db-sync] Triggering S3-to-DB config sync for siteId: ${siteId}`);
         await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-          type: 'llmo-config-db-sync',
+          type: LLMO_CONFIG_DB_SYNC_TYPE,
           siteId,
           dryRun: true, // temporary, should be false
         });

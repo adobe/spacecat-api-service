@@ -28,6 +28,10 @@ import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
+import {
+  LLMO_CONFIG_DB_SYNC_TYPE,
+  isSyncEnabledForSite,
+} from './llmo/llmo-config-sync-constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import {
   listPrompts,
@@ -806,20 +810,8 @@ function BrandsController(ctx, log, env) {
     }
   };
 
-  // Temporary: hardcoded site IDs for which the S3-to-DB config sync is enabled.
-  // TODO: replace with actual site UUIDs per environment.
-  const ALLOWED_SITE_IDS = [
-    '00000000-0000-0000-0000-000000000001', // dev
-    '00000000-0000-0000-0000-000000000002', // prod
-    'c2473d89-e997-458d-a86d-b4096649c12b', // dev
-  ];
-
-  function isSyncEnabledForSite(siteId) {
-    return ALLOWED_SITE_IDS.includes(siteId);
-  }
-
   const triggerConfigSync = async (context) => {
-    const { spaceCatId } = context.params || {};
+    const { spaceCatId, siteId } = context.params || {};
 
     try {
       if (!hasText(spaceCatId)) return badRequest('Organization ID required');
@@ -831,14 +823,8 @@ function BrandsController(ctx, log, env) {
         return forbidden('User does not have access to this organization');
       }
 
-      const rawQueryString = context.invocation?.event?.rawQueryString || '';
-      const params = Object.fromEntries(
-        rawQueryString.split('&').filter(Boolean).map((p) => p.split('=')),
-      );
-      const { siteId, dryRun } = params;
-
       if (!hasText(siteId) || !isValidUUID(siteId)) {
-        return badRequest('Query parameter siteId (valid UUID) is required');
+        return badRequest('Site ID (valid UUID) is required');
       }
 
       const site = await Site.findById(siteId);
@@ -851,14 +837,18 @@ function BrandsController(ctx, log, env) {
         return badRequest(`Config sync is not enabled for site ${siteId}`);
       }
 
-      const isDryRun = dryRun === 'true';
+      const rawQueryString = context.invocation?.event?.rawQueryString || '';
+      const queryParams = Object.fromEntries(
+        rawQueryString.split('&').filter(Boolean).map((p) => p.split('=')),
+      );
+      const isDryRun = queryParams.dryRun === 'true';
       await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-        type: 'llmo-config-db-sync',
+        type: LLMO_CONFIG_DB_SYNC_TYPE,
         siteId,
         ...(isDryRun && { dryRun: true }),
       });
 
-      log.info(`[llmo-config-db-sync] On-demand config DB sync${isDryRun ? ' (dry run)' : ''} triggered for site ${siteId}`);
+      log.info(`[${LLMO_CONFIG_DB_SYNC_TYPE}] On-demand config DB sync${isDryRun ? ' (dry run)' : ''} triggered for site ${siteId}`);
       return ok({ message: `Config sync${isDryRun ? ' (dry run)' : ''} triggered`, siteId, ...(isDryRun && { dryRun: true }) });
     } catch (error) {
       log.error(`Error triggering config sync for org ${spaceCatId}:`, error);

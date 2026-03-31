@@ -3172,8 +3172,7 @@ describe('Brands Controller', () => {
     it('enqueues SQS message for a valid site', async () => {
       const response = await brandsController.triggerConfigSync({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: `siteId=${SYNC_SITE_ID}` } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
         sqs: { sendMessage: sqsStub },
         env: mockEnv,
       });
@@ -3191,8 +3190,8 @@ describe('Brands Controller', () => {
     it('enqueues SQS message with dryRun flag when dryRun=true query param is provided', async () => {
       const response = await brandsController.triggerConfigSync({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: `siteId=${SYNC_SITE_ID}&dryRun=true` } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
+        invocation: { event: { rawQueryString: 'dryRun=true' } },
         sqs: { sendMessage: sqsStub },
         env: mockEnv,
       });
@@ -3243,11 +3242,10 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(404);
     });
 
-    it('returns 400 when siteId query param is missing', async () => {
+    it('returns 400 when siteId is missing', async () => {
       const response = await brandsController.triggerConfigSync({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: '' } },
       });
       expect(response.status).to.equal(400);
     });
@@ -3255,8 +3253,7 @@ describe('Brands Controller', () => {
     it('returns 400 when siteId is not a valid UUID', async () => {
       const response = await brandsController.triggerConfigSync({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: 'siteId=not-a-uuid' } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: 'not-a-uuid' },
       });
       expect(response.status).to.equal(400);
     });
@@ -3267,8 +3264,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.triggerConfigSync({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: `siteId=${SYNC_SITE_ID}` } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
       });
       expect(response.status).to.equal(404);
     });
@@ -3283,8 +3279,7 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.triggerConfigSync({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: `siteId=${SYNC_SITE_ID}` } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
       });
       expect(response.status).to.equal(403);
     });
@@ -3292,8 +3287,7 @@ describe('Brands Controller', () => {
     it('returns 400 when site is not in ALLOWED_SITE_IDS', async () => {
       const response = await brandsController.triggerConfigSync({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: `siteId=${SITE_ID}` } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
       });
       expect(response.status).to.equal(400);
     });
@@ -3313,8 +3307,7 @@ describe('Brands Controller', () => {
 
       const response = await ctrl.triggerConfigSync({
         ...noAccessContext,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: `siteId=${SYNC_SITE_ID}` } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
       });
       expect(response.status).to.equal(403);
     });
@@ -3322,8 +3315,7 @@ describe('Brands Controller', () => {
     it('returns 500 when SQS sendMessage throws', async () => {
       const response = await brandsController.triggerConfigSync({
         ...context,
-        params: { spaceCatId: ORGANIZATION_ID },
-        invocation: { event: { rawQueryString: `siteId=${SYNC_SITE_ID}` } },
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SYNC_SITE_ID },
         sqs: { sendMessage: sinon.stub().rejects(new Error('SQS failure')) },
         env: mockEnv,
       });
