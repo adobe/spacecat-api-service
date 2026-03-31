@@ -17,6 +17,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import { SFNClient } from '@aws-sdk/client-sfn';
+import { Config, DEFAULT_CONFIG } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
   resolvePayload,
   deltaEnableImports,
@@ -55,7 +56,18 @@ function createMockOrganization(overrides = {}) {
 function createMockSite(siteId = 's-1', baseURL = 'https://example.com') {
   const importsState = [];
   const siteConfig = {
+    getSlackConfig: () => ({}),
+    getHandlers: () => ({}),
+    getContentAiConfig: () => undefined,
     getImports: () => importsState,
+    getFetchConfig: () => ({}),
+    getBrandConfig: () => ({}),
+    getBrandProfile: () => ({}),
+    getCdnLogsConfig: () => ({}),
+    getLlmoConfig: () => ({}),
+    getTokowakaConfig: () => ({}),
+    getEdgeOptimizeConfig: () => ({}),
+    getCommerceLlmoConfig: () => ({}),
     enableImport: (type) => importsState.push({ type, enabled: true }),
     disableImport: (type) => {
       const idx = importsState.findIndex((i) => i.type === type);
@@ -67,6 +79,7 @@ function createMockSite(siteId = 's-1', baseURL = 'https://example.com') {
     getBaseURL: () => baseURL,
     getOrganizationId: () => 'org-sc-1',
     getConfig: () => siteConfig,
+    setConfig: sinon.stub().returnsThis(),
     save: sinon.stub().resolves(),
     importsState,
   };
@@ -274,6 +287,15 @@ describe('ephemeral-run-service', () => {
       site.importsState.push({ type: 'top-pages', enabled: false });
       const result = deltaEnableImports(site, ['top-pages']);
       expect(result.importsEnabled).to.deep.equal(['top-pages']);
+    });
+
+    it('enables traffic-analysis on real Config (run options are enqueue-only, not passed to enableImport)', () => {
+      const siteConfig = Config({ ...DEFAULT_CONFIG, imports: [] });
+      const site = { getConfig: () => siteConfig };
+      const result = deltaEnableImports(site, ['traffic-analysis']);
+      expect(result.importsEnabled).to.deep.equal(['traffic-analysis']);
+      const ta = siteConfig.getImports().find((i) => i.type === 'traffic-analysis');
+      expect(ta).to.exist;
     });
   });
 
@@ -491,6 +513,7 @@ describe('ephemeral-run-service', () => {
 
       expect(result.batchId).to.be.a('string');
       expect(result.total).to.equal(1);
+      expect(site.setConfig).to.have.been.called;
       expect(site.save).to.have.been.called;
       expect(config.save).to.have.been.called;
       // Import jobs enqueued directly

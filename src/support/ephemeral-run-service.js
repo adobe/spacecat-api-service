@@ -13,6 +13,7 @@
 import { randomUUID } from 'crypto';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { isObject } from '@adobe/spacecat-shared-utils';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
   triggerImportRun,
   triggerTrafficAnalysisBackfill,
@@ -227,6 +228,7 @@ async function rollbackImports(Site, perSiteSetup, log) {
           for (const importType of setup.importsEnabled) {
             siteConfig.disableImport(importType);
           }
+          site.setConfig(Config.toDynamoItem(site.getConfig()));
           // eslint-disable-next-line no-await-in-loop
           await site.save();
         }
@@ -555,6 +557,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
       } else {
         const { importsEnabled } = deltaEnableImports(site, imports.types);
         if (importsEnabled.length > 0) {
+          site.setConfig(Config.toDynamoItem(site.getConfig()));
           // eslint-disable-next-line no-await-in-loop
           await site.save();
         }
