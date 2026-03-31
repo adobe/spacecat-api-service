@@ -238,7 +238,40 @@ export async function ensureInitialCustomerConfigV2({
 
   const existingConfig = await readCustomerConfigV2FromPostgres(organizationId, postgrestClient);
   if (existingConfig) {
-    context.log.info(`V2 customer config already exists for organization ${organizationId}, skipping initialization`);
+    if (!existingConfig.customer) existingConfig.customer = {};
+    if (!existingConfig.customer.brands) existingConfig.customer.brands = [];
+    const { brands } = existingConfig.customer;
+    const siteAlreadyRegistered = brands.some((b) => b.v1SiteId === siteId);
+
+    if (siteAlreadyRegistered) {
+      context.log.info(`V2 customer config already exists for organization ${organizationId} with site ${siteId}, skipping`);
+      return existingConfig;
+    }
+
+    // Add the new site as a brand to the existing config
+    const primaryUrl = overrideBaseURL || baseURL;
+    const timestamp = new Date().toISOString();
+    const brandId = brandName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+    brands.push({
+      id: brandId,
+      v1SiteId: siteId,
+      name: brandName.trim(),
+      baseUrl: primaryUrl,
+      status: 'active',
+      updatedAt: timestamp,
+      updatedBy: resolveUpdatedBy(context),
+      urls: [{ value: primaryUrl, type: 'url' }],
+      brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
+    });
+
+    await writeCustomerConfigV2ToPostgres(
+      organizationId,
+      existingConfig,
+      postgrestClient,
+      resolveUpdatedBy(context),
+    );
+    context.log.info(`Added site ${siteId} as brand "${brandName}" to existing V2 config for organization ${organizationId}`);
     return existingConfig;
   }
 
