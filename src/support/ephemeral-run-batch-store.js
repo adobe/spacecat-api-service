@@ -111,6 +111,8 @@ async function fetchResults(s3, keys) {
 
 /**
  * Assemble the status response from manifest and per-site results.
+ * jobsPlan (batch): resolved import/audit types for this batch.
+ * Per-site jobsEnqueued / jobsSkipped: SQS enqueue outcomes (not worker execution).
  */
 function assembleBatchResponse(batchId, manifest, siteResults) {
   const sites = {};
@@ -126,6 +128,8 @@ function assembleBatchResponse(batchId, manifest, siteResults) {
         status: result.status,
         completedAt: result.completedAt,
         ...(result.error ? { error: result.error } : {}),
+        ...(result.enqueued ? { jobsEnqueued: result.enqueued } : {}),
+        ...(result.skipped?.length ? { jobsSkipped: result.skipped } : {}),
       };
       if (TERMINAL_STATUSES.includes(result.status)) {
         failedSiteIds.push(siteId);
@@ -149,6 +153,7 @@ function assembleBatchResponse(batchId, manifest, siteResults) {
     batchId,
     status: pending > 0 ? 'in_progress' : 'completed',
     createdAt: manifest.createdAt,
+    ...(manifest.jobsPlan ? { jobsPlan: manifest.jobsPlan } : {}),
     progress: {
       total: manifest.totalSites, completed, failed, pending,
     },

@@ -93,7 +93,9 @@ function EphemeralRunController(ctx) {
 
   /**
    * GET /ephemeral-run/batch/:batchId/status
-   * Poll batch progress and per-site results.
+   * Returns batch status from S3: jobsPlan (imports/audits for the batch), progress,
+   * and per-site enqueue outcomes (jobsEnqueued / jobsSkipped). Small batches often
+   * complete in one request; for many sites, re-fetch until progress.pending is 0.
    */
   const batchStatus = async (context) => {
     const { batchId } = context.params || {};

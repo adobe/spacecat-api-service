@@ -84,7 +84,7 @@ const PRESETS = {
 const DEFAULT_TRAFFIC_ANALYSIS_BACKFILL_WEEKS = 5;
 const DEFAULT_TEARDOWN_DELAY_SECONDS = 14400; // 4 hours
 const MAX_TEARDOWN_DELAY_SECONDS = 86400; // 24 hours
-const MAX_BATCH_SITES = 600;
+const MAX_BATCH_SITES = 1000;
 
 function mergeOptionsByImportType(baseMap = {}, bodyMap = {}) {
   const keys = new Set([
@@ -534,6 +534,16 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
     totalSites: effectiveSiteIds.length,
     enqueuedSiteIds: effectiveSiteIds,
     failedToEnqueue: [],
+    jobsPlan: {
+      imports: {
+        types: imports.types,
+        trafficAnalysisWeeks: imports.trafficAnalysisWeeks,
+      },
+      audits: {
+        types: audits.types,
+      },
+      teardownDelaySeconds,
+    },
     payload: {
       preset: body.preset,
       imports: body.imports,

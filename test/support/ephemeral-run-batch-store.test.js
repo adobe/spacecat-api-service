@@ -181,6 +181,50 @@ describe('ephemeral-run-batch-store', () => {
       expect(result.sites['s-2'].status).to.equal('pending');
     });
 
+    it('includes jobsPlan and per-site jobsEnqueued and jobsSkipped', async () => {
+      const manifest = {
+        batchId: 'b-1',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        enqueuedSiteIds: ['s-1'],
+        totalSites: 1,
+        failedToEnqueue: [],
+        jobsPlan: {
+          imports: { types: ['top-pages'], trafficAnalysisWeeks: 0 },
+          audits: { types: ['lhs-mobile'] },
+          teardownDelaySeconds: 14400,
+        },
+      };
+      const siteResult = {
+        siteId: 's-1',
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        enqueued: {
+          imports: [{ type: 'top-pages', status: 'queued' }],
+          audits: [{ type: 'lhs-mobile', status: 'queued' }],
+        },
+        skipped: [{ type: 'cwv', kind: 'audit', reason: 'queue down' }],
+      };
+
+      let callCount = 0;
+      s3.sendStub.callsFake(() => {
+        callCount += 1;
+        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 2) {
+          return Promise.resolve({
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
+            IsTruncated: false,
+          });
+        }
+        return Promise.resolve(makeBody(siteResult));
+      });
+
+      const result = await readBatchStatus(s3, 'b-1');
+      expect(result.jobsPlan).to.deep.equal(manifest.jobsPlan);
+      expect(result.sites['s-1'].jobsEnqueued).to.deep.equal(siteResult.enqueued);
+      expect(result.sites['s-1'].jobsSkipped).to.deep.equal(siteResult.skipped);
+    });
+
     it('returns completed when all sites have results', async () => {
       const manifest = {
         batchId: 'b-1',

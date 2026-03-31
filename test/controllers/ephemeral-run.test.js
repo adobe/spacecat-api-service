@@ -37,7 +37,7 @@ describe('ephemeral-run controller', () => {
     const mod = await esmock('../../src/controllers/ephemeral-run.js', {
       '../../src/support/ephemeral-run-service.js': {
         runEphemeralRunBatch: runEphemeralRunBatchStub,
-        MAX_BATCH_SITES: 600,
+        MAX_BATCH_SITES: 1000,
         PRESETS: { 'insights-report-default': {} },
       },
       '../../src/support/ephemeral-run-batch-store.js': {
@@ -112,7 +112,7 @@ describe('ephemeral-run controller', () => {
     it('returns 400 when siteIds exceeds max', async () => {
       const ctx = createCtx();
       const { batchRun } = EphemeralRunController(ctx);
-      const ids = Array.from({ length: 601 }, () => VALID_UUID);
+      const ids = Array.from({ length: 1001 }, () => VALID_UUID);
 
       const response = await batchRun({ data: { siteIds: ids } });
       expect(response.status).to.equal(400);

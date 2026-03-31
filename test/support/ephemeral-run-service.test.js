@@ -637,7 +637,7 @@ describe('ephemeral-run-service', () => {
       const ctx = createMockContext();
       ctx.dataAccess.Site.findById.resolves(createMockSite());
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
-      const ids = Array.from({ length: 600 }, (_, i) => `s-${i}`);
+      const ids = Array.from({ length: MAX_BATCH_SITES + 1 }, (_, i) => `s-${i}`);
 
       const result = await runEphemeralRunBatch(ids, {}, ctx);
 
@@ -1076,7 +1076,7 @@ describe('ephemeral-run-service', () => {
     });
 
     it('exports MAX_BATCH_SITES', () => {
-      expect(MAX_BATCH_SITES).to.equal(600);
+      expect(MAX_BATCH_SITES).to.equal(1000);
     });
   });
 });
