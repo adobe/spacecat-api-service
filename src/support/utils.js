@@ -302,6 +302,7 @@ export const triggerAuditForSite = async (
   auditData,
   slackContext,
   lambdaContext,
+  auditContext = {},
 ) => sendAuditMessage(
   lambdaContext.sqs,
   lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
@@ -311,6 +312,7 @@ export const triggerAuditForSite = async (
       channelId: slackContext.channelId,
       threadTs: slackContext.threadTs,
     },
+    ...auditContext,
   },
   site.getId(),
   auditData,
