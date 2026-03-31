@@ -66,6 +66,7 @@ const PRESETS = {
         'meta-tags',
         'meta-tags-auto-suggest',
         'alt-text',
+        'alt-text-auto-suggest-mystique',
         'forms-opportunities',
         'experimentation-opportunities',
         'accessibility',
