@@ -76,7 +76,7 @@ function ContactSalesLeadsController(ctx) {
    */
   const create = async (context) => {
     const {
-      name, email, domain, siteId,
+      name, email, domain, siteId, notes,
     } = context.data || {};
 
     if (!hasText(name)) {
@@ -146,6 +146,10 @@ function ContactSalesLeadsController(ctx) {
 
       if (hasText(siteId) && isValidUUID(siteId)) {
         leadData.siteId = siteId;
+      }
+
+      if (hasText(notes)) {
+        leadData.notes = notes;
       }
 
       if (organizationId) {
