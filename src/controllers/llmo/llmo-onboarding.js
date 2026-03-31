@@ -33,6 +33,7 @@ import {
   LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
+import { upsertBrand } from '../../support/brands-storage.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1342,6 +1343,23 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         postgrestClient,
       });
       log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
+
+      // Write initial brand to normalized brands table so DRS prompt sync can
+      // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
+      // Brandalf will upsert over this with LLM-identified sub-brands later.
+      const primaryUrl = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+      await upsertBrand({
+        organizationId: organization.getId(),
+        brand: {
+          name: brandName.trim(),
+          status: 'active',
+          urls: [{ value: primaryUrl, type: 'url' }],
+          brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
+        },
+        postgrestClient,
+        updatedBy: 'llmo-onboarding',
+      });
+      log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
 
       // Trigger Brandalf immediately after the v2 config exists so downstream
       // brand sync can attach results to the newly created organization.

@@ -254,6 +254,9 @@ describe('LLMO Onboarding Functions', () => {
     }
 
     deps['../../../src/support/customer-config-v2-storage.js'] = effectiveCustomerConfigV2Storage;
+    deps['../../../src/support/brands-storage.js'] = {
+      upsertBrand: options.mockUpsertBrand || sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+    };
 
     return deps;
   };
@@ -1422,6 +1425,9 @@ describe('LLMO Onboarding Functions', () => {
         updated_by: 'llmo-onboarding',
       });
       expect(mockLog.info).to.have.been.calledWith('Enabled brandalf feature flag for organization org123');
+
+      // Verify initial brand was written to normalized brands table
+      expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
