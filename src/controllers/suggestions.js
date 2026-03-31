@@ -1563,7 +1563,16 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (validSuggestionIds.length === 0) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no valid suggestions to deploy`);
-      return badRequest('No valid suggestions to deploy');
+      const response = {
+        suggestions: [...failedSuggestions],
+        metadata: {
+          total: suggestionIds.length,
+          success: 0,
+          failed: failedSuggestions.length,
+        },
+      };
+      response.suggestions.sort((a, b) => a.index - b.index);
+      return createResponse(response, 207);
     }
     const { pathInfo, request } = context;
     const preferHeaderValue = pathInfo?.headers?.prefer
@@ -1613,6 +1622,10 @@ function SuggestionsController(ctx, sqs, env) {
           promptSources = validSuggestions;
         }
         const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
+        if (prompts.length === 0) {
+          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
+          throw new Error('No prompts found in selected suggestions');
+        }
         const promptsS3Key = `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
         await s3Client.send(new PutObjectCommand({
           Bucket: s3Bucket,
@@ -1678,7 +1691,6 @@ function SuggestionsController(ctx, sqs, env) {
           await geoExperiment.remove();
           return createResponse({ message: `Failed to initiate experiment: ${updateError.message}` }, 500);
         }
-
         let job;
         try {
           job = await AsyncJob.create({
@@ -1714,18 +1726,28 @@ function SuggestionsController(ctx, sqs, env) {
           return suggestion.save();
         }));
 
-        return accepted({
-          jobId: job.getId(),
-          status: GeoExperimentModel.STATUSES.PRE_ANALYSIS_SUBMITTED,
-          experimentBatchId: preScheduleId,
-          geoExperimentId,
+        const experimentResponse = {
+          suggestions: [
+            ...validSuggestionEntities.map((suggestion) => ({
+              uuid: suggestion.getId(),
+              index: suggestionIds.indexOf(suggestion.getId()),
+              statusCode: 202,
+              suggestion: SuggestionDto.toJSON(suggestion),
+            })),
+            ...failedSuggestions,
+          ],
           metadata: {
             total: suggestionIds.length,
-            accepted: validSuggestionIds.length,
+            success: validSuggestionIds.length,
             failed: failedSuggestions.length,
           },
-          ...(failedSuggestions.length > 0 && { failedSuggestions }),
-        });
+          jobId: job.getId(),
+          geoExperimentId,
+          geoExperimentStatus: GeoExperimentModel.STATUSES.PRE_ANALYSIS_SUBMITTED,
+          prePhaseScheduleId: preScheduleId,
+        };
+        experimentResponse.suggestions.sort((a, b) => a.index - b.index);
+        return createResponse(experimentResponse, 207);
       } catch (error) {
         context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
         if (geoExperiment?.getId?.()) {
@@ -1737,9 +1759,20 @@ function SuggestionsController(ctx, sqs, env) {
           }
           /* c8 ignore stop */
         }
-        return createResponse({
-          message: `Failed to initiate experiment: ${error.message}`,
-        }, 500);
+        const errorResponse = {
+          suggestions: suggestionIds.map((id, index) => ({
+            uuid: id,
+            index,
+            statusCode: 500,
+            message: `Failed to initiate experiment: ${error.message}`,
+          })),
+          metadata: {
+            total: suggestionIds.length,
+            success: 0,
+            failed: suggestionIds.length,
+          },
+        };
+        return createResponse(errorResponse, 207);
       }
     }
 
@@ -1809,70 +1842,6 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     context.log.info(`[edge-deploy] response: ${JSON.stringify(response)}`);
     return createResponse(response, 207);
-  };
-
-  /**
-   * Gets the status of an edge-deploy experiment job.
-   */
-  const getEdgeDeployStatus = async (context) => {
-    const { siteId, opportunityId, jobId } = context.params;
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-    if (!isValidUUID(opportunityId)) {
-      return badRequest('Opportunity ID required');
-    }
-    if (!isValidUUID(jobId)) {
-      return badRequest('Job ID required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('User does not have access to this site');
-    }
-
-    const job = await AsyncJob.findById(jobId);
-    if (!job) {
-      return notFound('Job not found');
-    }
-
-    const metadata = job.getMetadata();
-    if (metadata?.siteId !== siteId || metadata?.opportunityId !== opportunityId) {
-      return notFound('Job not found for this site and opportunity');
-    }
-
-    const geoExperiment = (
-      metadata?.geoExperimentId
-      && GeoExperiment
-      && typeof GeoExperiment.findById === 'function'
-    )
-      ? await GeoExperiment.findById(metadata.geoExperimentId)
-      : null;
-
-    if (!geoExperiment) {
-      return notFound('Deployment experiment not found');
-    }
-
-    return ok({
-      jobId: job.getId(),
-      status: job.getStatus(),
-      deployStatus: geoExperiment.getStatus(),
-      experimentIds: [
-        geoExperiment.getPreScheduleId(),
-        geoExperiment.getPostScheduleId(),
-      ].filter(Boolean),
-      geoExperimentId: geoExperiment.getId(),
-      geoExperimentStatus: geoExperiment.getStatus(),
-      geoExperimentError: geoExperiment.getError(),
-      startedAt: job.getStartedAt(),
-      endedAt: job.getEndedAt(),
-      error: job.getError(),
-    });
   };
 
   /**
@@ -2336,7 +2305,6 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
-    getEdgeDeployStatus,
     listGeoExperiments,
     getGeoExperiment,
     rollbackSuggestionFromEdge,
