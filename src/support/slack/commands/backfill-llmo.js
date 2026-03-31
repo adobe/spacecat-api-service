@@ -26,6 +26,7 @@ const AUDIT_TYPES = {
   LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
   LLM_ERROR_PAGES: 'llm-error-pages',
 };
+const CDN_LOGS_ANALYSIS_DELAY_SECONDS = 5;
 
 function parseArgs(args) {
   const parsed = {};
@@ -85,7 +86,12 @@ async function triggerBackfill(
             },
           };
           // eslint-disable-next-line no-await-in-loop
-          await sqs.sendMessage(configuration.getQueues().audits, message);
+          await sqs.sendMessage(
+            configuration.getQueues().audits,
+            message,
+            undefined,
+            { delaySeconds: (dayOffset - 1) * CDN_LOGS_ANALYSIS_DELAY_SECONDS },
+          );
         }
       }
       break;

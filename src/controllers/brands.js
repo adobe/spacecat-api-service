@@ -43,6 +43,7 @@ import {
   upsertBrand,
   updateBrand,
   deleteBrand,
+  getBrandById,
 } from '../support/brands-storage.js';
 import {
   listCategories,
@@ -498,6 +499,38 @@ function BrandsController(ctx, log, env) {
 
   // ── Brand list (v2, reads from normalized tables) ──
 
+  const getBrandForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const brand = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+      if (!brand) return notFound(`Brand not found: ${brandId}`);
+
+      return ok(brand);
+    } catch (error) {
+      log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   const listBrandsForOrg = async (context) => {
     const { spaceCatId } = context.params || {};
     const { status } = getQueryParams(context);
@@ -776,6 +809,7 @@ function BrandsController(ctx, log, env) {
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
+    getBrandForOrg,
     listBrandsForOrg,
     listCategoriesForOrg,
     createCategoryForOrg,
