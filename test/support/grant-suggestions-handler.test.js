@@ -541,7 +541,7 @@ describe('grant-suggestions-handler', () => {
         getGrantId: () => grantId,
       });
 
-      it('revokes only stale grants when OUTDATED found and fills from NEW', async () => {
+      it('revokes only revocable grants when OUTDATED found and fills from NEW', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
         };
@@ -599,6 +599,109 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
+      it('revokes grants with PENDING_VALIDATION status as stale', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2PendingValidation = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'PENDING_VALIDATION',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2PendingValidation],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(tokenAfterRevoke);
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('revokes granted NEW suggestions as revocable but not stale', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2GrantedNew = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const sugg3Approved = {
+          getId: () => 'sugg-3', getRank: () => 5, getStatus: () => 'APPROVED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2GrantedNew, sugg3Approved],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+            mkGrant('sugg-3', 'g3'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(tokenAfterRevoke);
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // NEW is revocable (not stale), so g2 gets revoked; APPROVED g3 does not
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
       it('revokes all grants when REJECTED found and fills from NEW', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
@@ -649,7 +752,7 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
-      it('does not revoke when all grants are non-stale', async () => {
+      it('does not revoke when all grants are non-revocable', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
         };
@@ -689,7 +792,7 @@ describe('grant-suggestions-handler', () => {
 
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
-        // No revoke since all grants are non-stale
+        // No revoke since all grants are non-revocable (APPROVED)
         expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
         // Should grant the 1 ungranted NEW
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
@@ -729,7 +832,7 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
-      it('returns early if token is null after revoking stale grants', async () => {
+      it('returns early if token is null after revoking revocable grants', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
         };
@@ -776,7 +879,7 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
       });
 
-      it('throws when revokeSuggestionGrant fails for stale grants', async () => {
+      it('throws when revokeSuggestionGrant fails for revocable grants', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
         };

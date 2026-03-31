@@ -164,12 +164,14 @@ async function revokeGrants(SuggestionGrant, grantIds) {
   }
 }
 
-const REVOCABLE_STATUSES = new Set([
+const STALE_STATUSES = new Set([
   SuggestionModel.STATUSES.OUTDATED,
   SuggestionModel.STATUSES.REJECTED,
   SuggestionModel.STATUSES.PENDING_VALIDATION,
-  SuggestionModel.STATUSES.NEW,
 ]);
+
+const isRevocable = (status) => STALE_STATUSES.has(status)
+  || status === SuggestionModel.STATUSES.NEW;
 
 /**
  * Handles a new token cycle: creates the token and migrates
@@ -226,7 +228,7 @@ async function handleExistingTokenCycle(
     tokenGrants
       .filter((g) => {
         const s = grantedSuggestions.find((gs) => gs?.getId() === g.getSuggestionId());
-        return s && REVOCABLE_STATUSES.has(s.getStatus());
+        return s && isRevocable(s.getStatus());
       })
       .map((g) => g.getGrantId()),
   )];
