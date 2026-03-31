@@ -53,6 +53,21 @@ describe('LLMO Onboarding Functions', () => {
       },
     };
 
+    // Default feature_flags stub so all v2-path tests get a working postgrestClient.
+    // Individual tests can override with .withArgs('feature_flags') for specific assertions.
+    const defaultUpsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+    const defaultUpsertSelect = sinon.stub().returns({ single: defaultUpsertSingle });
+    const defaultUpsert = sinon.stub().returns({ select: defaultUpsertSelect });
+    const defaultMaybeSingle = sinon.stub().resolves({ data: null, error: null });
+    const defaultEq3 = sinon.stub().returns({ maybeSingle: defaultMaybeSingle });
+    const defaultEq2 = sinon.stub().returns({ eq: defaultEq3 });
+    const defaultEq1 = sinon.stub().returns({ eq: defaultEq2 });
+    const defaultSelect = sinon.stub().returns({ eq: defaultEq1 });
+    mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+      select: defaultSelect,
+      upsert: defaultUpsert,
+    });
+
     // Create mock log
     mockLog = {
       info: sinon.stub(),
@@ -1265,6 +1280,26 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
+      // Stub postgrestClient for feature flag read (resolveLlmoOnboardingMode)
+      // and upsert (enabling brandalf during v2 onboarding)
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({
+        data: {
+          organization_id: 'org123', product: 'LLMO', flag_name: 'brandalf', flag_value: true,
+        },
+        error: null,
+      });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
@@ -1376,6 +1411,17 @@ describe('LLMO Onboarding Functions', () => {
       expect(writtenConfig.customer.customerName).to.equal('Test Brand');
       expect(writtenConfig.customer.brands[0].v1SiteId).to.equal('site123');
       expect(writtenConfig.customer.brands[0].baseUrl).to.equal('https://example.com');
+
+      // Verify brandalf feature flag was enabled during v2 onboarding
+      expect(upsertStub).to.have.been.calledOnce;
+      expect(upsertStub.firstCall.args[0]).to.deep.include({
+        organization_id: 'org123',
+        product: 'LLMO',
+        flag_name: 'brandalf',
+        flag_value: true,
+        updated_by: 'llmo-onboarding',
+      });
+      expect(mockLog.info).to.have.been.calledWith('Enabled brandalf feature flag for organization org123');
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
@@ -2555,12 +2601,12 @@ describe('LLMO Onboarding Functions', () => {
         .customer.brands[0].updatedBy).to.equal('fallback-owner@example.com');
     });
 
-    it('skips writing when the v2 config already exists', async () => {
+    it('skips writing when the v2 config already exists and site is already registered', async () => {
       const existingConfig = {
         customer: {
           customerName: 'Existing',
           imsOrgID: 'ABC123@AdobeOrg',
-          brands: [{ id: 'existing-brand' }],
+          brands: [{ id: 'existing-brand', v1SiteId: 'site-123' }],
         },
       };
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
@@ -2586,8 +2632,123 @@ describe('LLMO Onboarding Functions', () => {
       expect(result).to.equal(existingConfig);
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
       expect(mockLog.info).to.have.been.calledWith(
-        'V2 customer config already exists for organization org-123, skipping initialization',
+        'V2 customer config already exists for organization org-123 with site site-123, skipping',
       );
+    });
+
+    it('adds new site as brand to existing v2 config when site is not registered', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'existing-brand', v1SiteId: 'other-site-456', name: 'Other Brand' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        overrideBaseURL: 'https://www.example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result).to.equal(existingConfig);
+      expect(result.customer.brands).to.have.length(2);
+      expect(result.customer.brands[0].v1SiteId).to.equal('other-site-456');
+
+      const newBrand = result.customer.brands[1];
+      expect(newBrand.v1SiteId).to.equal('site-123');
+      expect(newBrand.id).to.equal('new-brand');
+      expect(newBrand.name).to.equal('New Brand');
+      expect(newBrand.baseUrl).to.equal('https://www.example.com');
+      expect(newBrand.status).to.equal('active');
+      expect(newBrand.origin).to.equal('system');
+      expect(newBrand.regions).to.deep.equal(['gl']);
+      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
+
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[0])
+        .to.equal('org-123');
+      expect(mockLog.info).to.have.been.calledWith(
+        'Added site site-123 as brand "New Brand" to existing V2 config for organization org-123',
+      );
+    });
+
+    it('deduplicates brand ID when colliding with existing brand', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'new-brand', v1SiteId: 'other-site-456', name: 'New Brand (old)' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'abcd1234-5678-9abc-def0-123456789abc',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result.customer.brands).to.have.length(2);
+      const addedBrand = result.customer.brands[1];
+      expect(addedBrand.id).to.equal('new-brand-abcd1234');
+      expect(addedBrand.name).to.equal('New Brand');
+    });
+
+    it('adds new site as brand when existing config has no customer or brands', async () => {
+      const existingConfig = {};
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result).to.equal(existingConfig);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+      const newBrand = result.customer.brands[0];
+      expect(newBrand.v1SiteId).to.equal('site-123');
+      expect(newBrand.baseUrl).to.equal('https://example.com');
     });
   });
 

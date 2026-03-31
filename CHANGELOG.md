@@ -1,3 +1,59 @@
+## [1.389.1](https://github.com/adobe/spacecat-api-service/compare/v1.389.0...v1.389.1) (2026-03-31)
+
+
+### Bug Fixes
+
+* adds revoke and regrant logic for cases when suggestions get OUTDATED ([#2035](https://github.com/adobe/spacecat-api-service/issues/2035)) ([a052952](https://github.com/adobe/spacecat-api-service/commit/a05295289b5ac3d41482f046220a5fe291a87202))
+
+# [1.389.0](https://github.com/adobe/spacecat-api-service/compare/v1.388.0...v1.389.0) (2026-03-31)
+
+
+### Features
+
+* LLMO-3956 add new site as brand to existing v2 config during onboarding ([#2080](https://github.com/adobe/spacecat-api-service/issues/2080)) ([6f05411](https://github.com/adobe/spacecat-api-service/commit/6f05411fea1207cbf19f50b3939dd71423ff0a1b))
+
+# [1.388.0](https://github.com/adobe/spacecat-api-service/compare/v1.387.1...v1.388.0) (2026-03-31)
+
+
+### Features
+
+* support prerender csv audits from slack ([#2074](https://github.com/adobe/spacecat-api-service/issues/2074)) ([a776ccb](https://github.com/adobe/spacecat-api-service/commit/a776ccbb467e7592a21f8493c256757f5e543df5))
+
+## [1.387.1](https://github.com/adobe/spacecat-api-service/compare/v1.387.0...v1.387.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.109.0 ([#2069](https://github.com/adobe/spacecat-api-service/issues/2069)) ([6ca4100](https://github.com/adobe/spacecat-api-service/commit/6ca4100a4f69f27ed39d0c1f336108004d2550ee))
+
+# [1.387.0](https://github.com/adobe/spacecat-api-service/compare/v1.386.1...v1.387.0) (2026-03-30)
+
+
+### Features
+
+* LLMO-3956 enable brandalf feature flag during v2 onboarding ([#2066](https://github.com/adobe/spacecat-api-service/issues/2066)) ([e3d2c8f](https://github.com/adobe/spacecat-api-service/commit/e3d2c8fc6f1555b94630d48870d91026b9d30e4b))
+
+## [1.386.1](https://github.com/adobe/spacecat-api-service/compare/v1.386.0...v1.386.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.108.0 ([#2067](https://github.com/adobe/spacecat-api-service/issues/2067)) ([02549fa](https://github.com/adobe/spacecat-api-service/commit/02549fa7035d7f2a1d995d3cad951b49e77c628e))
+
+# [1.386.0](https://github.com/adobe/spacecat-api-service/compare/v1.385.3...v1.386.0) (2026-03-30)
+
+
+### Features
+
+* Create plg_tier_requirement_and_design.md ([#2050](https://github.com/adobe/spacecat-api-service/issues/2050)) ([a934522](https://github.com/adobe/spacecat-api-service/commit/a93452280ec102c597b4cc101bb4a1499709a65b))
+
+## [1.385.3](https://github.com/adobe/spacecat-api-service/compare/v1.385.2...v1.385.3) (2026-03-30)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2063](https://github.com/adobe/spacecat-api-service/issues/2063)) ([55738cd](https://github.com/adobe/spacecat-api-service/commit/55738cd68de40414211117422b3e3e9547d566f7))
+
 ## [1.385.2](https://github.com/adobe/spacecat-api-service/compare/v1.385.1...v1.385.2) (2026-03-28)
 
 
