@@ -254,6 +254,9 @@ describe('LLMO Onboarding Functions', () => {
     }
 
     deps['../../../src/support/customer-config-v2-storage.js'] = effectiveCustomerConfigV2Storage;
+    deps['../../../src/support/brands-storage.js'] = {
+      upsertBrand: options.mockUpsertBrand || sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+    };
 
     return deps;
   };
@@ -1313,6 +1316,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
 
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
@@ -1326,6 +1330,7 @@ describe('LLMO Onboarding Functions', () => {
           mockOctokit,
           mockDrsClient,
           mockCustomerConfigV2Storage,
+          mockUpsertBrand,
         }),
       );
 
@@ -1423,6 +1428,22 @@ describe('LLMO Onboarding Functions', () => {
       });
       expect(mockLog.info).to.have.been.calledWith('Enabled brandalf feature flag for organization org123');
 
+      // Verify initial brand was written to normalized brands table with correct args
+      expect(mockUpsertBrand).to.have.been.calledOnce;
+      expect(mockUpsertBrand.firstCall.args[0]).to.deep.include({
+        organizationId: 'org123',
+        updatedBy: 'llmo-onboarding',
+      });
+      expect(mockUpsertBrand.firstCall.args[0].brand).to.deep.include({
+        name: 'Test Brand',
+        status: 'active',
+      });
+      // Must use baseURL (matches sites.base_url), not overrideBaseURL
+      expect(mockUpsertBrand.firstCall.args[0].brand.urls).to.deep.equal([
+        { value: 'https://example.com', type: 'url' },
+      ]);
+      expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
+
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
@@ -1449,6 +1470,110 @@ describe('LLMO Onboarding Functions', () => {
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, baseURL https://example.com, brand Test Brand');
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com using LLMO onboarding mode v2');
+    });
+
+    it('should continue onboarding when upsertBrand fails', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Feature flag postgrest mock
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // upsertBrand throws — should not block onboarding
+      const failingUpsertBrand = sinon.stub().rejects(new Error('PostgREST unavailable'));
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand: failingUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        {
+          domain: 'example.com',
+          imsOrgId: 'ABC123@AdobeOrg',
+          brandName: 'Test Brand',
+        },
+        context,
+      );
+
+      // Onboarding completes despite upsertBrand failure
+      expect(result.message).to.equal(
+        'LLMO onboarding completed successfully',
+      );
+      expect(failingUpsertBrand).to.have.been.calledOnce;
+      expect(mockLog.warn).to.have.been.calledWith(
+        'Failed to create initial brand in normalized table: '
+        + 'PostgREST unavailable',
+      );
+      // Brandalf job should still be submitted
+      expect(mockDrsClient.createFrom().submitJob)
+        .to.have.been.called;
     });
 
     it('should skip v2 initialization and Brandalf in v1 onboarding mode', async () => {
