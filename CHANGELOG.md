@@ -1,3 +1,10 @@
+## [1.389.1](https://github.com/adobe/spacecat-api-service/compare/v1.389.0...v1.389.1) (2026-03-31)
+
+
+### Bug Fixes
+
+* adds revoke and regrant logic for cases when suggestions get OUTDATED ([#2035](https://github.com/adobe/spacecat-api-service/issues/2035)) ([a052952](https://github.com/adobe/spacecat-api-service/commit/a05295289b5ac3d41482f046220a5fe291a87202))
+
 # [1.389.0](https://github.com/adobe/spacecat-api-service/compare/v1.388.0...v1.389.0) (2026-03-31)
 
 
