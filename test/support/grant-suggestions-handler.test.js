@@ -648,13 +648,12 @@ describe('grant-suggestions-handler', () => {
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
-      it('revokes granted NEW suggestions as revocable but not stale', async () => {
+      it('does not revoke when only NEW grants exist (no stale triggers revocation)', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
         };
 
         const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
-        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
 
         const sugg2GrantedNew = {
           getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
@@ -681,6 +680,60 @@ describe('grant-suggestions-handler', () => {
             mkGrant('sugg-2', 'g2'),
             mkGrant('sugg-3', 'g3'),
           ]),
+          grantSuggestions: sandbox.stub(),
+          revokeSuggestionGrant: sandbox.stub(),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub().resolves(existingToken),
+        };
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // No stale grants → early return, no revocation even though NEW is revocable
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
+      });
+
+      it('revokes NEW grants alongside stale when stale triggers revocation', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 2 };
+
+        const sugg2GrantedNew = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const sugg3Outdated = {
+          getId: () => 'sugg-3', getRank: () => 5, getStatus: () => 'OUTDATED',
+        };
+        const sugg4Approved = {
+          getId: () => 'sugg-4', getRank: () => 8, getStatus: () => 'APPROVED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2GrantedNew, sugg3Outdated, sugg4Approved],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+            mkGrant('sugg-3', 'g3'),
+            mkGrant('sugg-4', 'g4'),
+          ]),
           grantSuggestions: sandbox.stub().resolves({ success: true }),
           revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
         };
@@ -696,9 +749,10 @@ describe('grant-suggestions-handler', () => {
 
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
-        // NEW is revocable (not stale), so g2 gets revoked; APPROVED g3 does not
-        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        // Stale (g3/OUTDATED) triggers revocation, NEW (g2) also revoked; APPROVED (g4) preserved
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledTwice;
         expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g3');
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 

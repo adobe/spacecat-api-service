@@ -228,14 +228,23 @@ async function handleExistingTokenCycle(
     tokenGrants
       .filter((g) => {
         const s = grantedSuggestions.find((gs) => gs?.getId() === g.getSuggestionId());
-        return s && isRevocable(s.getStatus());
+        return s && STALE_STATUSES.has(s.getStatus());
       })
       .map((g) => g.getGrantId()),
   )];
 
   if (staleGrantIds.length === 0) return { token, didRevoke: false };
 
-  await revokeGrants(SuggestionGrant, staleGrantIds);
+  const revocableGrantIds = [...new Set(
+    tokenGrants
+      .filter((g) => {
+        const s = grantedSuggestions.find((gs) => gs?.getId() === g.getSuggestionId());
+        return s && isRevocable(s.getStatus());
+      })
+      .map((g) => g.getGrantId()),
+  )];
+
+  await revokeGrants(SuggestionGrant, revocableGrantIds);
   const refreshedToken = await Token.findBySiteIdAndTokenType(siteId, tokenType);
 
   return { token: refreshedToken, didRevoke: true };
