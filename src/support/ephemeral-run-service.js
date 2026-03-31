@@ -57,6 +57,7 @@ const PRESETS = {
     },
     audits: {
       types: [
+        'scrape-top-pages',
         'broken-backlinks',
         'broken-backlinks-auto-suggest',
         'broken-internal-links',
