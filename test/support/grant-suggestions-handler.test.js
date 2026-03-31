@@ -309,8 +309,8 @@ describe('grant-suggestions-handler', () => {
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
-      // Called twice: initial split + re-fetch before final grant
-      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledTwice;
+      // Called once: no re-fetch needed since no revoke occurred
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
       expect(Token.findBySiteIdAndTokenType).to.have.been.calledTwice;
       // New token uses default total (no suppliedTotal)
       expect(Token.findBySiteIdAndTokenType.secondCall.args[2])
@@ -348,8 +348,8 @@ describe('grant-suggestions-handler', () => {
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
-      // Called twice: initial split + re-fetch before final grant
-      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledTwice;
+      // Called once: no re-fetch needed since no revoke occurred
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
       // Only 1 remaining, so only 1 grant call
       expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       expect(SuggestionGrant.grantSuggestions.firstCall.args[0])
@@ -442,8 +442,8 @@ describe('grant-suggestions-handler', () => {
 
         // No revoke needed
         expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
-        // Called twice: initial split + re-fetch before final grant
-        expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledTwice;
+        // Called once: no re-fetch needed since no revoke occurred
+        expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
         // Grant the 1 new suggestion
         expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
@@ -541,7 +541,7 @@ describe('grant-suggestions-handler', () => {
         getGrantId: () => grantId,
       });
 
-      it('revokes all grants when OUTDATED found and fills from NEW', async () => {
+      it('revokes only stale grants when OUTDATED found and fills from NEW', async () => {
         const s1 = {
           getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
         };
@@ -550,7 +550,7 @@ describe('grant-suggestions-handler', () => {
         };
 
         const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
-        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 2 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
 
         const sugg2Granted = {
           getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'OUTDATED',
@@ -592,12 +592,11 @@ describe('grant-suggestions-handler', () => {
 
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
-        // Should revoke all grants for the token (g2 and g3)
-        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledTwice;
+        // Should only revoke the stale grant (g2/OUTDATED), not g3 (APPROVED)
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
         expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
-        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g3');
-        // Remaining token granting fills from NEW (sugg-1 and sugg-2)
-        expect(SuggestionGrant.grantSuggestions).to.have.been.calledTwice;
+        // Remaining=1 after revoking 1 stale grant, fills 1 from NEW
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       });
 
       it('revokes all grants when REJECTED found and fills from NEW', async () => {
