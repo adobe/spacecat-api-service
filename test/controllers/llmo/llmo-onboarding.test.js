@@ -2675,6 +2675,8 @@ describe('LLMO Onboarding Functions', () => {
       expect(newBrand.name).to.equal('New Brand');
       expect(newBrand.baseUrl).to.equal('https://www.example.com');
       expect(newBrand.status).to.equal('active');
+      expect(newBrand.origin).to.equal('system');
+      expect(newBrand.regions).to.deep.equal(['gl']);
       expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
       expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
 
@@ -2684,6 +2686,40 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith(
         'Added site site-123 as brand "New Brand" to existing V2 config for organization org-123',
       );
+    });
+
+    it('deduplicates brand ID when colliding with existing brand', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'new-brand', v1SiteId: 'other-site-456', name: 'New Brand (old)' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'abcd1234-5678-9abc-def0-123456789abc',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result.customer.brands).to.have.length(2);
+      const addedBrand = result.customer.brands[1];
+      expect(addedBrand.id).to.equal('new-brand-abcd1234');
+      expect(addedBrand.name).to.equal('New Brand');
     });
 
     it('adds new site as brand when existing config has no customer or brands', async () => {

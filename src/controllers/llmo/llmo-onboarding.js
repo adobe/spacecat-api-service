@@ -24,7 +24,7 @@ import {
   readCustomerConfigV2FromPostgres,
   writeCustomerConfigV2ToPostgres,
 } from '../../support/customer-config-v2-storage.js';
-import { convertV1ToV2 } from '../../support/customer-config-mapper.js';
+import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
 import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V1,
@@ -251,18 +251,27 @@ export async function ensureInitialCustomerConfigV2({
     // Add the new site as a brand to the existing config
     const primaryUrl = overrideBaseURL || baseURL;
     const timestamp = new Date().toISOString();
-    const brandId = brandName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const trimmedName = brandName.trim();
+    let brandId = generateBrandId(trimmedName);
+
+    // Ensure brand ID is unique within the config
+    const existingIds = new Set(brands.map((b) => b.id));
+    if (existingIds.has(brandId)) {
+      brandId = `${brandId}-${siteId.slice(0, 8)}`;
+    }
 
     brands.push({
       id: brandId,
       v1SiteId: siteId,
-      name: brandName.trim(),
+      name: trimmedName,
       baseUrl: primaryUrl,
       status: 'active',
+      origin: 'system',
+      regions: ['gl'],
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
       urls: [{ value: primaryUrl, type: 'url' }],
-      brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
+      brandAliases: [{ name: trimmedName, regions: ['gl'] }],
     });
 
     await writeCustomerConfigV2ToPostgres(
