@@ -1585,13 +1585,6 @@ function SuggestionsController(ctx, sqs, env) {
     if (isAsyncExperimentRequested) {
       context.log.info(`[edge-deploy] async experiment requested for site: ${apexBaseUrl}`);
 
-      if (!GeoExperiment || typeof GeoExperiment.create !== 'function') {
-        context.log.error('[edge-deploy-failed] GeoExperiment data access is not configured');
-        return createResponse({
-          message: 'Failed to initiate experiment: GeoExperiment data access is not configured',
-        }, 500);
-      }
-
       const urls = allSuggestions
         .filter((s) => validSuggestionIds.includes(s.getId()))
         .map((s) => s.getData()?.url)
@@ -1645,9 +1638,7 @@ function SuggestionsController(ctx, sqs, env) {
           status: GeoExperimentModel.STATUSES.INITIATED,
           suggestionIds: promptSources.map((s) => s.getId()),
           metadata: {
-            jobType: 'geo-experiment',
             urls,
-            profile: { email: profile?.email },
           },
           updatedBy: profile?.email || 'geo-experiment',
         });
@@ -1670,7 +1661,6 @@ function SuggestionsController(ctx, sqs, env) {
             platforms: ['chatgpt_free', 'perplexity'],
             providerIds: ['brightdata', 'openai_web_search'],
             triggerImmediately: true,
-            experimentationUrls: urls,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
           });
           preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;

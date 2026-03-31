@@ -164,7 +164,6 @@ describe('Suggestions Controller', () => {
     'deploySuggestionToEdge',
     'listGeoExperiments',
     'getGeoExperiment',
-    'getEdgeDeployStatus',
     'rollbackSuggestionFromEdge',
     'previewSuggestions',
     'fetchFromEdge',
@@ -5084,6 +5083,7 @@ describe('Suggestions Controller', () => {
           getData: () => ({
             url: 'https://example.com/page1',
             recommendedAction: 'New Heading Title',
+            prompts: [{ prompt: 'What is page1?', regions: ['US'] }],
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -5102,6 +5102,7 @@ describe('Suggestions Controller', () => {
           getData: () => ({
             url: 'https://example.com/page2',
             recommendedAction: 'New Subtitle',
+            prompts: [{ prompt: 'What is page2?', regions: ['US'] }],
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -5159,6 +5160,29 @@ describe('Suggestions Controller', () => {
           remove: sandbox.stub().resolves(),
         };
       });
+    });
+
+    it('returns 207 with failure when suggestions have no prompts', async () => {
+      const noPromptsSugg = {
+        ...edgeSuggestions[0],
+        getData: () => ({
+          url: 'https://example.com/page1',
+          recommendedAction: 'New Heading Title',
+        }),
+      };
+      mockSuggestion.allByOpportunityId.resolves([noPromptsSugg]);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: { AWS_ENV: 'dev' },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('No prompts found');
     });
 
     it('returns badRequest for invalid siteId', async () => {
@@ -5289,7 +5313,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(404);
     });
 
-    it('returns badRequest when no valid suggestions found', async () => {
+    it('returns 207 with all failed suggestions when no valid suggestions found', async () => {
       mockSuggestion.allByOpportunityId.resolves([]);
 
       const response = await suggestionsController.deploySuggestionToEdge({
@@ -5298,10 +5322,13 @@ describe('Suggestions Controller', () => {
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
         env: {},
       });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
     });
 
-    it('returns 500 when GeoExperiment data access is missing', async () => {
+    it('returns 207 with failure when GeoExperiment data access is missing', async () => {
       const controllerWithoutGeoExperiment = SuggestionsController({
         dataAccess: {
           ...mockSuggestionDataAccess,
@@ -5319,12 +5346,12 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.message).to.include('GeoExperiment data access is not configured');
+      expect(body.metadata.failed).to.equal(1);
     });
 
-    it('returns 500 when GeoExperiment create returns no id', async () => {
+    it('returns 207 with failure when GeoExperiment create returns no id', async () => {
       mockSuggestionDataAccess.GeoExperiment.create.resolves({});
 
       const response = await suggestionsController.deploySuggestionToEdge({
@@ -5335,9 +5362,10 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.message).to.include('GeoExperiment was not created');
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('GeoExperiment was not created');
     });
 
     it('filters out suggestions not in NEW status (non-domain-wide)', async () => {
@@ -5359,7 +5387,10 @@ describe('Suggestions Controller', () => {
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
         env: {},
       });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
     });
 
     it('filters out domain-wide suggestions missing allowedRegexPatterns', async () => {
@@ -5381,7 +5412,10 @@ describe('Suggestions Controller', () => {
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
         env: {},
       });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
     });
 
     it('allows domain-wide suggestions with allowedRegexPatterns', async () => {
@@ -5394,20 +5428,43 @@ describe('Suggestions Controller', () => {
           isDomainWide: true,
           url: 'https://example.com',
           allowedRegexPatterns: ['.*\\.html'],
+          prompts: [{ prompt: 'What is example.com?', regions: ['US'] }],
         }),
         setData: sandbox.stub(),
         setUpdatedBy: sandbox.stub(),
         save: sandbox.stub().resolves(),
       };
-      mockSuggestion.allByOpportunityId.resolves([domainWideSugg]);
+      const regularSugg = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/page1',
+          prompts: [{ prompt: 'What is page1?', regions: ['US'] }],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSugg, regularSugg]);
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
         env: { AWS_ENV: 'dev' },
       });
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Domain-wide suggestion with allowedRegexPatterns is accepted as valid
+      const accepted = body.suggestions.filter((s) => s.statusCode !== 400 && s.statusCode !== 404);
+      expect(accepted.length).to.be.greaterThan(0);
     });
 
     it('logs warning and continues when domain-wide regex is invalid', async () => {
@@ -5592,7 +5649,7 @@ describe('Suggestions Controller', () => {
       expect(skippedSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.equal(true);
     });
 
-    it('returns 202 accepted with job details on success', async () => {
+    it('returns 207 with job details on success', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -5600,13 +5657,15 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.jobId).to.equal(JOB_ID);
-      expect(body.status).to.equal('pre_analysis_submitted');
-      expect(body.experimentBatchId).to.equal('sched-pre-001');
+      expect(body.geoExperimentStatus).to.equal('pre_analysis_submitted');
+      expect(body.prePhaseScheduleId).to.equal('sched-pre-001');
       expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
-      expect(body.metadata.accepted).to.equal(2);
+      expect(body.metadata.success).to.equal(2);
+      expect(body.suggestions).to.have.lengthOf(2);
+      expect(body.suggestions[0].statusCode).to.equal(202);
     });
 
     it('calls DrsClient.createExperimentSchedule with correct params', async () => {
@@ -5621,10 +5680,6 @@ describe('Suggestions Controller', () => {
       const callArgs = mockDrsClient.createExperimentSchedule.firstCall.args[0];
       expect(callArgs.siteId).to.equal(SITE_ID);
       expect(callArgs.experimentPhase).to.equal('pre');
-      expect(callArgs.experimentationUrls).to.deep.equal([
-        'https://example.com/page1',
-        'https://example.com/page2',
-      ]);
     });
 
     it('creates AsyncJob with correct metadata', async () => {
@@ -5710,7 +5765,7 @@ describe('Suggestions Controller', () => {
       expect(context.log.error.calledWithMatch('Failed to update GeoExperiment to PRE_ANALYSIS_SUBMITTED')).to.equal(true);
     });
 
-    it('returns 500 and logs when GeoExperiment remove fails during async experiment cleanup', async () => {
+    it('returns 207 with failure and logs when GeoExperiment remove fails during cleanup', async () => {
       mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
         const id = payload.geoExperimentId;
         return {
@@ -5731,11 +5786,11 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(207);
       expect(context.log.error.calledWithMatch('Failed to clean up GeoExperiment')).to.equal(true);
     });
 
-    it('returns 500 when S3 prompts upload fails before GeoExperiment is created', async () => {
+    it('returns 207 with failure when S3 prompts upload fails before GeoExperiment is created', async () => {
       context.s3.s3Client.send.rejects(new Error('s3 denied'));
 
       const response = await suggestionsController.deploySuggestionToEdge({
@@ -5745,9 +5800,9 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.message).to.include('s3 denied');
+      expect(body.suggestions[0].message).to.include('s3 denied');
     });
 
     it('honors Prefer: respond-async from request headers when pathInfo has no prefer', async () => {
@@ -5766,7 +5821,9 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.geoExperimentId).to.be.a('string');
     });
 
     it('honors respond-async when Prefer is only on request Headers as Prefer', async () => {
@@ -5783,7 +5840,9 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.geoExperimentId).to.be.a('string');
     });
 
     it('handles undefined pathInfo when resolving Prefer for async experiment', async () => {
@@ -5802,7 +5861,9 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.geoExperimentId).to.be.a('string');
     });
 
     it('supports createExperimentSchedule response with top-level schedule_id', async () => {
@@ -5817,9 +5878,9 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.experimentBatchId).to.equal('sched-pre-flat-001');
+      expect(body.prePhaseScheduleId).to.equal('sched-pre-flat-001');
 
       const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
       expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
@@ -5878,12 +5939,13 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.metadata.accepted).to.equal(1);
+      expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(1);
-      expect(body.failedSuggestions).to.have.lengthOf(1);
-      expect(body.failedSuggestions[0].uuid).to.equal(notFoundId);
+      const failed = body.suggestions.filter((s) => s.statusCode !== 202);
+      expect(failed).to.have.lengthOf(1);
+      expect(failed[0].uuid).to.equal(notFoundId);
     });
 
     it('returns 500 when DRS call fails', async () => {
@@ -7021,262 +7083,6 @@ describe('Suggestions Controller', () => {
     });
   });
 
-  describe('getEdgeDeployStatus', () => {
-    const JOB_ID = 'c3a7b5e2-1234-4abc-9def-567890abcdef';
-
-    beforeEach(() => {
-      site.getBaseURL = sandbox.stub().returns('https://example.com');
-      site.getId = sandbox.stub().returns(SITE_ID);
-    });
-
-    it('returns badRequest for invalid siteId', async () => {
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: 'invalid', opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns badRequest for invalid opportunityId', async () => {
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: 'invalid', jobId: JOB_ID },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns badRequest for invalid jobId', async () => {
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: 'invalid' },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns notFound when site does not exist', async () => {
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID_NOT_FOUND, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns forbidden when user does not have access', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-      expect(response.status).to.equal(403);
-    });
-
-    it('returns notFound when job does not exist', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves(null);
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns notFound when job belongs to different site', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves({
-        getId: () => JOB_ID,
-        getStatus: () => 'IN_PROGRESS',
-        getMetadata: () => ({
-          siteId: 'different-site-id',
-          opportunityId: OPPORTUNITY_ID,
-          deployStatus: 'pre_analysis_submitted',
-        }),
-        getStartedAt: () => '2025-01-01T00:00:00Z',
-        getEndedAt: () => null,
-        getError: () => null,
-      });
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns notFound when job belongs to different opportunity', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves({
-        getId: () => JOB_ID,
-        getStatus: () => 'IN_PROGRESS',
-        getMetadata: () => ({
-          siteId: SITE_ID,
-          opportunityId: 'different-opportunity-id',
-          deployStatus: 'pre_analysis_submitted',
-        }),
-        getStartedAt: () => '2025-01-01T00:00:00Z',
-        getEndedAt: () => null,
-        getError: () => null,
-      });
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns 200 with correct job status details', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves({
-        getId: () => JOB_ID,
-        getStatus: () => 'IN_PROGRESS',
-        getMetadata: () => ({
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-          experimentId: 'exp-test-123',
-          geoExperimentId: 'dep-exp-001',
-        }),
-        getStartedAt: () => '2025-01-01T00:00:00Z',
-        getEndedAt: () => null,
-        getError: () => null,
-      });
-      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
-        getId: () => 'dep-exp-001',
-        getStatus: () => 'pre_analysis_submitted',
-        getPreScheduleId: () => 'batch-pre-001',
-        getPostScheduleId: () => null,
-        getError: () => null,
-      });
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-
-      expect(response.status).to.equal(200);
-      const body = await response.json();
-      expect(body.jobId).to.equal(JOB_ID);
-      expect(body.status).to.equal('IN_PROGRESS');
-      expect(body.deployStatus).to.equal('pre_analysis_submitted');
-      expect(body.experimentIds).to.deep.equal(['batch-pre-001']);
-      expect(body.startedAt).to.equal('2025-01-01T00:00:00Z');
-      expect(body.endedAt).to.be.null;
-      expect(body.error).to.be.null;
-    });
-
-    it('returns both experiment IDs when post-analysis is submitted', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves({
-        getId: () => JOB_ID,
-        getStatus: () => 'IN_PROGRESS',
-        getMetadata: () => ({
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-          experimentId: 'exp-test-123',
-          geoExperimentId: 'dep-exp-001',
-        }),
-        getStartedAt: () => '2025-01-01T00:00:00Z',
-        getEndedAt: () => null,
-        getError: () => null,
-      });
-      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
-        getId: () => 'dep-exp-001',
-        getStatus: () => 'post_analysis_submitted',
-        getPreScheduleId: () => 'batch-pre-001',
-        getPostScheduleId: () => 'batch-post-002',
-        getError: () => null,
-      });
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-
-      expect(response.status).to.equal(200);
-      const body = await response.json();
-      expect(body.experimentIds).to.deep.equal(['batch-pre-001', 'batch-post-002']);
-    });
-
-    it('returns completed job with endedAt and error', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves({
-        getId: () => JOB_ID,
-        getStatus: () => 'FAILED',
-        getMetadata: () => ({
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-          experimentId: 'exp-test-123',
-          geoExperimentId: 'dep-exp-001',
-        }),
-        getStartedAt: () => '2025-01-01T00:00:00Z',
-        getEndedAt: () => '2025-01-01T01:00:00Z',
-        getError: () => 'Pre-analysis failed at DRS',
-      });
-      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
-        getId: () => 'dep-exp-001',
-        getStatus: () => 'failed',
-        getPreScheduleId: () => 'batch-pre-001',
-        getPostScheduleId: () => null,
-        getError: () => ({ message: 'Pre-analysis failed at DRS' }),
-      });
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-
-      expect(response.status).to.equal(200);
-      const body = await response.json();
-      expect(body.status).to.equal('FAILED');
-      expect(body.endedAt).to.equal('2025-01-01T01:00:00Z');
-      expect(body.error).to.equal('Pre-analysis failed at DRS');
-    });
-
-    it('returns notFound when deployment experiment does not exist', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves({
-        getId: () => JOB_ID,
-        getStatus: () => 'IN_PROGRESS',
-        getMetadata: () => ({
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-          experimentId: 'exp-test-123',
-          geoExperimentId: 'dep-exp-404',
-        }),
-        getStartedAt: () => '2025-01-01T00:00:00Z',
-        getEndedAt: () => null,
-        getError: () => null,
-      });
-      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-
-      expect(response.status).to.equal(404);
-      const body = await response.json();
-      expect(body.message).to.equal('Deployment experiment not found');
-    });
-
-    it('returns notFound when job metadata has no geoExperimentId', async () => {
-      mockSuggestionDataAccess.AsyncJob.findById.resolves({
-        getId: () => JOB_ID,
-        getStatus: () => 'IN_PROGRESS',
-        getMetadata: () => ({
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-          experimentId: 'exp-test-123',
-        }),
-        getStartedAt: () => '2025-01-01T00:00:00Z',
-        getEndedAt: () => null,
-        getError: () => null,
-      });
-
-      const response = await suggestionsController.getEdgeDeployStatus({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
-      });
-
-      expect(response.status).to.equal(404);
-      const body = await response.json();
-      expect(body.message).to.equal('Deployment experiment not found');
-    });
-  });
 
 
   describe('rollbackSuggestionFromEdge (Tokowaka Rollback)', () => {
