@@ -1,3 +1,10 @@
+# [1.391.0](https://github.com/adobe/spacecat-api-service/compare/v1.390.2...v1.391.0) (2026-03-31)
+
+
+### Features
+
+* config sync worker endpoint | LLMO-3918 ([#2048](https://github.com/adobe/spacecat-api-service/issues/2048)) ([32d5a5e](https://github.com/adobe/spacecat-api-service/commit/32d5a5e8bc10d0b5eeeb32ef839f42128f5c91a7))
+
 ## [1.390.2](https://github.com/adobe/spacecat-api-service/compare/v1.390.1...v1.390.2) (2026-03-31)
 
 
