@@ -209,6 +209,60 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.calledWith(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.')).to.be.true;
     });
 
+    it('allows prerender audits for a site with an attached CSV of page URLs', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO']));
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1\nhttps://valid.site/page-2\ninvalid-url');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering prerender audit for site https://site.com with 2 URLs.');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({
+        type: 'prerender',
+        siteId: '123',
+      });
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.equal({
+        slackContext: {
+          channelId: undefined,
+          threadTs: undefined,
+        },
+        urls: [
+          'https://valid.site/page-1',
+          'https://valid.site/page-2',
+        ],
+      });
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
+    });
+
+    it('warns when a prerender CSV has no valid URLs', async () => {
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'invalid-url');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: No valid URLs found in the CSV file.')).to.be.true;
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
     it('handles multiple CSV files', async () => {
       const command = RunAuditCommand(context);
       slackContext.files = [
