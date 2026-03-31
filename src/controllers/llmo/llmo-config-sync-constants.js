@@ -18,6 +18,7 @@ export const ALLOWED_SITE_IDS = [
   '00000000-0000-0000-0000-000000000001', // dev
   '00000000-0000-0000-0000-000000000002', // prod
   'c2473d89-e997-458d-a86d-b4096649c12b', // dev
+  '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3', // prod
 ];
 
 export function isSyncEnabledForSite(siteId) {
