@@ -18,8 +18,14 @@ import sinon from 'sinon';
 import nock from 'nock';
 
 import {
-  createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig, getIsSummitPlgEnabled,
+  createProject,
+  deriveProjectName,
+  autoResolveAuthorUrl,
+  updateCodeConfig,
+  getIsSummitPlgEnabled,
   getCookieValue,
+  queueDetectCdnAudit,
+  queueDeliveryConfigWriter,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -659,6 +665,384 @@ describe('utils', () => {
     it('returns null for empty cookie string', () => {
       const context = { pathInfo: { headers: { cookie: '' } } };
       expect(getCookieValue(context, 'promiseToken')).to.equal(null);
+    });
+  });
+
+  describe('queueDetectCdnAudit', () => {
+    let sandbox;
+    let context;
+    let sqsStub;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      sqsStub = { sendMessage: sandbox.stub().resolves() };
+      context = {
+        env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.example.com/queue' },
+        log: { error: sandbox.stub() },
+        sqs: sqsStub,
+      };
+    });
+
+    afterEach(() => sandbox.restore());
+
+    it('returns error when baseURL and site are both missing', async () => {
+      const result = await queueDetectCdnAudit({ slackContext: {} }, context);
+      expect(result).to.deep.equal({ ok: false, error: ':warning: detect-cdn: missing or invalid URL.' });
+    });
+
+    it('falls back to site.getBaseURL() when baseURL is not provided', async () => {
+      const site = { getBaseURL: () => 'https://site.com', getId: () => 'site-1' };
+      const result = await queueDetectCdnAudit({ site, slackContext: {} }, context);
+      expect(result).to.deep.equal({ ok: true });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({ baseURL: 'https://site.com' });
+    });
+
+    it('returns error when sqs is missing', async () => {
+      const result = await queueDetectCdnAudit(
+        { baseURL: 'https://example.com', slackContext: {} },
+        { ...context, sqs: null },
+      );
+      expect(result).to.deep.equal({ ok: false, error: ':x: Server misconfiguration: missing SQS client.' });
+    });
+
+    it('returns error when AUDIT_JOBS_QUEUE_URL is missing', async () => {
+      const result = await queueDetectCdnAudit(
+        { baseURL: 'https://example.com', slackContext: {} },
+        { ...context, env: {} },
+      );
+      expect(result).to.deep.equal({ ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' });
+    });
+
+    it('returns error when env is absent', async () => {
+      const { env: _, ...ctxWithoutEnv } = context;
+      const result = await queueDetectCdnAudit(
+        { baseURL: 'https://example.com', slackContext: {} },
+        ctxWithoutEnv,
+      );
+      expect(result).to.deep.equal({ ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' });
+    });
+
+    it('includes siteId in payload when site has an id', async () => {
+      const site = { getBaseURL: () => 'https://site.com', getId: () => 'abc-123' };
+      await queueDetectCdnAudit({ site, baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({ siteId: 'abc-123' });
+    });
+
+    it('omits siteId when site is absent', async () => {
+      await queueDetectCdnAudit({ baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('siteId');
+    });
+
+    it('includes slackContext in payload when channelId and threadTs are present', async () => {
+      const slackContext = { channelId: 'C123', threadTs: '1234.5' };
+      await queueDetectCdnAudit({ baseURL: 'https://example.com', slackContext }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1].slackContext).to.deep.equal({
+        channelId: 'C123',
+        threadTs: '1234.5',
+      });
+    });
+
+    it('omits slackContext from payload when channelId is null', async () => {
+      const slackContext = { channelId: null, threadTs: '1234.5' };
+      await queueDetectCdnAudit({ baseURL: 'https://example.com', slackContext }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('slackContext');
+    });
+
+    it('omits slackContext from payload when threadTs is null', async () => {
+      const slackContext = { channelId: 'C123', threadTs: null };
+      await queueDetectCdnAudit({ baseURL: 'https://example.com', slackContext }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('slackContext');
+    });
+
+    it('calls say when say function is provided', async () => {
+      const say = sandbox.stub().resolves();
+      const slackContext = { say, channelId: 'C123', threadTs: '1234.5' };
+      await queueDetectCdnAudit({ baseURL: 'https://example.com', slackContext }, context);
+      expect(say).to.have.been.calledOnce;
+      expect(say.firstCall.args[0]).to.include('Queued CDN detection');
+    });
+
+    it('sends message with correct type and baseURL', async () => {
+      await queueDetectCdnAudit({ baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[0]).to.equal('https://sqs.example.com/queue');
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({
+        type: 'detect-cdn',
+        baseURL: 'https://example.com',
+      });
+    });
+
+    it('throws and logs error when sendMessage rejects', async () => {
+      sqsStub.sendMessage.rejects(new Error('SQS failure'));
+      await expect(
+        queueDetectCdnAudit({ baseURL: 'https://example.com', slackContext: {} }, context),
+      ).to.be.rejectedWith('SQS failure');
+      expect(context.log.error).to.have.been.calledOnce;
+    });
+  });
+
+  describe('queueDeliveryConfigWriter', () => {
+    // Real values from SiteModel constants
+    const CS = 'cs';
+    const CS_CW = 'cs/crosswalk';
+    const AEM_CS = 'aem_cs';
+    const NON_CS = 'AMS';
+
+    let sandbox;
+    let context;
+    let sqsStub;
+
+    function makeSite({
+      id = 'site-1',
+      baseURL = 'https://example.com',
+      authoringType = CS,
+      deliveryType = AEM_CS,
+      deliveryConfig = { programId: 'p1', environmentId: 'e1' },
+    } = {}) {
+      return {
+        getId: () => id,
+        getBaseURL: () => baseURL,
+        getAuthoringType: () => authoringType,
+        getDeliveryType: () => deliveryType,
+        getDeliveryConfig: () => deliveryConfig,
+      };
+    }
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      sqsStub = { sendMessage: sandbox.stub().resolves() };
+      context = {
+        env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.example.com/queue' },
+        log: { error: sandbox.stub(), info: sandbox.stub() },
+        sqs: sqsStub,
+      };
+    });
+
+    afterEach(() => sandbox.restore());
+
+    it('returns error when site is null', async () => {
+      const result = await queueDeliveryConfigWriter(
+        { site: null, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result.ok).to.be.false;
+      expect(result.error).to.include('No site found');
+    });
+
+    it('returns error when resolved baseURL is empty', async () => {
+      const site = {
+        getId: () => 'site-1',
+        getBaseURL: () => '',
+        getAuthoringType: () => CS,
+        getDeliveryType: () => AEM_CS,
+        getDeliveryConfig: () => ({ programId: 'p1', environmentId: 'e1' }),
+      };
+      const result = await queueDeliveryConfigWriter({ site, slackContext: {} }, context);
+      expect(result.ok).to.be.false;
+      expect(result.error).to.include('missing or invalid URL');
+    });
+
+    it('falls back to site.getBaseURL() when baseURL param is absent', async () => {
+      const site = makeSite({ baseURL: 'https://fallback.com' });
+      await queueDeliveryConfigWriter({ site, slackContext: {} }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({ baseURL: 'https://fallback.com' });
+    });
+
+    it('returns error when sqs is missing', async () => {
+      const result = await queueDeliveryConfigWriter(
+        { site: makeSite(), baseURL: 'https://example.com', slackContext: {} },
+        { ...context, sqs: null },
+      );
+      expect(result).to.deep.equal({ ok: false, error: ':x: Server misconfiguration: missing SQS client.' });
+    });
+
+    it('returns error when AUDIT_JOBS_QUEUE_URL is missing', async () => {
+      const result = await queueDeliveryConfigWriter(
+        { site: makeSite(), baseURL: 'https://example.com', slackContext: {} },
+        { ...context, env: {} },
+      );
+      expect(result.ok).to.be.false;
+      expect(result.error).to.include('AUDIT_JOBS_QUEUE_URL');
+    });
+
+    it('returns error when env is absent', async () => {
+      const { env: _, ...ctxNoEnv } = context;
+      const result = await queueDeliveryConfigWriter(
+        { site: makeSite(), baseURL: 'https://example.com', slackContext: {} },
+        ctxNoEnv,
+      );
+      expect(result.ok).to.be.false;
+    });
+
+    it('includes redirect params when authoringType is CS', async () => {
+      const site = makeSite({ authoringType: CS, deliveryType: 'other' });
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({
+        programId: 'p1',
+        environmentId: 'e1',
+        minutes: 2000,
+        updateRedirects: true,
+      });
+    });
+
+    it('includes redirect params when authoringType is CS_CW', async () => {
+      const site = makeSite({ authoringType: CS_CW, deliveryType: 'other' });
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({ programId: 'p1', environmentId: 'e1' });
+    });
+
+    it('includes redirect params when deliveryType is AEM_CS (authoringType non-CS)', async () => {
+      const site = makeSite({ authoringType: NON_CS, deliveryType: AEM_CS });
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({ programId: 'p1', environmentId: 'e1' });
+    });
+
+    it('omits redirect params and logs info when site is not valid for redirects', async () => {
+      const site = makeSite({ authoringType: NON_CS, deliveryType: 'AEM_AMS' });
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext: {} }, context);
+      const payload = sqsStub.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('programId');
+      expect(payload).to.not.have.property('environmentId');
+      expect(context.log.info).to.have.been.calledWithMatch('CDN detection only');
+    });
+
+    it('skips redirect params and logs info when programId is missing', async () => {
+      const site = makeSite({ deliveryConfig: { programId: '', environmentId: 'e1' } });
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result).to.deep.equal({ ok: true });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
+      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+    });
+
+    it('skips redirect params and logs info when environmentId is missing', async () => {
+      const site = makeSite({ deliveryConfig: { programId: 'p1', environmentId: '' } });
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result).to.deep.equal({ ok: true });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
+      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+    });
+
+    it('skips redirect params and logs info when getDeliveryConfig is absent', async () => {
+      const site = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://example.com',
+        getAuthoringType: () => CS,
+        getDeliveryType: () => AEM_CS,
+        // no getDeliveryConfig
+      };
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result).to.deep.equal({ ok: true });
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
+      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+    });
+
+    it('includes slackContext in payload when channelId and threadTs are present', async () => {
+      const site = makeSite();
+      const slackContext = { channelId: 'C123', threadTs: '1234.5' };
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1].slackContext).to.deep.equal({
+        channelId: 'C123',
+        threadTs: '1234.5',
+      });
+    });
+
+    it('omits slackContext from payload when channelId is null', async () => {
+      const site = makeSite();
+      const slackContext = { channelId: null, threadTs: '1234.5' };
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('slackContext');
+    });
+
+    it('omits slackContext from payload when threadTs is null', async () => {
+      const site = makeSite();
+      const slackContext = { channelId: 'C123', threadTs: null };
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('slackContext');
+    });
+
+    it('calls say with redirect note when site is valid for redirects', async () => {
+      const say = sandbox.stub().resolves();
+      const site = makeSite();
+      const slackContext = { say, channelId: 'C123', threadTs: '1234.5' };
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
+      expect(say).to.have.been.calledOnce;
+      expect(say.firstCall.args[0]).to.include('redirect pattern detection');
+    });
+
+    it('calls say without redirect note when site is not valid for redirects', async () => {
+      const say = sandbox.stub().resolves();
+      const site = makeSite({ authoringType: NON_CS, deliveryType: 'AEM_AMS' });
+      const slackContext = { say, channelId: 'C123', threadTs: '1234.5' };
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
+      expect(say).to.have.been.calledOnce;
+      expect(say.firstCall.args[0]).to.not.include('redirect pattern detection');
+    });
+
+    it('calls say without redirect note when programId/environmentId are missing', async () => {
+      const say = sandbox.stub().resolves();
+      const site = makeSite({ deliveryConfig: { programId: '', environmentId: '' } });
+      const slackContext = { say, channelId: 'C123', threadTs: '1234.5' };
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext }, context);
+      expect(say).to.have.been.calledOnce;
+      expect(say.firstCall.args[0]).to.not.include('redirect pattern detection');
+    });
+
+    it('does not call say when say is not provided', async () => {
+      const site = makeSite();
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('sends message with correct type, siteId, and baseURL', async () => {
+      const site = makeSite();
+      await queueDeliveryConfigWriter({ site, baseURL: 'https://example.com', slackContext: {} }, context);
+      expect(sqsStub.sendMessage.firstCall.args[0]).to.equal('https://sqs.example.com/queue');
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.include({
+        type: 'delivery-config-writer',
+        siteId: 'site-1',
+        baseURL: 'https://example.com',
+      });
+    });
+
+    it('returns { ok: true } on success', async () => {
+      const site = makeSite();
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result).to.deep.equal({ ok: true });
+    });
+
+    it('uses provided minutes and updateRedirects when site is valid for redirects', async () => {
+      const site = makeSite();
+      await queueDeliveryConfigWriter(
+        {
+          site, baseURL: 'https://example.com', minutes: 500, updateRedirects: false, slackContext: {},
+        },
+        context,
+      );
+      const payload = sqsStub.sendMessage.firstCall.args[1];
+      expect(payload).to.include({ minutes: 500, updateRedirects: false });
+    });
+
+    it('throws and logs error when sendMessage rejects', async () => {
+      sqsStub.sendMessage.rejects(new Error('SQS down'));
+      await expect(
+        queueDeliveryConfigWriter(
+          { site: makeSite(), baseURL: 'https://example.com', slackContext: {} },
+          context,
+        ),
+      ).to.be.rejectedWith('SQS down');
+      expect(context.log.error).to.have.been.calledOnce;
     });
   });
 });
