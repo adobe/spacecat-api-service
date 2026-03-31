@@ -1,3 +1,10 @@
+# [1.389.0](https://github.com/adobe/spacecat-api-service/compare/v1.388.0...v1.389.0) (2026-03-31)
+
+
+### Features
+
+* LLMO-3956 add new site as brand to existing v2 config during onboarding ([#2080](https://github.com/adobe/spacecat-api-service/issues/2080)) ([6f05411](https://github.com/adobe/spacecat-api-service/commit/6f05411fea1207cbf19f50b3939dd71423ff0a1b))
+
 # [1.388.0](https://github.com/adobe/spacecat-api-service/compare/v1.387.1...v1.388.0) (2026-03-31)
 
 
