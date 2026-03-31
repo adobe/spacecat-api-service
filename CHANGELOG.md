@@ -1,3 +1,10 @@
+## [1.390.2](https://github.com/adobe/spacecat-api-service/compare/v1.390.1...v1.390.2) (2026-03-31)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-body-data to v2.2.4 ([#2084](https://github.com/adobe/spacecat-api-service/issues/2084)) ([a6b4ec6](https://github.com/adobe/spacecat-api-service/commit/a6b4ec6a5e64e4bceb3aacac9e9c8bb6d7b632ec))
+
 ## [1.390.1](https://github.com/adobe/spacecat-api-service/compare/v1.390.0...v1.390.1) (2026-03-31)
 
 
