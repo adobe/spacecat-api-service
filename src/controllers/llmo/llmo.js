@@ -26,6 +26,7 @@ import {
   composeBaseURL,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 import { getDomain } from 'tldts';
@@ -199,8 +200,8 @@ function LlmoController(ctx) {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -368,8 +369,8 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       const errorTime = Date.now();
-      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
-      return badRequest(error.message);
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -425,7 +426,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -459,7 +460,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -681,7 +682,7 @@ function LlmoController(ctx) {
       const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -731,7 +732,7 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -755,7 +756,7 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -789,7 +790,7 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -821,7 +822,7 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().cdnlogsFilter || []);
     } catch (error) {
       log.error(`Error updating CDN logs filter for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -853,7 +854,7 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().cdnBucketConfig || {});
     } catch (error) {
       log.error(`Error updating CDN bucket config for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -993,7 +994,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1031,7 +1032,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error during LLMO offboarding for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1045,8 +1046,8 @@ function LlmoController(ctx) {
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
-      log.debug(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1063,7 +1064,7 @@ function LlmoController(ctx) {
       return await handleLlmoRationale(context);
     } catch (error) {
       log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1080,7 +1081,7 @@ function LlmoController(ctx) {
       return await handleBrandClaims(context);
     } catch (error) {
       log.error(`Error getting brand claims for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1237,7 +1238,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Failed to create/update edge config for site ${siteId}:`, error);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1281,7 +1282,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Failed to fetch edge config for site ${siteId}:`, error);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1316,7 +1317,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error getting llmo strategy for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1394,7 +1395,7 @@ function LlmoController(ctx) {
       return ok({ version, notifications: notificationSummary });
     } catch (error) {
       log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1431,7 +1432,7 @@ function LlmoController(ctx) {
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
-      return internalServerError(error.message);
+      return internalServerError(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1615,7 +1616,7 @@ function LlmoController(ctx) {
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
-      return internalServerError(error.message);
+      return internalServerError(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1644,7 +1645,7 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().tags || []);
     } catch (error) {
       log.error(`Error marking opportunities as reviewed: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1768,7 +1769,7 @@ function LlmoController(ctx) {
       return ok(stageConfigs);
     } catch (error) {
       log.error(`Failed to add staging domains for site ${siteId}:`, error);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
