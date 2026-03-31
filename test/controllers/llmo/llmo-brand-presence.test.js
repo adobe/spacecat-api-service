@@ -52,7 +52,11 @@ import {
 
 use(sinonChai);
 
-function createChainableMock(resolveValue = { data: [], error: null }, resolveSequence = null) {
+function createChainableMock(
+  resolveValue = { data: [], error: null },
+  resolveSequence = null,
+  rpcResolveValue = null,
+) {
   const limitStub = resolveSequence
     ? sinon.stub()
       .onFirstCall()
@@ -62,6 +66,17 @@ function createChainableMock(resolveValue = { data: [], error: null }, resolveSe
       .onThirdCall()
       .resolves(resolveSequence[2] ?? { data: [], error: null })
     : sinon.stub().resolves(resolveValue);
+  const defaultFilterDimsRpc = {
+    data: {
+      brands: [],
+      categories: [],
+      topics: [],
+      origins: [],
+      regions: [],
+    },
+    error: null,
+  };
+  const rpcStub = sinon.stub().resolves(rpcResolveValue ?? defaultFilterDimsRpc);
   const c = {
     from: sinon.stub().returnsThis(),
     select: sinon.stub().returnsThis(),
@@ -75,6 +90,7 @@ function createChainableMock(resolveValue = { data: [], error: null }, resolveSe
     filter: sinon.stub().returnsThis(),
     order: sinon.stub().returnsThis(),
     limit: limitStub,
+    rpc: rpcStub,
     then(resolve) { return Promise.resolve(resolveValue).then(resolve); },
   };
   return c;
@@ -542,10 +558,12 @@ describe('llmo-brand-presence', () => {
       expect(mockContext.log.error).to.have.been.calledWith('Brand presence filter-dimensions error: Database connection failed');
     });
 
-    it('returns badRequest when executions query returns error', async () => {
-      const queryError = { message: 'relation "brand_presence_executions" does not exist' };
+    it('returns badRequest when filter-dimensions RPC returns error', async () => {
+      const queryError = { message: 'function rpc_brand_presence_filter_dimensions does not exist' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
-        { data: [], error: queryError },
+        { data: [], error: null },
+        null,
+        { data: null, error: queryError },
       );
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
@@ -553,24 +571,27 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('relation "brand_presence_executions" does not exist');
+      expect(body.message).to.equal('function rpc_brand_presence_filter_dimensions does not exist');
       expect(mockContext.log.error).to.have.been.calledWith(
-        'Brand presence filter-dimensions PostgREST error: relation "brand_presence_executions" does not exist',
+        'Brand presence filter-dimensions PostgREST error: function rpc_brand_presence_filter_dimensions does not exist',
       );
     });
 
-    it('returns badRequest when model is invalid', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
+    it('does not reject unknown model string (uses resolveModelFromRequest like other BP handlers)', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
       mockContext.data = { model: 'openai' };
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.message).to.include('Invalid model');
-      expect(body.message).to.include('chatgpt-paid');
-      expect(body.message).to.include('chatgpt-free');
+      expect(body.brands).to.deep.equal([]);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_model', 'openai'),
+      );
     });
 
     it('maps model query aliases for filter-dimensions (all → paid, chatgpt → free)', async () => {
@@ -581,20 +602,26 @@ describe('llmo-brand-presence', () => {
 
       mockContext.data = { model: 'ALL' };
       await handler(mockContext);
-      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-paid');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_model', 'chatgpt-paid'),
+      );
 
-      chainMock.eq.resetHistory();
+      chainMock.rpc.resetHistory();
       mockContext.data = { model: 'ChatGPT' };
       await handler(mockContext);
-      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-free');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_model', 'chatgpt-free'),
+      );
     });
 
-    it('handles executions query returning data: null (uses empty rows fallback)', async () => {
-      const emptySites = { data: [], error: null };
+    it('handles RPC returning data: null (uses empty dimension fallbacks)', async () => {
       const emptyPageIntents = { data: [], error: null };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
         { data: [], error: null },
-        [{ data: null, error: null }, emptySites, emptyPageIntents],
+        [emptyPageIntents],
+        { data: null, error: null },
       );
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
@@ -615,8 +642,9 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).not.to.have.been.calledWith('category_id', sinon.match.any);
-      expect(chainMock.eq).not.to.have.been.calledWith('category_name', sinon.match.any);
+      const rpcPayload = chainMock.rpc.firstCall.args[1];
+      expect(rpcPayload.p_category_id).to.be.undefined;
+      expect(rpcPayload.p_category_name).to.be.undefined;
     });
 
     it('handles null/undefined context.data (uses empty object fallback)', async () => {
@@ -631,7 +659,12 @@ describe('llmo-brand-presence', () => {
     });
 
     it('accepts snake_case params (start_date, end_date, model, site_id, etc.)', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
+      const sitesValidation = { data: [{ id: 'cccdac43-1a22-4659-9086-b762f59b9928' }], error: null };
+      const pageIntentsData = { data: [], error: null };
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        [sitesValidation, pageIntentsData],
+      );
       mockContext.data = {
         start_date: '2025-01-01',
         end_date: '2025-01-31',
@@ -648,49 +681,54 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.gte).to.have.been.calledWith('execution_date', '2025-01-01');
-      expect(chainMock.lte).to.have.been.calledWith('execution_date', '2025-01-31');
-      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
-      expect(chainMock.eq).to.have.been.calledWith('site_id', 'cccdac43-1a22-4659-9086-b762f59b9928');
-      expect(chainMock.in).to.have.been.calledWith('topic_id', ['0178a3f0-1234-7000-8000-0000000000aa']);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match({
+          p_start_date: '2025-01-01',
+          p_end_date: '2025-01-31',
+          p_model: 'gemini',
+          p_site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
+          p_category_id: '0178a3f0-1234-7000-8000-000000000099',
+          p_topic_ids: ['0178a3f0-1234-7000-8000-0000000000aa'],
+          p_region_code: 'US',
+        }),
+      );
       expect(chainMock.limit).to.have.been.calledWith(5000);
     });
 
     it('returns ok with brands, categories, topics, origins, regions, page_intents', async () => {
       const topicId1 = '0178a3f0-1234-7000-8000-0000000000a1';
       const topicId2 = '0178a3f0-1234-7000-8000-0000000000a2';
-      const brandData = {
-        data: [
-          {
-            brand_id: '0178a3f0-1234-7000-8000-000000000002',
-            brand_name: 'Brand A',
-            category_name: 'Cat1',
-            topic_id: topicId1,
-            topics: 't1',
-            region_code: 'US',
-            origin: 'human',
-            site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
-          },
-          {
-            brand_id: '0178a3f0-1234-7000-8000-000000000003',
-            brand_name: 'Brand B',
-            category_name: 'Cat2',
-            topic_id: topicId2,
-            topics: 't2',
-            region_code: 'DE',
-            origin: 'ai',
-            site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
-          },
+      const rpcDims = {
+        brands: [
+          { id: '0178a3f0-1234-7000-8000-000000000002', label: 'Brand A' },
+          { id: '0178a3f0-1234-7000-8000-000000000003', label: 'Brand B' },
         ],
-        error: null,
+        categories: [
+          { id: 'Cat1', label: 'Cat1' },
+          { id: 'Cat2', label: 'Cat2' },
+        ],
+        topics: [
+          { id: topicId1, label: 't1' },
+          { id: topicId2, label: 't2' },
+        ],
+        origins: [
+          { id: 'human', label: 'human' },
+          { id: 'ai', label: 'ai' },
+        ],
+        regions: [
+          { id: 'US', label: 'US' },
+          { id: 'DE', label: 'DE' },
+        ],
       };
       const pageIntentsData = {
         data: [{ page_intent: 'TRANSACTIONAL' }, { page_intent: 'INFORMATIONAL' }],
         error: null,
       };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
-        brandData,
-        [brandData, pageIntentsData],
+        { data: [], error: null },
+        [pageIntentsData],
+        { data: rpcDims, error: null },
       );
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
@@ -712,30 +750,23 @@ describe('llmo-brand-presence', () => {
       expect(body.page_intents[0]).to.have.property('label');
     });
 
-    it('uses topic_id as label when topics is null or empty', async () => {
+    it('uses topic_id as label when RPC returns id and label from DB (null topic name)', async () => {
       const topicIdNoLabel = '0178a3f0-1234-7000-8000-0000000000ff';
-      const brandData = {
-        data: [
-          {
-            brand_id: '0178a3f0-1234-7000-8000-000000000002',
-            brand_name: 'Brand A',
-            category_name: 'Cat1',
-            topic_id: topicIdNoLabel,
-            topics: null,
-            region_code: 'US',
-            origin: 'human',
-            site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
-          },
-        ],
-        error: null,
+      const rpcDims = {
+        brands: [],
+        categories: [],
+        topics: [{ id: topicIdNoLabel, label: topicIdNoLabel }],
+        origins: [],
+        regions: [],
       };
       const pageIntentsData = {
         data: [{ page_intent: 'TRANSACTIONAL' }],
         error: null,
       };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
-        brandData,
-        [brandData, pageIntentsData],
+        { data: [], error: null },
+        [pageIntentsData],
+        { data: rpcDims, error: null },
       );
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
@@ -748,22 +779,18 @@ describe('llmo-brand-presence', () => {
     });
 
     it('filters by brandId when single brand route', async () => {
-      const brandData = {
-        data: [
-          {
-            brand_id: '0178a3f0-1234-7000-8000-000000000002',
-            brand_name: 'Brand A',
-            category_name: 'Cat1',
-            topics: 't1',
-            region_code: 'US',
-            origin: 'human',
-            site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
-          },
-        ],
+      const siteIdRows = {
+        data: [{ site_id: 'cccdac43-1a22-4659-9086-b762f59b9928' }],
         error: null,
       };
-      const pageIntentsData = { data: [{ page_intent: 'TRANSACTIONAL' }], error: null };
-      const chainMock = createChainableMock(brandData, [brandData, pageIntentsData]);
+      const pageIntentsData = {
+        data: [{ page_intent: 'TRANSACTIONAL' }],
+        error: null,
+      };
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        [siteIdRows, pageIntentsData],
+      );
       mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
@@ -771,7 +798,10 @@ describe('llmo-brand-presence', () => {
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(chainMock.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000002');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_brand_id', '0178a3f0-1234-7000-8000-000000000002'),
+      );
     });
 
     it('filters by category_id when categoryId is a valid UUID', async () => {
@@ -782,7 +812,10 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('category_id', '0178a3f0-1234-7000-8000-000000000099');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_category_id', '0178a3f0-1234-7000-8000-000000000099'),
+      );
     });
 
     it('filters by category_name when categoryId is not a UUID (e.g. Acrobat)', async () => {
@@ -793,7 +826,10 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_category_name', 'Acrobat'),
+      );
     });
 
     it('filters by topicIds (single UUID) when provided', async () => {
@@ -805,7 +841,10 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.in).to.have.been.calledWith('topic_id', [topicUuid]);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_topic_ids', [topicUuid]),
+      );
     });
 
     it('filters by topicIds (comma-separated UUIDs) when provided', async () => {
@@ -820,7 +859,10 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_topic_ids', topicUuids),
+      );
     });
 
     it('filters by topicIds (array) when provided', async () => {
@@ -835,7 +877,10 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_topic_ids', topicUuids),
+      );
     });
 
     it('ignores non-UUID topicIds values', async () => {
@@ -846,10 +891,8 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      const topicIdCalls = chainMock.eq.getCalls().filter((c) => c.args[0] === 'topic_id');
-      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
-      expect(topicIdCalls).to.have.lengthOf(0);
-      expect(topicInCalls).to.have.lengthOf(0);
+      const rpcPayload = chainMock.rpc.firstCall.args[1];
+      expect(rpcPayload.p_topic_ids).to.be.undefined;
     });
 
     it('does not apply topic filter when topicIds is non-string, non-array value that fails UUID validation', async () => {
@@ -860,8 +903,8 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
-      expect(topicInCalls).to.have.lengthOf(0);
+      const rpcPayload = chainMock.rpc.firstCall.args[1];
+      expect(rpcPayload.p_topic_ids).to.be.undefined;
     });
 
     it('filters by regionCode when provided', async () => {
@@ -872,7 +915,10 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('region_code', 'US');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_region_code', 'US'),
+      );
     });
 
     it('filters by origin when provided', async () => {
@@ -883,21 +929,25 @@ describe('llmo-brand-presence', () => {
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.ilike).to.have.been.calledWith('origin', 'ai');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_origin', 'ai'),
+      );
     });
 
     it('includes page_intents from page_intents table when siteId is provided', async () => {
-      const brandData = { data: [], error: null };
-      const sitesValidation = { data: [{ id: 'cccdac43-1a22-4659-9086-b762f59b9928' }], error: null };
+      const sitesValidation = {
+        data: [{ id: 'cccdac43-1a22-4659-9086-b762f59b9928' }],
+        error: null,
+      };
       const pageIntentsData = {
         data: [{ page_intent: 'TRANSACTIONAL' }, { page_intent: 'INFORMATIONAL' }],
         error: null,
       };
-      const chainMock = createChainableMock(brandData, [
-        brandData,
-        sitesValidation,
-        pageIntentsData,
-      ]);
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        [sitesValidation, pageIntentsData],
+      );
       mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
@@ -907,13 +957,15 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.page_intents).to.have.lengthOf(2);
-      expect(chainMock.eq).to.have.been.calledWith('site_id', 'cccdac43-1a22-4659-9086-b762f59b9928');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        'rpc_brand_presence_filter_dimensions',
+        sinon.match.has('p_site_id', 'cccdac43-1a22-4659-9086-b762f59b9928'),
+      );
     });
 
     it('returns 403 when siteId does not belong to the organization', async () => {
-      const brandData = { data: [], error: null };
       const sitesValidation = { data: [], error: null };
-      const chainMock = createChainableMock(brandData, [brandData, sitesValidation]);
+      const chainMock = createChainableMock({ data: [], error: null }, [sitesValidation]);
       mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
@@ -923,43 +975,26 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(403);
       const body = await result.json();
       expect(body.message).to.equal('Site does not belong to the organization');
+      expect(chainMock.rpc).not.to.have.been.called;
     });
 
-    it('dedupes origins after lowercasing (Human and human become one)', async () => {
-      const brandData = {
-        data: [
-          {
-            brand_id: 'b1',
-            brand_name: 'B1',
-            category_name: 'C1',
-            topics: 't1',
-            region_code: 'US',
-            origin: 'Human',
-            site_id: 's1',
-          },
-          {
-            brand_id: 'b2',
-            brand_name: 'B2',
-            category_name: 'C2',
-            topics: 't2',
-            region_code: 'DE',
-            origin: 'human',
-            site_id: 's1',
-          },
-          {
-            brand_id: 'b3',
-            brand_name: 'B3',
-            category_name: 'C3',
-            topics: 't3',
-            region_code: 'WW',
-            origin: 'ai',
-            site_id: 's1',
-          },
+    it('returns normalized origins from RPC (ids human and ai)', async () => {
+      const rpcDims = {
+        brands: [],
+        categories: [],
+        topics: [],
+        origins: [
+          { id: 'human', label: 'Human' },
+          { id: 'ai', label: 'ai' },
         ],
-        error: null,
+        regions: [],
       };
       const pageIntentsData = { data: [{ page_intent: 'TRANSACTIONAL' }], error: null };
-      const chainMock = createChainableMock(brandData, [brandData, pageIntentsData]);
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        [pageIntentsData],
+        { data: rpcDims, error: null },
+      );
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
@@ -1177,18 +1212,18 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-free');
     });
 
-    it('returns badRequest when model is invalid', async () => {
-      mockContext.dataAccess.Site.postgrestService = mockClient;
+    it('does not reject unknown model string (uses resolveModelFromRequest like other BP handlers)', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
       mockContext.data = { model: 'invalid-model' };
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.message).to.include('Invalid model');
-      expect(body.message).to.include('chatgpt-paid');
-      expect(body.message).to.include('chatgpt-free');
+      expect(body.weeks).to.deep.equal([]);
+      expect(chainMock.eq).to.have.been.calledWith('model', 'invalid-model');
     });
 
     it('filters by brandId when single brand route', async () => {
