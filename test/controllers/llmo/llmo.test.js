@@ -1568,7 +1568,7 @@ describe('LlmoController', () => {
         {
           type: 'llmo-config-db-sync',
           siteId: '00000000-0000-0000-0000-000000000001',
-          dryRun: true, // temporary, should be false
+          dryRun: false,
         },
       );
     });
