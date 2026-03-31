@@ -1006,6 +1006,94 @@ describe('llmo-brand-presence', () => {
       const originIds = body.origins.map((o) => o.id).sort();
       expect(originIds).to.deep.equal(['ai', 'human']);
     });
+
+    it(
+      'applies regionCode and origin on executions site-id query when brand scope without siteId',
+      async () => {
+        const siteIdRows = {
+          data: [{ site_id: 'cccdac43-1a22-4659-9086-b762f59b9928' }],
+          error: null,
+        };
+        const pageIntentsData = {
+          data: [{ page_intent: 'TRANSACTIONAL' }],
+          error: null,
+        };
+        const chainMock = createChainableMock(
+          { data: [], error: null },
+          [siteIdRows, pageIntentsData],
+        );
+        mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+        mockContext.data = { regionCode: 'US', origin: 'ai' };
+        mockContext.dataAccess.Site.postgrestService = chainMock;
+
+        const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+        const result = await handler(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(chainMock.eq).to.have.been.calledWith('region_code', 'US');
+        expect(chainMock.ilike).to.have.been.calledWith('origin', 'ai');
+      },
+    );
+
+    it(
+      'applies category_id and topicIds on executions site-id query when brand scope without siteId',
+      async () => {
+        const siteIdRows = {
+          data: [{ site_id: 'cccdac43-1a22-4659-9086-b762f59b9928' }],
+          error: null,
+        };
+        const pageIntentsData = {
+          data: [{ page_intent: 'TRANSACTIONAL' }],
+          error: null,
+        };
+        const chainMock = createChainableMock(
+          { data: [], error: null },
+          [siteIdRows, pageIntentsData],
+        );
+        const catUuid = '0178a3f0-1234-7000-8000-000000000099';
+        const topicUuid = '0178a3f0-1234-7000-8000-0000000000aa';
+        mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+        mockContext.data = {
+          categoryId: catUuid,
+          topicIds: [topicUuid],
+        };
+        mockContext.dataAccess.Site.postgrestService = chainMock;
+
+        const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+        const result = await handler(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(chainMock.eq).to.have.been.calledWith('category_id', catUuid);
+        expect(chainMock.in).to.have.been.calledWith('topic_id', [topicUuid]);
+      },
+    );
+
+    it(
+      'applies category_name on executions site-id query when brand scope without siteId',
+      async () => {
+        const siteIdRows = {
+          data: [{ site_id: 'cccdac43-1a22-4659-9086-b762f59b9928' }],
+          error: null,
+        };
+        const pageIntentsData = {
+          data: [{ page_intent: 'TRANSACTIONAL' }],
+          error: null,
+        };
+        const chainMock = createChainableMock(
+          { data: [], error: null },
+          [siteIdRows, pageIntentsData],
+        );
+        mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+        mockContext.data = { categoryId: 'Acrobat' };
+        mockContext.dataAccess.Site.postgrestService = chainMock;
+
+        const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+        const result = await handler(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
+      },
+    );
   });
 
   describe('createBrandPresenceWeeksHandler', () => {

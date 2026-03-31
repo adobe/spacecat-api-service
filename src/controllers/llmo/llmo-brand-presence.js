@@ -189,7 +189,7 @@ function buildExecutionsSiteIdsQuery(client, organizationId, params, defaults, f
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const {
-    model, siteId, categoryId, topicIds, regionCode, origin,
+    model, categoryId, topicIds, regionCode, origin,
   } = params;
 
   let q = client
@@ -200,9 +200,6 @@ function buildExecutionsSiteIdsQuery(client, organizationId, params, defaults, f
     .lte('execution_date', endDate)
     .eq('model', model);
 
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
   if (filterByBrandId) {
     q = q.eq('brand_id', filterByBrandId);
   }
