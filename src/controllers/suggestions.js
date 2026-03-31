@@ -1574,11 +1574,9 @@ function SuggestionsController(ctx, sqs, env) {
       response.suggestions.sort((a, b) => a.index - b.index);
       return createResponse(response, 207);
     }
-    const { pathInfo, request } = context;
+    const { pathInfo } = context;
     const preferHeaderValue = pathInfo?.headers?.prefer
-      || pathInfo?.headers?.Prefer
-      || request?.headers?.get?.('prefer')
-      || request?.headers?.get?.('Prefer');
+      || pathInfo?.headers?.Prefer;
     const isAsyncExperimentRequested = hasText(preferHeaderValue)
       && preferHeaderValue.toLowerCase() === 'respond-async';
 

@@ -4133,6 +4133,11 @@ describe('LlmoController', () => {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
         data: { tokowakaEnabled: true },
+        env: {
+          ...mockContext.env,
+          SLACK_LLMO_ALERTS_CHANNEL_ID: undefined,
+          SLACK_BOT_TOKEN: undefined,
+        },
       };
     });
 

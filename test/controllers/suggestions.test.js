@@ -5805,17 +5805,10 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('s3 denied');
     });
 
-    it('honors Prefer: respond-async from request headers when pathInfo has no prefer', async () => {
+    it('honors Prefer: respond-async from pathInfo.headers.prefer (current implementation)', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
-        pathInfo: { headers: {} },
-        request: {
-          headers: {
-            get: sandbox.stub().callsFake((name) => (
-              String(name).toLowerCase() === 'prefer' ? 'respond-async' : null
-            )),
-          },
-        },
+        pathInfo: { headers: { prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
         env: { AWS_ENV: 'dev' },
@@ -5826,15 +5819,10 @@ describe('Suggestions Controller', () => {
       expect(body.geoExperimentId).to.be.a('string');
     });
 
-    it('honors respond-async when Prefer is only on request Headers as Prefer', async () => {
+    it('honors Prefer: respond-async from pathInfo.headers.Prefer (capital P)', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
-        pathInfo: { headers: {} },
-        request: {
-          headers: {
-            get: sandbox.stub().callsFake((name) => (name === 'Prefer' ? 'respond-async' : null)),
-          },
-        },
+        pathInfo: { headers: { Prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
         env: { AWS_ENV: 'dev' },
@@ -5845,17 +5833,10 @@ describe('Suggestions Controller', () => {
       expect(body.geoExperimentId).to.be.a('string');
     });
 
-    it('handles undefined pathInfo when resolving Prefer for async experiment', async () => {
+    it('honors respond-async prefer value case-insensitively on pathInfo.headers', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
-        pathInfo: undefined,
-        request: {
-          headers: {
-            get: sandbox.stub().callsFake((name) => (
-              String(name).toLowerCase() === 'prefer' ? 'respond-async' : null
-            )),
-          },
-        },
+        pathInfo: { headers: { prefer: 'RESPOND-ASYNC' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
         env: { AWS_ENV: 'dev' },
