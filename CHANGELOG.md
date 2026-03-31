@@ -1,3 +1,10 @@
+# [1.388.0](https://github.com/adobe/spacecat-api-service/compare/v1.387.1...v1.388.0) (2026-03-31)
+
+
+### Features
+
+* support prerender csv audits from slack ([#2074](https://github.com/adobe/spacecat-api-service/issues/2074)) ([a776ccb](https://github.com/adobe/spacecat-api-service/commit/a776ccbb467e7592a21f8493c256757f5e543df5))
+
 ## [1.387.1](https://github.com/adobe/spacecat-api-service/compare/v1.387.0...v1.387.1) (2026-03-30)
 
 
