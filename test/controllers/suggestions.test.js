@@ -5660,7 +5660,8 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.jobId).to.equal(JOB_ID);
-      expect(body.geoExperimentStatus).to.equal('pre_analysis_submitted');
+      expect(body.geoExperimentStatus).to.equal('GENERATING_BASELINE');
+      expect(body.geoExperimentPhase).to.equal('pre_analysis_submitted');
       expect(body.prePhaseScheduleId).to.equal('sched-pre-001');
       expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       expect(body.metadata.success).to.equal(2);
@@ -5695,18 +5696,19 @@ describe('Suggestions Controller', () => {
       expect(createArg.status).to.equal('IN_PROGRESS');
       expect(createArg.metadata.jobType).to.equal('geo-experiment');
       expect(createArg.metadata.siteId).to.equal(SITE_ID);
-      expect(createArg.metadata.opportunityId).to.equal(OPPORTUNITY_ID);
       expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
+      expect(createArg.metadata.opportunityId).to.be.undefined;
+      expect(createArg.metadata.suggestionIds).to.be.undefined;
       expect(mockSuggestionDataAccess.GeoExperiment.create).to.have.been.calledOnce;
 
       const depExpCreateArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
       expect(depExpCreateArg.siteId).to.equal(SITE_ID);
       expect(depExpCreateArg.opportunityId).to.equal(OPPORTUNITY_ID);
-      expect(depExpCreateArg.status).to.equal('initiated');
+      expect(depExpCreateArg.status).to.equal('GENERATING_BASELINE');
+      expect(depExpCreateArg.phase).to.equal('pre_analysis_submitted');
       expect(depExpCreateArg.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       const geoEntity = await mockSuggestionDataAccess.GeoExperiment.create.firstCall.returnValue;
       expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
-      expect(geoEntity.setStatus).to.have.been.calledWith('pre_analysis_submitted');
     });
 
     it('returns 500 and removes GeoExperiment when AsyncJob creation fails', async () => {
@@ -5762,7 +5764,7 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('geo save failed');
       expect(removeStubFn).to.have.been.calledOnce;
-      expect(context.log.error.calledWithMatch('Failed to update GeoExperiment to PRE_ANALYSIS_SUBMITTED')).to.equal(true);
+      expect(context.log.error.calledWithMatch('Failed to update GeoExperiment pre schedule ID')).to.equal(true);
     });
 
     it('returns 207 with failure and logs when GeoExperiment remove fails during cleanup', async () => {

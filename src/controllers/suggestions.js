@@ -1633,7 +1633,9 @@ function SuggestionsController(ctx, sqs, env) {
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
           name: context.data?.name || opportunity.getType(),
           promptsCount: prompts.length,
-          status: GeoExperimentModel.STATUSES.INITIATED,
+          promptsLocation: promptsS3Key,
+          status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
+          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
           suggestionIds: promptSources.map((s) => s.getId()),
           metadata: {
             urls,
@@ -1645,7 +1647,7 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('GeoExperiment was not created');
         }
 
-        context.log.info(`[geo-experiment] Created GeoExperiment ${geoExperimentId} with status INITIATED`);
+        context.log.info(`[geo-experiment] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_SUBMITTED`);
 
         let preScheduleId;
         try {
@@ -1655,7 +1657,7 @@ function SuggestionsController(ctx, sqs, env) {
             experimentId: geoExperimentId,
             experimentPhase: EXPERIMENT_PHASES.PRE,
             cronExpression: '0 * * * *',
-            expiresAt: new Date(Date.now() + 1 * 60 * 1000).toISOString(),
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
             platforms: ['chatgpt_free', 'perplexity'],
             providerIds: ['brightdata', 'openai_web_search'],
             triggerImmediately: true,
@@ -1671,11 +1673,10 @@ function SuggestionsController(ctx, sqs, env) {
 
         try {
           geoExperiment.setPreScheduleId(preScheduleId);
-          geoExperiment.setStatus(GeoExperimentModel.STATUSES.PRE_ANALYSIS_SUBMITTED);
           geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
           await geoExperiment.save();
         } catch (updateError) {
-          context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment to PRE_ANALYSIS_SUBMITTED: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
+          context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
           await geoExperiment.remove();
           return createResponse({ message: `Failed to initiate experiment: ${updateError.message}` }, 500);
         }
@@ -1686,11 +1687,7 @@ function SuggestionsController(ctx, sqs, env) {
             metadata: {
               jobType: 'geo-experiment',
               siteId,
-              opportunityId,
-              suggestionIds: validSuggestionIds,
               geoExperimentId,
-              urls,
-              profile: { email: profile?.email },
             },
           });
         } catch (jobError) {
@@ -1731,7 +1728,8 @@ function SuggestionsController(ctx, sqs, env) {
           },
           jobId: job.getId(),
           geoExperimentId,
-          geoExperimentStatus: GeoExperimentModel.STATUSES.PRE_ANALYSIS_SUBMITTED,
+          geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
+          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
           prePhaseScheduleId: preScheduleId,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
