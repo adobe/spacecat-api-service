@@ -244,6 +244,33 @@ function buildFilterDimensionsRpcParams(organizationId, params, defaults, filter
 }
 
 /**
+ * Normalizes RPC `stats` for the filter-dimensions HTTP response.
+ * Safe when the function omits `stats` or fields (e.g. older DB migration): each missing or
+ * non-finite value becomes 0. Non-plain objects (arrays, null stats) are treated as absent.
+ * @param {Record<string, unknown>|null|undefined} dims - Parsed RPC JSON body
+ * @returns {{ total_execution_count: number, distinct_prompt_count: number,
+ *   empty_answer_execution_count: number }}
+ */
+export function normalizeFilterDimensionsStatsFromRpc(dims) {
+  const hasPlainStats = dims != null
+    && typeof dims === 'object'
+    && dims.stats != null
+    && typeof dims.stats === 'object'
+    && !Array.isArray(dims.stats);
+  const raw = hasPlainStats ? dims.stats : {};
+  const totalExecutionCount = Number(raw.total_execution_count);
+  const distinctPromptCount = Number(raw.distinct_prompt_count);
+  const emptyAnswerExecutionCount = Number(raw.empty_answer_execution_count);
+  return {
+    total_execution_count: Number.isFinite(totalExecutionCount) ? totalExecutionCount : 0,
+    distinct_prompt_count: Number.isFinite(distinctPromptCount) ? distinctPromptCount : 0,
+    empty_answer_execution_count: Number.isFinite(emptyAnswerExecutionCount)
+      ? emptyAnswerExecutionCount
+      : 0,
+  };
+}
+
+/**
  * Validates that the given site belongs to the organization.
  * Used to prevent cross-tenant access when siteId is used in page_intents query.
  * @returns {Promise<boolean>} true if site exists in org, false otherwise
@@ -2219,6 +2246,9 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
 
 /**
  * Creates the getFilterDimensions handler.
+ * Returns dimension option lists from `rpc_brand_presence_filter_dimensions`, plus `stats`
+ * (total_execution_count, distinct_prompt_count, empty_answer_execution_count) from the same RPC,
+ * and `page_intents` from a separate query.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
@@ -2265,6 +2295,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
       const topics = Array.isArray(dims.topics) ? dims.topics : [];
       const origins = Array.isArray(dims.origins) ? dims.origins : [];
       const regions = Array.isArray(dims.regions) ? dims.regions : [];
+      const stats = normalizeFilterDimensionsStatsFromRpc(dims);
 
       let rowsForSiteIds = [];
       if (filterByBrandId && !shouldApplyFilter(siteFilter)) {
@@ -2300,6 +2331,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         topics,
         origins,
         regions,
+        stats,
         page_intents: pageIntents,
       });
     },

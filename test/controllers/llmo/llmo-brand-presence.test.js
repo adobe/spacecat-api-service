@@ -27,6 +27,7 @@ import {
   createBrandPresenceStatsHandler,
   createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
+  normalizeFilterDimensionsStatsFromRpc,
   createPromptDetailHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
@@ -73,6 +74,11 @@ function createChainableMock(
       topics: [],
       origins: [],
       regions: [],
+      stats: {
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      },
     },
     error: null,
   };
@@ -517,6 +523,69 @@ describe('llmo-brand-presence', () => {
     });
   });
 
+  describe('normalizeFilterDimensionsStatsFromRpc', () => {
+    it('returns zeros when stats is missing from RPC body', () => {
+      expect(normalizeFilterDimensionsStatsFromRpc({ brands: [] })).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
+    });
+
+    it('returns zeros when dims is null or undefined', () => {
+      expect(normalizeFilterDimensionsStatsFromRpc(null)).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
+      expect(normalizeFilterDimensionsStatsFromRpc(undefined)).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
+    });
+
+    it('treats stats: null as absent', () => {
+      expect(normalizeFilterDimensionsStatsFromRpc({ stats: null })).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
+    });
+
+    it('treats stats as array as absent', () => {
+      expect(normalizeFilterDimensionsStatsFromRpc({ stats: [] })).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
+    });
+
+    it('defaults missing stat fields to zero', () => {
+      expect(normalizeFilterDimensionsStatsFromRpc({
+        stats: { total_execution_count: 5 },
+      })).to.deep.equal({
+        total_execution_count: 5,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
+    });
+
+    it('passes through valid stats numbers', () => {
+      expect(normalizeFilterDimensionsStatsFromRpc({
+        stats: {
+          total_execution_count: 1200,
+          distinct_prompt_count: 80,
+          empty_answer_execution_count: 12,
+        },
+      })).to.deep.equal({
+        total_execution_count: 1200,
+        distinct_prompt_count: 80,
+        empty_answer_execution_count: 12,
+      });
+    });
+  });
+
   describe('createFilterDimensionsHandler', () => {
     it('returns badRequest when postgrestService is missing', async () => {
       mockContext.dataAccess.Site.postgrestService = null;
@@ -588,6 +657,11 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.brands).to.deep.equal([]);
+      expect(body.stats).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
       expect(chainMock.rpc).to.have.been.calledWith(
         'rpc_brand_presence_filter_dimensions',
         sinon.match.has('p_model', 'openai'),
@@ -632,6 +706,39 @@ describe('llmo-brand-presence', () => {
       expect(body.brands).to.deep.equal([]);
       expect(body.categories).to.deep.equal([]);
       expect(body.page_intents).to.deep.equal([]);
+      expect(body.stats).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
+    });
+
+    it('defaults stats to zero when RPC omits stats key (older function version)', async () => {
+      const rpcDims = {
+        brands: [{ id: '0178a3f0-1234-7000-8000-000000000002', label: 'Only Brand' }],
+        categories: [],
+        topics: [],
+        origins: [],
+        regions: [],
+      };
+      const pageIntentsData = { data: [], error: null };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        [pageIntentsData],
+        { data: rpcDims, error: null },
+      );
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.brands).to.have.lengthOf(1);
+      expect(body.stats).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
     });
 
     it('skips filter when categoryId is "all" (SKIP_VALUES)', async () => {
@@ -696,7 +803,7 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.limit).to.have.been.calledWith(5000);
     });
 
-    it('returns ok with brands, categories, topics, origins, regions, page_intents', async () => {
+    it('returns ok with brands, categories, topics, origins, regions, stats, page_intents', async () => {
       const topicId1 = '0178a3f0-1234-7000-8000-0000000000a1';
       const topicId2 = '0178a3f0-1234-7000-8000-0000000000a2';
       const rpcDims = {
@@ -720,6 +827,11 @@ describe('llmo-brand-presence', () => {
           { id: 'US', label: 'US' },
           { id: 'DE', label: 'DE' },
         ],
+        stats: {
+          total_execution_count: 1200,
+          distinct_prompt_count: 80,
+          empty_answer_execution_count: 12,
+        },
       };
       const pageIntentsData = {
         data: [{ page_intent: 'TRANSACTIONAL' }, { page_intent: 'INFORMATIONAL' }],
@@ -748,6 +860,11 @@ describe('llmo-brand-presence', () => {
       expect(body.page_intents).to.have.lengthOf(2);
       expect(body.page_intents[0]).to.have.property('id');
       expect(body.page_intents[0]).to.have.property('label');
+      expect(body.stats).to.deep.equal({
+        total_execution_count: 1200,
+        distinct_prompt_count: 80,
+        empty_answer_execution_count: 12,
+      });
     });
 
     it('uses topic_id as label when RPC returns id and label from DB (null topic name)', async () => {
@@ -776,6 +893,11 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topics).to.have.lengthOf(1);
       expect(body.topics[0]).to.deep.include({ id: topicIdNoLabel, label: topicIdNoLabel });
+      expect(body.stats).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
     });
 
     it('filters by brandId when single brand route', async () => {
@@ -957,6 +1079,11 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.page_intents).to.have.lengthOf(2);
+      expect(body.stats).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
       expect(chainMock.rpc).to.have.been.calledWith(
         'rpc_brand_presence_filter_dimensions',
         sinon.match.has('p_site_id', 'cccdac43-1a22-4659-9086-b762f59b9928'),
@@ -1005,6 +1132,11 @@ describe('llmo-brand-presence', () => {
       expect(body.origins).to.have.lengthOf(2);
       const originIds = body.origins.map((o) => o.id).sort();
       expect(originIds).to.deep.equal(['ai', 'human']);
+      expect(body.stats).to.deep.equal({
+        total_execution_count: 0,
+        distinct_prompt_count: 0,
+        empty_answer_execution_count: 0,
+      });
     });
 
     it(
