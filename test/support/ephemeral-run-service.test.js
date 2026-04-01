@@ -23,7 +23,7 @@ import {
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,
-  buildEphemeralOnboardWorkflowInput,
+  buildTeardownWorkflowInput,
   runEphemeralRunBatch,
   PRESETS,
   MAX_BATCH_SITES,
@@ -449,49 +449,51 @@ describe('ephemeral-run-service', () => {
   });
 
   // -----------------------------------------------------------------------
-  // buildEphemeralOnboardWorkflowInput
+  // buildTeardownWorkflowInput
   // -----------------------------------------------------------------------
-  describe('buildEphemeralOnboardWorkflowInput()', () => {
-    const baseParams = {
-      siteId: 's-1',
-      siteUrl: 'https://example.com',
-      imsOrgId: 'ims@test',
-      organizationId: 'org-1',
-      opportunityStatusAuditTypes: ['lhs-mobile'],
-      importTypesToDisable: ['top-pages'],
-      auditTypesToDisable: ['lhs-mobile'],
-      profileName: 'insights-report-default',
-      workflowWaitTime: 3600,
-    };
+  describe('buildTeardownWorkflowInput()', () => {
+    const baseSites = [
+      {
+        siteId: 's-1',
+        siteUrl: 'https://example.com',
+        importTypes: ['top-pages'],
+        auditTypes: ['lhs-mobile'],
+      },
+    ];
+
+    it('builds bulkDisableJob with sites and taskContext', () => {
+      const input = buildTeardownWorkflowInput({
+        sites: baseSites,
+        slackContext: { channelId: 'C1', threadTs: 't1' },
+        workflowWaitTime: 3600,
+      });
+      expect(input.workflowWaitTime).to.equal(3600);
+      expect(input.bulkDisableJob.type).to.equal('bulk-disable-import-audit-processor');
+      expect(input.bulkDisableJob.sites).to.deep.equal(baseSites);
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
+        channelId: 'C1',
+        threadTs: 't1',
+      });
+    });
 
     it('fills slack with empty strings when slackContext omits channelId and threadTs', () => {
-      const input = buildEphemeralOnboardWorkflowInput({
-        ...baseParams,
+      const input = buildTeardownWorkflowInput({
+        sites: baseSites,
         slackContext: {},
-        env: {},
+        workflowWaitTime: 3600,
       });
-      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
         channelId: '',
         threadTs: '',
       });
     });
 
-    it('uses default experience URL when EXPERIENCE_URL is unset', () => {
-      const input = buildEphemeralOnboardWorkflowInput({
-        ...baseParams,
-        slackContext: { channelId: 'C1', threadTs: 't1' },
-        env: {},
+    it('defaults scheduledRun to false', () => {
+      const input = buildTeardownWorkflowInput({
+        sites: baseSites,
+        workflowWaitTime: 3600,
       });
-      expect(input.demoURLJob.taskContext.experienceUrl).to.equal('https://experience.adobe.com');
-    });
-
-    it('uses env EXPERIENCE_URL when set', () => {
-      const input = buildEphemeralOnboardWorkflowInput({
-        ...baseParams,
-        slackContext: { channelId: 'C1', threadTs: 't1' },
-        env: { EXPERIENCE_URL: 'https://custom.experience' },
-      });
-      expect(input.demoURLJob.taskContext.experienceUrl).to.equal('https://custom.experience');
+      expect(input.bulkDisableJob.taskContext.scheduledRun).to.equal(false);
     });
   });
 
@@ -529,7 +531,7 @@ describe('ephemeral-run-service', () => {
       expect(body.status).to.equal('completed');
     });
 
-    it('single-site insights-report-default sends full onboard-shaped SFN input', async () => {
+    it('single-site insights-report-default sends bulk teardown SFN input', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -540,15 +542,10 @@ describe('ephemeral-run-service', () => {
 
       expect(sfnSendStub).to.have.been.called;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input).to.have.keys(
-        'cwvDemoSuggestionsJob',
-        'opportunityStatusJob',
-        'disableImportAndAuditJob',
-        'demoURLJob',
-        'workflowWaitTime',
-      );
-      expect(input.disableImportAndAuditJob.type).to.equal('disable-import-audit-processor');
-      expect(input.cwvDemoSuggestionsJob.taskContext.profile).to.equal('insights-report-default');
+      expect(input).to.have.keys('bulkDisableJob', 'workflowWaitTime');
+      expect(input.bulkDisableJob.type).to.equal('bulk-disable-import-audit-processor');
+      expect(input.bulkDisableJob.sites).to.be.an('array').with.length(1);
+      expect(input.bulkDisableJob.sites[0].siteId).to.equal('s-1');
     });
 
     it('does not schedule teardown when nothing is newly enabled', async () => {
@@ -576,29 +573,14 @@ describe('ephemeral-run-service', () => {
         teardown: { delaySeconds: 0 },
       }, ctx);
 
-      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.workflowWaitTime).to.equal(7200);
+      const sfnInput = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(sfnInput.workflowWaitTime).to.equal(7200);
     });
 
-    it('uses fallback state machine ARN when primary teardown ARNs unset', async () => {
+    it('logs when teardown state machine ARN is missing (EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN unset)', async () => {
       const ctx = createMockContext();
       delete ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN;
-      ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN = 'arn:fallback';
       const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
-
-      const cmd = sfnSendStub.firstCall.args[0];
-      expect(cmd.input.stateMachineArn).to.equal('arn:fallback');
-    });
-
-    it('logs and skips SFN teardown when site has no organization', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      site.getOrganizationId = () => null;
       const config = createMockConfiguration();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
@@ -606,21 +588,7 @@ describe('ephemeral-run-service', () => {
       await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
 
       expect(sfnSendStub).to.not.have.been.called;
-      expect(ctx.log.error).to.have.been.calledWithMatch(/no organization/);
-    });
-
-    it('logs and skips SFN teardown when Organization.findById returns null', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.Organization.findById.resolves(null);
-
-      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
-
-      expect(sfnSendStub).to.not.have.been.called;
-      expect(ctx.log.error).to.have.been.calledWithMatch(/organization not found/);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown/);
     });
 
     it('deduplicates siteIds', async () => {
@@ -795,13 +763,9 @@ describe('ephemeral-run-service', () => {
 
       expect(sfnSendStub).to.have.been.calledOnce;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
         channelId: 'C-payload',
         threadTs: 'ts-payload',
-      });
-      expect(input.demoURLJob.taskContext.slackContext).to.deep.equal({
-        channelId: '',
-        threadTs: '',
       });
     });
 
@@ -820,7 +784,7 @@ describe('ephemeral-run-service', () => {
       }, ctx);
 
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
         channelId: 'C-only',
         threadTs: 'ts-env',
       });
@@ -841,7 +805,7 @@ describe('ephemeral-run-service', () => {
       }, ctx);
 
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
         channelId: '',
         threadTs: '',
       });
@@ -860,7 +824,7 @@ describe('ephemeral-run-service', () => {
       }, ctx);
 
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
         channelId: '',
         threadTs: '',
       });
@@ -881,7 +845,7 @@ describe('ephemeral-run-service', () => {
       }, ctx);
 
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.opportunityStatusJob.taskContext.slackContext.threadTs).to.equal('ts-insights');
+      expect(input.bulkDisableJob.taskContext.slackContext.threadTs).to.equal('ts-insights');
     });
 
     it('uses env channel when body.slack sets only threadTs', async () => {
@@ -899,16 +863,15 @@ describe('ephemeral-run-service', () => {
       }, ctx);
 
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.opportunityStatusJob.taskContext.slackContext).to.deep.equal({
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
         channelId: 'C-env',
         threadTs: 'ts-only',
       });
     });
 
-    it('prefers EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN over ONBOARD_WORKFLOW_STATE_MACHINE_ARN', async () => {
+    it('uses EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN for teardown', async () => {
       const ctx = createMockContext();
       ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN = 'arn:aws:states:ephemeral';
-      ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN = 'arn:aws:states:onboard';
       const site = createMockSite();
       const config = createMockConfiguration();
       ctx.dataAccess.Site.findById.resolves(site);
@@ -917,20 +880,6 @@ describe('ephemeral-run-service', () => {
       await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
 
       expect(sfnSendStub.firstCall.args[0].input.stateMachineArn).to.equal('arn:aws:states:ephemeral');
-    });
-
-    it('uses default experience URL in SFN input when EXPERIENCE_URL is unset', async () => {
-      const ctx = createMockContext();
-      delete ctx.env.EXPERIENCE_URL;
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
-
-      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.demoURLJob.taskContext.experienceUrl).to.equal('https://experience.adobe.com');
     });
 
     it('logs when teardown delay resolves to a non-finite workflow wait time', async () => {
@@ -946,10 +895,10 @@ describe('ephemeral-run-service', () => {
         teardown: { delaySeconds: NaN },
       }, ctx);
 
-      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown/);
     });
 
-    it('schedules single onboard-shaped teardown when only imports were enabled', async () => {
+    it('schedules single bulk teardown when only imports were enabled', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -963,11 +912,11 @@ describe('ephemeral-run-service', () => {
 
       expect(sfnSendStub).to.have.been.calledOnce;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.disableImportAndAuditJob.taskContext.auditTypes).to.deep.equal([]);
-      expect(input.disableImportAndAuditJob.taskContext.importTypes).to.include('top-pages');
+      expect(input.bulkDisableJob.sites[0].auditTypes).to.deep.equal([]);
+      expect(input.bulkDisableJob.sites[0].importTypes).to.include('top-pages');
     });
 
-    it('schedules single onboard-shaped teardown when only audits were enabled', async () => {
+    it('schedules single bulk teardown when only audits were enabled', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
@@ -981,8 +930,8 @@ describe('ephemeral-run-service', () => {
 
       expect(sfnSendStub).to.have.been.calledOnce;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.disableImportAndAuditJob.taskContext.importTypes).to.deep.equal([]);
-      expect(input.disableImportAndAuditJob.taskContext.auditTypes).to.include('lhs-mobile');
+      expect(input.bulkDisableJob.sites[0].importTypes).to.deep.equal([]);
+      expect(input.bulkDisableJob.sites[0].auditTypes).to.include('lhs-mobile');
     });
 
     it('uses WORKFLOW_WAIT_TIME_IN_SECONDS for batch teardown when delay is 0', async () => {
@@ -999,8 +948,8 @@ describe('ephemeral-run-service', () => {
       }, ctx);
 
       expect(sfnSendStub).to.have.been.calledOnce;
-      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.workflowWaitTime).to.equal(3600);
+      const sfnInput = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(sfnInput.workflowWaitTime).to.equal(3600);
     });
 
     it('handles teardown scheduling failure gracefully', async () => {
@@ -1016,20 +965,6 @@ describe('ephemeral-run-service', () => {
       expect(ctx.log.error).to.have.been.called;
     });
 
-    it('logs when teardown state machine ARN is missing', async () => {
-      const ctx = createMockContext();
-      delete ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN;
-      delete ctx.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
-
-      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
-    });
-
     it('logs when delaySeconds is 0 but WORKFLOW_WAIT_TIME_IN_SECONDS is unset', async () => {
       const ctx = createMockContext();
       delete ctx.env.WORKFLOW_WAIT_TIME_IN_SECONDS;
@@ -1043,7 +978,7 @@ describe('ephemeral-run-service', () => {
         teardown: { delaySeconds: 0 },
       }, ctx);
 
-      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown/);
     });
 
     it('logs when WORKFLOW_WAIT_TIME_IN_SECONDS is not a finite wait time', async () => {
@@ -1059,7 +994,7 @@ describe('ephemeral-run-service', () => {
         teardown: { delaySeconds: 0 },
       }, ctx);
 
-      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown for site/);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown/);
     });
   });
 

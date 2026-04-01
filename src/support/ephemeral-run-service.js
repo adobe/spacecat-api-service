@@ -242,93 +242,34 @@ async function rollbackImports(Site, perSiteSetup, log) {
 }
 
 function getStateMachineArn(env) {
-  return env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN
-    || env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
+  return env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN;
 }
 
 const EMPTY_SLACK_CONTEXT = { channelId: '', threadTs: '' };
 
 /**
- * Same shape as buildOnboardWorkflowInput in utils.js (onboard-workflow SFN), but
- * demo-url-processor always gets empty slackContext so ephemeral runs do not post there.
+ * Builds the input payload for the ephemeral-run-teardown-workflow Step Function.
+ * Sends a single bulk-disable-import-audit-processor job covering all sites,
+ * so the task-processor can load Configuration once and save it once.
  */
-function buildEphemeralOnboardWorkflowInput({
-  siteId,
-  siteUrl,
-  imsOrgId,
-  organizationId,
+function buildTeardownWorkflowInput({
+  sites,
   slackContext = EMPTY_SLACK_CONTEXT,
-  opportunityStatusAuditTypes,
-  importTypesToDisable = [],
-  auditTypesToDisable = [],
   scheduledRun = false,
-  profileName,
-  env,
   workflowWaitTime,
-  onboardStartTime = Date.now(),
 }) {
-  const sc = slackContext;
-  const slack = { channelId: sc.channelId ?? '', threadTs: sc.threadTs ?? '' };
-  const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+  const slack = { channelId: slackContext.channelId ?? '', threadTs: slackContext.threadTs ?? '' };
 
-  const opportunityStatusJob = {
-    type: 'opportunity-status-processor',
-    siteId,
-    siteUrl,
-    imsOrgId,
-    organizationId,
+  const bulkDisableJob = {
+    type: 'bulk-disable-import-audit-processor',
+    sites,
     taskContext: {
-      auditTypes: opportunityStatusAuditTypes,
-      onboardStartTime,
-      slackContext: slack,
-    },
-  };
-
-  const disableImportAndAuditJob = {
-    type: 'disable-import-audit-processor',
-    siteId,
-    siteUrl,
-    imsOrgId,
-    organizationId,
-    taskContext: {
-      importTypes: importTypesToDisable,
-      auditTypes: auditTypesToDisable,
       scheduledRun,
       slackContext: slack,
     },
   };
 
-  const demoURLJob = {
-    type: 'demo-url-processor',
-    siteId,
-    siteUrl,
-    imsOrgId,
-    organizationId,
-    taskContext: {
-      experienceUrl,
-      slackContext: EMPTY_SLACK_CONTEXT,
-    },
-  };
-
-  const cwvDemoSuggestionsJob = {
-    type: 'cwv-demo-suggestions-processor',
-    siteId,
-    siteUrl,
-    imsOrgId,
-    organizationId,
-    taskContext: {
-      profile: profileName,
-      slackContext: slack,
-    },
-  };
-
-  return {
-    opportunityStatusJob,
-    disableImportAndAuditJob,
-    demoURLJob,
-    cwvDemoSuggestionsJob,
-    workflowWaitTime,
-  };
+  return { bulkDisableJob, workflowWaitTime };
 }
 
 function coerceSlackField(value) {
@@ -362,14 +303,7 @@ function ephemeralRunWorkflowSlackContext(body, env) {
 
 async function scheduleTeardown(params) {
   const {
-    siteId,
-    baseURL,
-    imsOrgId,
-    organizationId,
-    importsEnabled,
-    auditsEnabled,
-    opportunityStatusAuditTypes,
-    profileName,
+    sites,
     delaySeconds,
     slackContext,
     env,
@@ -379,8 +313,7 @@ async function scheduleTeardown(params) {
   const stateMachineArn = getStateMachineArn(env);
   if (!stateMachineArn) {
     throw new Error(
-      'Ephemeral run teardown requires EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN '
-      + 'or ONBOARD_WORKFLOW_STATE_MACHINE_ARN',
+      'Ephemeral run teardown requires EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN',
     );
   }
 
@@ -399,25 +332,14 @@ async function scheduleTeardown(params) {
     throw new Error('Workflow wait time must be a finite non-negative number');
   }
 
-  const workflowInput = buildEphemeralOnboardWorkflowInput({
-    siteId,
-    siteUrl: baseURL,
-    imsOrgId,
-    organizationId,
+  const workflowInput = buildTeardownWorkflowInput({
+    sites,
     slackContext,
-    opportunityStatusAuditTypes,
-    importTypesToDisable: importsEnabled,
-    auditTypesToDisable: auditsEnabled,
     scheduledRun: false,
-    profileName,
-    env,
     workflowWaitTime,
-    onboardStartTime: Date.now(),
   });
 
-  const workflowName = sanitizeExecutionName(
-    `ephemeral-run-${siteId.slice(0, 8)}-${Date.now()}`,
-  );
+  const workflowName = sanitizeExecutionName(`ephemeral-run-teardown-${Date.now()}`);
 
   await sfnClient.send(new StartExecutionCommand({
     stateMachineArn,
@@ -425,7 +347,7 @@ async function scheduleTeardown(params) {
     name: workflowName,
   }));
 
-  log.info(`Scheduled teardown for site ${siteId}, workflowWaitTime=${workflowWaitTime}s`);
+  log.info(`Scheduled teardown for ${sites.length} site(s), workflowWaitTime=${workflowWaitTime}s`);
 
   return {
     mode: 'deferred',
@@ -516,7 +438,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
   const {
     dataAccess, s3, env, log,
   } = context;
-  const { Site, Configuration, Organization } = dataAccess;
+  const { Site, Configuration } = dataAccess;
   const batchId = randomUUID();
   const uniqueSiteIds = [...new Set(siteIds)];
   const effectiveSiteIds = uniqueSiteIds.slice(0, MAX_BATCH_SITES);
@@ -656,43 +578,32 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
       .catch((e) => log.error(`Failed to write result for ${siteId}`, e));
   }
 
-  // Phase 4: One onboard-compatible teardown execution per site (imports and/or audits)
-  const profileName = body.preset ?? 'insights-report-default';
+  // Phase 4: Single teardown execution covering all sites that had imports/audits enabled
+  const teardownSites = [];
   for (const [siteId, setup] of Object.entries(perSiteSetup)) {
     if (setup.importsEnabled.length === 0 && setup.auditsEnabled.length === 0) {
       // eslint-disable-next-line no-continue
       continue;
     }
-    if (!setup.organizationId) {
-      log.error(`Batch ${batchId}: site ${siteId} has no organization; skipping teardown schedule`);
-      // eslint-disable-next-line no-continue
-      continue;
-    }
+    teardownSites.push({
+      siteId,
+      siteUrl: setup.baseURL,
+      importTypes: setup.importsEnabled,
+      auditTypes: setup.auditsEnabled,
+    });
+  }
+
+  if (teardownSites.length > 0) {
     try {
-      // eslint-disable-next-line no-await-in-loop
-      const organization = await Organization.findById(setup.organizationId);
-      if (!organization) {
-        log.error(`Batch ${batchId}: organization not found for site ${siteId}; skipping teardown`);
-        // eslint-disable-next-line no-continue
-        continue;
-      }
-      // eslint-disable-next-line no-await-in-loop
       await scheduleTeardown({
-        siteId,
-        baseURL: setup.baseURL,
-        imsOrgId: organization.getImsOrgId(),
-        organizationId: organization.getId(),
-        importsEnabled: setup.importsEnabled,
-        auditsEnabled: setup.auditsEnabled,
-        opportunityStatusAuditTypes: auditTypes,
-        profileName,
+        sites: teardownSites,
         delaySeconds: teardownDelaySeconds,
         slackContext: workflowSlackContext,
         env,
         log,
       });
     } catch (error) {
-      log.error(`Batch ${batchId}: failed to schedule teardown for site ${siteId}`, error);
+      log.error(`Batch ${batchId}: failed to schedule teardown`, error);
     }
   }
 
@@ -710,7 +621,7 @@ export {
   deltaEnableImports,
   deltaEnableAudits,
   enqueueSiteJobs,
-  buildEphemeralOnboardWorkflowInput,
+  buildTeardownWorkflowInput,
   PRESETS,
   MAX_BATCH_SITES,
 };
