@@ -55,6 +55,12 @@ import {
   updateCategory,
   deleteCategory,
 } from '../support/categories-storage.js';
+import {
+  listTopics,
+  createTopic,
+  updateTopic,
+  deleteTopic,
+} from '../support/topics-storage.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -698,6 +704,144 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // ── Topic CRUD (v2) ──
+
+  const listTopicsForOrg = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const { status, brandId } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const topics = await listTopics({
+        organizationId: spaceCatId, postgrestClient, status, brandId,
+      });
+      return ok({ topics });
+    } catch (error) {
+      log.error(`Error listing topics for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const createTopicForOrg = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const topicData = context.data;
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!isNonEmptyObject(topicData)) return badRequest('Topic data is required');
+      if (!hasText(topicData.name)) return badRequest('Topic name is required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const created = await createTopic({
+        organizationId: spaceCatId,
+        topic: topicData,
+        postgrestClient,
+        updatedBy,
+      });
+
+      return createResponse(created, 201);
+    } catch (error) {
+      log.error(`Error creating topic for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const updateTopicForOrg = async (context) => {
+    const { spaceCatId, topicId } = context.params || {};
+    const updates = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(topicId)) return badRequest('Topic ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const updated = await updateTopic({
+        organizationId: spaceCatId,
+        topicId,
+        updates,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!updated) return notFound(`Topic not found: ${topicId}`);
+      return ok(updated);
+    } catch (error) {
+      log.error(`Error updating topic ${topicId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const deleteTopicForOrg = async (context) => {
+    const { spaceCatId, topicId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(topicId)) return badRequest('Topic ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const deleted = await deleteTopic({
+        organizationId: spaceCatId,
+        topicId,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!deleted) return notFound(`Topic not found: ${topicId}`);
+      return createResponse(null, 204);
+    } catch (error) {
+      log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   // ── Brand CRUD (v2) ──
 
   const createBrandForOrg = async (context) => {
@@ -865,6 +1009,10 @@ function BrandsController(ctx, log, env) {
     createCategoryForOrg,
     updateCategoryForOrg,
     deleteCategoryForOrg,
+    listTopicsForOrg,
+    createTopicForOrg,
+    updateTopicForOrg,
+    deleteTopicForOrg,
     createBrandForOrg,
     updateBrandForOrg,
     deleteBrandForOrg,

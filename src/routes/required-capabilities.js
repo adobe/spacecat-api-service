@@ -148,6 +148,10 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/categories': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/topics': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/topics': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'organization:write',
+  'DELETE /v2/orgs/:spaceCatId/topics/:topicId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
@@ -358,6 +362,7 @@ const routeRequiredCapabilities = {
 
   // Scraped Content
   'GET /sites/:siteId/scraped-content/:type': 'site:read',
+  'GET /sites/:siteId/metadata': 'site:read',
   'GET /sites/:siteId/files': 'site:read',
 
   // Scrape Jobs
@@ -449,6 +454,9 @@ const routeRequiredCapabilities = {
 
   // Sentiment - Config
   'GET /sites/:siteId/sentiment/config': 'sentimentTopic:read',
+
+  // Tokens
+  'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
 };
 
 export default routeRequiredCapabilities;
