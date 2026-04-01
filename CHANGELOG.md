@@ -1,3 +1,11 @@
+# [1.393.0](https://github.com/adobe/spacecat-api-service/compare/v1.392.0...v1.393.0) (2026-04-01)
+
+
+### Features
+
+* log dryrun set to false | LLMO-3918 ([#2090](https://github.com/adobe/spacecat-api-service/issues/2090)) ([5569d18](https://github.com/adobe/spacecat-api-service/commit/5569d18a19e674a27342181c5102b36df8bffc23))
+* no forced dryRun for LLMO config sync | LLMO-3918 ([#2085](https://github.com/adobe/spacecat-api-service/issues/2085)) ([b3caf3b](https://github.com/adobe/spacecat-api-service/commit/b3caf3b100f1d41ad482d7b4963f05f8bd832703))
+
 # [1.392.0](https://github.com/adobe/spacecat-api-service/compare/v1.391.0...v1.392.0) (2026-03-31)
 
 
