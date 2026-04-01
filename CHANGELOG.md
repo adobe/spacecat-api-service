@@ -1,3 +1,10 @@
+# [1.398.0](https://github.com/adobe/spacecat-api-service/compare/v1.397.0...v1.398.0) (2026-04-01)
+
+
+### Features
+
+* add support for llmo temporary onboarding for 6k customers ([#2098](https://github.com/adobe/spacecat-api-service/issues/2098)) ([2080668](https://github.com/adobe/spacecat-api-service/commit/208066820577b8f656baf545c8124f76d5f51b2d))
+
 # [1.397.0](https://github.com/adobe/spacecat-api-service/compare/v1.396.0...v1.397.0) (2026-04-01)
 
 
