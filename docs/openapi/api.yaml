@@ -131,6 +131,10 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/topics:
+    $ref: './topics-v2-api.yaml#/v2-topics-for-org'
+  /v2/orgs/{spaceCatId}/topics/{topicId}:
+    $ref: './topics-v2-api.yaml#/v2-topic-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts:
     $ref: './customer-config-api.yaml#/v2-prompts-by-brand'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/{promptId}:
