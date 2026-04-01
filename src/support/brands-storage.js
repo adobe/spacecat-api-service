@@ -110,8 +110,8 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
 }
 
 /**
- * Fully replaces brand_sites for a brand. Groups submitted URLs by base URL so that
- * multiple paths under the same site share one brand_sites row.
+ * Fully replaces brand_sites for a brand. Groups submitted URLs by normalized base URL
+ * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
  */
 async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
   const { error: deleteError } = await postgrestClient
