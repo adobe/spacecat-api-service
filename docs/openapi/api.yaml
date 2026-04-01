@@ -127,6 +127,10 @@ paths:
     $ref: './customer-config-api.yaml#/llmo-topics-by-space-cat-id-v2'
   /v2/orgs/{spaceCatId}/llmo-prompts:
     $ref: './customer-config-api.yaml#/llmo-prompts-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/brands:
+    $ref: './brands-v2-api.yaml#/v2-brands-for-org'
+  /v2/orgs/{spaceCatId}/brands/{brandId}:
+    $ref: './brands-v2-api.yaml#/v2-brand-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts:
     $ref: './customer-config-api.yaml#/v2-prompts-by-brand'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/{promptId}:
