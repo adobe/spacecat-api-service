@@ -521,20 +521,12 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let q = client
-        .from('brand_presence_executions')
-        .select('min_date:execution_date.min(), max_date:execution_date.max()')
-        .eq('organization_id', organizationId)
-        .eq('model', model);
-
-      if (shouldApplyFilter(siteId)) {
-        q = q.eq('site_id', siteId);
-      }
-      if (filterByBrandId) {
-        q = q.eq('brand_id', filterByBrandId);
-      }
-
-      const { data, error } = await q;
+      const { data, error } = await client.rpc('rpc_brand_presence_execution_date_range', {
+        p_organization_id: organizationId,
+        p_model: model,
+        p_site_id: shouldApplyFilter(siteId) ? siteId : null,
+        p_brand_id: filterByBrandId || null,
+      });
 
       if (error) {
         ctx.log.error(`Brand presence weeks PostgREST error: ${error.message}`);
