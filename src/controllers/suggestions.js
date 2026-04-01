@@ -1584,10 +1584,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (isAsyncExperimentRequested) {
       context.log.info(`[edge-deploy] async experiment requested for site: ${apexBaseUrl}`);
 
-      const urls = allSuggestions
-        .filter((s) => validSuggestionIds.includes(s.getId()))
-        .map((s) => s.getData()?.url)
-        .filter(Boolean);
+      let urls;
 
       const geoExperimentId = crypto.randomUUID();
 
@@ -1613,6 +1610,7 @@ function SuggestionsController(ctx, sqs, env) {
         } else {
           promptSources = validSuggestions;
         }
+        urls = promptSources.map((s) => s.getData()?.url).filter(Boolean);
         const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
         if (prompts.length === 0) {
           context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
