@@ -1,0 +1,68 @@
+name: Publish Python Types
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-types:
+    name: Publish Python Types
+    runs-on: ubuntu-latest
+    concurrency: publish-types
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Bundle OpenAPI spec
+        run: npx @redocly/cli bundle docs/openapi/api.yaml -o /tmp/openapi.json --config docs/openapi/redocly-config.yaml
+
+      - name: Generate Python types
+        run: |
+          mkdir -p /tmp/types-py/spacecat_api_types
+          uv tool install datamodel-code-generator
+          datamodel-codegen \
+            --input /tmp/openapi.json \
+            --input-file-type openapi \
+            --output /tmp/types-py/spacecat_api_types/models.py \
+            --output-model-type pydantic_v2.BaseModel \
+            --target-python-version 3.11 \
+            --field-constraints \
+            --use-annotated \
+            --snake-case-field
+
+      - name: Prepare package
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          cp clients/python/pyproject.toml /tmp/types-py/
+          cp clients/python/README.md /tmp/types-py/
+          cp clients/python/spacecat_api_types/__init__.py /tmp/types-py/spacecat_api_types/
+          sed -i "s/version = \"0.0.0\"/version = \"${VERSION#v}\"/" /tmp/types-py/pyproject.toml
+
+      - name: Push to types-py branch + tag
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan types-py-tmp
+          git rm -rf .
+          cp -r /tmp/types-py/* .
+          git add -A
+          git commit -m "types-py ${VERSION}"
+          git push origin HEAD:types-py --force
+          git tag "types-py-${VERSION}"
+          git push origin "types-py-${VERSION}"
