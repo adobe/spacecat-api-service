@@ -1,3 +1,10 @@
+# [1.396.0](https://github.com/adobe/spacecat-api-service/compare/v1.395.0...v1.396.0) (2026-04-01)
+
+
+### Features
+
+* add created by + created at fields in llmo config response; fix missing updated at in category ([#2089](https://github.com/adobe/spacecat-api-service/issues/2089)) ([616fde8](https://github.com/adobe/spacecat-api-service/commit/616fde89ac9dc875e326083f598df8d19614fcd7))
+
 # [1.395.0](https://github.com/adobe/spacecat-api-service/compare/v1.394.1...v1.395.0) (2026-04-01)
 
 
