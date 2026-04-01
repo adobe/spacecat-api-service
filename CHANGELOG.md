@@ -1,3 +1,10 @@
+# [1.394.0](https://github.com/adobe/spacecat-api-service/compare/v1.393.0...v1.394.0) (2026-04-01)
+
+
+### Features
+
+* metadata api ([#2068](https://github.com/adobe/spacecat-api-service/issues/2068)) ([e8de8a1](https://github.com/adobe/spacecat-api-service/commit/e8de8a17d937315359d3e839d70b27f5703dbc0c))
+
 # [1.393.0](https://github.com/adobe/spacecat-api-service/compare/v1.392.0...v1.393.0) (2026-04-01)
 
 
