@@ -6961,7 +6961,9 @@ V2Brand:
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
-      type: string
+      type:
+        - string
+        - 'null'
       description: Email of the user who last modified the brand
   required:
     - id
@@ -6976,7 +6978,6 @@ V2Brand:
     - competitors
     - siteIds
     - updatedAt
-    - updatedBy
   example:
     id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
     name: 'Example Brand'
