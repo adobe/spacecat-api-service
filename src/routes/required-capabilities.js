@@ -358,6 +358,7 @@ const routeRequiredCapabilities = {
 
   // Scraped Content
   'GET /sites/:siteId/scraped-content/:type': 'site:read',
+  'GET /sites/:siteId/metadata': 'site:read',
   'GET /sites/:siteId/files': 'site:read',
 
   // Scrape Jobs
