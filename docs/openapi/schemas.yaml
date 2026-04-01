@@ -6859,3 +6859,291 @@ PresignedUrlResponse:
     - presignedUrl
     - expiresAt
   additionalProperties: false
+
+# ── V2 Brand schemas (PostgREST-backed, /v2/orgs/{spaceCatId}/brands) ──
+
+V2BrandUrl:
+  type: object
+  properties:
+    value:
+      type: string
+      description: Full URL (base URL + optional path)
+      example: 'https://www.example.com/products'
+  required:
+    - value
+
+V2BrandSocialAccount:
+  type: object
+  properties:
+    url:
+      type: string
+      description: Social media account URL
+      example: 'https://twitter.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes this account targets
+      example: ['US', 'DE']
+
+V2BrandEarnedContent:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Name of the earned content source
+      example: 'TechCrunch'
+    url:
+      type: string
+      description: URL of the earned content source
+      example: 'https://techcrunch.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandAlias:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Alias name for the brand
+      example: 'Example Corp'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandCompetitor:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Competitor name
+      example: 'Acme Inc'
+    url:
+      type:
+        - string
+        - 'null'
+      description: Competitor URL
+      example: 'https://www.acme.com'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2Brand:
+  type: object
+  description: A brand managed via the v2 PostgREST-backed API
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Brand UUID
+    name:
+      type: string
+      description: Brand name (unique per organization)
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      description: Brand status
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      description: How the brand was created
+      default: human
+    description:
+      type:
+        - string
+        - 'null'
+      description: Brand description
+    vertical:
+      type:
+        - string
+        - 'null'
+      description: Industry vertical
+    region:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes the brand targets
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+      description: Brand site URLs (derived from brand_sites)
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+    siteIds:
+      type: array
+      items:
+        type: string
+        format: uuid
+      description: IDs of sites linked to this brand (read-only, derived from brand_sites)
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      type:
+        - string
+        - 'null'
+      description: Email of the user who last modified the brand
+  required:
+    - id
+    - name
+    - status
+    - origin
+    - region
+    - urls
+    - socialAccounts
+    - earnedContent
+    - brandAliases
+    - competitors
+    - siteIds
+    - updatedAt
+  example:
+    id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    name: 'Example Brand'
+    status: 'active'
+    origin: 'human'
+    description: 'An example brand'
+    vertical: 'technology'
+    region: ['US', 'DE']
+    urls:
+      - value: 'https://www.example.com'
+      - value: 'https://www.example.com/products'
+    socialAccounts:
+      - url: 'https://twitter.com/example'
+        regions: ['US']
+    earnedContent:
+      - name: 'TechCrunch'
+        url: 'https://techcrunch.com/example'
+        regions: ['US']
+    brandAliases:
+      - name: 'Example Corp'
+        regions: ['US']
+    competitors:
+      - name: 'Acme Inc'
+        url: 'https://www.acme.com'
+        regions: ['US']
+    siteIds: ['b2c3d4e5-6789-01ab-cdef-2345678901ab']
+    updatedAt: '2026-03-15T10:30:00Z'
+    updatedBy: 'user@adobe.com'
+
+V2BrandInput:
+  type: object
+  description: Request body for creating a brand. Upserts on conflict (organization_id, name).
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      description: Brand name (unique per organization, used as upsert key)
+    status:
+      type: string
+      enum: [active, pending]
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      default: human
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandUpdateInput:
+  type: object
+  description: Request body for updating a brand. All fields are optional.
+  properties:
+    name:
+      type: string
+    status:
+      type: string
+      enum: [active, pending]
+    origin:
+      type: string
+      enum: [human, ai]
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandListResponse:
+  type: object
+  description: Response envelope for listing brands
+  required:
+    - brands
+  properties:
+    brands:
+      type: array
+      items:
+        $ref: '#/V2Brand'
