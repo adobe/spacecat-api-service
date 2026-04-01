@@ -42,6 +42,7 @@ const ALL_AUDITS = [
   'meta-tags',
   'product-metatags',
   'commerce-product-enrichments',
+  'commerce-product-enrichments-yearly',
   'structured-data',
   'forms-opportunities',
   'alt-text',
