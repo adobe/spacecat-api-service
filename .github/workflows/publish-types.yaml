@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: '.nvmrc'
 
       - uses: actions/setup-python@v5
         with:
@@ -32,6 +32,7 @@ jobs:
 
       - name: Generate Python types
         run: |
+          mkdir -p /tmp/types-py/spacecat_api_types
           uv tool install datamodel-code-generator
           datamodel-codegen \
             --input /tmp/openapi.json \
@@ -49,7 +50,6 @@ jobs:
         run: |
           cp clients/python/pyproject.toml /tmp/types-py/
           cp clients/python/README.md /tmp/types-py/
-          mkdir -p /tmp/types-py/spacecat_api_types
           cp clients/python/spacecat_api_types/__init__.py /tmp/types-py/spacecat_api_types/
           sed -i "s/version = \"0.0.0\"/version = \"${VERSION#v}\"/" /tmp/types-py/pyproject.toml
 

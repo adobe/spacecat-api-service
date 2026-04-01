@@ -6883,7 +6883,9 @@ V2BrandCompetitor:
       description: Competitor name
       example: 'Acme Inc'
     url:
-      type: string
+      type:
+        - string
+        - 'null'
       description: Competitor URL
       example: 'https://www.acme.com'
     regions:
@@ -6961,6 +6963,20 @@ V2Brand:
     updatedBy:
       type: string
       description: Email of the user who last modified the brand
+  required:
+    - id
+    - name
+    - status
+    - origin
+    - region
+    - urls
+    - socialAccounts
+    - earnedContent
+    - brandAliases
+    - competitors
+    - siteIds
+    - updatedAt
+    - updatedBy
   example:
     id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
     name: 'Example Brand'
@@ -7080,6 +7096,8 @@ V2BrandUpdateInput:
 V2BrandListResponse:
   type: object
   description: Response envelope for listing brands
+  required:
+    - brands
   properties:
     brands:
       type: array

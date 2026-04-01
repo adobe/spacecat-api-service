@@ -59,6 +59,9 @@ v2-brands-for-org:
       Nested arrays (`urls`, `socialAccounts`, `earnedContent`, `brandAliases`,
       `competitors`) use full-replace semantics — existing child rows are deleted
       and re-inserted on each write.
+
+      **Note:** The current implementation always returns 201 regardless of
+      create vs update. Per HTTP semantics, upsert-update should return 200.
     operationId: createBrandForOrgV2
     security:
       - ims_key: []
@@ -71,13 +74,7 @@ v2-brands-for-org:
             $ref: './schemas.yaml#/V2BrandInput'
     responses:
       '201':
-        description: Brand created
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/V2Brand'
-      '200':
-        description: Existing brand updated (upsert matched on organization_id + name)
+        description: Brand created (or updated via upsert)
         content:
           application/json:
             schema:
