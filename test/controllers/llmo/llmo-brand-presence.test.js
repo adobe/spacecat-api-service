@@ -26,6 +26,7 @@ import {
   buildTopicPromptKey,
   createBrandPresenceStatsHandler,
   createBrandPresenceWeeksHandler,
+  generateIsoWeekRange,
   createFilterDimensionsHandler,
   normalizeFilterDimensionsStatsFromRpc,
   createPromptDetailHandler,
@@ -1275,10 +1276,10 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('returns badRequest when brand_metrics_weekly query returns error', async () => {
-      const queryError = { message: 'relation "brand_metrics_weekly" does not exist' };
+    it('returns badRequest when brand_presence_executions query returns error', async () => {
+      const queryError = { message: 'relation "brand_presence_executions" does not exist' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
-        { data: [], error: queryError },
+        { data: null, error: queryError },
       );
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
@@ -1286,14 +1287,27 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('relation "brand_metrics_weekly" does not exist');
+      expect(body.message).to.equal('relation "brand_presence_executions" does not exist');
       expect(mockContext.log.error).to.have.been.calledWith(
-        'Brand presence weeks PostgREST error: relation "brand_metrics_weekly" does not exist',
+        'Brand presence weeks PostgREST error: relation "brand_presence_executions" does not exist',
       );
     });
 
-    it('returns empty weeks when no data', async () => {
+    it('returns empty weeks when no rows returned', async () => {
       mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeks).to.deep.equal([]);
+    });
+
+    it('returns empty weeks when min_date/max_date are null (no executions)', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [{ min_date: null, max_date: null }], error: null },
+      );
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -1316,7 +1330,7 @@ describe('llmo-brand-presence', () => {
       expect(body.weeks).to.deep.equal([]);
     });
 
-    it('handles weeks query with data: null (empty rows fallback)', async () => {
+    it('handles data: null response fallback', async () => {
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
         { data: null, error: null },
       );
@@ -1329,18 +1343,12 @@ describe('llmo-brand-presence', () => {
       expect(body.weeks).to.deep.equal([]);
     });
 
-    it('returns distinct weeks sorted descending', async () => {
-      const metricsData = {
-        data: [
-          { week: '2026-W11' },
-          { week: '2026-W10' },
-          { week: '2026-W11' },
-          { week: '2026-W09' },
-          { week: '2026-W07' },
-        ],
+    it('generates contiguous weeks from min_date to max_date, sorted descending', async () => {
+      // W07 (2026-02-09) through W11 (2026-03-15) → 5 consecutive weeks
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: [{ min_date: '2026-02-09', max_date: '2026-03-15' }],
         error: null,
-      };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock(metricsData);
+      });
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -1351,42 +1359,36 @@ describe('llmo-brand-presence', () => {
         { week: '2026-W11', startDate: '2026-03-09', endDate: '2026-03-15' },
         { week: '2026-W10', startDate: '2026-03-02', endDate: '2026-03-08' },
         { week: '2026-W09', startDate: '2026-02-23', endDate: '2026-03-01' },
+        { week: '2026-W08', startDate: '2026-02-16', endDate: '2026-02-22' },
         { week: '2026-W07', startDate: '2026-02-09', endDate: '2026-02-15' },
       ]);
     });
 
-    it('returns startDate/endDate null for invalid week strings from DB', async () => {
-      const metricsData = {
-        data: [
-          { week: '2026-W11' },
-          { week: '2026-W00' },
-          { week: 'invalid' },
-        ],
+    it('returns a single week when min_date and max_date fall in the same week', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: [{ min_date: '2026-03-09', max_date: '2026-03-12' }],
         error: null,
-      };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock(metricsData);
+      });
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
 
-      expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.weeks).to.have.lengthOf(3);
-      expect(body.weeks[0]).to.deep.equal({
-        week: 'invalid',
-        startDate: null,
-        endDate: null,
-      });
-      expect(body.weeks[1]).to.deep.equal({
-        week: '2026-W11',
-        startDate: '2026-03-09',
-        endDate: '2026-03-15',
-      });
-      expect(body.weeks[2]).to.deep.equal({
-        week: '2026-W00',
-        startDate: null,
-        endDate: null,
-      });
+      expect(body.weeks).to.deep.equal([
+        { week: '2026-W11', startDate: '2026-03-09', endDate: '2026-03-15' },
+      ]);
+    });
+
+    it('queries brand_presence_executions with min/max aggregate select', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.from).to.have.been.calledWith('brand_presence_executions');
+      expect(chainMock.select).to.have.been.calledWith('min_date:execution_date.min(), max_date:execution_date.max()');
+      expect(chainMock.eq).to.have.been.calledWith('organization_id', mockContext.params.spaceCatId);
     });
 
     it('defaults model to chatgpt-free when not provided', async () => {
@@ -1512,19 +1514,50 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.message).to.equal('Site does not belong to the organization');
     });
+  });
 
-    it('queries brand_metrics_weekly with select week, order descending, limit 200000', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.dataAccess.Site.postgrestService = chainMock;
+  describe('generateIsoWeekRange', () => {
+    it('returns empty array when minDate is null', () => {
+      expect(generateIsoWeekRange(null, '2026-03-15')).to.deep.equal([]);
+    });
 
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
+    it('returns empty array when maxDate is null', () => {
+      expect(generateIsoWeekRange('2026-03-09', null)).to.deep.equal([]);
+    });
 
-      expect(chainMock.from).to.have.been.calledWith('brand_metrics_weekly');
-      expect(chainMock.select).to.have.been.calledWith('week');
-      expect(chainMock.eq).to.have.been.calledWith('organization_id', mockContext.params.spaceCatId);
-      expect(chainMock.order).to.have.been.calledWith('week', { ascending: false });
-      expect(chainMock.limit).to.have.been.calledWith(200000);
+    it('returns empty array when both are null', () => {
+      expect(generateIsoWeekRange(null, null)).to.deep.equal([]);
+    });
+
+    it('returns a single week when min and max are in the same week', () => {
+      expect(generateIsoWeekRange('2026-03-09', '2026-03-15')).to.deep.equal(['2026-W11']);
+    });
+
+    it('returns a single week when min and max are different dates within the same week', () => {
+      expect(generateIsoWeekRange('2026-03-09', '2026-03-12')).to.deep.equal(['2026-W11']);
+    });
+
+    it('returns consecutive weeks sorted descending', () => {
+      const result = generateIsoWeekRange('2026-03-02', '2026-03-15');
+      expect(result).to.deep.equal(['2026-W11', '2026-W10']);
+    });
+
+    it('handles year boundary correctly', () => {
+      // W52 2025 starts 2025-12-22; W01 2026 starts 2025-12-29
+      const result = generateIsoWeekRange('2025-12-22', '2026-01-04');
+      expect(result).to.deep.equal(['2026-W01', '2025-W52']);
+    });
+
+    it('handles min_date mid-week: snaps to the Monday of that week', () => {
+      // 2026-03-11 is Wednesday of W11; range should still start at W11 Monday
+      const result = generateIsoWeekRange('2026-03-11', '2026-03-15');
+      expect(result).to.deep.equal(['2026-W11']);
+    });
+
+    it('returns empty array when a malformed date produces an unparseable ISO week string', () => {
+      // 'not-a-date' causes dateToIsoWeek to return "NaN-WNaN" which fails getWeekDateRange's regex
+      expect(generateIsoWeekRange('not-a-date', '2026-03-15')).to.deep.equal([]);
+      expect(generateIsoWeekRange('2026-03-09', 'not-a-date')).to.deep.equal([]);
     });
   });
 
