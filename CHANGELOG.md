@@ -1,3 +1,10 @@
+# [1.400.0](https://github.com/adobe/spacecat-api-service/compare/v1.399.0...v1.400.0) (2026-04-01)
+
+
+### Features
+
+* rename ahrefs to seo in API controllers and OpenAPI schemas ([#2101](https://github.com/adobe/spacecat-api-service/issues/2101)) ([0200b1d](https://github.com/adobe/spacecat-api-service/commit/0200b1dc4abd4e2c6e833bf00d744b9de53ce8f4))
+
 # [1.399.0](https://github.com/adobe/spacecat-api-service/compare/v1.398.0...v1.399.0) (2026-04-01)
 
 
