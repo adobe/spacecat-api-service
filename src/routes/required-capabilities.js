@@ -358,6 +358,7 @@ const routeRequiredCapabilities = {
 
   // Scraped Content
   'GET /sites/:siteId/scraped-content/:type': 'site:read',
+  'GET /sites/:siteId/metadata': 'site:read',
   'GET /sites/:siteId/files': 'site:read',
 
   // Scrape Jobs
@@ -449,6 +450,9 @@ const routeRequiredCapabilities = {
 
   // Sentiment - Config
   'GET /sites/:siteId/sentiment/config': 'sentimentTopic:read',
+
+  // Tokens
+  'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
 };
 
 export default routeRequiredCapabilities;
