@@ -79,7 +79,7 @@ describe('LlmoOnboardCommand', () => {
       await command.handleExecution([], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        'Usage: _onboard-llmo <site url>_',
+        'Usage: _onboard-llmo <site url> [--skip-helix-query | --temp-onboarding]_',
       );
     });
 
@@ -87,7 +87,7 @@ describe('LlmoOnboardCommand', () => {
       await command.handleExecution(['invalid-url'], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        'Usage: _onboard-llmo <site url>_',
+        'Usage: _onboard-llmo <site url> [--skip-helix-query | --temp-onboarding]_',
       );
     });
 
@@ -117,8 +117,24 @@ describe('LlmoOnboardCommand', () => {
       expect(button.type).to.equal('button');
       expect(button.text.text).to.equal('Start Onboarding');
       expect(button.action_id).to.equal('start_llmo_onboarding');
-      expect(button.value).to.equal('https://example.com');
+      expect(JSON.parse(button.value)).to.deep.equal({ brandURL: 'https://example.com' });
       expect(button.style).to.equal('primary');
+    });
+
+    it('should encode skip helix-query flag on Start Onboarding button', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      await command.handleExecution(
+        ['https://example.com', '--skip-helix-query'],
+        slackContext,
+      );
+
+      const message = slackContext.say.getCall(0).args[0];
+      const button = message.blocks.find((block) => block.type === 'actions').elements[0];
+      expect(JSON.parse(button.value)).to.deep.equal({
+        brandURL: 'https://example.com',
+        tempOnboarding: true,
+      });
     });
 
     it('should show reonboarding options for existing site with LLMO brand', async () => {
@@ -209,7 +225,7 @@ describe('LlmoOnboardCommand', () => {
       expect(button.type).to.equal('button');
       expect(button.text.text).to.equal('Start Onboarding');
       expect(button.action_id).to.equal('start_llmo_onboarding');
-      expect(button.value).to.equal('https://example.com');
+      expect(JSON.parse(button.value)).to.deep.equal({ brandURL: 'https://example.com' });
       expect(button.style).to.equal('primary');
     });
 
@@ -229,7 +245,7 @@ describe('LlmoOnboardCommand', () => {
       expect(slackContext.say).to.have.been.calledOnce;
       const message = slackContext.say.getCall(0).args[0];
       const button = message.blocks.find((block) => block.type === 'actions').elements[0];
-      expect(button.value).to.equal('https://example.com');
+      expect(JSON.parse(button.value)).to.deep.equal({ brandURL: 'https://example.com' });
     });
   });
 });

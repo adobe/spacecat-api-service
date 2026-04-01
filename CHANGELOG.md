@@ -1,3 +1,45 @@
+# [1.399.0](https://github.com/adobe/spacecat-api-service/compare/v1.398.0...v1.399.0) (2026-04-01)
+
+
+### Features
+
+* use rpc to get weeks | LLMO-4049 ([#2100](https://github.com/adobe/spacecat-api-service/issues/2100)) ([ebc3e27](https://github.com/adobe/spacecat-api-service/commit/ebc3e276f7ca5dfb0315ad808463131f77cc5799))
+
+# [1.398.0](https://github.com/adobe/spacecat-api-service/compare/v1.397.0...v1.398.0) (2026-04-01)
+
+
+### Features
+
+* add support for llmo temporary onboarding for 6k customers ([#2098](https://github.com/adobe/spacecat-api-service/issues/2098)) ([2080668](https://github.com/adobe/spacecat-api-service/commit/208066820577b8f656baf545c8124f76d5f51b2d))
+
+# [1.397.0](https://github.com/adobe/spacecat-api-service/compare/v1.396.0...v1.397.0) (2026-04-01)
+
+
+### Bug Fixes
+
+* add geo-brand-presence handler enrollment to HTTP onboarding path ([#2094](https://github.com/adobe/spacecat-api-service/issues/2094)) ([7d10dde](https://github.com/adobe/spacecat-api-service/commit/7d10dde8d07c557fb5bc5a8c1fd2c2d5ab4e2e99))
+* normalize URLs in syncBrandSites to prevent silent brand-site linkage failures ([#2097](https://github.com/adobe/spacecat-api-service/issues/2097)) ([2048b71](https://github.com/adobe/spacecat-api-service/commit/2048b71930a8646bfef194995ba9395cacc43628)), closes [#2096](https://github.com/adobe/spacecat-api-service/issues/2096)
+
+
+### Features
+
+* add topics CRUD endpoints (v2) ([#2095](https://github.com/adobe/spacecat-api-service/issues/2095)) ([3e51c52](https://github.com/adobe/spacecat-api-service/commit/3e51c52f823077548604c3cd552a522fbbf95cbe))
+
+# [1.396.0](https://github.com/adobe/spacecat-api-service/compare/v1.395.0...v1.396.0) (2026-04-01)
+
+
+### Features
+
+* add created by + created at fields in llmo config response; fix missing updated at in category ([#2089](https://github.com/adobe/spacecat-api-service/issues/2089)) ([616fde8](https://github.com/adobe/spacecat-api-service/commit/616fde89ac9dc875e326083f598df8d19614fcd7))
+
+# [1.395.0](https://github.com/adobe/spacecat-api-service/compare/v1.394.1...v1.395.0) (2026-04-01)
+
+
+### Features
+
+* adds token controllers ([#1941](https://github.com/adobe/spacecat-api-service/issues/1941)) ([e5383fa](https://github.com/adobe/spacecat-api-service/commit/e5383fa19fb2b054395e939429c5b140ab591dcb))
+* use new brand-presence filter dimensions rpc ([#2077](https://github.com/adobe/spacecat-api-service/issues/2077)) ([04f5339](https://github.com/adobe/spacecat-api-service/commit/04f53390dbde4071df6a3d5cbf24e93cef838cd1))
+
 ## [1.394.1](https://github.com/adobe/spacecat-api-service/compare/v1.394.0...v1.394.1) (2026-04-01)
 
 

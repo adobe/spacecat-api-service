@@ -19,6 +19,8 @@ function mapDbCategoryToV2(row) {
     name: row.name,
     status: row.status || 'active',
     origin: row.origin || 'human',
+    createdAt: row.created_at,
+    createdBy: row.created_by,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   };
