@@ -30,8 +30,36 @@ import {
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
+/**
+ * Slack button `value` for `start_llmo_onboarding`: plain URL (legacy) or JSON
+ * `{ brandURL, tempOnboarding?: true }`.
+ *
+ * @param {string} [raw]
+ * @returns {{ brandURL: string, tempOnboarding: boolean }}
+ */
+export function parseStartLlmoOnboardingButtonValue(raw) {
+  if (raw == null || raw === '') {
+    return { brandURL: '', tempOnboarding: false };
+  }
+  const trimmed = String(raw).trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed.brandURL === 'string') {
+        return {
+          brandURL: parsed.brandURL.trim(),
+          tempOnboarding: parsed.tempOnboarding === true,
+        };
+      }
+    } catch {
+      // fall through to raw string
+    }
+  }
+  return { brandURL: trimmed, tempOnboarding: false };
+}
+
 // site isn't on spacecat yet
-async function fullOnboardingModal(body, client, respond, brandURL) {
+async function fullOnboardingModal(body, client, respond, brandURL, tempOnboarding = false) {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -53,6 +81,7 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
         originalChannel,
         originalThreadTs,
         brandURL,
+        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }),
       title: {
         type: 'plain_text',
@@ -200,7 +229,7 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
 }
 
 // site is already on spacecat
-async function elmoOnboardingModal(body, client, respond, brandURL, currentCadence = 'weekly') {
+async function elmoOnboardingModal(body, client, respond, brandURL, currentCadence = 'weekly', tempOnboarding = false) {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -222,6 +251,7 @@ async function elmoOnboardingModal(body, client, respond, brandURL, currentCaden
         originalChannel,
         originalThreadTs,
         brandURL,
+        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }),
       title: {
         type: 'plain_text',
@@ -393,11 +423,13 @@ export function startLLMOOnboarding(lambdaContext) {
       const { Site } = dataAccess;
 
       // check current onboarding status
-      const brandURL = actions?.[0]?.value;
+      const { brandURL, tempOnboarding } = parseStartLlmoOnboardingButtonValue(
+        actions?.[0]?.value,
+      );
       const site = await Site.findByBaseURL(brandURL);
 
       if (!site) {
-        await fullOnboardingModal(body, client, respond, brandURL);
+        await fullOnboardingModal(body, client, respond, brandURL, tempOnboarding);
         log.debug(`User ${user.id} started full onboarding process for ${brandURL}.`);
         return;
       }
@@ -422,7 +454,7 @@ export function startLLMOOnboarding(lambdaContext) {
       const currentCadence = isDailyEnabled ? 'daily' : 'weekly';
       log.debug(`Site ${site.getId()} current brand presence config: weekly-free=${isWeeklyFreeEnabled}, weekly-paid=${isWeeklyPaidEnabled}, daily=${isDailyEnabled}, detected cadence=${currentCadence}`);
 
-      await elmoOnboardingModal(body, client, respond, brandURL, currentCadence);
+      await elmoOnboardingModal(body, client, respond, brandURL, currentCadence, tempOnboarding);
       log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
@@ -442,6 +474,7 @@ export function startLLMOOnboarding(lambdaContext) {
  * @param {string} [input.deliveryType]
  * @param {'weekly-free' | 'weekly-paid' | 'daily' | 'weekly'} [input.brandPresenceCadence]
  *   'weekly' is a legacy alias for 'weekly-free' (from the Slack modal dropdown).
+ * @param {boolean} [input.tempOnboarding] If true, skip helix-query.yaml update.
  * @param {Object} lambdaCtx
  * @param {Object} slackCtx
  */
@@ -449,7 +482,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, env } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId, deliveryType, brandPresenceCadence = 'weekly-free',
+    baseURL, brandName, imsOrgId, deliveryType, brandPresenceCadence = 'weekly-free', tempOnboarding,
   } = input;
 
   const dataFolder = generateDataFolder(baseURL, env.ENV);
@@ -473,7 +506,12 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     const cadence = brandPresenceCadence === 'weekly' ? 'weekly-free' : brandPresenceCadence;
     const result = await performLlmoOnboarding(
       {
-        baseURL, brandName, imsOrgId, deliveryType, cadence,
+        baseURL,
+        brandName,
+        imsOrgId,
+        deliveryType,
+        cadence,
+        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       },
       lambdaCtx,
       safeSay,
@@ -523,12 +561,14 @@ export function onboardLLMOModal(lambdaContext) {
       let originalChannel;
       let originalThreadTs;
       let brandURL;
+      let tempOnboarding;
       try {
         /* c8 ignore next */
         const metadata = JSON.parse(view.private_metadata || '{}');
         originalChannel = metadata.originalChannel;
         originalThreadTs = metadata.originalThreadTs;
         brandURL = metadata.brandURL;
+        tempOnboarding = metadata.tempOnboarding === true;
       } catch (error) {
         log.warn('Failed to parse private metadata:', error);
       }
@@ -562,6 +602,7 @@ export function onboardLLMOModal(lambdaContext) {
         brandURL,
         originalChannel,
         originalThreadTs,
+        tempOnboarding: tempOnboarding === true,
       });
 
       // eslint-disable-next-line max-statements-per-line
@@ -587,7 +628,12 @@ export function onboardLLMOModal(lambdaContext) {
       };
 
       await onboardSite({
-        brandName, baseURL: brandURL, imsOrgId, deliveryType, brandPresenceCadence,
+        brandName,
+        baseURL: brandURL,
+        imsOrgId,
+        deliveryType,
+        brandPresenceCadence,
+        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }, lambdaContext, slackContext);
 
       log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);

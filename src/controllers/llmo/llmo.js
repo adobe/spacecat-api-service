@@ -872,6 +872,8 @@ function LlmoController(ctx) {
    * @param {string} [context.data.imsOrgId] - Optional IMS org ID override
    *   (must match `/^[a-z0-9]{24}@AdobeOrg$/i`). When omitted the org ID
    *   is read from the authenticated user's JWT token.
+   * @param {boolean} [context.data['temp-onboarding']] - When true, skips updating
+   *   helix-query.yaml in project-elmo-ui-data during onboarding.
    * @returns {Promise<Response>} The onboarding response.
    */
   const onboardCustomer = async (context) => {
@@ -891,6 +893,7 @@ function LlmoController(ctx) {
       const {
         domain, brandName, imsOrgId: payloadImsOrgId, cadence,
       } = data;
+      const tempOnboarding = data['temp-onboarding'] === true;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
@@ -945,7 +948,11 @@ function LlmoController(ctx) {
       // Perform the complete onboarding process
       const result = await performLlmoOnboarding(
         {
-          domain, brandName, imsOrgId, cadence,
+          domain,
+          brandName,
+          imsOrgId,
+          cadence,
+          tempOnboarding,
         },
         context,
       );
