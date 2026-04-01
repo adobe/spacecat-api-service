@@ -85,6 +85,8 @@ function mapDbBrandToV2(row) {
       regions: c.regions || [],
     })),
     siteIds,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   };

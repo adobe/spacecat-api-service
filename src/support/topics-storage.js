@@ -20,6 +20,8 @@ function mapDbTopicToV2(row) {
     description: row.description || null,
     status: row.status || 'active',
     brandId: row.brand_id || null,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   };
