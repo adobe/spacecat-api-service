@@ -514,6 +514,8 @@ export function convertV2ToV1(customerConfig) {
   return llmoConfig;
 }
 
+export { generateBrandId };
+
 export default {
   convertV1ToV2,
   convertV2ToV1,
