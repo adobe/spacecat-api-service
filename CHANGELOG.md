@@ -1,3 +1,10 @@
+# [1.399.0](https://github.com/adobe/spacecat-api-service/compare/v1.398.0...v1.399.0) (2026-04-01)
+
+
+### Features
+
+* use rpc to get weeks | LLMO-4049 ([#2100](https://github.com/adobe/spacecat-api-service/issues/2100)) ([ebc3e27](https://github.com/adobe/spacecat-api-service/commit/ebc3e276f7ca5dfb0315ad808463131f77cc5799))
+
 # [1.398.0](https://github.com/adobe/spacecat-api-service/compare/v1.397.0...v1.398.0) (2026-04-01)
 
 
