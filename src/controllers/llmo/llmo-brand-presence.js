@@ -50,7 +50,7 @@ const MODEL_QUERY_ALIASES = new Map([
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
-/** High row limit for weeks query — we need all rows to extract every distinct week (200K cap). */
+/** High row limit for large execution queries (sentiment, topics, prompt-detail, etc). */
 const WEEKS_QUERY_LIMIT = 200000;
 
 /**
@@ -442,29 +442,63 @@ export function getWeekDateRange(isoWeek) {
 }
 
 /**
- * Builds a query to fetch week values from brand_metrics_weekly.
- * Table already has week in YYYY-Wnn format; filters: organization_id, model, site_id, brand_id.
+ * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
+ * @param {string} dateStr - e.g. "2026-03-15"
+ * @returns {string} e.g. "2026-W11"
+ * @internal Exported for testing
  */
-function buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId) {
-  let q = client
-    .from('brand_metrics_weekly')
-    .select('week')
-    .eq('organization_id', organizationId)
-    .eq('model', model);
+export function dateToIsoWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dayOfWeek = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
+  const year = d.getUTCFullYear();
+  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
+}
 
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
-  if (filterByBrandId) {
-    q = q.eq('brand_id', filterByBrandId);
+/**
+ * Generates every ISO week (YYYY-Wnn) between minDate and maxDate, inclusive,
+ * sorted newest-first.
+ *
+ * NOTE: This assumes no gaps in execution data. If a week between minDate and
+ * maxDate has no executions (e.g. a pipeline outage), it will still appear in
+ * the output. This is an accepted trade-off — a single min/max aggregation is
+ * far cheaper than scanning all rows for distinct weeks on a large table.
+ * The UI's existing empty-state handling covers the case where a selected week
+ * returns no data.
+ *
+ * @param {string|null} minDate - Earliest execution_date (YYYY-MM-DD)
+ * @param {string|null} maxDate - Latest execution_date (YYYY-MM-DD)
+ * @returns {string[]} ISO week strings sorted descending e.g. ["2026-W11", "2026-W10", ...]
+ * @internal Exported for testing
+ */
+export function generateIsoWeekRange(minDate, maxDate) {
+  if (!minDate || !maxDate) return [];
+  const minRange = getWeekDateRange(dateToIsoWeek(minDate));
+  const maxRange = getWeekDateRange(dateToIsoWeek(maxDate));
+  if (!minRange || !maxRange) return [];
+
+  const result = [];
+  let currentMs = new Date(`${minRange.startDate}T00:00:00Z`).getTime();
+  const maxMs = new Date(`${maxRange.startDate}T00:00:00Z`).getTime();
+
+  while (currentMs <= maxMs) {
+    const d = new Date(currentMs);
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    result.push(dateToIsoWeek(`${y}-${mo}-${day}`));
+    currentMs += 7 * MS_PER_DAY;
   }
 
-  return q.order('week', { ascending: false }).limit(WEEKS_QUERY_LIMIT);
+  return result.sort((a, b) => b.localeCompare(a));
 }
 
 /**
  * Creates the getBrandPresenceWeeks handler.
- * Returns distinct ISO weeks (YYYY-Wnn) for the given model, optionally filtered by brand or site.
+ * Returns all ISO weeks (YYYY-Wnn) between the earliest and latest execution_date
+ * for the given org/model, optionally filtered by brand or site.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
@@ -487,27 +521,25 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const q = buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId);
-      const { data, error } = await q;
+      const { data, error } = await client.rpc('rpc_brand_presence_execution_date_range', {
+        p_organization_id: organizationId,
+        p_model: model,
+        p_site_id: shouldApplyFilter(siteId) ? siteId : null,
+        p_brand_id: filterByBrandId || null,
+      });
 
       if (error) {
         ctx.log.error(`Brand presence weeks PostgREST error: ${error.message}`);
         return badRequest(error.message);
       }
 
-      const rows = data || [];
-      const weekSet = new Set();
-      rows.forEach((r) => {
-        const w = r.week;
-        if (w && typeof w === 'string') weekSet.add(w);
-      });
-      const sortedWeeks = [...weekSet].sort((a, b) => b.localeCompare(a));
-      const weeks = sortedWeeks.map((weekStr) => {
+      const row = (data || [])[0] || {};
+      const weeks = generateIsoWeekRange(row.min_date, row.max_date).map((weekStr) => {
         const range = getWeekDateRange(weekStr);
         return {
           week: weekStr,
-          startDate: range?.startDate ?? null,
-          endDate: range?.endDate ?? null,
+          startDate: range.startDate,
+          endDate: range.endDate,
         };
       });
 
@@ -528,22 +560,6 @@ function parseMarketTrackingTrendsParams(context) {
     categoryId: q.categoryId || q.category_id,
     regionCode: q.regionCode || q.region_code || q.region,
   };
-}
-
-/**
- * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
- * @param {string} dateStr - e.g. "2026-03-15"
- * @returns {string} e.g. "2026-W11"
- * @internal Exported for testing
- */
-export function dateToIsoWeek(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  const dayOfWeek = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
-  const year = d.getUTCFullYear();
-  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
 }
 
 function parseIsoWeek(weekStr) {
