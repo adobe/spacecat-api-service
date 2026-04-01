@@ -1739,7 +1739,7 @@ SiteTopPage:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     url: 'https://example-site.com/foo/bar'
     traffic: 360420000
-    source: 'ahrefs'
+    source: 'seo'
     geo: 'au'
     importedAt: '2024-04-29T15:14:33.653Z'
 SiteTopPageList:
@@ -2167,7 +2167,7 @@ SiteMetric:
       $ref: '#/DateTime'
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-traffic'
     value: 37900
     time: '2024-04-29T00:00:00.000Z'
@@ -2217,7 +2217,7 @@ PageOrganicKeywords:
       type: boolean
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-keywords'
     time: '2024-04-29T00:00:00.000Z'
     url: 'https://example.com/foo/bar'
@@ -2727,6 +2727,7 @@ OpportunityType:
   enum:
     - 'broken-backlinks'
     - 'broken-internal-links'
+    - 'info-gain'
   example: 'broken-backlinks'
 OpportunityOrigin:
   description: |
@@ -7147,3 +7148,103 @@ V2BrandListResponse:
       type: array
       items:
         $ref: '#/V2Brand'
+
+V2Topic:
+  type: object
+  description: A topic in the normalized topics table
+  required:
+    - id
+    - uuid
+    - name
+    - status
+  properties:
+    id:
+      type: string
+      description: Topic business key (topic_id)
+      example: 'baseurl-discovery-research-topic'
+    uuid:
+      type: string
+      format: uuid
+      description: UUID primary key (topics.id)
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type:
+        - string
+        - 'null'
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+      description: Topic status
+      example: 'active'
+    brandId:
+      type:
+        - string
+        - 'null'
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    updatedAt:
+      type: string
+      format: date-time
+      description: Last update timestamp
+    updatedBy:
+      type: string
+      description: User or system that last updated the topic
+
+V2TopicInput:
+  type: object
+  description: Request body for creating a topic
+  required:
+    - name
+  properties:
+    id:
+      type: string
+      description: Topic business key. Auto-generated from name if omitted.
+      example: 'baseurl-discovery-research-topic'
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type: string
+      description: Optional topic description
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    status:
+      type: string
+      enum: [active, pending, ignored]
+      default: 'active'
+
+V2TopicUpdateInput:
+  type: object
+  description: Request body for updating a topic (partial update)
+  properties:
+    name:
+      type: string
+      description: Human-readable topic name
+    description:
+      type: string
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID
+
+V2TopicListResponse:
+  type: object
+  description: Response envelope for listing topics
+  required:
+    - topics
+  properties:
+    topics:
+      type: array
+      items:
+        $ref: '#/V2Topic'

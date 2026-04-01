@@ -1,3 +1,51 @@
+## [1.401.1](https://github.com/adobe/spacecat-api-service/compare/v1.401.0...v1.401.1) (2026-04-01)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2099](https://github.com/adobe/spacecat-api-service/issues/2099)) ([1af1b2e](https://github.com/adobe/spacecat-api-service/commit/1af1b2e26841d3ab393546589986609cd601e4ae))
+
+# [1.401.0](https://github.com/adobe/spacecat-api-service/compare/v1.400.0...v1.401.0) (2026-04-01)
+
+
+### Features
+
+* LLMO-3758 info-gain ([#2086](https://github.com/adobe/spacecat-api-service/issues/2086)) ([2922236](https://github.com/adobe/spacecat-api-service/commit/292223656efa266407b863dedb8de5025e35f2cb))
+
+# [1.400.0](https://github.com/adobe/spacecat-api-service/compare/v1.399.0...v1.400.0) (2026-04-01)
+
+
+### Features
+
+* rename ahrefs to seo in API controllers and OpenAPI schemas ([#2101](https://github.com/adobe/spacecat-api-service/issues/2101)) ([0200b1d](https://github.com/adobe/spacecat-api-service/commit/0200b1dc4abd4e2c6e833bf00d744b9de53ce8f4))
+
+# [1.399.0](https://github.com/adobe/spacecat-api-service/compare/v1.398.0...v1.399.0) (2026-04-01)
+
+
+### Features
+
+* use rpc to get weeks | LLMO-4049 ([#2100](https://github.com/adobe/spacecat-api-service/issues/2100)) ([ebc3e27](https://github.com/adobe/spacecat-api-service/commit/ebc3e276f7ca5dfb0315ad808463131f77cc5799))
+
+# [1.398.0](https://github.com/adobe/spacecat-api-service/compare/v1.397.0...v1.398.0) (2026-04-01)
+
+
+### Features
+
+* add support for llmo temporary onboarding for 6k customers ([#2098](https://github.com/adobe/spacecat-api-service/issues/2098)) ([2080668](https://github.com/adobe/spacecat-api-service/commit/208066820577b8f656baf545c8124f76d5f51b2d))
+
+# [1.397.0](https://github.com/adobe/spacecat-api-service/compare/v1.396.0...v1.397.0) (2026-04-01)
+
+
+### Bug Fixes
+
+* add geo-brand-presence handler enrollment to HTTP onboarding path ([#2094](https://github.com/adobe/spacecat-api-service/issues/2094)) ([7d10dde](https://github.com/adobe/spacecat-api-service/commit/7d10dde8d07c557fb5bc5a8c1fd2c2d5ab4e2e99))
+* normalize URLs in syncBrandSites to prevent silent brand-site linkage failures ([#2097](https://github.com/adobe/spacecat-api-service/issues/2097)) ([2048b71](https://github.com/adobe/spacecat-api-service/commit/2048b71930a8646bfef194995ba9395cacc43628)), closes [#2096](https://github.com/adobe/spacecat-api-service/issues/2096)
+
+
+### Features
+
+* add topics CRUD endpoints (v2) ([#2095](https://github.com/adobe/spacecat-api-service/issues/2095)) ([3e51c52](https://github.com/adobe/spacecat-api-service/commit/3e51c52f823077548604c3cd552a522fbbf95cbe))
+
 # [1.396.0](https://github.com/adobe/spacecat-api-service/compare/v1.395.0...v1.396.0) (2026-04-01)
 
 

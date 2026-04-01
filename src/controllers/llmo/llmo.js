@@ -69,6 +69,7 @@ const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
+const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -871,6 +872,8 @@ function LlmoController(ctx) {
    * @param {string} [context.data.imsOrgId] - Optional IMS org ID override
    *   (must match `/^[a-z0-9]{24}@AdobeOrg$/i`). When omitted the org ID
    *   is read from the authenticated user's JWT token.
+   * @param {boolean} [context.data['temp-onboarding']] - When true, skips updating
+   *   helix-query.yaml in project-elmo-ui-data during onboarding.
    * @returns {Promise<Response>} The onboarding response.
    */
   const onboardCustomer = async (context) => {
@@ -887,10 +890,17 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
 
-      const { domain, brandName, imsOrgId: payloadImsOrgId } = data;
+      const {
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence,
+      } = data;
+      const tempOnboarding = data['temp-onboarding'] === true;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
+      }
+
+      if (cadence && !VALID_CADENCES.includes(cadence)) {
+        return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
       }
 
       let imsOrgId;
@@ -937,7 +947,13 @@ function LlmoController(ctx) {
 
       // Perform the complete onboarding process
       const result = await performLlmoOnboarding(
-        { domain, brandName, imsOrgId },
+        {
+          domain,
+          brandName,
+          imsOrgId,
+          cadence,
+          tempOnboarding,
+        },
         context,
       );
 
