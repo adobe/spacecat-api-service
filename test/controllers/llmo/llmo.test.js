@@ -2676,6 +2676,52 @@ describe('LlmoController', () => {
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
+    it('should pass tempOnboarding when temp-onboarding is true', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const ctxWithTemp = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          'temp-onboarding': true,
+        },
+      };
+
+      const result = await testController.onboardCustomer(ctxWithTemp);
+
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+      expect(performLlmoOnboardingStub.firstCall.args[0].tempOnboarding).to.equal(true);
+    });
+
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
       it(`should return bad request when ${field} is missing`, async () => {
         const contextCopy = { ...onboardingContext, data: { ...onboardingContext.data } };

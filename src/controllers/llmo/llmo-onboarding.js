@@ -1238,13 +1238,15 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
+ * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
+ *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
  */
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
-    domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
+    domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType, tempOnboarding,
   } = params;
   const { env, log } = context;
 
@@ -1277,8 +1279,13 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
     }
 
-    // Update index config
-    await updateIndexConfig(dataFolder, context, say);
+    // Update helix-query.yaml in project-elmo-ui-data (skip for temporary onboarding)
+    if (tempOnboarding) {
+      log.info(`Skipping helix-query.yaml update (temp-onboarding) for data folder ${dataFolder}`);
+      await say(`:information_source: Skipping helix-query.yaml update (temp-onboarding) for ${dataFolder}`);
+    } else {
+      await updateIndexConfig(dataFolder, context, say);
+    }
 
     // Enable audits (continues on partial failure, logs warnings)
     await enableAudits(

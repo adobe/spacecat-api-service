@@ -770,6 +770,11 @@ llmo-onboard:
                 type: string
                 description: The brand name for the site
                 example: "Example Brand"
+              temp-onboarding:
+                type: boolean
+                description: |
+                  When true, skips updating helix-query.yaml in the project-elmo-ui-data GitHub repo
+                  (temporary onboarding; default is false).
             required:
               - domain
               - brandName
