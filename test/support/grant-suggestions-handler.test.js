@@ -256,15 +256,18 @@ describe('grant-suggestions-handler', () => {
     });
 
     it('returns early when token exists with no remaining', async () => {
-      const mockSugg = { getId: () => 'sugg-1', getRank: () => 1 };
-      const existingToken = { getRemaining: () => 0 };
+      const mockSugg = {
+        getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+      };
+      const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([mockSugg]),
       };
       const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub().resolves({
-          grantIds: [], notGrantedIds: ['sugg-1'],
+          grantedIds: [], grantIds: [], notGrantedIds: ['sugg-1'],
         }),
+        allByIndexKeys: sandbox.stub().resolves([]),
         grantSuggestions: sandbox.stub(),
       };
       const Token = {
@@ -277,15 +280,20 @@ describe('grant-suggestions-handler', () => {
       expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
     });
 
-    it('creates token when none exists and grants top suggestions', async () => {
-      const s1 = { getId: () => 'sugg-1', getRank: () => 1 };
-      const s2 = { getId: () => 'sugg-2', getRank: () => 2 };
+    it('creates token with default total when none exists and grants top suggestions', async () => {
+      const s1 = {
+        getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+      };
+      const s2 = {
+        getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+      };
       const createdToken = { getRemaining: () => 2 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
       };
       const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: [],
           grantIds: [],
           notGrantedIds: ['sugg-1', 'sugg-2'],
         }),
@@ -301,24 +309,35 @@ describe('grant-suggestions-handler', () => {
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
+      // Called once: no re-fetch needed since no revoke occurred
       expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
       expect(Token.findBySiteIdAndTokenType).to.have.been.calledTwice;
+      // New token uses default total (no suppliedTotal)
       expect(Token.findBySiteIdAndTokenType.secondCall.args[2])
         .to.deep.include({ createIfNotFound: true });
+      expect(Token.findBySiteIdAndTokenType.secondCall.args[2])
+        .to.not.have.property('total');
       expect(SuggestionGrant.grantSuggestions).to.have.been.calledTwice;
     });
 
     it('grants only up to remaining token count', async () => {
-      const s1 = { getId: () => 'sugg-1', getRank: () => 1 };
-      const s2 = { getId: () => 'sugg-2', getRank: () => 2 };
-      const existingToken = { getRemaining: () => 1 };
+      const s1 = {
+        getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+      };
+      const s2 = {
+        getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+      };
+      const existingToken = { getId: () => 'tok-1', getRemaining: () => 1 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
       };
       const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: [],
+          grantIds: [],
           notGrantedIds: ['sugg-1', 'sugg-2'],
         }),
+        allByIndexKeys: sandbox.stub().resolves([]),
         grantSuggestions: sandbox.stub().resolves({ success: true }),
       };
       const Token = {
@@ -329,78 +348,653 @@ describe('grant-suggestions-handler', () => {
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
+      // Called once: no re-fetch needed since no revoke occurred
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
       // Only 1 remaining, so only 1 grant call
       expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
       expect(SuggestionGrant.grantSuggestions.firstCall.args[0])
         .to.deep.equal(['sugg-1']);
     });
 
-    it('adjusts total by already-granted count when creating token', async () => {
-      const s1 = { getId: () => 'sugg-1', getRank: () => 1 };
-      const createdToken = { getRemaining: () => 1 };
-      const Suggestion = {
-        allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
-      };
-      const SuggestionGrant = {
-        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
-          grantIds: ['g1', 'g2'],
-          notGrantedIds: ['sugg-1'],
-        }),
-        grantSuggestions: sandbox.stub().resolves({ success: true }),
-      };
-      const Token = {
-        findBySiteIdAndTokenType: sandbox.stub(),
-      };
-      Token.findBySiteIdAndTokenType
-        .onFirstCall().resolves(null)
-        .onSecondCall().resolves(createdToken);
-      const dataAccess = { Suggestion, SuggestionGrant, Token };
+    describe('new token (new cycle) — revoke and re-grant', () => {
+      it('revokes old grants and re-grants when new token is created', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+        const s2 = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const s3 = {
+          getId: () => 'sugg-3', getRank: () => 3, getStatus: () => 'NEW',
+        };
+        const createdToken = { getRemaining: () => 3 };
+        const tokenAfterRegrant = { getRemaining: () => 1 };
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2, s3]),
+        };
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub(),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+        // First call: initial split
+        SuggestionGrant.splitSuggestionsByGrantStatus
+          .onFirstCall().resolves({
+            grantedIds: ['sugg-1', 'sugg-2'],
+            grantIds: ['g1', 'g2'],
+            notGrantedIds: ['sugg-3'],
+          })
+          // Second call: re-fetch after revoke+re-grant, sugg-1/sugg-2 re-granted, sugg-3 not
+          .onSecondCall().resolves({
+            grantedIds: ['sugg-1', 'sugg-2'],
+            grantIds: ['new-g1', 'new-g2'],
+            notGrantedIds: ['sugg-3'],
+          });
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall()
+          .resolves(null) // no existing token
+          .onSecondCall()
+          .resolves(createdToken) // create new token
+          .onThirdCall()
+          .resolves(tokenAfterRegrant); // after re-grant
 
-      await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
 
-      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
-      // tokensPerCycle=3, 2 already granted => total=1
-      const createArgs = Token.findBySiteIdAndTokenType.secondCall.args;
-      expect(createArgs[2]).to.deep.include({ total: 1 });
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // Should revoke old grants
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledTwice;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g1');
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        // Should re-grant 2 previously granted + 1 new = 3 grant calls
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledThrice;
+      });
+
+      it('skips revoke when new token created but no existing grants', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+        const createdToken = { getRemaining: () => 3 };
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+        };
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub(),
+        };
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(null)
+          .onSecondCall().resolves(createdToken);
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // No revoke needed
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        // Called once: no re-fetch needed since no revoke occurred
+        expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+        // Grant the 1 new suggestion
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('handles empty grantIds when grantedIds exist (revokeGrants guard)', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+        const s2 = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const createdToken = { getRemaining: () => 3 };
+        const tokenAfterRegrant = { getRemaining: () => 1 };
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
+        };
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub(),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+        // grantedIds has items but grantIds is empty — triggers revokeGrants guard
+        SuggestionGrant.splitSuggestionsByGrantStatus
+          .onFirstCall().resolves({
+            grantedIds: ['sugg-1'],
+            grantIds: [],
+            notGrantedIds: ['sugg-2'],
+          })
+          .onSecondCall().resolves({
+            grantedIds: ['sugg-1'],
+            grantIds: [],
+            notGrantedIds: ['sugg-2'],
+          });
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(null)
+          .onSecondCall().resolves(createdToken)
+          .onThirdCall()
+          .resolves(tokenAfterRegrant);
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // revokeGrants called but no revokes since grantIds is empty
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        // Re-grant of grantedIds + grant of remaining
+        expect(SuggestionGrant.grantSuggestions.callCount).to.be.greaterThan(0);
+      });
+
+      it('returns early after re-grant if token is null on re-fetch', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+        const s2 = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const createdToken = { getRemaining: () => 3 };
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
+        };
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: ['sugg-1'],
+            grantIds: ['g1'],
+            notGrantedIds: ['sugg-2'],
+          }),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall()
+          .resolves(null)
+          .onSecondCall()
+          .resolves(createdToken)
+          .onThirdCall()
+          .resolves(null); // token gone on re-fetch
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // Revoke + re-grant happened but no new grants since token was null
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce; // only re-grant
+      });
     });
 
-    it('handles undefined grantIds when creating token', async () => {
-      const s1 = { getId: () => 'sugg-1', getRank: () => 1 };
-      const createdToken = { getRemaining: () => 1 };
-      const Suggestion = {
-        allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
-      };
-      const SuggestionGrant = {
-        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
-          notGrantedIds: ['sugg-1'],
-        }),
-        grantSuggestions: sandbox.stub().resolves({ success: true }),
-      };
-      const Token = {
-        findBySiteIdAndTokenType: sandbox.stub(),
-      };
-      Token.findBySiteIdAndTokenType
-        .onFirstCall().resolves(null)
-        .onSecondCall().resolves(createdToken);
-      const dataAccess = { Suggestion, SuggestionGrant, Token };
+    describe('existing token — re-grant logic', () => {
+      const mkGrant = (suggestionId, grantId) => ({
+        getSuggestionId: () => suggestionId,
+        getGrantId: () => grantId,
+      });
 
-      await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+      it('revokes only revocable grants when OUTDATED found and fills from NEW', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+        const s2 = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
 
-      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
-      const createArgs = Token.findBySiteIdAndTokenType.secondCall.args;
-      expect(createArgs[2]).to.deep.include({ total: 3 });
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2Granted = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'OUTDATED',
+        };
+        const sugg3Granted = {
+          getId: () => 'sugg-3', getRank: () => 5, getStatus: () => 'APPROVED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Granted, sugg3Granted],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1', 'sugg-2'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+            mkGrant('sugg-3', 'g3'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(tokenAfterRevoke); // after revoke
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // Should only revoke the stale grant (g2/OUTDATED), not g3 (APPROVED)
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        // Remaining=1 after revoking 1 stale grant, fills 1 from NEW
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('revokes grants with PENDING_VALIDATION status as stale', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2PendingValidation = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'PENDING_VALIDATION',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2PendingValidation],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(tokenAfterRevoke);
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('does not revoke when only NEW grants exist (no stale triggers revocation)', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+
+        const sugg2GrantedNew = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const sugg3Approved = {
+          getId: () => 'sugg-3', getRank: () => 5, getStatus: () => 'APPROVED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2GrantedNew, sugg3Approved],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+            mkGrant('sugg-3', 'g3'),
+          ]),
+          grantSuggestions: sandbox.stub(),
+          revokeSuggestionGrant: sandbox.stub(),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub().resolves(existingToken),
+        };
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // No stale grants → early return, no revocation even though NEW is revocable
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
+      });
+
+      it('revokes NEW grants alongside stale when stale triggers revocation', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 2 };
+
+        const sugg2GrantedNew = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'NEW',
+        };
+        const sugg3Outdated = {
+          getId: () => 'sugg-3', getRank: () => 5, getStatus: () => 'OUTDATED',
+        };
+        const sugg4Approved = {
+          getId: () => 'sugg-4', getRank: () => 8, getStatus: () => 'APPROVED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2GrantedNew, sugg3Outdated, sugg4Approved],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+            mkGrant('sugg-3', 'g3'),
+            mkGrant('sugg-4', 'g4'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(tokenAfterRevoke);
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // Stale (g3/OUTDATED) triggers revocation, NEW (g2) also revoked; APPROVED (g4) preserved
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledTwice;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g3');
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('revokes all grants when REJECTED found and fills from NEW', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 0 };
+        const tokenAfterRevoke = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2Rejected = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'REJECTED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Rejected],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(tokenAfterRevoke);
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('g2');
+        // Should grant from NEW with freed capacity
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('does not revoke when all grants are non-revocable', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2Approved = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'APPROVED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Approved],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+          ]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub(),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub().resolves(existingToken),
+        };
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        // No revoke since all grants are non-revocable (APPROVED)
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        // Should grant the 1 ungranted NEW
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('skips re-grant logic when no grants exist for token', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 2 };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([]),
+          grantSuggestions: sandbox.stub().resolves({ success: true }),
+          revokeSuggestionGrant: sandbox.stub(),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub().resolves(existingToken),
+        };
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+        expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      });
+
+      it('returns early if token is null after revoking revocable grants', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2Outdated = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'OUTDATED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Outdated],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            mkGrant('sugg-2', 'g2'),
+          ]),
+          grantSuggestions: sandbox.stub(),
+          revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub(),
+        };
+        Token.findBySiteIdAndTokenType
+          .onFirstCall().resolves(existingToken)
+          .onSecondCall().resolves(null); // token gone after revoke
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+
+        expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnce;
+        expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
+      });
+
+      it('throws when revokeSuggestionGrant fails for revocable grants', async () => {
+        const s1 = {
+          getId: () => 'sugg-1', getRank: () => 1, getStatus: () => 'NEW',
+        };
+
+        const existingToken = { getId: () => 'tok-1', getRemaining: () => 1 };
+
+        const sugg2Outdated = {
+          getId: () => 'sugg-2', getRank: () => 2, getStatus: () => 'OUTDATED',
+        };
+
+        const Suggestion = {
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [sugg2Outdated],
+            unprocessed: [],
+          }),
+        };
+
+        const SuggestionGrant = {
+          splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+            grantedIds: [],
+            grantIds: [],
+            notGrantedIds: ['sugg-1'],
+          }),
+          allByIndexKeys: sandbox.stub().resolves([
+            { getSuggestionId: () => 'sugg-2', getGrantId: () => 'g2' },
+          ]),
+          grantSuggestions: sandbox.stub(),
+          revokeSuggestionGrant: sandbox.stub().rejects(new Error('DB error')),
+        };
+
+        const Token = {
+          findBySiteIdAndTokenType: sandbox.stub().resolves(existingToken),
+        };
+
+        const dataAccess = { Suggestion, SuggestionGrant, Token };
+
+        try {
+          await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
+          expect.fail('Should have thrown');
+        } catch (err) {
+          expect(err.message).to.equal('Failed to revoke 1/1 grants');
+        }
+      });
     });
 
     it('skips grant for groups with no valid ids', async () => {
-      const s1 = { getId: () => '', getRank: () => 1 };
-      const existingToken = { getRemaining: () => 1 };
+      const s1 = {
+        getId: () => '', getRank: () => 1, getStatus: () => 'NEW',
+      };
+      const existingToken = { getId: () => 'tok-1', getRemaining: () => 1 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
       };
       const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: [],
+          grantIds: [],
           notGrantedIds: [''],
         }),
+        allByIndexKeys: sandbox.stub().resolves([]),
         grantSuggestions: sandbox.stub(),
       };
       const Token = {
