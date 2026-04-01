@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -129,8 +129,9 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .filter(hasText)
     .forEach((value) => {
       const { base, path } = parseUrlParts(value);
-      if (!pathsByBase.has(base)) pathsByBase.set(base, []);
-      pathsByBase.get(base).push(path || '/');
+      const normalizedBase = composeBaseURL(base);
+      if (!pathsByBase.has(normalizedBase)) pathsByBase.set(normalizedBase, []);
+      pathsByBase.get(normalizedBase).push(path || '/');
     });
 
   if (pathsByBase.size === 0) return;
