@@ -169,6 +169,7 @@ describe('getRouteHandlers', () => {
     updatePromptByBrandAndId: sinon.stub(),
     deletePromptByBrandAndId: sinon.stub(),
     bulkDeletePromptsByBrand: sinon.stub(),
+    triggerConfigSync: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -182,6 +183,7 @@ describe('getRouteHandlers', () => {
 
   const mockScrapeController = {
     getFileByKey: sinon.stub(),
+    getMetadata: sinon.stub(),
     listScrapedContentFiles: sinon.stub(),
   };
   const mockPaidController = {
@@ -374,6 +376,10 @@ describe('getRouteHandlers', () => {
     revoke: sinon.stub(),
   };
 
+  const mockTokensController = {
+    getByTokenType: sinon.stub(),
+  };
+
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
     getStatus: sinon.stub(),
@@ -435,6 +441,7 @@ describe('getRouteHandlers', () => {
       mockBotBlockerController,
       mockSentimentController,
       mockConsumersController,
+      mockTokensController,
       mockPlgOnboardingController,
       mockImsOrgAccessController,
       mockFeatureFlagsController,
@@ -522,6 +529,7 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
+      'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/all/brand-presence/weeks',
@@ -629,6 +637,7 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'GET /sites/:siteId/scraped-content/:type',
+      'GET /sites/:siteId/metadata',
       'GET /sites/:siteId/page-citability/counts',
       'GET /sites/:siteId/top-pages',
       'GET /sites/:siteId/top-pages/:source',
@@ -786,6 +795,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers/by-client-id/:clientId',
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
+      'GET /sites/:siteId/tokens/by-type/:tokenType',
       'GET /plg/onboard/status/:imsOrgId',
       'POST /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access',
@@ -877,6 +887,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/scraped-content/:type'].handler).to.equal(mockScrapeController.listScrapedContentFiles);
     expect(dynamicRoutes['GET /sites/:siteId/scraped-content/:type'].paramNames).to.deep.equal(['siteId', 'type']);
+    expect(dynamicRoutes['GET /sites/:siteId/metadata'].handler).to.equal(mockScrapeController.getMetadata);
+    expect(dynamicRoutes['GET /sites/:siteId/metadata'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid'].handler).to.equal(mockPaidController.getTopPaidPages);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-platform-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypePlatformCampaign);

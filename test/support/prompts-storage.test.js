@@ -183,7 +183,10 @@ describe('prompts-storage', () => {
         regions: ['us'],
         status: 'active',
         origin: 'human',
-        updated_at: '2026-01-01T00:00:00Z',
+        source: 'config',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'admin@test.com',
+        updated_at: '2026-02-01T00:00:00Z',
         updated_by: 'system',
         brands: { id: BRAND_UUID, name: 'Brand' },
         categories: null,
@@ -203,6 +206,10 @@ describe('prompts-storage', () => {
       expect(result.items).to.have.lengthOf(1);
       expect(result.items[0].id).to.equal(PROMPT_ID);
       expect(result.items[0].uuid).to.equal('prompt-pk-uuid');
+      expect(result.items[0].createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result.items[0].createdBy).to.equal('admin@test.com');
+      expect(result.items[0].updatedAt).to.equal('2026-02-01T00:00:00Z');
+      expect(result.items[0].updatedBy).to.equal('system');
       expect(result.total).to.equal(1);
       expect(result.limit).to.equal(100);
       expect(result.page).to.equal(1);
@@ -522,6 +529,11 @@ describe('prompts-storage', () => {
         regions: [],
         status: 'active',
         origin: 'human',
+        source: 'sheet',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'admin@test.com',
+        updated_at: '2026-02-01T00:00:00Z',
+        updated_by: 'user@test.com',
         brands: { id: BRAND_UUID, name: 'Brand' },
         categories: null,
         topics: null,
@@ -537,6 +549,11 @@ describe('prompts-storage', () => {
       expect(result.id).to.equal(PROMPT_ID);
       expect(result.uuid).to.equal('prompt-pk-uuid');
       expect(result.prompt).to.equal('Prompt');
+      expect(result.source).to.equal('sheet');
+      expect(result.createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result.createdBy).to.equal('admin@test.com');
+      expect(result.updatedAt).to.equal('2026-02-01T00:00:00Z');
+      expect(result.updatedBy).to.equal('user@test.com');
     });
 
     it('returns prompt with category and topic when present', async () => {
@@ -606,6 +623,17 @@ describe('prompts-storage', () => {
       expect(result.topic).to.be.null;
       expect(result.brandId).to.be.null;
       expect(result.brandName).to.be.null;
+    });
+
+    it('returns null when prompt is not found', async () => {
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await getPromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        postgrestClient: client,
+      });
+      expect(result).to.be.null;
     });
 
     it('throws on query error', async () => {
@@ -1228,6 +1256,8 @@ describe('prompts-storage', () => {
       status: 'active',
       origin: 'human',
       source: 'config',
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: 'system',
       updated_at: '2026-01-01T00:00:00Z',
       updated_by: 'system',
       brands: { id: BRAND_UUID, name: 'Brand' },
@@ -1372,6 +1402,8 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.prompts[0].source).to.equal('sheet');
+      expect(result.prompts[0].createdAt).to.be.undefined;
+      expect(result.prompts[0].createdBy).to.be.undefined;
     });
 
     it('defaults source to config when not provided', async () => {

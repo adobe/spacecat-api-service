@@ -157,6 +157,7 @@ const routeRequiredCapabilities = {
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': 'organization:write',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
@@ -357,6 +358,7 @@ const routeRequiredCapabilities = {
 
   // Scraped Content
   'GET /sites/:siteId/scraped-content/:type': 'site:read',
+  'GET /sites/:siteId/metadata': 'site:read',
   'GET /sites/:siteId/files': 'site:read',
 
   // Scrape Jobs
@@ -448,6 +450,9 @@ const routeRequiredCapabilities = {
 
   // Sentiment - Config
   'GET /sites/:siteId/sentiment/config': 'sentimentTopic:read',
+
+  // Tokens
+  'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
 };
 
 export default routeRequiredCapabilities;
