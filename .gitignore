@@ -24,3 +24,5 @@ admin-idp-p*.json
 # V1 to V2 migration scripts and test data (local only)
 scripts/
 docs/index.html
+docs/openapi/dist/
+clients/python/spacecat_api_types/models.py

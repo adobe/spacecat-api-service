@@ -1,0 +1,10 @@
+[project]
+name = "spacecat-api-types"
+version = "0.0.0"
+description = "Generated Pydantic v2 models for the SpaceCat API"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
