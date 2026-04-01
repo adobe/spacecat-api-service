@@ -1,3 +1,16 @@
+# [1.397.0](https://github.com/adobe/spacecat-api-service/compare/v1.396.0...v1.397.0) (2026-04-01)
+
+
+### Bug Fixes
+
+* add geo-brand-presence handler enrollment to HTTP onboarding path ([#2094](https://github.com/adobe/spacecat-api-service/issues/2094)) ([7d10dde](https://github.com/adobe/spacecat-api-service/commit/7d10dde8d07c557fb5bc5a8c1fd2c2d5ab4e2e99))
+* normalize URLs in syncBrandSites to prevent silent brand-site linkage failures ([#2097](https://github.com/adobe/spacecat-api-service/issues/2097)) ([2048b71](https://github.com/adobe/spacecat-api-service/commit/2048b71930a8646bfef194995ba9395cacc43628)), closes [#2096](https://github.com/adobe/spacecat-api-service/issues/2096)
+
+
+### Features
+
+* add topics CRUD endpoints (v2) ([#2095](https://github.com/adobe/spacecat-api-service/issues/2095)) ([3e51c52](https://github.com/adobe/spacecat-api-service/commit/3e51c52f823077548604c3cd552a522fbbf95cbe))
+
 # [1.396.0](https://github.com/adobe/spacecat-api-service/compare/v1.395.0...v1.396.0) (2026-04-01)
 
 

@@ -69,6 +69,7 @@ const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
+const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -889,11 +890,17 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
 
-      const { domain, brandName, imsOrgId: payloadImsOrgId } = data;
+      const {
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence,
+      } = data;
       const tempOnboarding = data['temp-onboarding'] === true;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
+      }
+
+      if (cadence && !VALID_CADENCES.includes(cadence)) {
+        return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
       }
 
       let imsOrgId;
@@ -944,6 +951,7 @@ function LlmoController(ctx) {
           domain,
           brandName,
           imsOrgId,
+          cadence,
           tempOnboarding,
         },
         context,

@@ -1198,6 +1198,104 @@ export async function enableImports(siteConfig, imports, log, say = () => {}) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Geo-brand-presence handler enrollment
+// ---------------------------------------------------------------------------
+
+export const GEO_BRAND_PRESENCE_WEEKLY_FREE = 'geo-brand-presence-free';
+export const GEO_BRAND_PRESENCE_WEEKLY_PAID = 'geo-brand-presence-paid';
+export const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
+
+const GEO_FREE_SPLIT_COUNT = 23;
+const GEO_FREE_SPLITS = Array.from(
+  { length: GEO_FREE_SPLIT_COUNT },
+  (_, i) => `geo-brand-presence-free-${i + 1}`,
+);
+
+/**
+ * Finds the geo-brand-presence-free split with the fewest enabled sites.
+ * @param {object} configuration - Configuration instance
+ * @returns {string} The split handler to assign (e.g. 'geo-brand-presence-free-1')
+ */
+function findBestFreeSplit(configuration) {
+  let bestSplit = GEO_FREE_SPLITS[0];
+  let minCount = Infinity;
+
+  for (const split of GEO_FREE_SPLITS) {
+    const count = configuration.getEnabledSiteIdsForHandler(split).length;
+    if (count < minCount) {
+      minCount = count;
+      bestSplit = split;
+      if (count === 0) break;
+    }
+  }
+
+  return bestSplit;
+}
+
+/**
+ * Checks if a site is enabled in any geo-brand-presence-free split.
+ * @param {object} configuration - Configuration instance
+ * @param {object} site - Site instance
+ * @returns {boolean}
+ */
+export function isAnyFreeSplitEnabled(configuration, site) {
+  return GEO_FREE_SPLITS.some(
+    (split) => configuration.isHandlerEnabledForSite(split, site),
+  );
+}
+
+/**
+ * Disables a site from all geo-brand-presence-free splits.
+ * @param {object} configuration - Configuration instance
+ * @param {object} site - Site instance
+ */
+function disableAllFreeSplits(configuration, site) {
+  for (const split of GEO_FREE_SPLITS) {
+    configuration.disableHandlerForSite(split, site);
+  }
+}
+
+/**
+ * Enrolls a site in geo-brand-presence handlers based on cadence.
+ * Disables all other variants before enabling the requested one.
+ * @param {object} site - The site object
+ * @param {object} context - The request context (with dataAccess, log)
+ * @param {string} [cadence='weekly-free'] - One of 'daily', 'weekly-paid', 'weekly-free'
+ * @param {Function} [say] - Optional progress message callback
+ * @returns {Promise<string>} The handler name that was enabled
+ */
+export async function enrollGeoBrandPresence(site, context, cadence = 'weekly-free', say = () => {}) {
+  const { dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+  const siteId = site.getId();
+
+  // Disable all variants first
+  configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+  configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+  configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+  disableAllFreeSplits(configuration, site);
+
+  let enabledHandler;
+  if (cadence === 'daily') {
+    configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+    enabledHandler = GEO_BRAND_PRESENCE_DAILY;
+  } else if (cadence === 'weekly-paid') {
+    configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+    enabledHandler = GEO_BRAND_PRESENCE_WEEKLY_PAID;
+  } else {
+    const targetSplit = findBestFreeSplit(configuration);
+    configuration.enableHandlerForSite(targetSplit, site);
+    enabledHandler = targetSplit;
+  }
+
+  log.info(`Enabled brand presence (${enabledHandler}) for site ${siteId}`);
+  say(`:calendar: Brand presence cadence: ${enabledHandler}`);
+  await configuration.save();
+  return enabledHandler;
+}
+
 export async function triggerAudits(audits, context, site) {
   const { sqs, dataAccess, log } = context;
   const { Configuration } = dataAccess;
@@ -1238,6 +1336,8 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
+ * @param {string} [params.cadence='weekly-free'] - Brand presence cadence
+ *   ('daily', 'weekly-paid', 'weekly-free')
  * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
  *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {object} context - The request context
@@ -1246,7 +1346,9 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  */
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
-    domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType, tempOnboarding,
+    domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
+    cadence = 'weekly-free',
+    tempOnboarding,
   } = params;
   const { env, log } = context;
 
@@ -1294,6 +1396,14 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'],
       say,
     );
+
+    // Enroll in geo-brand-presence handler for recurring brand presence data collection
+    try {
+      await enrollGeoBrandPresence(site, context, cadence, say);
+    } catch (error) {
+      log.warn(`Failed to enroll geo-brand-presence for site ${site.getId()}: ${error.message}`);
+      say(`:warning: Failed to configure brand presence cadence: ${error.message}`);
+    }
 
     // Get current site config
     const siteConfig = site.getConfig();
@@ -1452,7 +1562,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     if (site) {
       await revokeEnrollment(site, context);
     }
-    // Rolling back llmo config is not required, as it's the last step and won't have been saved
+    // Note: some config may already be persisted (audits, geo-brand-presence, v2 customer config).
+    // Full rollback is not attempted; cleanup is limited to SharePoint and enrollment.
     throw error;
   }
 }
