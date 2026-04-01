@@ -887,10 +887,17 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
 
-      const { domain, brandName, imsOrgId: payloadImsOrgId } = data;
+      const {
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence,
+      } = data;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
+      }
+
+      const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+      if (cadence && !VALID_CADENCES.includes(cadence)) {
+        return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
       }
 
       let imsOrgId;
@@ -937,7 +944,9 @@ function LlmoController(ctx) {
 
       // Perform the complete onboarding process
       const result = await performLlmoOnboarding(
-        { domain, brandName, imsOrgId },
+        {
+          domain, brandName, imsOrgId, cadence,
+        },
         context,
       );
 

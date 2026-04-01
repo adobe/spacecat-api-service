@@ -1273,6 +1273,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1493,6 +1496,9 @@ describe('LLMO Onboarding Functions', () => {
       };
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1599,6 +1605,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1693,6 +1702,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1780,6 +1792,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1869,6 +1884,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1960,6 +1978,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2051,6 +2072,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2133,6 +2157,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2269,6 +2296,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2392,6 +2422,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2502,6 +2535,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
