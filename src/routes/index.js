@@ -181,6 +181,7 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
+    'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
