@@ -89,6 +89,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
+ * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -135,6 +136,7 @@ export default function getRouteHandlers(
   consumersController,
   plgOnboardingController,
   imsOrgAccessController,
+  featureFlagsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -179,6 +181,7 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
+    'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -441,6 +444,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+    'POST /sites/:siteId/site-enrollments': siteEnrollmentController.createPlgEnrollment,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
@@ -451,6 +455,11 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
+    'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
+      featureFlagsController.putByOrganizationProductAndName,
+    'DELETE /organizations/:organizationId/feature-flags/:product/:flagName':
+      featureFlagsController.deleteByOrganizationProductAndName,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
