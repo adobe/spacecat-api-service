@@ -1245,7 +1245,7 @@ example-com:
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
 
       // Verify log message uses new format
-      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabling weekly-paid brand presence audit'));
+      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabled brand presence (geo-brand-presence-paid)'));
     });
 
     it('should handle daily cadence and enable correct handlers', async () => {
@@ -1281,7 +1281,7 @@ example-com:
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
 
       // Verify log message
-      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabling daily brand presence audit and disabling weekly'));
+      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabled brand presence (geo-brand-presence-daily)'));
     });
 
     it('should default to weekly when brand presence cadence is not provided', async () => {
