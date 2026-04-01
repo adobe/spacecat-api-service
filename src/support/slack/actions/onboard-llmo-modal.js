@@ -176,6 +176,13 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
               {
                 text: {
                   type: 'plain_text',
+                  text: 'Weekly (Paid)',
+                },
+                value: 'weekly-paid',
+              },
+              {
+                text: {
+                  type: 'plain_text',
                   text: 'Daily',
                 },
                 value: 'daily',
@@ -288,6 +295,13 @@ async function elmoOnboardingModal(body, client, respond, brandURL, currentCaden
                   text: 'Weekly',
                 },
                 value: 'weekly',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Weekly (Paid)',
+                },
+                value: 'weekly-paid',
               },
               {
                 text: {
@@ -426,7 +440,8 @@ export function startLLMOOnboarding(lambdaContext) {
  * @param {string} input.brandName
  * @param {string} input.imsOrgId
  * @param {string} [input.deliveryType]
- * @param {'weekly' | 'weekly-free' | 'weekly-paid' | 'daily'} [input.brandPresenceCadence]
+ * @param {'weekly-free' | 'weekly-paid' | 'daily' | 'weekly'} [input.brandPresenceCadence]
+ *   'weekly' is a legacy alias for 'weekly-free' (from the Slack modal dropdown).
  * @param {Object} lambdaCtx
  * @param {Object} slackCtx
  */
@@ -523,7 +538,8 @@ export function onboardLLMOModal(lambdaContext) {
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
       const brandPresenceCadenceRaw = values.brand_presence_cadence_input
         ?.brand_presence_cadence?.selected_option?.value;
-      const brandPresenceCadence = (brandPresenceCadenceRaw === 'daily' || brandPresenceCadenceRaw === 'weekly')
+      const validCadences = ['daily', 'weekly', 'weekly-paid'];
+      const brandPresenceCadence = validCadences.includes(brandPresenceCadenceRaw)
         ? brandPresenceCadenceRaw
         : 'weekly';
 

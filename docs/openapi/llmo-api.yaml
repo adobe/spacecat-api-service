@@ -770,6 +770,17 @@ llmo-onboard:
                 type: string
                 description: The brand name for the site
                 example: "Example Brand"
+              cadence:
+                type: string
+                enum:
+                  - daily
+                  - weekly-paid
+                  - weekly-free
+                default: weekly-free
+                description: >
+                  Brand presence monitoring cadence. Controls how often brand
+                  presence data is collected via geo-brand-presence handlers.
+                example: "weekly-free"
             required:
               - domain
               - brandName

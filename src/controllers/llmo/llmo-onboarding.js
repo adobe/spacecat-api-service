@@ -1390,7 +1390,12 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     );
 
     // Enroll in geo-brand-presence handler for recurring brand presence data collection
-    await enrollGeoBrandPresence(site, context, cadence, say);
+    try {
+      await enrollGeoBrandPresence(site, context, cadence, say);
+    } catch (error) {
+      log.warn(`Failed to enroll geo-brand-presence for site ${site.getId()}: ${error.message}`);
+      say(`:warning: Failed to configure brand presence cadence: ${error.message}`);
+    }
 
     // Get current site config
     const siteConfig = site.getConfig();
@@ -1549,7 +1554,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     if (site) {
       await revokeEnrollment(site, context);
     }
-    // Rolling back llmo config is not required, as it's the last step and won't have been saved
+    // Note: some config may already be persisted (audits, geo-brand-presence, v2 customer config).
+    // Full rollback is not attempted; cleanup is limited to SharePoint and enrollment.
     throw error;
   }
 }

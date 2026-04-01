@@ -69,6 +69,7 @@ const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
+const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -895,7 +896,6 @@ function LlmoController(ctx) {
         return badRequest('domain and brandName are required');
       }
 
-      const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
       if (cadence && !VALID_CADENCES.includes(cadence)) {
         return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
       }
