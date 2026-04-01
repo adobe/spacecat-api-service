@@ -2182,7 +2182,7 @@ describe('Sites Controller', () => {
   });
 
   describe('Metrics filtering by top organic search pages', () => {
-    it('filters metrics by top N organic search pages from Ahrefs', async () => {
+    it('filters metrics by top N organic search pages from SEO data', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2195,7 +2195,7 @@ describe('Sites Controller', () => {
         { url: 'https://example.com/page5', pageviews: 1000, lcp: 1600 },
       ];
 
-      // Mock top pages from Ahrefs
+      // Mock top pages from SEO data
       const mockTopPages = [
         { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
         { getUrl: () => 'https://example.com/page3', getTraffic: () => 8000 },
@@ -2222,7 +2222,7 @@ describe('Sites Controller', () => {
 
       const response = await result.json();
 
-      // Should only include pages that are in top 2 Ahrefs pages (page1, page3)
+      // Should only include pages that are in top 2 SEO pages (page1, page3)
       expect(response).to.have.length(2);
       expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
       expect(response.find((m) => m.url === 'https://example.com/page3')).to.exist;
@@ -2529,7 +2529,7 @@ describe('Sites Controller', () => {
       expect(error).to.have.property('message', 'filterByTopOrganicSearchPages must be a positive integer');
     });
 
-    it('returns empty array when no Ahrefs pages found', async () => {
+    it('returns empty array when no SEO pages found', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2558,12 +2558,12 @@ describe('Sites Controller', () => {
 
       const response = await result.json();
 
-      // Should return empty array when user requested filtering but no Ahrefs pages exist
+      // Should return empty array when user requested filtering but no SEO pages exist
       expect(response).to.have.length(0);
       expect(loggerStub.warn).to.have.been.called;
     });
 
-    it('returns internal server error when Ahrefs data fetch fails', async () => {
+    it('returns internal server error when SEO data fetch fails', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2595,7 +2595,7 @@ describe('Sites Controller', () => {
       expect(response.message).to.include('Database error');
     });
 
-    it('returns empty array when no Ahrefs pages match base URL filter', async () => {
+    it('returns empty array when no SEO pages match base URL filter', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2852,7 +2852,7 @@ describe('Sites Controller', () => {
         },
       ];
 
-      // But top 3 Ahrefs pages include page2 which has no RUM data
+      // But top 3 SEO pages include page2 which has no RUM data
       const mockTopPages = [
         { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
         { getUrl: () => 'https://example.com/page2', getTraffic: () => 9000 },
