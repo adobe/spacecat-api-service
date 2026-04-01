@@ -643,6 +643,9 @@ site-opportunity-suggestions-edge-deploy:
                       description: GeoExperiment record ID
                     geoExperimentStatus:
                       type: string
+                      enum: [GENERATING_BASELINE]
+                    geoExperimentPhase:
+                      type: string
                       enum: [pre_analysis_submitted]
                     prePhaseScheduleId:
                       type: string
@@ -707,8 +710,7 @@ site-geo-experiment:
     operationId: getGeoExperiment
     summary: Get geo experiment details
     description: |
-      Returns the full details of a geo experiment, including associated async jobs
-      and prompts (fetched from S3).
+      Returns the full details of a geo experiment, including prompts (fetched from S3).
     tags:
       - geo-experiments
     responses:
@@ -721,30 +723,6 @@ site-geo-experiment:
                 - $ref: '#/GeoExperiment'
                 - type: object
                   properties:
-                    jobs:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          id:
-                            type: string
-                            format: uuid
-                          status:
-                            type: string
-                          startedAt:
-                            type:
-                              - string
-                              - 'null'
-                            format: date-time
-                          endedAt:
-                            type:
-                              - string
-                              - 'null'
-                            format: date-time
-                          error:
-                            type:
-                              - object
-                              - 'null'
                     prompts:
                       type:
                         - array
@@ -791,16 +769,22 @@ GeoExperiment:
         - onsite_opportunity_deployment
     status:
       type: string
+      description: High-level experiment state
       enum:
-        - initiated
+        - GENERATING_BASELINE
+        - IN_PROGRESS
+        - COMPLETED
+        - FAILED
+    phase:
+      type: string
+      description: Detailed step within the experiment lifecycle
+      enum:
         - pre_analysis_submitted
         - pre_analysis_done
-        - pre_analysis_failed
-        - optimisation_deployed
+        - deployment_started
+        - deployment_completed
         - post_analysis_submitted
         - post_analysis_done
-        - post_analysis_failed
-        - failed
     siteId:
       type: string
       format: uuid
@@ -824,6 +808,11 @@ GeoExperiment:
         format: uuid
     promptsCount:
       type: integer
+    promptsLocation:
+      type:
+        - string
+        - 'null'
+      description: S3 key of the uploaded prompts JSON file
     metadata:
       type:
         - object

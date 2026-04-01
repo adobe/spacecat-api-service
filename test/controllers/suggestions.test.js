@@ -5711,7 +5711,7 @@ describe('Suggestions Controller', () => {
       expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
     });
 
-    it('returns 500 and removes GeoExperiment when AsyncJob creation fails', async () => {
+    it('returns 207 with failure and removes GeoExperiment when AsyncJob creation fails', async () => {
       const removeStubFn = sandbox.stub().resolves();
       mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
         const id = payload.geoExperimentId;
@@ -5733,9 +5733,9 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.message).to.include('job create failed');
+      expect(body.suggestions[0].message).to.include('job create failed');
       expect(removeStubFn).to.have.been.calledOnce;
     });
 
@@ -5760,25 +5760,14 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.message).to.include('geo save failed');
+      expect(body.suggestions[0].message).to.include('geo save failed');
       expect(removeStubFn).to.have.been.calledOnce;
       expect(context.log.error.calledWithMatch('Failed to update GeoExperiment pre schedule ID')).to.equal(true);
     });
 
-    it('returns 207 with failure and logs when GeoExperiment remove fails during cleanup', async () => {
-      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
-        const id = payload.geoExperimentId;
-        return {
-          getId: () => id,
-          setPreScheduleId: sandbox.stub(),
-          setStatus: sandbox.stub(),
-          setUpdatedBy: sandbox.stub(),
-          save: sandbox.stub().resolves(),
-          remove: sandbox.stub().callsFake(() => Promise.reject(new Error('remove failed'))),
-        };
-      });
+    it('returns 207 success and logs warning when marking suggestion as EXPERIMENT_IN_PROGRESS fails', async () => {
       edgeSuggestions[0].save.rejects(new Error('suggestion persist failed'));
 
       const response = await suggestionsController.deploySuggestionToEdge({
@@ -5789,7 +5778,9 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(context.log.error.calledWithMatch('Failed to clean up GeoExperiment')).to.equal(true);
+      const body = await response.json();
+      expect(body.geoExperimentId).to.be.a('string');
+      expect(context.log.warn.calledWithMatch(/suggestion.*failed to mark as EXPERIMENT_IN_PROGRESS/i)).to.equal(true);
     });
 
     it('returns 207 with failure when S3 prompts upload fails before GeoExperiment is created', async () => {
@@ -5931,7 +5922,7 @@ describe('Suggestions Controller', () => {
       expect(failed[0].uuid).to.equal(notFoundId);
     });
 
-    it('returns 500 when DRS call fails', async () => {
+    it('returns 207 with failure when DRS call fails', async () => {
       mockDrsClient.createExperimentSchedule.rejects(new Error('DRS unavailable'));
 
       const response = await suggestionsController.deploySuggestionToEdge({
@@ -5941,9 +5932,37 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.message).to.include('DRS unavailable');
+      expect(body.suggestions[0].message).to.include('DRS unavailable');
+    });
+
+    it('returns 207 with failure when DRS returns no schedule ID', async () => {
+      const removeStubFn = sandbox.stub().resolves();
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
+        const id = payload.geoExperimentId;
+        return {
+          getId: () => id,
+          setPreScheduleId: sandbox.stub(),
+          setStatus: sandbox.stub(),
+          setUpdatedBy: sandbox.stub(),
+          save: sandbox.stub().resolves(),
+          remove: removeStubFn,
+        };
+      });
+      mockDrsClient.createExperimentSchedule.resolves({});
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: { AWS_ENV: 'dev' },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0].message).to.include('DRS schedule created but returned no schedule ID');
+      expect(removeStubFn).to.have.been.called;
     });
 
     it('uses direct deploy flow when Prefer: respond-async is missing', async () => {
@@ -6854,14 +6873,29 @@ describe('Suggestions Controller', () => {
     });
 
     it('returns list of experiments without prompts', async () => {
-      const exp1 = {
-        getId: () => 'exp-id-1',
-        toJSON: () => ({ siteId: SITE_ID, name: 'Exp 1', status: 'initiated' }),
-      };
-      const exp2 = {
-        getId: () => 'exp-id-2',
-        toJSON: () => ({ siteId: SITE_ID, name: 'Exp 2', status: 'post_analysis_done' }),
-      };
+      const makeExp = (id, name, status, phase) => ({
+        getId: () => id,
+        getSiteId: () => SITE_ID,
+        getOpportunityId: () => undefined,
+        getType: () => 'onsite_opportunity_deployment',
+        getName: () => name,
+        getStatus: () => status,
+        getPhase: () => phase,
+        getPreScheduleId: () => undefined,
+        getPostScheduleId: () => undefined,
+        getSuggestionIds: () => [],
+        getPromptsCount: () => 0,
+        getPromptsLocation: () => undefined,
+        getMetadata: () => undefined,
+        getError: () => undefined,
+        getStartTime: () => undefined,
+        getEndTime: () => undefined,
+        getUpdatedBy: () => 'test',
+        getCreatedAt: () => '2026-01-01T00:00:00.000Z',
+        getUpdatedAt: () => '2026-01-01T00:00:00.000Z',
+      });
+      const exp1 = makeExp('exp-id-1', 'Exp 1', 'GENERATING_BASELINE', 'pre_analysis_submitted');
+      const exp2 = makeExp('exp-id-2', 'Exp 2', 'COMPLETED', 'post_analysis_done');
       mockSuggestionDataAccess.GeoExperiment.allBySiteId = sandbox.stub().resolves({
         data: [exp1, exp2],
         cursor: null,
@@ -6917,13 +6951,23 @@ describe('Suggestions Controller', () => {
       mockGeoExperiment = {
         getId: () => GEO_EXP_ID,
         getSiteId: () => SITE_ID,
-        toJSON: () => ({
-          siteId: SITE_ID,
-          type: 'onsite_opportunity_deployment',
-          status: 'pre_analysis_submitted',
-          name: 'Test Experiment',
-          promptsCount: 3,
-        }),
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'onsite_opportunity_deployment',
+        getName: () => 'Test Experiment',
+        getStatus: () => 'GENERATING_BASELINE',
+        getPhase: () => 'pre_analysis_submitted',
+        getPreScheduleId: () => 'sched-pre-001',
+        getPostScheduleId: () => undefined,
+        getSuggestionIds: () => [SUGGESTION_IDS[0]],
+        getPromptsCount: () => 3,
+        getPromptsLocation: () => `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-prompts.json`,
+        getMetadata: () => undefined,
+        getError: () => undefined,
+        getStartTime: () => undefined,
+        getEndTime: () => undefined,
+        getUpdatedBy: () => 'test',
+        getCreatedAt: () => '2026-01-01T00:00:00.000Z',
+        getUpdatedAt: () => '2026-01-01T00:00:00.000Z',
       };
 
       mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
@@ -6985,28 +7029,11 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(404);
     });
 
-    it('returns experiment details with jobs and prompts on success', async () => {
+    it('returns experiment details with prompts on success', async () => {
       const promptsPayload = [{ text: 'hello' }];
       context.s3.s3Client.send.resolves({
         Body: { transformToString: sandbox.stub().resolves(JSON.stringify(promptsPayload)) },
       });
-      const jobRows = [{
-        id: 'job-uuid-001',
-        status: 'IN_PROGRESS',
-        started_at: '2026-01-01T00:00:00.000Z',
-        ended_at: null,
-        error: null,
-      }];
-      context.dataAccess = {
-        ...mockSuggestionDataAccess,
-        services: {
-          postgrestClient: {
-            from: sandbox.stub().returnsThis(),
-            select: sandbox.stub().returnsThis(),
-            filter: sandbox.stub().resolves({ data: jobRows, error: null }),
-          },
-        },
-      };
       const response = await suggestionsController.getGeoExperiment({
         ...context,
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
@@ -7014,13 +7041,10 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.id).to.equal(GEO_EXP_ID);
-      expect(body.jobs).to.have.lengthOf(1);
-      expect(body.jobs[0].id).to.equal('job-uuid-001');
-      expect(body.jobs[0].startedAt).to.equal('2026-01-01T00:00:00.000Z');
       expect(body.prompts).to.deep.equal(promptsPayload);
     });
 
-    it('returns null prompts when S3 fetch fails', async () => {
+    it('returns null prompts and logs when S3 fetch fails', async () => {
       context.s3.s3Client.send.rejects(new Error('NoSuchKey'));
       const response = await suggestionsController.getGeoExperiment({
         ...context,
@@ -7029,40 +7053,24 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.prompts).to.be.null;
-      expect(body.jobs).to.deep.equal([]);
+      expect(context.log.info.calledWithMatch(/Could not fetch prompts/)).to.equal(true);
     });
 
-    it('skips job query when postgrestClient is not available', async () => {
-      context.s3.s3Client.send.rejects(new Error('NoSuchKey'));
-      // no services.postgrestClient on dataAccess
+    it('uses fallback S3 key when promptsLocation is not set', async () => {
+      mockGeoExperiment.getPromptsLocation = () => null;
+      const promptsPayload = [{ text: 'fallback' }];
+      context.s3.s3Client.send.resolves({
+        Body: { transformToString: sandbox.stub().resolves(JSON.stringify(promptsPayload)) },
+      });
       const response = await suggestionsController.getGeoExperiment({
         ...context,
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
       expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body.jobs).to.deep.equal([]);
-    });
-
-    it('returns empty jobs array when postgrest returns an error', async () => {
-      context.s3.s3Client.send.rejects(new Error('NoSuchKey'));
-      context.dataAccess = {
-        ...mockSuggestionDataAccess,
-        services: {
-          postgrestClient: {
-            from: sandbox.stub().returnsThis(),
-            select: sandbox.stub().returnsThis(),
-            filter: sandbox.stub().resolves({ data: null, error: new Error('DB error') }),
-          },
-        },
-      };
-      const response = await suggestionsController.getGeoExperiment({
-        ...context,
-        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
-      });
-      expect(response.status).to.equal(200);
-      const body = await response.json();
-      expect(body.jobs).to.deep.equal([]);
+      expect(body.prompts).to.deep.equal(promptsPayload);
+      const sentCommand = context.s3.s3Client.send.firstCall.args[0];
+      expect(sentCommand.Key).to.equal(`geo-experiments/${SITE_ID}/${GEO_EXP_ID}-prompts.json`);
     });
   });
 

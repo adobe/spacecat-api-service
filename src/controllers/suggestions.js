@@ -33,6 +33,7 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
+import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
   sendAutofixMessage,
   getCookieValue,
@@ -45,6 +46,14 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+const GEO_EXPERIMENT_SCHEDULE = Object.freeze({
+  PRE_CRON_EXPRESSION: '0 * * * *', // hourly (fires immediately via triggerImmediately: true)
+  // 5 minutes — only needs to live long enough for the immediate trigger
+  PRE_EXPIRY_MS: 5 * 60 * 1000,
+  PLATFORMS: ['chatgpt_free', 'perplexity'],
+  PROVIDER_IDS: ['brightdata', 'openai_web_search'],
+});
 
 /**
  * Suggestions controller.
@@ -1467,7 +1476,9 @@ function SuggestionsController(ctx, sqs, env) {
     const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
 
     if (!accessControlUtil.isLLMOAdministrator()) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`);
+      context.log.warn(
+        `[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`,
+      );
       return forbidden('Only LLMO administrators can deploy suggestions to edge');
     }
 
@@ -1480,19 +1491,24 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no request body data provided`);
       return badRequest('No data provided');
     }
-    const { suggestionIds } = context.data;
-    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+    const { suggestionIds: rawSuggestionIds } = context.data;
+    if (!isArray(rawSuggestionIds) || rawSuggestionIds.length === 0) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestionIds is not a non-empty array`);
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
+    const suggestionIds = [...new Set(rawSuggestionIds)];
 
     if (!await accessControlUtil.hasAccess(site)) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
+      context.log.warn(
+        `[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`,
+      );
       return forbidden('User does not belong to the organization');
     }
 
     if (!await accessControlUtil.isOwnerOfSite(site)) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not the owner of the site`);
+      context.log.warn(
+        `[edge-deploy-failed] site: ${apexBaseUrl}, user is not the owner of the site`,
+      );
       return forbidden('User does not have access to deploy edge optimize fixes for this site');
     }
 
@@ -1582,13 +1598,11 @@ function SuggestionsController(ctx, sqs, env) {
       && preferHeaderValue.toLowerCase() === 'respond-async';
 
     if (isAsyncExperimentRequested) {
-      context.log.info(`[edge-deploy] async experiment requested for site: ${apexBaseUrl}`);
-
+      context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
       let urls;
-
       const geoExperimentId = crypto.randomUUID();
 
-      context.log.info('[geo-experiment] Initiating experiment', {
+      context.log.info('[edge-geo-exp] Initiating experiment', {
         geoExperimentId,
         opportunityId,
         opportunityType: opportunity.getType(),
@@ -1600,20 +1614,29 @@ function SuggestionsController(ctx, sqs, env) {
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
         let promptSources;
         if (domainWideSuggestions.length > 0) {
-          const top20ByContentGainRatio = [...validSuggestions]
+          const newStatus = SuggestionModel.STATUSES.NEW;
+          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
+          const top15ByContentGainRatio = [...allNew]
+            .filter((s) => s.getData()?.isDomainWide !== true)
             .sort((a, b) => (b.getData()?.contentGainRatio || 0)
               - (a.getData()?.contentGainRatio || 0))
             .slice(0, 15);
-          promptSources = top20ByContentGainRatio
+          promptSources = top15ByContentGainRatio
             .sort((a, b) => (b.getData()?.agenticTraffic || 0) - (a.getData()?.agenticTraffic || 0))
             .slice(0, 10);
         } else {
           promptSources = validSuggestions;
         }
-        urls = promptSources.map((s) => s.getData()?.url).filter(Boolean);
+        const domainWideSuggestionIds = new Set(
+          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
+        );
+        urls = promptSources
+          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
+          .map((s) => s.getData()?.url)
+          .filter(Boolean);
         const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
         if (prompts.length === 0) {
-          context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
+          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
           throw new Error('No prompts found in selected suggestions');
         }
         const promptsS3Key = `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
@@ -1623,7 +1646,7 @@ function SuggestionsController(ctx, sqs, env) {
           Body: JSON.stringify(prompts),
           ContentType: 'application/json',
         }));
-        context.log.info(`[geo-experiment] Uploaded ${prompts.length} prompts to S3: ${promptsS3Key}`);
+        context.log.info(`[edge-geo-exp] Uploaded ${prompts.length} prompts to S3: ${promptsS3Key}`);
 
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
@@ -1635,7 +1658,7 @@ function SuggestionsController(ctx, sqs, env) {
           promptsLocation: promptsS3Key,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
-          suggestionIds: promptSources.map((s) => s.getId()),
+          suggestionIds: validSuggestionIds,
           metadata: {
             urls,
           },
@@ -1646,7 +1669,7 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('GeoExperiment was not created');
         }
 
-        context.log.info(`[geo-experiment] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_SUBMITTED`);
+        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_SUBMITTED`);
 
         let preScheduleId;
         try {
@@ -1655,29 +1678,30 @@ function SuggestionsController(ctx, sqs, env) {
             siteId,
             experimentId: geoExperimentId,
             experimentPhase: EXPERIMENT_PHASES.PRE,
-            cronExpression: '0 * * * *',
-            expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-            platforms: ['chatgpt_free', 'perplexity'],
-            providerIds: ['brightdata', 'openai_web_search'],
+            cronExpression: GEO_EXPERIMENT_SCHEDULE.PRE_CRON_EXPRESSION,
+            expiresAt: new Date(Date.now() + GEO_EXPERIMENT_SCHEDULE.PRE_EXPIRY_MS).toISOString(),
+            platforms: GEO_EXPERIMENT_SCHEDULE.PLATFORMS,
+            providerIds: GEO_EXPERIMENT_SCHEDULE.PROVIDER_IDS,
             triggerImmediately: true,
+            enableBrandPresence: true,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
           });
           preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
-          context.log.info(`[geo-experiment] DRS pre-analysis schedule created: ${preScheduleId}`);
+          if (!preScheduleId) {
+            throw new Error('DRS schedule created but returned no schedule ID');
+          }
+          context.log.info(`[edge-geo-exp] DRS pre-analysis schedule created: ${preScheduleId}`);
         } catch (drsError) {
-          context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, DRS schedule creation failed: ${drsError.message}`, drsError);
-          await geoExperiment.remove();
-          return createResponse({ message: `Failed to initiate experiment: ${drsError.message}` }, 500);
+          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, DRS schedule creation failed: ${drsError.message}`, drsError);
+          throw drsError;
         }
-
         try {
           geoExperiment.setPreScheduleId(preScheduleId);
           geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
           await geoExperiment.save();
         } catch (updateError) {
-          context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
-          await geoExperiment.remove();
-          return createResponse({ message: `Failed to initiate experiment: ${updateError.message}` }, 500);
+          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
+          throw updateError;
         }
         let job;
         try {
@@ -1690,25 +1714,33 @@ function SuggestionsController(ctx, sqs, env) {
             },
           });
         } catch (jobError) {
-          context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, AsyncJob creation failed: ${jobError.message}`, jobError);
-          await geoExperiment.remove();
-          return createResponse({ message: `Failed to initiate experiment: ${jobError.message}` }, 500);
+          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, AsyncJob creation failed: ${jobError.message}`, jobError);
+          throw jobError;
         }
-
         const validSuggestionEntities = [
           ...validSuggestions,
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
         ];
 
-        await Promise.all(validSuggestionEntities.map(async (suggestion) => {
-          const currentData = suggestion.getData();
-          suggestion.setData({
-            ...currentData,
-            edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
+        const markResults = await Promise.allSettled(
+          validSuggestionEntities.map(async (suggestion) => {
+            const currentData = suggestion.getData();
+            suggestion.setData({
+              ...currentData,
+              edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
+            });
+            suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
+            return suggestion.save();
+          }),
+        );
+
+        const markFailures = markResults.filter((r) => r.status === 'rejected');
+        if (markFailures.length > 0) {
+          context.log.warn(`[edge-geo-exp-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+            geoExperimentId,
+            errors: markFailures.map((r) => r.reason?.message),
           });
-          suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
-          return suggestion.save();
-        }));
+        }
 
         const experimentResponse = {
           suggestions: [
@@ -1734,13 +1766,13 @@ function SuggestionsController(ctx, sqs, env) {
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
         return createResponse(experimentResponse, 207);
       } catch (error) {
-        context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
+        context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
         if (geoExperiment?.getId?.()) {
           /* c8 ignore start */
           try {
             await geoExperiment.remove();
           } catch (removeError) {
-            context.log.error(`[edge-deploy-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
+            context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
           /* c8 ignore stop */
         }
@@ -1850,10 +1882,7 @@ function SuggestionsController(ctx, sqs, env) {
 
     const { data: experiments } = await GeoExperiment.allBySiteId(siteId);
 
-    return ok(experiments.map((exp) => ({
-      ...exp.toJSON(),
-      id: exp.getId(),
-    })));
+    return ok(experiments.map((exp) => GeoExperimentDto.toJSON(exp)));
   };
 
   /**
@@ -1877,43 +1906,24 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('GeoExperiment not found');
     }
 
-    // Fetch associated async jobs via JSONB metadata filter
-    let jobs = [];
-    const postgrestClient = context.dataAccess?.services?.postgrestClient;
-    if (postgrestClient?.from) {
-      const { data: jobRows, error: jobError } = await postgrestClient
-        .from('async_jobs')
-        .select('id, status, started_at, ended_at, error, metadata')
-        .filter('metadata', 'cs', JSON.stringify({ geoExperimentId }));
-      if (!jobError && jobRows) {
-        jobs = jobRows.map((row) => ({
-          id: row.id,
-          status: row.status,
-          startedAt: row.started_at,
-          endedAt: row.ended_at,
-          error: row.error ?? null,
-        }));
-      }
-    }
-
     // Fetch prompts from S3
     let prompts = null;
     try {
       const { s3Client, s3Bucket, GetObjectCommand } = context.s3;
-      const promptsS3Key = `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
+      const promptsS3Key = geoExperiment.getPromptsLocation()
+        || `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
       const response = await s3Client.send(
         new GetObjectCommand({ Bucket: s3Bucket, Key: promptsS3Key }),
       );
       const body = await response.Body.transformToString();
       prompts = JSON.parse(body);
-    } catch {
+    } catch (s3Error) {
       // Prompts may not exist yet (e.g. experiment not yet started)
+      context.log.info(`[geo-experiment] Could not fetch prompts for ${geoExperimentId}: ${s3Error.message}`);
     }
 
     return ok({
-      ...geoExperiment.toJSON(),
-      id: geoExperiment.getId(),
-      jobs,
+      ...GeoExperimentDto.toJSON(geoExperiment),
       prompts,
     });
   };
