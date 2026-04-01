@@ -1,3 +1,11 @@
+# [1.395.0](https://github.com/adobe/spacecat-api-service/compare/v1.394.1...v1.395.0) (2026-04-01)
+
+
+### Features
+
+* adds token controllers ([#1941](https://github.com/adobe/spacecat-api-service/issues/1941)) ([e5383fa](https://github.com/adobe/spacecat-api-service/commit/e5383fa19fb2b054395e939429c5b140ab591dcb))
+* use new brand-presence filter dimensions rpc ([#2077](https://github.com/adobe/spacecat-api-service/issues/2077)) ([04f5339](https://github.com/adobe/spacecat-api-service/commit/04f53390dbde4071df6a3d5cbf24e93cef838cd1))
+
 ## [1.394.1](https://github.com/adobe/spacecat-api-service/compare/v1.394.0...v1.394.1) (2026-04-01)
 
 
