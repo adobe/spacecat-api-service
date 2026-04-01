@@ -774,7 +774,7 @@ describe('Sites Controller', () => {
     });
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -1486,17 +1486,17 @@ describe('Sites Controller', () => {
 
   it('get site metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-12T00:00:00Z',
       metric: 'organic-traffic',
       value: 100,
     }, {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -1520,7 +1520,7 @@ describe('Sites Controller', () => {
   });
 
   it('get site metrics by sources returns bad request when siteId is missing', async () => {
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
 
     const result = await sitesController.getSiteMetricsBySource({
@@ -1547,7 +1547,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics by sources returns bad request when metric is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
 
     const result = await sitesController.getSiteMetricsBySource({
       params: { siteId, source },
@@ -1560,7 +1560,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics by source returns not found when site is not found', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     mockDataAccess.Site.findById.resolves(null);
 
@@ -1575,7 +1575,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics for non belonging to the organization', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
@@ -1687,7 +1687,7 @@ describe('Sites Controller', () => {
 
     it('works with different metric types when filterByTop100PageViews=true', async () => {
       const siteId = sites[0].getId();
-      const source = 'ahrefs';
+      const source = 'seo';
       const metric = 'organic-traffic';
 
       const mockMetrics = [
@@ -1908,7 +1908,7 @@ describe('Sites Controller', () => {
 
     it('returns plain array when objectResponseDataKey is not provided (backward compatibility)', async () => {
       const siteId = sites[0].getId();
-      const source = 'ahrefs';
+      const source = 'seo';
       const metric = 'organic-traffic';
 
       const mockMetricsArray = [
@@ -2226,7 +2226,7 @@ describe('Sites Controller', () => {
       expect(response).to.have.length(2);
       expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
       expect(response.find((m) => m.url === 'https://example.com/page3')).to.exist;
-      expect(mockSiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(siteId, 'ahrefs', 'global');
+      expect(mockSiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(siteId, 'seo', 'global');
     });
 
     it('handles URL variations with trailing slashes', async () => {
@@ -2636,7 +2636,7 @@ describe('Sites Controller', () => {
       // Should return empty array when no pages match base URL
       expect(response).to.have.length(0);
       expect(loggerStub.warn).to.have.been.calledWith(
-        sinon.match(/No Ahrefs top pages match base URL/),
+        sinon.match(/No SEO top pages match base URL/),
       );
     });
 
@@ -3080,13 +3080,13 @@ describe('Sites Controller', () => {
 
   it('get page metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-12T00:00:00Z',
       metric: 'organic-traffic',
       value: 100,
@@ -3094,7 +3094,7 @@ describe('Sites Controller', () => {
     },
     {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 400,
@@ -3102,7 +3102,7 @@ describe('Sites Controller', () => {
     },
     {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -3140,7 +3140,7 @@ describe('Sites Controller', () => {
   });
 
   it('get page metrics by sources returns bad request when siteId is missing', async () => {
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
@@ -3169,7 +3169,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by sources returns bad request when metric is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
     const result = await sitesController.getPageMetricsBySource({
@@ -3183,7 +3183,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by sources returns bad request when base64PageUrl is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
 
     const result = await sitesController.getPageMetricsBySource({
@@ -3197,7 +3197,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by source returns not found when site is not found', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
@@ -3219,7 +3219,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics for non belonging to the organization', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
@@ -4322,27 +4322,27 @@ describe('Sites Controller', () => {
       const result = await sitesController.getTopPages({
         params: {
           siteId: SITE_IDS[0],
-          source: 'ahrefs',
+          source: 'seo',
         },
       });
       const response = await result.json();
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'ahrefs');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'seo');
     });
 
     it('retrieves top pages by source and geo for a site', async () => {
       const result = await sitesController.getTopPages({
         params: {
           siteId: SITE_IDS[0],
-          source: 'ahrefs',
+          source: 'seo',
           geo: 'US',
         },
       });
       const response = await result.json();
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'seo', 'US');
     });
   });
 
