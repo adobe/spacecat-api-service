@@ -1,3 +1,10 @@
+# [1.401.0](https://github.com/adobe/spacecat-api-service/compare/v1.400.0...v1.401.0) (2026-04-01)
+
+
+### Features
+
+* LLMO-3758 info-gain ([#2086](https://github.com/adobe/spacecat-api-service/issues/2086)) ([2922236](https://github.com/adobe/spacecat-api-service/commit/292223656efa266407b863dedb8de5025e35f2cb))
+
 # [1.400.0](https://github.com/adobe/spacecat-api-service/compare/v1.399.0...v1.400.0) (2026-04-01)
 
 
