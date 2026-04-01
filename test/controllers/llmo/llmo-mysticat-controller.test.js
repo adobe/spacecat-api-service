@@ -34,7 +34,19 @@ describe('LlmoMysticatController', () => {
       c.eq = sandbox.stub().returns(c);
       c.gte = sandbox.stub().returns(c);
       c.lte = sandbox.stub().returns(c);
+      c.in = sandbox.stub().returns(c);
+      c.ilike = sandbox.stub().returns(c);
       c.limit = sandbox.stub().resolves({ data: [], error: null });
+      c.rpc = sandbox.stub().resolves({
+        data: {
+          brands: [],
+          categories: [],
+          topics: [],
+          origins: [],
+          regions: [],
+        },
+        error: null,
+      });
       c.then = (resolve) => Promise.resolve({ data: [], error: null }).then(resolve);
       return c;
     };

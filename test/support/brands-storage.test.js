@@ -57,6 +57,8 @@ describe('brands-storage', () => {
       brand_earned_sources: [],
       competitors: [],
       brand_sites: [],
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: 'system',
       updated_at: '2026-01-01',
       updated_by: 'system',
       ...overrides,
@@ -97,6 +99,10 @@ describe('brands-storage', () => {
       expect(result[0].earnedContent).to.deep.equal([{ name: 'TechCrunch', url: 'https://techcrunch.com', regions: [] }]);
       expect(result[0].competitors).to.deep.equal([{ name: 'Rival', url: 'https://rival.com', regions: ['US'] }]);
       expect(result[0].urls).to.deep.equal([{ value: 'https://test.com' }]);
+      expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result[0].createdBy).to.equal('system');
+      expect(result[0].updatedAt).to.equal('2026-01-01');
+      expect(result[0].updatedBy).to.equal('user@test.com');
     });
 
     it('expands brand_sites paths into flat URL list', async () => {

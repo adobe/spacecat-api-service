@@ -59,6 +59,10 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
+import {
+  LLMO_CONFIG_DB_SYNC_TYPE,
+  isSyncEnabledForSite,
+} from './llmo-config-sync-constants.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -530,6 +534,17 @@ function LlmoController(ctx) {
               : /* c8 ignore next */ null,
           },
         });
+      }
+
+      if (isSyncEnabledForSite(siteId)) {
+        log.info(`[llmo-config-db-sync] Triggering S3-to-DB config sync for siteId: ${siteId} with dryRun: false`);
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: LLMO_CONFIG_DB_SYNC_TYPE,
+          siteId,
+          dryRun: false,
+        });
+      } else {
+        log.info(`[llmo-config-db-sync] Skipping S3-to-DB config sync for siteId: ${siteId} because it is not in ALLOWED_SITE_IDS`);
       }
 
       // Build config summary
