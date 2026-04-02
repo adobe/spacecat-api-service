@@ -1,3 +1,10 @@
+# [1.406.0](https://github.com/adobe/spacecat-api-service/compare/v1.405.0...v1.406.0) (2026-04-02)
+
+
+### Features
+
+* edge deploy API async support ([#1980](https://github.com/adobe/spacecat-api-service/issues/1980)) ([d25c328](https://github.com/adobe/spacecat-api-service/commit/d25c3282e877de72ba621b2413b3d47464897399))
+
 # [1.405.0](https://github.com/adobe/spacecat-api-service/compare/v1.404.0...v1.405.0) (2026-04-02)
 
 
