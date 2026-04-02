@@ -124,22 +124,29 @@ function stripDrsPrefix(slug) {
 
 /**
  * Best-effort conversion of a category/topic slug back to a readable name.
- * Strips known DRS source prefixes, title-cases each word, and joins with
- * " & " to restore the original naming convention (e.g. "Comparison & Decision").
+ * Strips known DRS source prefixes and title-cases each word. Two-word slugs
+ * are joined with " & " to match the DRS naming convention (e.g.
+ * "comparison-decision" → "Comparison & Decision"). Slugs with more or fewer
+ * words are joined with spaces.
  *
  * This is a fallback — the primary fix is DRS sending explicit `id` so this
  * path rarely executes.
  */
 function slugToName(slug) {
-  return stripDrsPrefix(slug)
+  const words = stripDrsPrefix(slug)
     .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' & ');
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  return words.join(words.length === 2 ? ' & ' : ' ');
 }
 
 /**
  * Ensures that all referenced categories and topics exist in their respective
  * tables. Creates any missing ones and updates the lookup maps in place.
+ *
+ * The fallback path (prefix-stripping lookup) depends on the
+ * uq_category_name_per_org / uq_topic_name_per_org unique constraints in
+ * mysticat-data-service to trigger an upsert failure when a prefixed slug
+ * collides with an existing unprefixed entry's name.
  */
 // eslint-disable-next-line max-len
 async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy) {
@@ -177,9 +184,10 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
             data.forEach((c) => categoryMap.set(c.category_id, c.id));
             return;
           }
-          // Upsert failed (likely unique name constraint). Try resolving each
+          // Upsert failed (likely uq_category_name_per_org). Try resolving each
           // missing category by its unprefixed slug — the old category_id before
           // DRS started adding source prefixes.
+          const unresolved = [];
           for (const catId of unique) {
             if (!categoryMap.has(catId)) {
               const unprefixed = stripDrsPrefix(catId);
@@ -190,8 +198,16 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
                 .eq('organization_id', organizationId)
                 .eq('category_id', unprefixed)
                 .maybeSingle();
-              if (existing) categoryMap.set(catId, existing.id);
+              if (existing) {
+                categoryMap.set(catId, existing.id);
+              } else {
+                unresolved.push(catId);
+              }
             }
+          }
+          if (unresolved.length > 0) {
+            // eslint-disable-next-line no-console
+            console.warn(`Failed to auto-create or resolve categories: ${unresolved.join(', ')} (org: ${organizationId}, upsert error: ${error.message})`);
           }
         }),
     );
@@ -217,6 +233,7 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
             return;
           }
           // Upsert failed — try resolving by unprefixed slug.
+          const unresolved = [];
           for (const topId of unique) {
             if (!topicMap.has(topId)) {
               const unprefixed = stripDrsPrefix(topId);
@@ -227,8 +244,16 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
                 .eq('organization_id', organizationId)
                 .eq('topic_id', unprefixed)
                 .maybeSingle();
-              if (existing) topicMap.set(topId, existing.id);
+              if (existing) {
+                topicMap.set(topId, existing.id);
+              } else {
+                unresolved.push(topId);
+              }
             }
+          }
+          if (unresolved.length > 0) {
+            // eslint-disable-next-line no-console
+            console.warn(`Failed to auto-create or resolve topics: ${unresolved.join(', ')} (org: ${organizationId}, upsert error: ${error.message})`);
           }
         }),
     );

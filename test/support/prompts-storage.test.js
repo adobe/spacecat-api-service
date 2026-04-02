@@ -923,9 +923,9 @@ describe('prompts-storage', () => {
       expect(upsertedRows.categories).to.be.an('array').with.lengthOf(1);
       expect(upsertedRows.categories[0].name).to.equal('Comparison & Decision');
 
-      // slugToName strips "gsc-" prefix and joins with " & "
+      // slugToName strips "gsc-" prefix; 3+ words joined with spaces
       expect(upsertedRows.topics).to.be.an('array').with.lengthOf(1);
-      expect(upsertedRows.topics[0].name).to.equal('Photo & Editing & Topic');
+      expect(upsertedRows.topics[0].name).to.equal('Photo Editing Topic');
     });
 
     it('falls back to unprefixed slug lookup when category upsert fails', async () => {
