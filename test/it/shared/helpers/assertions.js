@@ -11,6 +11,7 @@
  */
 
 import { expect } from 'chai';
+import { validateResponseSchema } from './schema-validator.js';
 
 const ISO_8601_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 
@@ -131,4 +132,24 @@ export function expectBatch201(res, expectedTotal) {
 export function expectNonEmptyString(value, label = 'field') {
   expect(value, `${label} should be a string`).to.be.a('string');
   expect(value, `${label} should not be empty`).to.have.length.greaterThan(0);
+}
+
+/**
+ * Validates that an API response body conforms to the declared OpenAPI schema.
+ * Skips validation for error responses (4xx/5xx) and empty bodies.
+ *
+ * @param {object} res - HTTP response { status, body }
+ * @param {string} method - HTTP method (GET, POST, etc.)
+ * @param {string} openApiPath - OpenAPI path template (e.g., '/sites/{siteId}')
+ */
+export function expectSchemaValid(res, method, openApiPath) {
+  if (res.status >= 400 || res.body == null) return;
+
+  const statusCode = String(res.status);
+  const { errors } = validateResponseSchema(method, openApiPath, statusCode, res.body);
+
+  expect(
+    errors,
+    `OpenAPI schema mismatch [${method} ${openApiPath} ${statusCode}]:\n${errors.join('\n')}`,
+  ).to.have.lengthOf(0);
 }

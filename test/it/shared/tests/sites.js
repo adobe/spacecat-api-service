@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp } from '../helpers/assertions.js';
+import { expectISOTimestamp, expectSchemaValid } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
   ORG_2_ID,
@@ -82,6 +82,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
+        expectSchemaValid(res, 'GET', '/sites');
         // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
         // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3)
         expect(res.body).to.be.an('array').with.lengthOf(2);
@@ -103,6 +104,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get(`/sites/${SITE_1_ID}`);
         expect(res.status).to.equal(200);
+        expectSchemaValid(res, 'GET', '/sites/{siteId}');
         expectSiteDto(res.body);
         expect(res.body.id).to.equal(SITE_1_ID);
         expect(res.body.baseURL).to.equal(SITE_1_BASE_URL);
@@ -180,6 +182,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get(`/sites/by-base-url/${base64url(SITE_1_BASE_URL)}`);
         expect(res.status).to.equal(200);
+        expectSchemaValid(res, 'GET', '/sites/by-base-url/{base64BaseUrl}');
         expectSiteDto(res.body);
         expect(res.body.id).to.equal(SITE_1_ID);
         expect(res.body.baseURL).to.equal(SITE_1_BASE_URL);
@@ -212,6 +215,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/aem_edge');
         expect(res.status).to.equal(200);
+        expectSchemaValid(res, 'GET', '/sites/by-delivery-type/{deliveryType}');
         // SITE_1, SITE_3, and SITE_4 are aem_edge; SITE_2 is aem_cs
         expect(res.body).to.be.an('array').with.lengthOf(3);
         res.body.forEach((site) => {
@@ -264,6 +268,7 @@ export default function siteTests(getHttpClient, resetData) {
           baseURL: 'https://new-it-site.example.com',
         });
         expect(res.status).to.equal(201);
+        expectSchemaValid(res, 'POST', '/sites');
         expectSiteDto(res.body);
         expect(res.body.baseURL).to.equal('https://new-it-site.example.com');
         expect(res.body.organizationId).to.equal(ORG_1_ID);
@@ -308,6 +313,7 @@ export default function siteTests(getHttpClient, resetData) {
           name: 'Updated Site Name',
         });
         expect(res.status).to.equal(200);
+        expectSchemaValid(res, 'PATCH', '/sites/{siteId}');
         expectSiteDto(res.body);
         expect(res.body.id).to.equal(testSiteId);
         expect(res.body.name).to.equal('Updated Site Name');
