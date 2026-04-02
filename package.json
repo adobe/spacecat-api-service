@@ -86,7 +86,7 @@
     "@adobe/spacecat-shared-rum-api-client": "2.40.10",
     "@adobe/spacecat-shared-scrape-client": "2.6.0",
     "@adobe/spacecat-shared-slack-client": "1.6.4",
-    "@adobe/spacecat-shared-tier-client": "https://gist.github.com/ravverma/73fbd39cad0536f360791528e21c3857/raw/995b7f2a1a771692d5e4a6fb4b5af2b498a8ffc4/adobe-spacecat-shared-tier-client-1.4.0.tgz",
+    "@adobe/spacecat-shared-tier-client": "1.4.1",
     "@adobe/spacecat-shared-tokowaka-client": "1.13.0",
     "@adobe/spacecat-shared-utils": "^1.110.0",
     "@adobe/spacecat-shared-vault-secrets": "1.3.1",
