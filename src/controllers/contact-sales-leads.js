@@ -50,36 +50,14 @@ function ContactSalesLeadsController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Resolves the internal organization from the authenticated user's IMS org.
-   * @param {object} context - Request context.
-   * @returns {Promise<object|null>} Organization or null.
-   */
-  const resolveOrganization = async (context) => {
-    const authInfo = context.attributes?.authInfo;
-    if (!authInfo) return null;
-
-    const profile = authInfo.getProfile();
-    const tenantId = profile?.tenants?.[0]?.id;
-    if (!hasText(tenantId)) return null;
-
-    const imsOrgId = tenantId.includes('@') ? tenantId : `${tenantId}@AdobeOrg`;
-
-    try {
-      return await Organization.findByImsOrgId(imsOrgId);
-    } catch (e) {
-      context.log.error(`Error resolving organization for IMS org ${imsOrgId}: ${e.message}`);
-      return null;
-    }
-  };
-
-  /**
-   * Creates a new contact sales lead.
+   * Creates a new contact sales lead for a given organization and site.
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} ContactSalesLead response.
    */
   const create = async (context) => {
+    const { organizationId, siteId } = context.params;
     const {
-      name, email, domain, siteId, notes,
+      name, email, domain, notes,
     } = context.data || {};
 
     if (!hasText(name)) {
@@ -95,59 +73,38 @@ function ContactSalesLeadsController(ctx) {
     }
 
     try {
-      const organization = await resolveOrganization(context);
+      const organization = await Organization.findById(organizationId);
       if (!organization) {
-        return badRequest('Unable to resolve organization from authentication context');
+        return notFound('Organization not found');
       }
 
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
-      const organizationId = organization.getId();
-
-      if (hasText(siteId) && isValidUUID(siteId)) {
-        const existingLead = await ContactSalesLead.findByAll(
-          { organizationId, siteId },
+      const existingLead = await ContactSalesLead.findByAll(
+        { organizationId, siteId },
+      );
+      if (existingLead) {
+        return createResponse(
+          {
+            message:
+              'A contact sales request has already been submitted for this site.',
+          },
+          409,
         );
-        if (existingLead) {
-          return createResponse(
-            {
-              message:
-                'A contact sales request has already been submitted for this site.',
-            },
-            409,
-          );
-        }
-      } else {
-        const leads = await ContactSalesLead.allByOrganizationId(organizationId);
-        const duplicateEmailNoSite = leads.find(
-          (lead) => lead.getEmail() === email && !lead.getSiteId(),
-        );
-        if (duplicateEmailNoSite) {
-          return createResponse(
-            {
-              message:
-                'A contact sales request has already been submitted for this email.',
-            },
-            409,
-          );
-        }
       }
 
       const leadData = {
         name,
         email,
         organizationId,
+        siteId,
         status: ContactSalesLeadModel.STATUSES.NEW,
       };
 
       if (hasText(domain)) {
         leadData.domain = domain;
-      }
-
-      if (hasText(siteId) && isValidUUID(siteId)) {
-        leadData.siteId = siteId;
       }
 
       if (hasText(notes)) {

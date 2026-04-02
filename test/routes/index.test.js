@@ -487,7 +487,6 @@ describe('getRouteHandlers', () => {
       'PATCH /trial-users/email-preferences',
       'GET /consumers',
       'POST /consumers/register',
-      'POST /contact-sales-leads',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -814,6 +813,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access/:accessId',
       'DELETE /sites/:siteId/ims-org-access/:accessId',
+      'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'GET /organizations/:organizationId/contact-sales-leads',
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',

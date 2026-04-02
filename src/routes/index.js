@@ -518,7 +518,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.revokeGrant,
 
     // Contact Sales Leads
-    'POST /contact-sales-leads': contactSalesLeadsController.create,
+    'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.create,
     'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
     'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
     'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,

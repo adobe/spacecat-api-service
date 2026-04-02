@@ -59,7 +59,6 @@ describe('ContactSalesLeads Controller', () => {
     },
     Organization: {
       findById: sandbox.stub(),
-      findByImsOrgId: sandbox.stub(),
     },
     Entitlement: {},
     SiteEnrollment: {},
@@ -91,7 +90,6 @@ describe('ContactSalesLeads Controller', () => {
     mockDataAccess.ContactSalesLead.create = sandbox.stub().resolves(mockLead);
     mockDataAccess.ContactSalesLead.allByOrganizationId = sandbox.stub().resolves([]);
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
-    mockDataAccess.Organization.findByImsOrgId = sandbox.stub().resolves(mockOrganization);
 
     contactSalesLeadsController = ContactSalesLeadsController({
       dataAccess: mockDataAccess,
@@ -127,26 +125,22 @@ describe('ContactSalesLeads Controller', () => {
   });
 
   describe('create', () => {
+    const createContext = (data = {}) => ({
+      params: { organizationId, siteId },
+      data,
+      log: mockLogger,
+      attributes: {
+        authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+      },
+    });
+
     it('creates a new contact sales lead successfully', async () => {
-      const context = {
-        data: {
-          name: 'Test User',
-          email: 'test@example.com',
-          domain: 'https://example.com',
-          siteId,
-          notes: 'Some notes',
-        },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
+      const context = createContext({
+        name: 'Test User',
+        email: 'test@example.com',
+        domain: 'https://example.com',
+        notes: 'Some notes',
+      });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(201);
@@ -159,31 +153,18 @@ describe('ContactSalesLeads Controller', () => {
       expect(body.status).to.equal('NEW');
     });
 
-    it('creates a lead without optional siteId', async () => {
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com' },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
+    it('creates a lead without optional domain and notes', async () => {
+      const context = createContext({
+        name: 'Test User',
+        email: 'test@example.com',
+      });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(201);
     });
 
     it('returns 400 when name is missing', async () => {
-      const context = {
-        data: { email: 'test@example.com' },
-        log: mockLogger,
-        attributes: { authInfo: new AuthInfo().withAuthenticated(true).withType('ims') },
-      };
+      const context = createContext({ email: 'test@example.com' });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(400);
@@ -191,103 +172,42 @@ describe('ContactSalesLeads Controller', () => {
 
     it('returns 400 when context data is missing', async () => {
       const context = {
+        params: { organizationId, siteId },
         log: mockLogger,
         attributes: { authInfo: new AuthInfo().withAuthenticated(true).withType('ims') },
       };
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(400);
-    });
-
-    it('returns 400 when authInfo has no tenants (org unresolvable)', async () => {
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com' },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({ email: 'test@example.com' })
-            .withType('ims'),
-        },
-      };
-
-      const response = await contactSalesLeadsController.create(context);
-      expect(response.status).to.equal(400);
-    });
-
-    it('returns 400 when authInfo is missing (org unresolvable)', async () => {
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com' },
-        log: mockLogger,
-        attributes: {},
-      };
-
-      const response = await contactSalesLeadsController.create(context);
-      expect(response.status).to.equal(400);
-    });
-
-    it('handles tenantId already containing @ sign', async () => {
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com', siteId },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id@AdobeOrg' }],
-            })
-            .withType('ims'),
-        },
-      };
-
-      const response = await contactSalesLeadsController.create(context);
-      expect(response.status).to.equal(201);
-      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('test-ims-org-id@AdobeOrg');
     });
 
     it('returns 400 when email is missing', async () => {
-      const context = {
-        data: { name: 'Test User' },
-        log: mockLogger,
-        attributes: { authInfo: new AuthInfo().withAuthenticated(true).withType('ims') },
-      };
+      const context = createContext({ name: 'Test User' });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(400);
     });
 
     it('returns 400 when email is invalid', async () => {
-      const context = {
-        data: { name: 'Test User', email: 'not-an-email' },
-        log: mockLogger,
-        attributes: { authInfo: new AuthInfo().withAuthenticated(true).withType('ims') },
-      };
+      const context = createContext({ name: 'Test User', email: 'not-an-email' });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(400);
     });
 
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const context = createContext({ name: 'Test User', email: 'test@example.com' });
+
+      const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(404);
+    });
+
     it('returns 403 when user does not have access to the organization', async () => {
       mockAccessControlUtil.hasAccess.resolves(false);
 
-      const context = {
-        data: {
-          name: 'Test User',
-          email: 'test@example.com',
-          siteId,
-        },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
+      const context = createContext({ name: 'Test User', email: 'test@example.com' });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(403);
@@ -296,117 +216,21 @@ describe('ContactSalesLeads Controller', () => {
     it('returns 409 when a lead already exists for the same org and site', async () => {
       mockDataAccess.ContactSalesLead.findByAll.resolves(mockLead);
 
-      const context = {
-        data: {
-          name: 'Test User',
-          email: 'test@example.com',
-          siteId,
-        },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
+      const context = createContext({ name: 'Test User', email: 'test@example.com' });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(409);
-    });
-
-    it('returns 409 when a lead with same email without site already exists', async () => {
-      const mockLeadNoSite = {
-        ...mockLead,
-        getSiteId: () => null,
-      };
-      mockDataAccess.ContactSalesLead.allByOrganizationId.resolves([mockLeadNoSite]);
-
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com' },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
-
-      const response = await contactSalesLeadsController.create(context);
-      expect(response.status).to.equal(409);
-    });
-
-    it('returns 400 when organization cannot be resolved from IMS org', async () => {
-      mockDataAccess.Organization.findByImsOrgId.resolves(null);
-
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com' },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
-
-      const response = await contactSalesLeadsController.create(context);
-      expect(response.status).to.equal(400);
     });
 
     it('returns 500 on unexpected error with generic message', async () => {
-      mockDataAccess.ContactSalesLead.findByAll.rejects(new Error('DB connection refused'));
+      mockDataAccess.Organization.findById.rejects(new Error('DB connection refused'));
 
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com', siteId },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
+      const context = createContext({ name: 'Test User', email: 'test@example.com' });
 
       const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(500);
       const body = await response.json();
       expect(body.message).to.equal('Failed to create contact sales lead');
-    });
-
-    it('returns 400 when resolveOrganization fails due to DB error', async () => {
-      mockDataAccess.Organization.findByImsOrgId.rejects(new Error('DB down'));
-
-      const context = {
-        data: { name: 'Test User', email: 'test@example.com' },
-        log: mockLogger,
-        attributes: {
-          authInfo: new AuthInfo()
-            .withAuthenticated(true)
-            .withProfile({
-              email: 'test@example.com',
-              tenants: [{ id: 'test-ims-org-id' }],
-            })
-            .withType('ims'),
-        },
-      };
-
-      const response = await contactSalesLeadsController.create(context);
-      expect(response.status).to.equal(400);
-      expect(mockLogger.error).to.have.been.calledWithMatch(/Error resolving organization/);
     });
   });
 
