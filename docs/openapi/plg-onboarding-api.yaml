@@ -49,6 +49,36 @@ plg-onboard:
     security:
       - ims_key: [ ]
 
+aso-plg-sites:
+  get:
+    tags:
+      - plg
+    summary: List all PLG site onboardings (admin)
+    description: |
+      Returns every row from the `plg_onboardings` table (entity `PlgOnboarding` in
+      `@adobe/spacecat-shared-data-access`), i.e. all PLG ASO site onboarding records.
+      Each item includes `domain`, `baseURL`, onboarding `status`, and when resolved the
+      SpaceCat `siteId` and `organizationId`. Cross-tenant; only SpaceCat administrators
+      may call this endpoint.
+    operationId: listAsoPlgSites
+    responses:
+      '200':
+        description: All PLG onboarding records
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/PlgOnboarding'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
 plg-onboard-status:
   parameters:
     - $ref: './parameters.yaml#/imsOrgId'

@@ -491,7 +491,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 /**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
- * @returns {object} Controller with onboard and getStatus methods.
+  * @returns {object} Controller with onboard, getStatus, and getAllOnboardings methods.
  */
 function PlgOnboardingController(ctx) {
   const { log } = ctx;
@@ -592,7 +592,34 @@ function PlgOnboardingController(ctx) {
     return ok(records.map(PlgOnboardingDto.toJSON));
   };
 
-  return { onboard, getStatus };
+  /**
+   * Lists every row in the PLG onboardings store (`plg_onboardings` via PostgREST;
+   * schema in `@adobe/spacecat-shared-data-access` plg-onboarding.schema.js).
+   * Each record is one PLG site onboarding (domain, baseURL, optional SpaceCat siteId).
+   * Cross-tenant; restricted to SpaceCat admins.
+   * @param {object} context - Request context.
+   * @returns {Promise<Response>} Array of onboarding DTOs.
+   */
+  const getAllOnboardings = async (context) => {
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can list all PLG onboarding records');
+    }
+
+    try {
+      const { PlgOnboarding } = context.dataAccess;
+      const records = await PlgOnboarding.all(
+        {},
+        { fetchAllPages: true },
+      );
+      return ok(records.map(PlgOnboardingDto.toJSON));
+    } catch (error) {
+      log.error(`Failed to list PLG onboardings: ${error.message}`, error);
+      return internalServerError('Failed to list PLG onboarding records');
+    }
+  };
+
+  return { onboard, getStatus, getAllOnboardings };
 }
 
 export default PlgOnboardingController;

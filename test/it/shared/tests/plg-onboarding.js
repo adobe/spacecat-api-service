@@ -38,6 +38,7 @@ function expectPlgOnboardingDto(onboarding) {
  * Shared PLG Onboarding endpoint tests.
  *
  * POST /plg/onboard — validation tests only (happy path needs external services).
+ * GET /aso-plg-sites — admin-only list of all PLG onboarding rows.
  * GET /plg/onboard/status/:imsOrgId — validation + lookup.
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
@@ -90,6 +91,29 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         });
         expect(res.status).to.equal(400);
       });
+    });
+
+    // ── GET /aso-plg-sites ──
+
+    describe('GET /aso-plg-sites', () => {
+      it('returns 403 for non-admin user', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/aso-plg-sites');
+        expect(res.status).to.equal(403);
+      });
+
+      if (!skipPlgOnboardingTests) {
+        it('admin: returns 200 with all seeded onboardings', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/aso-plg-sites');
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array').with.length.of.at.least(1);
+          const match = res.body.find((r) => r.id === PLG_ONBOARDING_1_ID);
+          expect(match).to.be.an('object');
+          expectPlgOnboardingDto(match);
+          expect(match.domain).to.equal(PLG_ONBOARDING_1_DOMAIN);
+        });
+      }
     });
 
     // ── GET /plg/onboard/status/:imsOrgId ──

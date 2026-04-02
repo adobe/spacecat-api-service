@@ -236,6 +236,7 @@ describe('PlgOnboardingController', () => {
         findByImsOrgIdAndDomain: sandbox.stub().resolves(null),
         create: sandbox.stub().resolves(mockOnboarding),
         allByImsOrgId: sandbox.stub().resolves([]),
+        all: sandbox.stub().resolves([]),
       },
     };
 
@@ -1850,6 +1851,60 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Authentication information is required');
+    });
+
+    describe('getAllOnboardings', () => {
+      beforeEach(() => {
+        mockDataAccess.PlgOnboarding.all.reset();
+        mockDataAccess.PlgOnboarding.all.resolves([]);
+      });
+
+      it('returns 403 when caller is not admin', async () => {
+        const nonAdminController = PlgOnboardingController({ log: mockLog });
+        const res = await nonAdminController.getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(403);
+        expect(res.value).to.equal('Only admins can list all PLG onboarding records');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 200 with all records when admin', async () => {
+        const record = createMockOnboarding({
+          id: 'all-rec-1',
+          domain: 'plg-all.example.com',
+          status: 'ONBOARDED',
+        });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').with.length(1);
+        expect(res.value[0].id).to.equal('all-rec-1');
+        expect(res.value[0].domain).to.equal('plg-all.example.com');
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { fetchAllPages: true },
+        );
+      });
+
+      it('returns 500 when data access fails', async () => {
+        mockDataAccess.PlgOnboarding.all.rejects(new Error('db unavailable'));
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to list PLG onboarding records');
+      });
     });
   });
 });
