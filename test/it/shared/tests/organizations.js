@@ -252,7 +252,7 @@ export default function organizationTests(getHttpClient, resetData) {
       });
 
       describe('with minimal query parameter', () => {
-        it('admin: returns only id and baseURL when minimal=true', async () => {
+        it('admin: returns only id, baseURL, and config when minimal=true', async () => {
           const http = getHttpClient();
           const res = await http.admin.get(
             `/organizations/${ORG_1_ID}/sites?minimal=true`,
@@ -268,7 +268,8 @@ export default function organizationTests(getHttpClient, resetData) {
           res.body.forEach((site) => {
             expect(site).to.have.property('id');
             expect(site).to.have.property('baseURL');
-            expect(Object.keys(site)).to.have.lengthOf(2);
+            expect(site).to.have.property('config');
+            expect(Object.keys(site)).to.have.lengthOf(3);
             expect(site).to.not.have.property('name');
             expect(site).to.not.have.property('organizationId');
             expect(site).to.not.have.property('deliveryType');
@@ -297,7 +298,7 @@ export default function organizationTests(getHttpClient, resetData) {
             expect(site).to.have.property('name');
             expect(site).to.have.property('organizationId');
             expect(site).to.have.property('deliveryType');
-            expect(Object.keys(site).length).to.be.greaterThan(2);
+            expect(Object.keys(site).length).to.be.greaterThan(3);
           });
         });
 
@@ -334,7 +335,8 @@ export default function organizationTests(getHttpClient, resetData) {
           res.body.forEach((site) => {
             expect(site).to.have.property('id');
             expect(site).to.have.property('baseURL');
-            expect(Object.keys(site)).to.have.lengthOf(2);
+            expect(site).to.have.property('config');
+            expect(Object.keys(site)).to.have.lengthOf(3);
           });
         });
 

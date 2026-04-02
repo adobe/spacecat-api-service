@@ -627,12 +627,39 @@ SiteMinimal:
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
+    authoringType:
+      description: The authoring type of the site
+      type: string
+      example: 'aem_cs'
+    deliveryConfig:
+      type: object
+      properties:
+        authorURL:
+          description: The author URL
+          type: string
+          example: 'https://author.example.com'
+    hlxConfig:
+      type: object
+      properties:
+        rso:
+          type: object
+          properties:
+            site:
+              description: The Helix site name
+              type: string
+              example: 'my-site'
   required:
     - id
     - baseURL
   example:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     baseURL: 'https://example.com'
+    authoringType: 'aem_cs'
+    deliveryConfig:
+      authorURL: 'https://author.example.com'
+    hlxConfig:
+      rso:
+        site: 'my-site'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'

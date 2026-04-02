@@ -80,15 +80,43 @@ export const SiteDto = {
   }),
 
   /**
-   * Minimal representation returning only id and baseURL.
+   * Minimal representation returning only essential fields.
    * Used when clients need only basic site identification.
    * @param {Readonly<Site>} site - Site object.
    * @returns {object}
    */
-  toMinimalJSON: (site) => ({
-    id: site.getId(),
-    baseURL: site.getBaseURL(),
-  }),
+  toMinimalJSON: (site) => {
+    const result = {
+      id: site.getId(),
+      baseURL: site.getBaseURL(),
+    };
+
+    // Add optional authoringType
+    const authoringType = site.getAuthoringType();
+    if (authoringType) {
+      result.authoringType = authoringType;
+    }
+
+    // Add optional deliveryConfig.authorURL
+    const deliveryConfig = site.getDeliveryConfig();
+    if (deliveryConfig?.authorURL) {
+      result.deliveryConfig = {
+        authorURL: deliveryConfig.authorURL,
+      };
+    }
+
+    // Add optional hlxConfig.rso.site
+    const hlxConfig = site.getHlxConfig();
+    if (hlxConfig?.rso?.site) {
+      result.hlxConfig = {
+        rso: {
+          site: hlxConfig.rso.site,
+        },
+      };
+    }
+
+    return result;
+  },
 
   // TODO: implement toCSV
   toCSV: () => '',

@@ -595,16 +595,12 @@ describe('Organizations Controller', () => {
 
     expect(response.status).to.equal(200);
     expect(body).to.be.an('array').with.lengthOf(2);
-    expect(body).to.deep.equal([
-      {
-        id: sites[0].getId(),
-        baseURL: sites[0].getBaseURL(),
-      },
-      {
-        id: sites[1].getId(),
-        baseURL: sites[1].getBaseURL(),
-      },
-    ]);
+    // Verify minimal format - only id and baseURL required
+    expect(body[0]).to.have.property('id', sites[0].getId());
+    expect(body[0]).to.have.property('baseURL', sites[0].getBaseURL());
+    expect(body[1]).to.have.property('id', sites[1].getId());
+    expect(body[1]).to.have.property('baseURL', sites[1].getBaseURL());
+    // May include optional fields like authoringType, deliveryConfig, hlxConfig
   });
 
   it('returns full site representation when minimal=false', async () => {
@@ -648,7 +644,7 @@ describe('Organizations Controller', () => {
 
     expect(response.status).to.equal(200);
     expect(body).to.be.an('array').with.lengthOf(1);
-    expect(Object.keys(body[0]).length).to.be.greaterThan(2);
+    expect(Object.keys(body[0]).length).to.be.greaterThan(3);
   });
 
   it('returns full site representation when minimal parameter is omitted', async () => {
@@ -697,8 +693,8 @@ describe('Organizations Controller', () => {
     expect(body[0]).to.have.property('baseURL');
     expect(body[0]).to.have.property('organizationId');
     expect(body[0]).to.have.property('deliveryType');
-    // Verify it's NOT the minimal representation (has more than just id and baseURL)
-    expect(Object.keys(body[0]).length).to.be.greaterThan(2);
+    // Verify it's NOT the minimal representation (has more than 3 fields)
+    expect(Object.keys(body[0]).length).to.be.greaterThan(3);
   });
 
   it('returns full site representation when query parameter has no value', async () => {
@@ -747,7 +743,7 @@ describe('Organizations Controller', () => {
     expect(body[0]).to.have.property('baseURL');
     expect(body[0]).to.have.property('organizationId');
     expect(body[0]).to.have.property('deliveryType');
-    expect(Object.keys(body[0]).length).to.be.greaterThan(2);
+    expect(Object.keys(body[0]).length).to.be.greaterThan(3);
   });
 
   it('gets an organization by id', async () => {
