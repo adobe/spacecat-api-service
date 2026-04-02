@@ -96,6 +96,39 @@ describe('llmo-agentic-traffic-global', () => {
       expect((await response.json()).message).to.equal('limit must be greater than or equal to 1');
     });
 
+    it('returns bad request for non-integer week query param', async () => {
+      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+
+      const response = await handler({
+        ...context,
+        invocation: { event: { rawQueryString: 'week=abc' } },
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('week must be an integer');
+    });
+
+    it('treats query params without a value as empty strings', async () => {
+      const thenable = {
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      thenable.select = sandbox.stub().returns(thenable);
+      thenable.order = sandbox.stub().returns(thenable);
+      thenable.eq = sandbox.stub().returns(thenable);
+      thenable.limit = sandbox.stub().returns(thenable);
+      postgrestClient.from.returns(thenable);
+
+      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const response = await handler({
+        ...context,
+        invocation: { event: { rawQueryString: 'year' } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(thenable.eq).not.to.have.been.called;
+      expect(await response.json()).to.deep.equal([]);
+    });
+
     it('lists global traffic rows ordered by newest week', async () => {
       const thenable = {
         then: (resolve) => Promise.resolve({
@@ -137,6 +170,65 @@ describe('llmo-agentic-traffic-global', () => {
         updatedBy: 'system',
       }]);
     });
+
+    it('applies the week filter when provided', async () => {
+      const thenable = {
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      thenable.select = sandbox.stub().returns(thenable);
+      thenable.order = sandbox.stub().returns(thenable);
+      thenable.eq = sandbox.stub().returns(thenable);
+      thenable.limit = sandbox.stub().returns(thenable);
+      postgrestClient.from.returns(thenable);
+
+      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const response = await handler({
+        ...context,
+        invocation: { event: { rawQueryString: 'year=2026&week=14' } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(thenable.eq).to.have.been.calledWith('week', 14);
+      expect(await response.json()).to.deep.equal([]);
+    });
+
+    it('returns an empty array when PostgREST returns no rows', async () => {
+      const thenable = {
+        then: (resolve) => Promise.resolve({ data: null, error: null }).then(resolve),
+      };
+      thenable.select = sandbox.stub().returns(thenable);
+      thenable.order = sandbox.stub().returns(thenable);
+      thenable.eq = sandbox.stub().returns(thenable);
+      thenable.limit = sandbox.stub().returns(thenable);
+      postgrestClient.from.returns(thenable);
+
+      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal([]);
+    });
+
+    it('returns internal server error when PostgREST responds with an error', async () => {
+      const thenable = {
+        then: (resolve) => Promise.resolve({
+          data: null,
+          error: { message: 'boom' },
+        }).then(resolve),
+      };
+      thenable.select = sandbox.stub().returns(thenable);
+      thenable.order = sandbox.stub().returns(thenable);
+      thenable.eq = sandbox.stub().returns(thenable);
+      thenable.limit = sandbox.stub().returns(thenable);
+      postgrestClient.from.returns(thenable);
+
+      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWith('Error listing global agentic traffic: boom');
+      expect((await response.json()).message).to.equal('Failed to list global agentic traffic');
+    });
   });
 
   describe('POST handler', () => {
@@ -149,6 +241,17 @@ describe('llmo-agentic-traffic-global', () => {
       expect(response.status).to.equal(403);
     });
 
+    it('returns 503 when PostgREST is unavailable', async () => {
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+
+      const response = await handler({
+        ...context,
+        dataAccess: { services: {} },
+      });
+
+      expect(response.status).to.equal(503);
+    });
+
     it('returns bad request when body is not an object', async () => {
       const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
 
@@ -159,6 +262,30 @@ describe('llmo-agentic-traffic-global', () => {
 
       expect(response.status).to.equal(400);
       expect((await response.json()).message).to.equal('Request body must be an object');
+    });
+
+    it('returns bad request when year is missing', async () => {
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+
+      const response = await handler({
+        ...context,
+        data: { week: 14, hits: 10 },
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('year is required');
+    });
+
+    it('returns bad request for non-integer hits', async () => {
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+
+      const response = await handler({
+        ...context,
+        data: { year: 2026, week: 14, hits: 'many' },
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.equal('hits must be an integer');
     });
 
     it('returns bad request for invalid week', async () => {
@@ -216,6 +343,146 @@ describe('llmo-agentic-traffic-global', () => {
         updatedAt: '2026-04-02T00:00:00Z',
         updatedBy: 'user-1',
       });
+    });
+
+    it('uses profile sub when user_id is missing', async () => {
+      const upsertStub = sandbox.stub().returns({
+        select: sandbox.stub().returns({
+          single: sandbox.stub().resolves({
+            data: {
+              id: 'row-2',
+              year: 2026,
+              week: 15,
+              hits: 200,
+              created_at: '2026-04-01T00:00:00Z',
+              updated_at: '2026-04-02T00:00:00Z',
+              updated_by: 'sub-9',
+            },
+            error: null,
+          }),
+        }),
+      });
+      postgrestClient.from.returns({
+        upsert: upsertStub,
+      });
+
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+      const response = await handler({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true, sub: 'sub-9' })
+            .withAuthenticated(true),
+        },
+        data: { year: 2026, week: 15, hits: 200 },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(upsertStub).to.have.been.calledWithMatch({
+        updated_by: 'sub-9',
+      });
+    });
+
+    it('falls back to service name when auth profile has no user_id or sub', async () => {
+      const upsertStub = sandbox.stub().returns({
+        select: sandbox.stub().returns({
+          single: sandbox.stub().resolves({
+            data: {
+              id: 'row-3',
+              year: 2026,
+              week: 16,
+              hits: 300,
+              created_at: '2026-04-01T00:00:00Z',
+              updated_at: '2026-04-02T00:00:00Z',
+              updated_by: 'spacecat-api-service',
+            },
+            error: null,
+          }),
+        }),
+      });
+      postgrestClient.from.returns({
+        upsert: upsertStub,
+      });
+
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+      const response = await handler({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+        data: { year: 2026, week: 16, hits: 300 },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(upsertStub).to.have.been.calledWithMatch({
+        updated_by: 'spacecat-api-service',
+      });
+    });
+
+    it('uses authInfo.profile when getProfile is unavailable', async () => {
+      const upsertStub = sandbox.stub().returns({
+        select: sandbox.stub().returns({
+          single: sandbox.stub().resolves({
+            data: {
+              id: 'row-4',
+              year: 2026,
+              week: 17,
+              hits: 400,
+              created_at: '2026-04-01T00:00:00Z',
+              updated_at: '2026-04-02T00:00:00Z',
+              updated_by: 'profile-sub',
+            },
+            error: null,
+          }),
+        }),
+      });
+      postgrestClient.from.returns({
+        upsert: upsertStub,
+      });
+
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+      const response = await handler({
+        ...context,
+        attributes: {
+          authInfo: {
+            profile: { sub: 'profile-sub' },
+          },
+        },
+        data: { year: 2026, week: 17, hits: 400 },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(upsertStub).to.have.been.calledWithMatch({
+        updated_by: 'profile-sub',
+      });
+    });
+
+    it('returns internal server error when upsert responds with an error', async () => {
+      const upsertStub = sandbox.stub().returns({
+        select: sandbox.stub().returns({
+          single: sandbox.stub().resolves({
+            data: null,
+            error: { message: 'insert failed' },
+          }),
+        }),
+      });
+      postgrestClient.from.returns({
+        upsert: upsertStub,
+      });
+
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+      const response = await handler({
+        ...context,
+        data: { year: 2026, week: 14, hits: 12345 },
+      });
+
+      expect(response.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWith('Error upserting global agentic traffic: insert failed');
+      expect((await response.json()).message).to.equal('Failed to update global agentic traffic');
     });
   });
 });

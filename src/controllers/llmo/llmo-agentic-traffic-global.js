@@ -36,11 +36,9 @@ function getQueryParams(context) {
 
   const params = {};
   rawQueryString.split('&').forEach((param) => {
-    const [key, value] = param.split('=');
+    const [key, value = ''] = param.split('=');
     if (key) {
-      params[decodeURIComponent(key)] = value !== undefined
-        ? decodeURIComponent(value)
-        : '';
+      params[decodeURIComponent(key)] = decodeURIComponent(value);
     }
   });
   return params;
@@ -67,6 +65,28 @@ function normalizeInteger(value, fieldName, {
   return { value: parsed };
 }
 
+function isObjectPayload(data) {
+  return data !== null && typeof data === 'object' && !Array.isArray(data);
+}
+
+function normalizeIntegerFields(source, specs) {
+  const values = {};
+
+  for (const [fieldName, options] of Object.entries(specs)) {
+    const { required = false, ...constraints } = options;
+    const { value, error } = normalizeInteger(source[fieldName], fieldName, constraints);
+
+    if (error) return { error };
+    if (required && value == null) {
+      return { error: `${fieldName} is required` };
+    }
+
+    values[fieldName] = value;
+  }
+
+  return { values };
+}
+
 function resolveUpdatedBy(context) {
   const authInfo = context.attributes?.authInfo;
   const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
@@ -85,14 +105,12 @@ export function createAgenticTrafficGlobalGetHandler(accessControlUtil) {
     if (unavailable) return unavailable;
 
     const query = getQueryParams(context);
-    const yearResult = normalizeInteger(query.year, 'year', { minimum: 2000, maximum: 9999 });
-    if (yearResult.error) return badRequest(yearResult.error);
-
-    const weekResult = normalizeInteger(query.week, 'week', { minimum: 1, maximum: 53 });
-    if (weekResult.error) return badRequest(weekResult.error);
-
-    const limitResult = normalizeInteger(query.limit, 'limit', { minimum: 1, maximum: 520 });
-    if (limitResult.error) return badRequest(limitResult.error);
+    const { values, error: validationError } = normalizeIntegerFields(query, {
+      year: { minimum: 2000, maximum: 9999 },
+      week: { minimum: 1, maximum: 53 },
+      limit: { minimum: 1, maximum: 520 },
+    });
+    if (validationError) return badRequest(validationError);
 
     try {
       const { postgrestClient } = context.dataAccess.services;
@@ -102,14 +120,14 @@ export function createAgenticTrafficGlobalGetHandler(accessControlUtil) {
         .order('year', { ascending: false })
         .order('week', { ascending: false });
 
-      if (yearResult.value != null) {
-        dbQuery = dbQuery.eq('year', yearResult.value);
+      if (values.year != null) {
+        dbQuery = dbQuery.eq('year', values.year);
       }
-      if (weekResult.value != null) {
-        dbQuery = dbQuery.eq('week', weekResult.value);
+      if (values.week != null) {
+        dbQuery = dbQuery.eq('week', values.week);
       }
-      if (limitResult.value != null) {
-        dbQuery = dbQuery.limit(limitResult.value);
+      if (values.limit != null) {
+        dbQuery = dbQuery.limit(values.limit);
       }
 
       const { data, error } = await dbQuery;
@@ -134,31 +152,23 @@ export function createAgenticTrafficGlobalPostHandler(accessControlUtil) {
     const unavailable = requirePostgrest(context);
     if (unavailable) return unavailable;
 
-    if (!context.data || typeof context.data !== 'object' || Array.isArray(context.data)) {
+    if (!isObjectPayload(context.data)) {
       return badRequest('Request body must be an object');
     }
 
-    const yearResult = normalizeInteger(context.data.year, 'year', { minimum: 2000, maximum: 9999 });
-    if (yearResult.error || yearResult.value == null) {
-      return badRequest(yearResult.error || 'year is required');
-    }
-
-    const weekResult = normalizeInteger(context.data.week, 'week', { minimum: 1, maximum: 53 });
-    if (weekResult.error || weekResult.value == null) {
-      return badRequest(weekResult.error || 'week is required');
-    }
-
-    const hitsResult = normalizeInteger(context.data.hits, 'hits', { minimum: 0 });
-    if (hitsResult.error || hitsResult.value == null) {
-      return badRequest(hitsResult.error || 'hits is required');
-    }
+    const { values, error: validationError } = normalizeIntegerFields(context.data, {
+      year: { required: true, minimum: 2000, maximum: 9999 },
+      week: { required: true, minimum: 1, maximum: 53 },
+      hits: { required: true, minimum: 0 },
+    });
+    if (validationError) return badRequest(validationError);
 
     try {
       const { postgrestClient } = context.dataAccess.services;
       const row = {
-        year: yearResult.value,
-        week: weekResult.value,
-        hits: hitsResult.value,
+        year: values.year,
+        week: values.week,
+        hits: values.hits,
         updated_by: resolveUpdatedBy(context),
       };
 
