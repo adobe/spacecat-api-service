@@ -90,6 +90,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} tokensController - The tokens controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
+ * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -138,6 +139,7 @@ export default function getRouteHandlers(
   tokensController,
   plgOnboardingController,
   imsOrgAccessController,
+  contactSalesLeadsController,
   featureFlagsController,
 ) {
   const staticRoutes = {};
@@ -518,6 +520,12 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/ims-org-access': imsOrgAccessController.listGrants,
     'GET /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.getGrant,
     'DELETE /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.revokeGrant,
+
+    // Contact Sales Leads
+    'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.create,
+    'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
+    'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
+    'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
   };
 
   // Initialization of static and dynamic routes

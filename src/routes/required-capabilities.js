@@ -98,6 +98,12 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/ims-org-access/:accessId',
   'DELETE /sites/:siteId/ims-org-access/:accessId',
 
+  // Contact sales leads - IMS-authenticated, end-user UI only; not for S2S consumers
+  'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+  'GET /organizations/:organizationId/contact-sales-leads',
+  'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+  'PATCH /contact-sales-leads/:contactSalesLeadId',
+
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
   'GET /consumers/by-client-id/:clientId',

@@ -394,6 +394,13 @@ describe('getRouteHandlers', () => {
     revokeGrant: sinon.stub(),
   };
 
+  const mockContactSalesLeadsController = {
+    create: sinon.stub(),
+    getByOrganizationId: sinon.stub(),
+    checkBySite: sinon.stub(),
+    update: sinon.stub(),
+  };
+
   const mockFeatureFlagsController = {
     listByOrganization: () => null,
     putByOrganizationProductAndName: () => null,
@@ -446,6 +453,7 @@ describe('getRouteHandlers', () => {
       mockTokensController,
       mockPlgOnboardingController,
       mockImsOrgAccessController,
+      mockContactSalesLeadsController,
       mockFeatureFlagsController,
     );
 
@@ -813,6 +821,10 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access/:accessId',
       'DELETE /sites/:siteId/ims-org-access/:accessId',
+      'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+      'GET /organizations/:organizationId/contact-sales-leads',
+      'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+      'PATCH /contact-sales-leads/:contactSalesLeadId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
