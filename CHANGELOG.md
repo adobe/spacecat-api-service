@@ -1,3 +1,16 @@
+# [1.410.0](https://github.com/adobe/spacecat-api-service/compare/v1.409.0...v1.410.0) (2026-04-02)
+
+
+### Bug Fixes
+
+* **api-service:** remove geo-brand-presence onboarding enrollment ([#2116](https://github.com/adobe/spacecat-api-service/issues/2116)) ([8ba187c](https://github.com/adobe/spacecat-api-service/commit/8ba187cc18a08c2312ec28a75c3ba89c14409efe))
+
+
+### Features
+
+* add lastAuditedAt to opportunity DTO and OpenAPI schema ([#2117](https://github.com/adobe/spacecat-api-service/issues/2117)) ([660bf59](https://github.com/adobe/spacecat-api-service/commit/660bf59af1b1c1d9b71160bd02fbbf6e72410d8a))
+* add preflight beta endpoints proxying to Mysticat analyze ([#2102](https://github.com/adobe/spacecat-api-service/issues/2102)) ([4f40229](https://github.com/adobe/spacecat-api-service/commit/4f402299e565d97963968280474ad5f4c9cd5ef4))
+
 # [1.409.0](https://github.com/adobe/spacecat-api-service/compare/v1.408.0...v1.409.0) (2026-04-02)
 
 
