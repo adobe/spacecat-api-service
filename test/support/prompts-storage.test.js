@@ -928,56 +928,104 @@ describe('prompts-storage', () => {
       expect(upsertedRows.topics[0].name).to.equal('Photo & Editing & Topic');
     });
 
-    it('throws when auto-creating categories fails', async () => {
+    it('falls back to name lookup when category upsert hits name constraint', async () => {
+      let catCallCount = 0;
       const client = {
         from: (table) => {
           if (table === 'prompts') {
             return {
               select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
-              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
           }
           if (table === 'categories') {
-            return makeChain({ data: null, error: { message: 'constraint violation' } });
+            catCallCount += 1;
+            if (catCallCount === 1) {
+              // First call: buildLookupMaps — no existing categories
+              return makeChain({ data: [], error: null });
+            }
+            if (catCallCount === 2) {
+              // Second call: upsert fails (name constraint violation)
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            // Third call: fallback name lookup succeeds
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: { id: 'existing-uuid', category_id: 'comparison-decision' }, error: null }),
+                  }),
+                }),
+              }),
+            };
           }
           return makeChain({ data: [], error: null });
         },
       };
-      await expect(
-        upsertPrompts({
-          organizationId: ORG_ID,
-          brandUuid: BRAND_UUID,
-          prompts: [{ prompt: 'X', regions: [], categoryId: 'bad-cat' }],
-          postgrestClient: client,
-        }),
-      ).to.be.rejectedWith('Failed to auto-create categories');
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], categoryId: 'baseurl-comparison-decision' }],
+        postgrestClient: client,
+      });
+      // Should succeed — fallback resolved the category by name
+      expect(result.created).to.equal(1);
     });
 
-    it('throws when auto-creating topics fails', async () => {
+    it('falls back to name lookup when topic upsert hits name constraint', async () => {
+      let topicCallCount = 0;
       const client = {
         from: (table) => {
           if (table === 'prompts') {
             return {
               select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
-              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
           }
           if (table === 'topics') {
-            return makeChain({ data: null, error: { message: 'constraint violation' } });
+            topicCallCount += 1;
+            if (topicCallCount === 1) {
+              return makeChain({ data: [], error: null });
+            }
+            if (topicCallCount === 2) {
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: { id: 'existing-uuid', topic_id: 'some-topic' }, error: null }),
+                  }),
+                }),
+              }),
+            };
           }
           return makeChain({ data: [], error: null });
         },
       };
-      await expect(
-        upsertPrompts({
-          organizationId: ORG_ID,
-          brandUuid: BRAND_UUID,
-          prompts: [{ prompt: 'X', regions: [], topicId: 'bad-topic' }],
-          postgrestClient: client,
-        }),
-      ).to.be.rejectedWith('Failed to auto-create topics');
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], topicId: 'gsc-some-topic' }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
     });
 
     it('handles existing prompts with null regions', async () => {

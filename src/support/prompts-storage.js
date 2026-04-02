@@ -160,9 +160,26 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .from('categories')
         .upsert(rows, { onConflict: 'organization_id,category_id' })
         .select('id,category_id')
-        .then(({ data, error }) => {
-          if (error) throw new Error(`Failed to auto-create categories: ${error.message}`);
-          data.forEach((c) => categoryMap.set(c.category_id, c.id));
+        .then(async ({ data, error }) => {
+          if (!error) {
+            data.forEach((c) => categoryMap.set(c.category_id, c.id));
+            return;
+          }
+          // Unique name constraint — a category with the same name but different
+          // category_id already exists.  Look it up by name and reuse its UUID.
+          for (const catId of unique) {
+            if (!categoryMap.has(catId)) {
+              const name = slugToName(catId);
+              // eslint-disable-next-line no-await-in-loop
+              const { data: existing } = await postgrestClient
+                .from('categories')
+                .select('id,category_id')
+                .eq('organization_id', organizationId)
+                .eq('name', name)
+                .maybeSingle();
+              if (existing) categoryMap.set(catId, existing.id);
+            }
+          }
         }),
     );
   }
@@ -181,9 +198,25 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .from('topics')
         .upsert(rows, { onConflict: 'organization_id,topic_id' })
         .select('id,topic_id')
-        .then(({ data, error }) => {
-          if (error) throw new Error(`Failed to auto-create topics: ${error.message}`);
-          data.forEach((t) => topicMap.set(t.topic_id, t.id));
+        .then(async ({ data, error }) => {
+          if (!error) {
+            data.forEach((t) => topicMap.set(t.topic_id, t.id));
+            return;
+          }
+          // Unique name constraint — fall back to lookup by name.
+          for (const topId of unique) {
+            if (!topicMap.has(topId)) {
+              const name = slugToName(topId);
+              // eslint-disable-next-line no-await-in-loop
+              const { data: existing } = await postgrestClient
+                .from('topics')
+                .select('id,topic_id')
+                .eq('organization_id', organizationId)
+                .eq('name', name)
+                .maybeSingle();
+              if (existing) topicMap.set(topId, existing.id);
+            }
+          }
         }),
     );
   }
