@@ -1,3 +1,10 @@
+# [1.403.0](https://github.com/adobe/spacecat-api-service/compare/v1.402.0...v1.403.0) (2026-04-02)
+
+
+### Features
+
+* transition to RPC for market tracking trends | LLMO-3922 ([#2044](https://github.com/adobe/spacecat-api-service/issues/2044)) ([9fce656](https://github.com/adobe/spacecat-api-service/commit/9fce65646e929ddece40f548a8b4e46434c52b45))
+
 # [1.402.0](https://github.com/adobe/spacecat-api-service/compare/v1.401.2...v1.402.0) (2026-04-02)
 
 
