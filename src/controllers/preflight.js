@@ -250,7 +250,7 @@ function PreflightController(ctx, log, env) {
    * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
    * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
    * identified by scanId.
-   * @param {string} mysticatBaseUrl - The base URL of the Mysticat service.
+   * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
    * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
    * @param {string} siteId - The site ID.
    * @param {string} url - The page URL to analyze.
