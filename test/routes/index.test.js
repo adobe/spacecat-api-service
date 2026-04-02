@@ -270,6 +270,8 @@ describe('getRouteHandlers', () => {
 
   const mockLlmoMysticatController = {
     getFilterDimensions: () => null,
+    getAgenticTrafficGlobal: () => null,
+    postAgenticTrafficGlobal: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -481,6 +483,8 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
+      'GET /llmo/agentic-traffic/global',
+      'POST /llmo/agentic-traffic/global',
       'POST /plg/onboard',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
@@ -506,6 +510,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
+    expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
+    expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);

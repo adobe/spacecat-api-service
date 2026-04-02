@@ -870,7 +870,267 @@ describe('prompts-storage', () => {
       expect(result.prompts[0].topicId).to.equal('new-topic');
     });
 
-    it('throws when auto-creating categories fails', async () => {
+    it('ensureLookupEntries uses slugToName for readable fallback names', async () => {
+      const upsertedRows = {};
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          // Capture upsert rows to verify the name field
+          return {
+            upsert: (rows) => {
+              upsertedRows[table] = rows;
+              const data = rows.map((r) => ({
+                id: `uuid-${r.category_id || r.topic_id}`,
+                ...(r.category_id ? { category_id: r.category_id } : {}),
+                ...(r.topic_id ? { topic_id: r.topic_id } : {}),
+              }));
+              return {
+                select: () => ({
+                  then: (resolve) => resolve({ data, error: null }),
+                  catch: () => {},
+                }),
+              };
+            },
+            select: () => ({
+              eq: () => ({
+                eq: () => thenable({ data: [], error: null }),
+              }),
+            }),
+          };
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            prompt: 'Q1',
+            regions: ['us'],
+            categoryId: 'baseurl-comparison-decision',
+            topicId: 'gsc-photo-editing-topic',
+          },
+        ],
+        postgrestClient: client,
+      });
+
+      // slugToName strips "baseurl-" prefix and joins with " & "
+      expect(upsertedRows.categories).to.be.an('array').with.lengthOf(1);
+      expect(upsertedRows.categories[0].name).to.equal('Comparison & Decision');
+
+      // slugToName strips "gsc-" prefix; 3+ words joined with spaces
+      expect(upsertedRows.topics).to.be.an('array').with.lengthOf(1);
+      expect(upsertedRows.topics[0].name).to.equal('Photo Editing Topic');
+    });
+
+    it('falls back to unprefixed slug lookup when category upsert fails', async () => {
+      let catCallCount = 0;
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'categories') {
+            catCallCount += 1;
+            if (catCallCount === 1) {
+              // First call: buildLookupMaps — no existing categories
+              return makeChain({ data: [], error: null });
+            }
+            if (catCallCount === 2) {
+              // Second call: upsert fails (name constraint violation)
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            // Third call: fallback lookup by unprefixed category_id succeeds
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: { id: 'existing-uuid', category_id: 'comparison-decision' }, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], categoryId: 'baseurl-comparison-decision' }],
+        postgrestClient: client,
+      });
+      // Should succeed — fallback resolved via unprefixed slug "comparison-decision"
+      expect(result.created).to.equal(1);
+    });
+
+    it('falls back to unprefixed slug lookup when topic upsert fails', async () => {
+      let topicCallCount = 0;
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            topicCallCount += 1;
+            if (topicCallCount === 1) {
+              return makeChain({ data: [], error: null });
+            }
+            if (topicCallCount === 2) {
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            // Fallback lookup by unprefixed topic_id
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: { id: 'existing-uuid', topic_id: 'some-topic' }, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], topicId: 'gsc-some-topic' }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+    });
+
+    it('warns when category upsert fails and fallback also finds nothing', async () => {
+      let catCallCount = 0;
+      const warnStub = sandbox.stub(console, 'warn');
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'categories') {
+            catCallCount += 1;
+            if (catCallCount === 1) {
+              return makeChain({ data: [], error: null });
+            }
+            if (catCallCount === 2) {
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            // Fallback lookup finds nothing
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], categoryId: 'baseurl-unknown-cat' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.calledOnce).to.be.true;
+      expect(warnStub.firstCall.args[0]).to.include('baseurl-unknown-cat');
+    });
+
+    it('warns when topic upsert fails and fallback also finds nothing', async () => {
+      let topicCallCount = 0;
+      const warnStub = sandbox.stub(console, 'warn');
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            topicCallCount += 1;
+            if (topicCallCount === 1) {
+              return makeChain({ data: [], error: null });
+            }
+            if (topicCallCount === 2) {
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], topicId: 'gsc-unknown-topic' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.calledOnce).to.be.true;
+      expect(warnStub.firstCall.args[0]).to.include('gsc-unknown-topic');
+    });
+
+    it('throws when category upsert fails with non-constraint error', async () => {
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -881,7 +1141,7 @@ describe('prompts-storage', () => {
             };
           }
           if (table === 'categories') {
-            return makeChain({ data: null, error: { message: 'constraint violation' } });
+            return makeChain({ data: null, error: { code: '42501', message: 'permission denied' } });
           }
           return makeChain({ data: [], error: null });
         },
@@ -896,7 +1156,7 @@ describe('prompts-storage', () => {
       ).to.be.rejectedWith('Failed to auto-create categories');
     });
 
-    it('throws when auto-creating topics fails', async () => {
+    it('throws when topic upsert fails with non-constraint error', async () => {
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -907,7 +1167,7 @@ describe('prompts-storage', () => {
             };
           }
           if (table === 'topics') {
-            return makeChain({ data: null, error: { message: 'constraint violation' } });
+            return makeChain({ data: null, error: { code: '42501', message: 'permission denied' } });
           }
           return makeChain({ data: [], error: null });
         },
