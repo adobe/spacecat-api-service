@@ -109,17 +109,29 @@ async function buildLookupMaps(organizationId, postgrestClient) {
 }
 
 /**
+ * DRS source prefix pattern. Must stay in sync with DRS _build_gsc /
+ * _build_base_url / _build_agentic_traffic in spacecat_v2_prompts_sync.py.
+ */
+const DRS_PREFIX_RE = /^(baseurl|gsc|agentic)-/;
+
+/**
+ * Strips known DRS source prefixes from a slug.
+ * e.g. "baseurl-comparison-decision" → "comparison-decision"
+ */
+function stripDrsPrefix(slug) {
+  return slug.replace(DRS_PREFIX_RE, '');
+}
+
+/**
  * Best-effort conversion of a category/topic slug back to a readable name.
  * Strips known DRS source prefixes, title-cases each word, and joins with
  * " & " to restore the original naming convention (e.g. "Comparison & Decision").
  *
- * NOTE: The prefix list must stay in sync with DRS _build_gsc / _build_base_url /
- * _build_agentic_traffic in spacecat_v2_prompts_sync.py. This is a fallback —
- * the primary fix is DRS sending explicit `id` so this path rarely executes.
+ * This is a fallback — the primary fix is DRS sending explicit `id` so this
+ * path rarely executes.
  */
 function slugToName(slug) {
-  const stripped = slug.replace(/^(baseurl|gsc|agentic)-/, '');
-  return stripped
+  return stripDrsPrefix(slug)
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' & ');
@@ -165,17 +177,18 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
             data.forEach((c) => categoryMap.set(c.category_id, c.id));
             return;
           }
-          // Unique name constraint — a category with the same name but different
-          // category_id already exists.  Look it up by name and reuse its UUID.
+          // Upsert failed (likely unique name constraint). Try resolving each
+          // missing category by its unprefixed slug — the old category_id before
+          // DRS started adding source prefixes.
           for (const catId of unique) {
             if (!categoryMap.has(catId)) {
-              const name = slugToName(catId);
+              const unprefixed = stripDrsPrefix(catId);
               // eslint-disable-next-line no-await-in-loop
               const { data: existing } = await postgrestClient
                 .from('categories')
                 .select('id,category_id')
                 .eq('organization_id', organizationId)
-                .eq('name', name)
+                .eq('category_id', unprefixed)
                 .maybeSingle();
               if (existing) categoryMap.set(catId, existing.id);
             }
@@ -203,16 +216,16 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
             data.forEach((t) => topicMap.set(t.topic_id, t.id));
             return;
           }
-          // Unique name constraint — fall back to lookup by name.
+          // Upsert failed — try resolving by unprefixed slug.
           for (const topId of unique) {
             if (!topicMap.has(topId)) {
-              const name = slugToName(topId);
+              const unprefixed = stripDrsPrefix(topId);
               // eslint-disable-next-line no-await-in-loop
               const { data: existing } = await postgrestClient
                 .from('topics')
                 .select('id,topic_id')
                 .eq('organization_id', organizationId)
-                .eq('name', name)
+                .eq('topic_id', unprefixed)
                 .maybeSingle();
               if (existing) topicMap.set(topId, existing.id);
             }

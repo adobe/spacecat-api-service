@@ -928,7 +928,7 @@ describe('prompts-storage', () => {
       expect(upsertedRows.topics[0].name).to.equal('Photo & Editing & Topic');
     });
 
-    it('falls back to name lookup when category upsert hits name constraint', async () => {
+    it('falls back to unprefixed slug lookup when category upsert fails', async () => {
       let catCallCount = 0;
       const client = {
         from: (table) => {
@@ -956,7 +956,7 @@ describe('prompts-storage', () => {
                 }),
               };
             }
-            // Third call: fallback name lookup succeeds
+            // Third call: fallback lookup by unprefixed category_id succeeds
             return {
               select: () => ({
                 eq: () => ({
@@ -976,11 +976,11 @@ describe('prompts-storage', () => {
         prompts: [{ prompt: 'X', regions: [], categoryId: 'baseurl-comparison-decision' }],
         postgrestClient: client,
       });
-      // Should succeed — fallback resolved the category by name
+      // Should succeed — fallback resolved via unprefixed slug "comparison-decision"
       expect(result.created).to.equal(1);
     });
 
-    it('falls back to name lookup when topic upsert hits name constraint', async () => {
+    it('falls back to unprefixed slug lookup when topic upsert fails', async () => {
       let topicCallCount = 0;
       const client = {
         from: (table) => {
@@ -1006,6 +1006,7 @@ describe('prompts-storage', () => {
                 }),
               };
             }
+            // Fallback lookup by unprefixed topic_id
             return {
               select: () => ({
                 eq: () => ({

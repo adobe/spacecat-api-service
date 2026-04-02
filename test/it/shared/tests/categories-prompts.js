@@ -17,8 +17,8 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  * Integration tests for the category slug-as-name bug (LLMO-4060).
  *
  * Validates:
- * 1. Fallback path: category exists by name, then prompts arrive with a prefixed slug
- *    — the fallback resolves to the existing category instead of crashing on name collision
+ * 1. Fallback path: category exists with unprefixed slug, prompt references prefixed slug
+ *    — the fallback strips the DRS prefix and resolves to the existing category
  * 2. Fix verification: POST categories with explicit id preserves name, no duplicates
  * 3. Idempotency: duplicate category creation upserts (201), not conflicts (409)
  *
@@ -29,13 +29,14 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
   describe('Categories & Prompts (LLMO-4060)', () => {
     // ── Fallback path (slugToName defense-in-depth) ──
 
-    describe('Fallback: category exists by name, prompt references prefixed slug', () => {
+    describe('Fallback: category exists with unprefixed slug, prompt references prefixed slug', () => {
       before(() => resetData());
 
-      it('resolves to the existing category instead of crashing on name collision', async () => {
+      it('resolves to the existing category via unprefixed slug lookup', async () => {
         const http = getHttpClient();
 
         // 1. Create a category WITHOUT an explicit id — API auto-derives slug from name
+        //    Stored category_id = "comparison-decision" (no prefix)
         const catRes = await http.admin.post(
           `/v2/orgs/${ORG_1_ID}/categories`,
           { name: 'Comparison & Decision', origin: 'ai' },
@@ -43,9 +44,9 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
         expect(catRes.status).to.equal(201);
         expect(catRes.body.id).to.equal('comparison-decision');
 
-        // 2. Post prompts referencing a PREFIXED categoryId that doesn't match the stored slug.
-        //    slugToName produces "Comparison & Decision" — same name as the existing category.
-        //    The fallback should resolve to the existing category, not 500.
+        // 2. Post prompts referencing "baseurl-comparison-decision" (prefixed slug).
+        //    Upsert fails (name collision), fallback strips prefix and finds
+        //    the existing "comparison-decision" category.
         const promptRes = await http.admin.post(
           `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
           [
@@ -59,7 +60,7 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
         expect(promptRes.status).to.equal(201);
         expect(promptRes.body.created).to.equal(1);
 
-        // 3. Only ONE category with that name should exist (no duplicate)
+        // 3. Only ONE category should exist — no duplicate created
         const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/categories`);
         expect(listRes.status).to.equal(200);
 
