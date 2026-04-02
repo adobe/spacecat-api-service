@@ -1,3 +1,10 @@
+## [1.403.1](https://github.com/adobe/spacecat-api-service/compare/v1.403.0...v1.403.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* use readable names for auto-created category/topic fallbacks (LLMO-4060) ([#2108](https://github.com/adobe/spacecat-api-service/issues/2108)) ([7a3acc6](https://github.com/adobe/spacecat-api-service/commit/7a3acc6f590d8285e6ee1a145a259ddd773e7ef8))
+
 # [1.403.0](https://github.com/adobe/spacecat-api-service/compare/v1.402.0...v1.403.0) (2026-04-02)
 
 
