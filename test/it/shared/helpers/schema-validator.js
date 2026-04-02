@@ -43,7 +43,7 @@ function getBundledSpec() {
   const apiYamlPath = join(rootDir, 'docs/openapi/api.yaml');
   const outPath = join(rootDir, 'docs/openapi/.bundled-api.json');
   execSync(
-    `npx @redocly/cli bundle "${apiYamlPath}" --ext json -o "${outPath}"`,
+    `npx @redocly/cli bundle "${apiYamlPath}" --dereferenced --ext json -o "${outPath}"`,
     { cwd: rootDir, encoding: 'utf8', timeout: 30000 },
   );
   const content = readFileSync(outPath, 'utf8');
