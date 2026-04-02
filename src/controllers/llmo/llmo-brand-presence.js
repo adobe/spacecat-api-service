@@ -569,7 +569,7 @@ function parseMarketTrackingTrendsParams(context) {
 }
 
 // eslint-disable-next-line max-len
-function callMarketTrackingTrendsRpc(client, organizationId, params, defaults, filterByBrandId, log) {
+async function callMarketTrackingTrendsRpc(client, organizationId, params, defaults, filterByBrandId, log) {
   const rpcParams = {
     p_organization_id: organizationId,
     p_start_date: params.startDate || defaults.startDate,
@@ -584,7 +584,11 @@ function callMarketTrackingTrendsRpc(client, organizationId, params, defaults, f
     p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
   };
   log.info(`RPC rpc_market_tracking_trends called with: ${JSON.stringify(rpcParams)}`);
-  return client.rpc('rpc_market_tracking_trends', rpcParams);
+  const start = performance.now();
+  const result = await client.rpc('rpc_market_tracking_trends', rpcParams);
+  const elapsed = (performance.now() - start).toFixed(0);
+  log.info(`RPC rpc_market_tracking_trends completed in ${elapsed}ms`);
+  return result;
 }
 
 /**
