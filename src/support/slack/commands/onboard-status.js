@@ -16,7 +16,7 @@ import {
   AUDIT_OPPORTUNITY_MAP,
   computeAuditCompletion,
 } from '@adobe/spacecat-shared-utils';
-import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
+import { extractURLFromSlackInput, loadProfileConfig } from '../../../utils/slack/base.js';
 import BaseCommand from './base.js';
 
 const PHRASES = ['onboard status'];
@@ -79,21 +79,42 @@ Example:
 
       // Onboard trigger timestamp — same value the task processor reads as onboardStartTime.
       // Used by computeAuditCompletion to detect audits that predate the last onboarding.
-      const lastStartTime = site.getConfig()?.getOnboardConfig()?.lastStartTime;
+      const onboardConfig = site.getConfig()?.getOnboardConfig();
+      const lastStartTime = onboardConfig?.lastStartTime;
+      const lastProfile = onboardConfig?.lastProfile;
 
-      // Fetch latest audits — derive auditTypes (for opportunity filtering) from records.
-      // For the pending check, always compare against ALL map-known audit types so that
-      // audits not yet started (no DB record) are correctly identified as pending.
+      // Load the profile used during onboarding to restrict which audit types are relevant.
+      // Falls back to all map-known types if the profile cannot be resolved.
+      let profileAuditTypes = null;
+      if (lastProfile) {
+        try {
+          const profile = loadProfileConfig(lastProfile);
+          if (profile?.audits && typeof profile.audits === 'object') {
+            profileAuditTypes = Object.keys(profile.audits)
+              .filter((t) => AUDIT_OPPORTUNITY_MAP[t]);
+          }
+        } catch (profileErr) {
+          log.warn(`[onboard-status] Could not load profile "${lastProfile}", falling back to all known types: ${profileErr.message}`);
+        }
+      }
+      const scopedTypes = profileAuditTypes || Object.keys(AUDIT_OPPORTUNITY_MAP);
+
+      // Fetch latest audits — derive auditTypes (for opportunity filtering) from records,
+      // restricted to the profile's audit types so pre-existing records from prior runs
+      // don't bleed non-profile opportunities into the status view.
       let auditTypes = [];
       let pendingAuditTypes = [];
       try {
         const latestAudits = await LatestAudit.allBySiteId(siteId);
         if (latestAudits && latestAudits.length > 0) {
-          auditTypes = [...new Set(latestAudits.map((a) => a.getAuditType()))];
+          auditTypes = [...new Set(
+            latestAudits
+              .map((a) => a.getAuditType())
+              .filter((t) => scopedTypes.includes(t)),
+          )];
         }
-        const knownTypes = Object.keys(AUDIT_OPPORTUNITY_MAP);
         const audits = latestAudits || [];
-        pendingAuditTypes = computeAuditCompletion(knownTypes, lastStartTime, audits)
+        pendingAuditTypes = computeAuditCompletion(scopedTypes, lastStartTime, audits)
           .pendingAuditTypes;
       } catch (auditErr) {
         log.warn(`[onboard-status] Could not fetch audit types for site ${siteId}: ${auditErr.message}`);
