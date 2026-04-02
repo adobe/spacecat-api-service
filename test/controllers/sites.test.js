@@ -4446,15 +4446,15 @@ describe('Sites Controller', () => {
 
       mockTierClientStub = {
         checkValidEntitlement: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         }),
         getFirstEnrollment: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
           enrollment: { getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] },
           site: testSites[0],
         }),
         getAllEnrollment: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
           enrollments: [{ getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] }],
         }),
       };
@@ -4507,7 +4507,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Site.findById.resolves(testSites[0]);
 
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4526,7 +4526,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4547,7 +4547,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4628,6 +4628,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4665,6 +4666,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4700,6 +4702,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4730,6 +4733,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => 'entitlement-456',
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       const mockTierClient = {
@@ -4752,6 +4756,77 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('organization');
       expect(body.data).to.have.property('site');
       expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
+    });
+
+    it('should return 404 for PLG-tier site via siteId path', async () => {
+      const validSiteId = SITE_IDS[1];
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-plg',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PLG',
+        },
+        enrollments: [{
+          getId: () => 'enrollment-plg',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for PLG-tier site via organizationId path', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-plg',
+          getTier: () => 'PLG',
+        },
+        enrollment: { getId: () => 'enrollment-plg', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for PLG-tier site via imsOrg path', async () => {
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'entitlement-plg',
+            getTier: () => 'PLG',
+          },
+          enrollment: { getId: () => 'enrollment-plg', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
     });
   });
 
