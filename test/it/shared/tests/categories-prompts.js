@@ -17,18 +17,19 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  * Integration tests for the category slug-as-name bug (LLMO-4060).
  *
  * Validates:
- * 1. Bug reproduction: POST categories without id, then prompts with prefixed categoryId
- * 2. Fix verification: POST categories with explicit id preserves name
- * 3. Idempotency: duplicate category creation returns 409
+ * 1. Fallback path: POST categories without id, then prompts with prefixed categoryId
+ *    — the auto-created fallback should get a readable name (slugToName), not the raw slug
+ * 2. Fix verification: POST categories with explicit id preserves name, no duplicates
+ * 3. Idempotency: duplicate category creation upserts (201), not conflicts (409)
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
  */
 export default function categoriesPromptsTests(getHttpClient, resetData) {
   describe('Categories & Prompts (LLMO-4060)', () => {
-    // ── Bug reproduction ──
+    // ── Fallback path (slugToName defense-in-depth) ──
 
-    describe('Bug: POST categories without id then prompts with prefixed categoryId', () => {
+    describe('Fallback: POST categories without id then prompts with prefixed categoryId', () => {
       before(() => resetData());
 
       it('auto-created fallback category has a readable name, not the raw slug', async () => {

@@ -111,6 +111,11 @@ async function buildLookupMaps(organizationId, postgrestClient) {
 /**
  * Best-effort conversion of a category/topic slug back to a readable name.
  * Strips known DRS source prefixes and title-cases the remainder.
+ *
+ * NOTE: The prefix list must stay in sync with DRS _build_gsc / _build_base_url /
+ * _build_agentic_traffic in spacecat_v2_prompts_sync.py. If a new DRS source is
+ * added, its prefix should be added here. This is a fallback — the primary fix is
+ * DRS sending explicit `id` so this path rarely executes.
  */
 function slugToName(slug) {
   const stripped = slug.replace(/^(baseurl|gsc|agentic)-/, '');

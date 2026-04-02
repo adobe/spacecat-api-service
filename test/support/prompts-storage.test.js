@@ -870,6 +870,64 @@ describe('prompts-storage', () => {
       expect(result.prompts[0].topicId).to.equal('new-topic');
     });
 
+    it('ensureLookupEntries uses slugToName for readable fallback names', async () => {
+      const upsertedRows = {};
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          // Capture upsert rows to verify the name field
+          return {
+            upsert: (rows) => {
+              upsertedRows[table] = rows;
+              const data = rows.map((r) => ({
+                id: `uuid-${r.category_id || r.topic_id}`,
+                ...(r.category_id ? { category_id: r.category_id } : {}),
+                ...(r.topic_id ? { topic_id: r.topic_id } : {}),
+              }));
+              return {
+                select: () => ({
+                  then: (resolve) => resolve({ data, error: null }),
+                  catch: () => {},
+                }),
+              };
+            },
+            select: () => ({
+              eq: () => ({
+                eq: () => thenable({ data: [], error: null }),
+              }),
+            }),
+          };
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          {
+            prompt: 'Q1',
+            regions: ['us'],
+            categoryId: 'baseurl-comparison-decision',
+            topicId: 'gsc-photo-editing-topic',
+          },
+        ],
+        postgrestClient: client,
+      });
+
+      // slugToName strips "baseurl-" and title-cases
+      expect(upsertedRows.categories).to.be.an('array').with.lengthOf(1);
+      expect(upsertedRows.categories[0].name).to.equal('Comparison Decision');
+
+      // slugToName strips "gsc-" and title-cases
+      expect(upsertedRows.topics).to.be.an('array').with.lengthOf(1);
+      expect(upsertedRows.topics[0].name).to.equal('Photo Editing Topic');
+    });
+
     it('throws when auto-creating categories fails', async () => {
       const client = {
         from: (table) => {
