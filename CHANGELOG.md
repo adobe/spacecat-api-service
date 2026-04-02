@@ -1,3 +1,10 @@
+# [1.402.0](https://github.com/adobe/spacecat-api-service/compare/v1.401.2...v1.402.0) (2026-04-02)
+
+
+### Features
+
+* enforce PLG tier invisibility at API filter layer (ASO-PLG) ([#2081](https://github.com/adobe/spacecat-api-service/issues/2081)) ([c2e2cba](https://github.com/adobe/spacecat-api-service/commit/c2e2cba6f2bf0809113a2789a2155741bd005533))
+
 ## [1.401.2](https://github.com/adobe/spacecat-api-service/compare/v1.401.1...v1.401.2) (2026-04-02)
 
 
