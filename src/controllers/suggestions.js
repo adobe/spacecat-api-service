@@ -70,6 +70,7 @@ function SuggestionsController(ctx, sqs, env) {
     'security-permissions',
     'security-vulnerabilities',
     'security-csp',
+    'high-page-views-low-form-views',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
