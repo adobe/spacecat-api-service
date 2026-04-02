@@ -126,6 +126,7 @@ describe('llmo-agentic-traffic-global', () => {
 
       expect(response.status).to.equal(200);
       expect(thenable.eq).not.to.have.been.called;
+      expect(thenable.limit).to.have.been.calledWith(52);
       expect(await response.json()).to.deep.equal([]);
     });
 
@@ -189,6 +190,7 @@ describe('llmo-agentic-traffic-global', () => {
 
       expect(response.status).to.equal(200);
       expect(thenable.eq).to.have.been.calledWith('week', 14);
+      expect(thenable.limit).to.have.been.calledWith(52);
       expect(await response.json()).to.deep.equal([]);
     });
 
@@ -206,6 +208,7 @@ describe('llmo-agentic-traffic-global', () => {
       const response = await handler(context);
 
       expect(response.status).to.equal(200);
+      expect(thenable.limit).to.have.been.calledWith(52);
       expect(await response.json()).to.deep.equal([]);
     });
 

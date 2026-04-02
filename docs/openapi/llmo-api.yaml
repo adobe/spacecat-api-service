@@ -665,7 +665,7 @@ llmo-agentic-traffic-global:
       Query parameters:
       - `year`: optional 4-digit year filter
       - `week`: optional ISO week filter (`1-53`)
-      - `limit`: optional max rows to return (`1-520`)
+      - `limit`: optional max rows to return (`1-520`, defaults to `52`)
 
       Human access is admin-only. S2S consumers may call this endpoint when granted the mapped route capability.
     operationId: getLlmoAgenticTrafficGlobal

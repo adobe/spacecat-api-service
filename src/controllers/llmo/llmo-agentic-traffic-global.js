@@ -19,6 +19,8 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { AgenticTrafficGlobalDto } from '../../dto/agentic-traffic-global.js';
 
+const DEFAULT_LIMIT = 52;
+
 function requirePostgrest(context) {
   const postgrestClient = context.dataAccess?.services?.postgrestClient;
   if (!postgrestClient?.from) {
@@ -126,9 +128,7 @@ export function createAgenticTrafficGlobalGetHandler(accessControlUtil) {
       if (values.week != null) {
         dbQuery = dbQuery.eq('week', values.week);
       }
-      if (values.limit != null) {
-        dbQuery = dbQuery.limit(values.limit);
-      }
+      dbQuery = dbQuery.limit(values.limit ?? DEFAULT_LIMIT);
 
       const { data, error } = await dbQuery;
       if (error) {
