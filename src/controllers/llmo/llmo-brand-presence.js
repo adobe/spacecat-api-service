@@ -50,7 +50,7 @@ const MODEL_QUERY_ALIASES = new Map([
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
-/** High row limit for weeks query — we need all rows to extract every distinct week (200K cap). */
+/** High row limit for large execution queries (sentiment, topics, prompt-detail, etc). */
 const WEEKS_QUERY_LIMIT = 200000;
 
 /**
@@ -181,24 +181,25 @@ function defaultDateRange() {
   };
 }
 
-function buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
+/**
+ * Same filters as rpc_brand_presence_filter_dimensions / filter-dimensions RPC; used only to
+ * collect distinct site_id rows for page_intents when a brand scope is applied without siteId.
+ */
+function buildExecutionsSiteIdsQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const {
-    model, siteId, categoryId, topicIds, regionCode, origin,
+    model, categoryId, topicIds, regionCode, origin,
   } = params;
 
   let q = client
     .from('brand_presence_executions')
-    .select('brand_id, brand_name, category_name, topic_id, topics, origin, region_code, site_id')
+    .select('site_id')
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
     .eq('model', model);
 
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
   if (filterByBrandId) {
     q = q.eq('brand_id', filterByBrandId);
   }
@@ -216,6 +217,57 @@ function buildExecutionsQuery(client, organizationId, params, defaults, filterBy
   }
 
   return q.limit(QUERY_LIMIT);
+}
+
+function buildFilterDimensionsRpcParams(organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const rpcParams = {
+    p_organization_id: organizationId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_model: params.model,
+  };
+  if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
+  if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
+  if (shouldApplyFilter(params.categoryId)) {
+    if (isValidUUID(params.categoryId)) {
+      rpcParams.p_category_id = params.categoryId;
+    } else {
+      rpcParams.p_category_name = params.categoryId;
+    }
+  }
+  if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
+  if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
+  if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
+  return rpcParams;
+}
+
+/**
+ * Normalizes RPC `stats` for the filter-dimensions HTTP response.
+ * Safe when the function omits `stats` or fields (e.g. older DB migration): each missing or
+ * non-finite value becomes 0. Non-plain objects (arrays, null stats) are treated as absent.
+ * @param {Record<string, unknown>|null|undefined} dims - Parsed RPC JSON body
+ * @returns {{ total_execution_count: number, distinct_prompt_count: number,
+ *   empty_answer_execution_count: number }}
+ */
+export function normalizeFilterDimensionsStatsFromRpc(dims) {
+  const hasPlainStats = dims != null
+    && typeof dims === 'object'
+    && dims.stats != null
+    && typeof dims.stats === 'object'
+    && !Array.isArray(dims.stats);
+  const raw = hasPlainStats ? dims.stats : {};
+  const totalExecutionCount = Number(raw.total_execution_count);
+  const distinctPromptCount = Number(raw.distinct_prompt_count);
+  const emptyAnswerExecutionCount = Number(raw.empty_answer_execution_count);
+  return {
+    total_execution_count: Number.isFinite(totalExecutionCount) ? totalExecutionCount : 0,
+    distinct_prompt_count: Number.isFinite(distinctPromptCount) ? distinctPromptCount : 0,
+    empty_answer_execution_count: Number.isFinite(emptyAnswerExecutionCount)
+      ? emptyAnswerExecutionCount
+      : 0,
+  };
 }
 
 /**
@@ -299,47 +351,6 @@ async function fetchPageIntents(client, organizationId, siteId, filterByBrandId,
   return [];
 }
 
-function buildDimensionOptions(rows) {
-  const brands = [];
-  const brandIds = new Set();
-  rows.forEach((r) => {
-    if (r.brand_id && r.brand_name && !brandIds.has(r.brand_id)) {
-      brandIds.add(r.brand_id);
-      brands.push(toFilterOption(r.brand_id, r.brand_name));
-    }
-  });
-  const sortedBrands = brands.toSorted((a, b) => strCompare(a.label, b.label));
-
-  const catNames = [...new Set(rows.map((r) => r.category_name).filter(Boolean))];
-  const categories = catNames.toSorted(strCompare).map((c) => toFilterOption(c, c));
-
-  const topicEntries = new Map();
-  rows.forEach((r) => {
-    if (r.topic_id && !topicEntries.has(r.topic_id)) {
-      topicEntries.set(r.topic_id, r.topics || r.topic_id);
-    }
-  });
-  const topics = [...topicEntries.entries()]
-    .toSorted((a, b) => strCompare(a[1], b[1]))
-    .map(([id, label]) => toFilterOption(id, label));
-
-  const originVals = [...new Set(
-    rows.map((r) => r.origin).filter(Boolean).map((o) => o.toLowerCase()),
-  )];
-  const origins = originVals.toSorted(strCompare).map((o) => toFilterOption(o, o));
-
-  const regionVals = [...new Set(rows.map((r) => r.region_code).filter(Boolean))];
-  const regions = regionVals.toSorted(strCompare).map((r) => toFilterOption(r, r));
-
-  return {
-    brands: sortedBrands,
-    categories,
-    topics,
-    origins,
-    regions,
-  };
-}
-
 function parseWeeksParams(context) {
   const q = context.data || {};
   return {
@@ -398,6 +409,15 @@ export function splitDateRangeIntoWeeksBackward(
   return weeks.slice(-maxWeeks);
 }
 
+function parseIsoWeek(weekStr) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
+  if (!match) return { weekNumber: 0, year: 0 };
+  return {
+    year: Number.parseInt(match[1], 10),
+    weekNumber: Number.parseInt(match[2], 10),
+  };
+}
+
 /**
  * Returns startDate (Monday) and endDate (Sunday) for an ISO week string (YYYY-Wnn).
  * Uses Date.UTC for timezone-independent calendar dates.
@@ -406,11 +426,8 @@ export function splitDateRangeIntoWeeksBackward(
  * @internal Exported for testing
  */
 export function getWeekDateRange(isoWeek) {
-  const match = /^(\d{4})-W(\d{2})$/.exec(isoWeek);
-  if (!match) return null;
-  const year = Number.parseInt(match[1], 10);
-  const week = Number.parseInt(match[2], 10);
-  if (week < 1 || week > 53) return null;
+  const { year, weekNumber: week } = parseIsoWeek(isoWeek);
+  if (!year || week < 1 || week > 53) return null;
   const jan4 = new Date(Date.UTC(year, 0, 4));
   const dayOfWeek = jan4.getUTCDay();
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
@@ -431,29 +448,63 @@ export function getWeekDateRange(isoWeek) {
 }
 
 /**
- * Builds a query to fetch week values from brand_metrics_weekly.
- * Table already has week in YYYY-Wnn format; filters: organization_id, model, site_id, brand_id.
+ * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
+ * @param {string} dateStr - e.g. "2026-03-15"
+ * @returns {string} e.g. "2026-W11"
+ * @internal Exported for testing
  */
-function buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId) {
-  let q = client
-    .from('brand_metrics_weekly')
-    .select('week')
-    .eq('organization_id', organizationId)
-    .eq('model', model);
+export function dateToIsoWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dayOfWeek = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
+  const year = d.getUTCFullYear();
+  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
+}
 
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
-  if (filterByBrandId) {
-    q = q.eq('brand_id', filterByBrandId);
+/**
+ * Generates every ISO week (YYYY-Wnn) between minDate and maxDate, inclusive,
+ * sorted newest-first.
+ *
+ * NOTE: This assumes no gaps in execution data. If a week between minDate and
+ * maxDate has no executions (e.g. a pipeline outage), it will still appear in
+ * the output. This is an accepted trade-off — a single min/max aggregation is
+ * far cheaper than scanning all rows for distinct weeks on a large table.
+ * The UI's existing empty-state handling covers the case where a selected week
+ * returns no data.
+ *
+ * @param {string|null} minDate - Earliest execution_date (YYYY-MM-DD)
+ * @param {string|null} maxDate - Latest execution_date (YYYY-MM-DD)
+ * @returns {string[]} ISO week strings sorted descending e.g. ["2026-W11", "2026-W10", ...]
+ * @internal Exported for testing
+ */
+export function generateIsoWeekRange(minDate, maxDate) {
+  if (!minDate || !maxDate) return [];
+  const minRange = getWeekDateRange(dateToIsoWeek(minDate));
+  const maxRange = getWeekDateRange(dateToIsoWeek(maxDate));
+  if (!minRange || !maxRange) return [];
+
+  const result = [];
+  let currentMs = new Date(`${minRange.startDate}T00:00:00Z`).getTime();
+  const maxMs = new Date(`${maxRange.startDate}T00:00:00Z`).getTime();
+
+  while (currentMs <= maxMs) {
+    const d = new Date(currentMs);
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    result.push(dateToIsoWeek(`${y}-${mo}-${day}`));
+    currentMs += 7 * MS_PER_DAY;
   }
 
-  return q.order('week', { ascending: false }).limit(WEEKS_QUERY_LIMIT);
+  return result.sort((a, b) => b.localeCompare(a));
 }
 
 /**
  * Creates the getBrandPresenceWeeks handler.
- * Returns distinct ISO weeks (YYYY-Wnn) for the given model, optionally filtered by brand or site.
+ * Returns all ISO weeks (YYYY-Wnn) between the earliest and latest execution_date
+ * for the given org/model, optionally filtered by brand or site.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
@@ -464,11 +515,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const params = parseWeeksParams(ctx);
       const { model: modelParam, siteId } = params;
-      const modelValidation = validateModel(modelParam);
-      if (!modelValidation.valid) {
-        return badRequest(modelValidation.error);
-      }
-      const { model } = modelValidation;
+      const model = resolveModelFromRequest(modelParam);
       const { spaceCatId, brandId } = ctx.params;
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
@@ -480,27 +527,25 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const q = buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId);
-      const { data, error } = await q;
+      const { data, error } = await client.rpc('rpc_brand_presence_execution_date_range', {
+        p_organization_id: organizationId,
+        p_model: model,
+        p_site_id: shouldApplyFilter(siteId) ? siteId : null,
+        p_brand_id: filterByBrandId || null,
+      });
 
       if (error) {
         ctx.log.error(`Brand presence weeks PostgREST error: ${error.message}`);
         return badRequest(error.message);
       }
 
-      const rows = data || [];
-      const weekSet = new Set();
-      rows.forEach((r) => {
-        const w = r.week;
-        if (w && typeof w === 'string') weekSet.add(w);
-      });
-      const sortedWeeks = [...weekSet].sort((a, b) => b.localeCompare(a));
-      const weeks = sortedWeeks.map((weekStr) => {
+      const row = (data || [])[0] || {};
+      const weeks = generateIsoWeekRange(row.min_date, row.max_date).map((weekStr) => {
         const range = getWeekDateRange(weekStr);
         return {
           week: weekStr,
-          startDate: range?.startDate ?? null,
-          endDate: range?.endDate ?? null,
+          startDate: range.startDate,
+          endDate: range.endDate,
         };
       });
 
@@ -523,160 +568,54 @@ function parseMarketTrackingTrendsParams(context) {
   };
 }
 
+function callMarketTrackingTrendsRpc(client, organizationId, params, defaults, filterByBrandId) {
+  return client.rpc('rpc_market_tracking_trends', {
+    p_organization_id: organizationId,
+    p_start_date: params.startDate || defaults.startDate,
+    p_end_date: params.endDate || defaults.endDate,
+    p_model: resolveModelFromRequest(params.model),
+    p_brand_id: filterByBrandId || null,
+    p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
+      ? params.categoryId : null,
+    p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
+      ? params.categoryId : null,
+    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+  });
+}
+
 /**
- * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
- * @param {string} dateStr - e.g. "2026-03-15"
- * @returns {string} e.g. "2026-W11"
+ * Reshapes flat RPC rows into the weeklyTrends response format.
+ * Input: [{week_str, week_number, year, brand_mentions, brand_citations,
+ *          competitor_name, competitor_mentions, competitor_citations}, ...]
+ * Output: [{week, weekNumber, year, mentions, citations,
+ *           competitors: [{name, mentions, citations}]}, ...]
  * @internal Exported for testing
  */
-export function dateToIsoWeek(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  const dayOfWeek = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
-  const year = d.getUTCFullYear();
-  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
-}
-
-function parseIsoWeek(weekStr) {
-  const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
-  if (!match) return { weekNumber: 0, year: 0 };
-  return {
-    year: Number.parseInt(match[1], 10),
-    weekNumber: Number.parseInt(match[2], 10),
-  };
-}
-
-/**
- * Queries brand_presence_executions for raw execution rows.
- * Mirrors the legacy UI approach which reads from the brand_all sheet
- * (equivalent to brand_presence_executions) and deduplicates by unique prompt
- * before counting mentions and citations per week.
- *
- * Deduplication key: prompt|topics|region_code|site_id — matches the legacy UI
- * composite key (prompt|Region|Topics|siteId).
- *
- * TODO: Once prompt_id is populated on brand_presence_executions, replace the
- * composite-key deduplication with a simple distinct count on prompt_id for
- * better performance and correctness.
- */
-function buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
-  const startDate = params.startDate || defaults.startDate;
-  const endDate = params.endDate || defaults.endDate;
-  const model = resolveModelFromRequest(params.model);
-  const {
-    siteId, categoryId, regionCode,
-  } = params;
-
-  let q = client
-    .from('brand_presence_executions')
-    .select('execution_date, prompt, topics, region_code, site_id, mentions, citations')
-    .eq('organization_id', organizationId)
-    .eq('model', model)
-    .gte('execution_date', startDate)
-    .lte('execution_date', endDate);
-
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
-  if (filterByBrandId) {
-    q = q.eq('brand_id', filterByBrandId);
-  }
-  if (shouldApplyFilter(categoryId)) {
-    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
-  }
-  if (shouldApplyFilter(regionCode)) {
-    q = q.eq('region_code', regionCode);
-  }
-
-  return q;
-}
-
-function buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId) {
-  const startDate = params.startDate || defaults.startDate;
-  const endDate = params.endDate || defaults.endDate;
-  const model = resolveModelFromRequest(params.model);
-  const {
-    siteId, categoryId, regionCode,
-  } = params;
-
-  let q = client
-    .from('executions_competitor_data')
-    .select('execution_date, competitor, mentions, citations')
-    .eq('organization_id', organizationId)
-    .eq('model', model)
-    .gte('execution_date', startDate)
-    .lte('execution_date', endDate);
-
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
-  if (filterByBrandId) {
-    q = q.eq('brand_id', filterByBrandId);
-  }
-  if (shouldApplyFilter(categoryId)) {
-    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
-  }
-  if (shouldApplyFilter(regionCode)) {
-    q = q.eq('region_code', regionCode);
-  }
-
-  return q;
-}
-
-function aggregateWeeklyTrends(brandRows, competitorRows) {
-  // Deduplicate brand rows by unique prompt key per week before counting.
-  // Key: prompt|topics|region_code|site_id — mirrors the legacy UI composite key.
-  const brandByWeek = new Map();
-  brandRows.forEach((r) => {
-    if (!r.execution_date) return;
-    const w = dateToIsoWeek(String(r.execution_date));
-    if (!brandByWeek.has(w)) {
-      brandByWeek.set(w, { mentionKeys: new Set(), citationKeys: new Set() });
+export function reshapeMarketTrackingRows(rows) {
+  const weekMap = new Map();
+  rows.forEach((r) => {
+    if (!r.week_str) return;
+    if (!weekMap.has(r.week_str)) {
+      weekMap.set(r.week_str, {
+        week: r.week_str,
+        weekNumber: r.week_number,
+        year: r.year,
+        mentions: r.brand_mentions || 0,
+        citations: r.brand_citations || 0,
+        competitors: [],
+      });
     }
-    const bucket = brandByWeek.get(w);
-    const key = `${r.prompt || ''}|${r.topics || ''}|${r.region_code || ''}|${r.site_id || ''}`;
-    if (r.mentions === true || r.mentions === 'true') bucket.mentionKeys.add(key);
-    if (r.citations === true || r.citations === 'true') bucket.citationKeys.add(key);
-  });
-
-  const competitorByWeek = new Map();
-  competitorRows.forEach((r) => {
-    if (!r.execution_date || !r.competitor) return;
-    const week = dateToIsoWeek(String(r.execution_date));
-    if (!competitorByWeek.has(week)) {
-      competitorByWeek.set(week, new Map());
+    const entry = weekMap.get(r.week_str);
+    if (r.competitor_name) {
+      entry.competitors.push({
+        name: r.competitor_name,
+        mentions: r.competitor_mentions || 0,
+        citations: r.competitor_citations || 0,
+      });
     }
-    const weekMap = competitorByWeek.get(week);
-    const existing = weekMap.get(r.competitor) || { mentions: 0, citations: 0 };
-    existing.mentions += r.mentions || 0;
-    existing.citations += r.citations || 0;
-    weekMap.set(r.competitor, existing);
   });
-
-  const allWeeks = new Set([...brandByWeek.keys(), ...competitorByWeek.keys()]);
-  return [...allWeeks].sort().map((weekStr) => {
-    const { weekNumber, year } = parseIsoWeek(weekStr);
-    const brandBucket = brandByWeek.get(weekStr);
-    const brand = brandBucket
-      ? { mentions: brandBucket.mentionKeys.size, citations: brandBucket.citationKeys.size }
-      : { mentions: 0, citations: 0 };
-    const competitorMap = competitorByWeek.get(weekStr) || new Map();
-
-    const competitors = [...competitorMap.entries()]
-      .map(([name, data]) => ({ name, mentions: data.mentions, citations: data.citations }))
-      .sort((a, b) => (b.mentions + b.citations) - (a.mentions + a.citations));
-
-    return {
-      week: weekStr,
-      weekNumber,
-      year,
-      mentions: brand.mentions,
-      citations: brand.citations,
-      competitors,
-    };
-  });
+  return [...weekMap.values()].sort((a, b) => (a.week < b.week ? -1 : 1));
 }
 
 /**
@@ -707,26 +646,20 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      // eslint-disable-next-line max-len
-      const brandQuery = buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
-      // eslint-disable-next-line max-len
-      const competitorQuery = buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId);
-
-      const [brandResult, competitorResult] = await Promise.all([brandQuery, competitorQuery]);
-
-      if (brandResult.error) {
-        ctx.log.error(`Market-tracking-trends brand query error: ${brandResult.error.message}`);
-        return badRequest(brandResult.error.message);
-      }
-      if (competitorResult.error) {
-        ctx.log.error(`Market-tracking-trends competitor query error: ${competitorResult.error.message}`);
-        return badRequest(competitorResult.error.message);
-      }
-
-      const weeklyTrends = aggregateWeeklyTrends(
-        brandResult.data || [],
-        competitorResult.data || [],
+      const { data, error } = await callMarketTrackingTrendsRpc(
+        client,
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
       );
+
+      if (error) {
+        ctx.log.error(`Market-tracking-trends RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const weeklyTrends = reshapeMarketTrackingRows(data || []);
 
       return ok({
         weeklyTrends,
@@ -2239,6 +2172,9 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
 
 /**
  * Creates the getFilterDimensions handler.
+ * Returns dimension option lists from `rpc_brand_presence_filter_dimensions`, plus `stats`
+ * (total_execution_count, distinct_prompt_count, empty_answer_execution_count) from the same RPC,
+ * and `page_intents` from a separate query.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
@@ -2249,34 +2185,63 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
-      const modelValidation = validateModel(params.model);
-      if (!modelValidation.valid) {
-        return badRequest(modelValidation.error);
-      }
-      params.model = modelValidation.model;
+      params.model = resolveModelFromRequest(params.model);
 
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-
-      const q = buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
-      const { data, error } = await q;
-
-      if (error) {
-        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${error.message}`);
-        return badRequest(error.message);
-      }
-
-      const rows = data || [];
       const siteFilter = params.siteId;
+
       if (shouldApplyFilter(siteFilter)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
         if (!siteBelongsToOrg) {
           return forbidden('Site does not belong to the organization');
         }
       }
+
+      const rpcParams = buildFilterDimensionsRpcParams(
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
+      );
+      const { data: rpcData, error: rpcError } = await client.rpc(
+        'rpc_brand_presence_filter_dimensions',
+        rpcParams,
+      );
+
+      if (rpcError) {
+        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${rpcError.message}`);
+        return badRequest(rpcError.message);
+      }
+
+      const dims = rpcData && typeof rpcData === 'object' ? rpcData : {};
+      const brands = Array.isArray(dims.brands) ? dims.brands : [];
+      const categories = Array.isArray(dims.categories) ? dims.categories : [];
+      const topics = Array.isArray(dims.topics) ? dims.topics : [];
+      const origins = Array.isArray(dims.origins) ? dims.origins : [];
+      const regions = Array.isArray(dims.regions) ? dims.regions : [];
+      const stats = normalizeFilterDimensionsStatsFromRpc(dims);
+
+      let rowsForSiteIds = [];
+      if (filterByBrandId && !shouldApplyFilter(siteFilter)) {
+        const siteQ = buildExecutionsSiteIdsQuery(
+          client,
+          organizationId,
+          params,
+          defaults,
+          filterByBrandId,
+        );
+        const { data: siteRows, error: siteErr } = await siteQ;
+        if (siteErr) {
+          ctx.log.error(`Brand presence filter-dimensions site-id query error: ${siteErr.message}`);
+          return badRequest(siteErr.message);
+        }
+        rowsForSiteIds = siteRows || [];
+      }
+
       const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
-        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows)
+        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rowsForSiteIds)
         : [];
       const pageIntents = await fetchPageIntents(
         client,
@@ -2285,13 +2250,6 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         filterByBrandId,
         siteIds,
       );
-      const {
-        brands,
-        categories,
-        topics,
-        origins,
-        regions,
-      } = buildDimensionOptions(rows);
 
       return ok({
         brands,
@@ -2299,6 +2257,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         topics,
         origins,
         regions,
+        stats,
         page_intents: pageIntents,
       });
     },

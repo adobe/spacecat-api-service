@@ -57,6 +57,8 @@ describe('brands-storage', () => {
       brand_earned_sources: [],
       competitors: [],
       brand_sites: [],
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: 'system',
       updated_at: '2026-01-01',
       updated_by: 'system',
       ...overrides,
@@ -97,6 +99,10 @@ describe('brands-storage', () => {
       expect(result[0].earnedContent).to.deep.equal([{ name: 'TechCrunch', url: 'https://techcrunch.com', regions: [] }]);
       expect(result[0].competitors).to.deep.equal([{ name: 'Rival', url: 'https://rival.com', regions: ['US'] }]);
       expect(result[0].urls).to.deep.equal([{ value: 'https://test.com' }]);
+      expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result[0].createdBy).to.equal('system');
+      expect(result[0].updatedAt).to.equal('2026-01-01');
+      expect(result[0].updatedBy).to.equal('user@test.com');
     });
 
     it('expands brand_sites paths into flat URL list', async () => {
@@ -594,6 +600,111 @@ describe('brands-storage', () => {
       });
 
       expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('normalizes www prefix in brand URLs before site lookup', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: ['/products'], sites: { base_url: 'https://test.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://www.test.com/products' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('normalizes port numbers in brand URLs before site lookup', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: ['/products'], sites: { base_url: 'https://test.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com:8080/products' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('normalizes mixed case and trailing slash in brand URLs before site lookup', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: ['/'], sites: { base_url: 'https://test.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://WWW.Test.Com/' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('merges paths when multiple brand URLs normalize to the same site', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-1',
+          paths: ['/products', '/help'],
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://www.adobe.com/products' },
+            { value: 'https://WWW.ADOBE.COM/help' },
+          ],
+        },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com/products' },
+        { value: 'https://adobe.com/help' },
+      ]);
     });
 
     it('skips syncBrandSites when urls resolve to no matching sites', async () => {

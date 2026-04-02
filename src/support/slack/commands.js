@@ -48,6 +48,7 @@ import runPageCitability from './commands/run-page-citability.js';
 import runA11yCodefix from './commands/run-a11y-codefix.js';
 import identifyRedirects from './commands/identify-redirects.js';
 import identifyAndUpdateRedirects from './commands/identify-and-update-redirects.js';
+import detectCdn from './commands/detect-cdn.js';
 import setLlmoCountryCodeIgnoreList from './commands/set-llmo-country-code-ignore-list.js';
 import addDelegate from './commands/add-delegate.js';
 import listDelegates from './commands/list-delegates.js';
@@ -98,6 +99,7 @@ export default (context) => [
   runA11yCodefix(context),
   identifyRedirects(context),
   identifyAndUpdateRedirects(context),
+  detectCdn(context),
   setLlmoCountryCodeIgnoreList(context),
   addDelegate(context),
   listDelegates(context),

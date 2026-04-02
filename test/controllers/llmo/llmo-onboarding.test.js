@@ -254,6 +254,9 @@ describe('LLMO Onboarding Functions', () => {
     }
 
     deps['../../../src/support/customer-config-v2-storage.js'] = effectiveCustomerConfigV2Storage;
+    deps['../../../src/support/brands-storage.js'] = {
+      upsertBrand: options.mockUpsertBrand || sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+    };
 
     return deps;
   };
@@ -1270,6 +1273,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1313,6 +1319,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
 
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
@@ -1326,6 +1333,7 @@ describe('LLMO Onboarding Functions', () => {
           mockOctokit,
           mockDrsClient,
           mockCustomerConfigV2Storage,
+          mockUpsertBrand,
         }),
       );
 
@@ -1423,6 +1431,22 @@ describe('LLMO Onboarding Functions', () => {
       });
       expect(mockLog.info).to.have.been.calledWith('Enabled brandalf feature flag for organization org123');
 
+      // Verify initial brand was written to normalized brands table with correct args
+      expect(mockUpsertBrand).to.have.been.calledOnce;
+      expect(mockUpsertBrand.firstCall.args[0]).to.deep.include({
+        organizationId: 'org123',
+        updatedBy: 'llmo-onboarding',
+      });
+      expect(mockUpsertBrand.firstCall.args[0].brand).to.deep.include({
+        name: 'Test Brand',
+        status: 'active',
+      });
+      // Must use baseURL (matches sites.base_url), not overrideBaseURL
+      expect(mockUpsertBrand.firstCall.args[0].brand.urls).to.deep.equal([
+        { value: 'https://example.com', type: 'url' },
+      ]);
+      expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
+
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
@@ -1451,6 +1475,208 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com using LLMO onboarding mode v2');
     });
 
+    it('should continue onboarding when enrollGeoBrandPresence fails', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub().throws(new Error('config service down')),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: {}, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test' });
+
+      const { performLlmoOnboarding: performWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await performWithMocks(
+        { domain: 'example.com', brandName: 'Test', imsOrgId: 'ABC123@AdobeOrg' },
+        context,
+      );
+
+      // Onboarding should complete despite enrollment failure
+      expect(result.siteId).to.equal('site123');
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match('Failed to enroll geo-brand-presence'),
+      );
+    });
+
+    it('should continue onboarding when upsertBrand fails', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Feature flag postgrest mock
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      // upsertBrand throws — should not block onboarding
+      const failingUpsertBrand = sinon.stub().rejects(new Error('PostgREST unavailable'));
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockUpsertBrand: failingUpsertBrand,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await onboardWithMocks(
+        {
+          domain: 'example.com',
+          imsOrgId: 'ABC123@AdobeOrg',
+          brandName: 'Test Brand',
+        },
+        context,
+      );
+
+      // Onboarding completes despite upsertBrand failure
+      expect(result.message).to.equal(
+        'LLMO onboarding completed successfully',
+      );
+      expect(failingUpsertBrand).to.have.been.calledOnce;
+      expect(mockLog.warn).to.have.been.calledWith(
+        'Failed to create initial brand in normalized table: '
+        + 'PostgREST unavailable',
+      );
+      // Brandalf job should still be submitted
+      expect(mockDrsClient.createFrom().submitJob)
+        .to.have.been.called;
+    });
+
     it('should skip v2 initialization and Brandalf in v1 onboarding mode', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
@@ -1474,6 +1700,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1568,6 +1797,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1655,6 +1887,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1744,6 +1979,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1835,6 +2073,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1926,6 +2167,9 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -1983,6 +2227,83 @@ describe('LLMO Onboarding Functions', () => {
       );
     });
 
+    it('should skip helix-query.yaml update when tempOnboarding is true', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const { repos: { createOrUpdateFileContents } } = mockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+      };
+
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        tempOnboarding: true,
+      }, context);
+
+      expect(createOrUpdateFileContents).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/Skipping helix-query.yaml update \(temp-onboarding\)/),
+      );
+    });
+
     it('should call cleanup functions when site.save() throws an error', async () => {
       // Mock organization
       const mockOrganization = {
@@ -2008,6 +2329,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2144,6 +2468,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2267,6 +2594,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2377,6 +2707,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock configuration
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
         save: sinon.stub().resolves(),
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
@@ -2601,12 +2934,12 @@ describe('LLMO Onboarding Functions', () => {
         .customer.brands[0].updatedBy).to.equal('fallback-owner@example.com');
     });
 
-    it('skips writing when the v2 config already exists', async () => {
+    it('skips writing when the v2 config already exists and site is already registered', async () => {
       const existingConfig = {
         customer: {
           customerName: 'Existing',
           imsOrgID: 'ABC123@AdobeOrg',
-          brands: [{ id: 'existing-brand' }],
+          brands: [{ id: 'existing-brand', v1SiteId: 'site-123' }],
         },
       };
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
@@ -2632,8 +2965,123 @@ describe('LLMO Onboarding Functions', () => {
       expect(result).to.equal(existingConfig);
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
       expect(mockLog.info).to.have.been.calledWith(
-        'V2 customer config already exists for organization org-123, skipping initialization',
+        'V2 customer config already exists for organization org-123 with site site-123, skipping',
       );
+    });
+
+    it('adds new site as brand to existing v2 config when site is not registered', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'existing-brand', v1SiteId: 'other-site-456', name: 'Other Brand' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        overrideBaseURL: 'https://www.example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result).to.equal(existingConfig);
+      expect(result.customer.brands).to.have.length(2);
+      expect(result.customer.brands[0].v1SiteId).to.equal('other-site-456');
+
+      const newBrand = result.customer.brands[1];
+      expect(newBrand.v1SiteId).to.equal('site-123');
+      expect(newBrand.id).to.equal('new-brand');
+      expect(newBrand.name).to.equal('New Brand');
+      expect(newBrand.baseUrl).to.equal('https://www.example.com');
+      expect(newBrand.status).to.equal('active');
+      expect(newBrand.origin).to.equal('system');
+      expect(newBrand.regions).to.deep.equal(['gl']);
+      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
+
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[0])
+        .to.equal('org-123');
+      expect(mockLog.info).to.have.been.calledWith(
+        'Added site site-123 as brand "New Brand" to existing V2 config for organization org-123',
+      );
+    });
+
+    it('deduplicates brand ID when colliding with existing brand', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Existing',
+          imsOrgID: 'ABC123@AdobeOrg',
+          brands: [{ id: 'new-brand', v1SiteId: 'other-site-456', name: 'New Brand (old)' }],
+        },
+      };
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'abcd1234-5678-9abc-def0-123456789abc',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result.customer.brands).to.have.length(2);
+      const addedBrand = result.customer.brands[1];
+      expect(addedBrand.id).to.equal('new-brand-abcd1234');
+      expect(addedBrand.name).to.equal('New Brand');
+    });
+
+    it('adds new site as brand when existing config has no customer or brands', async () => {
+      const existingConfig = {};
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
+        readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
+      });
+      const { ensureInitialCustomerConfigV2 } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
+      );
+
+      const result = await ensureInitialCustomerConfigV2({
+        organizationId: 'org-123',
+        brandName: 'New Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        siteId: 'site-123',
+        baseURL: 'https://example.com',
+        context: {
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        },
+      });
+
+      expect(result).to.equal(existingConfig);
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
+      const newBrand = result.customer.brands[0];
+      expect(newBrand.v1SiteId).to.equal('site-123');
+      expect(newBrand.baseUrl).to.equal('https://example.com');
     });
   });
 
@@ -3397,6 +3845,91 @@ describe('LLMO Onboarding Functions', () => {
       );
       expect(resultWithSlash).to.equal('https://www.example.com/');
       expect(resultWithSlash.endsWith('/')).to.be.true;
+    });
+  });
+
+  describe('enrollGeoBrandPresence', () => {
+    let enrollGeoBrandPresence;
+    let mockConfiguration;
+    let mockSite;
+    let mockContext;
+
+    beforeEach(async () => {
+      ({ enrollGeoBrandPresence } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {},
+      ));
+      mockSite = { getId: () => 'site-abc' };
+      mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+      };
+      mockContext = {
+        dataAccess: {
+          Configuration: { findLatest: sinon.stub().resolves(mockConfiguration) },
+        },
+        log: { info: sinon.stub(), warn: sinon.stub() },
+      };
+    });
+
+    it('should enable weekly-free split by default', async () => {
+      const result = await enrollGeoBrandPresence(mockSite, mockContext);
+
+      expect(result).to.match(/^geo-brand-presence-free-\d+$/);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith(result, mockSite);
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+    });
+
+    it('should enable daily cadence', async () => {
+      const result = await enrollGeoBrandPresence(mockSite, mockContext, 'daily');
+
+      expect(result).to.equal('geo-brand-presence-daily');
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+    });
+
+    it('should enable weekly-paid cadence', async () => {
+      const result = await enrollGeoBrandPresence(mockSite, mockContext, 'weekly-paid');
+
+      expect(result).to.equal('geo-brand-presence-paid');
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+    });
+
+    it('should pick the least-loaded free split', async () => {
+      // Split 1 has 5 sites, split 2 has 0 — should pick split 2
+      mockConfiguration.getEnabledSiteIdsForHandler.callsFake((split) => {
+        if (split === 'geo-brand-presence-free-1') return ['a', 'b', 'c', 'd', 'e'];
+        return [];
+      });
+
+      const result = await enrollGeoBrandPresence(mockSite, mockContext, 'weekly-free');
+
+      expect(result).to.equal('geo-brand-presence-free-2');
+    });
+
+    it('should call say callback', async () => {
+      const sayStub = sinon.stub();
+
+      await enrollGeoBrandPresence(mockSite, mockContext, 'daily', sayStub);
+
+      expect(sayStub).to.have.been.calledWith(sinon.match('Brand presence cadence'));
+    });
+
+    it('should propagate errors from Configuration.save', async () => {
+      mockConfiguration.save.rejects(new Error('save failed'));
+
+      try {
+        await enrollGeoBrandPresence(mockSite, mockContext, 'daily');
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('save failed');
+      }
     });
   });
 

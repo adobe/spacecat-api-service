@@ -19,6 +19,7 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { UnauthorizedProductError } from './errors.js';
+import { CUSTOMER_VISIBLE_TIERS } from './utils.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -125,6 +126,11 @@ export default class AccessControlUtil {
 
     if (!hasText(entitlement.getTier())) {
       throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
+    }
+
+    // PLG tier is internal-only; block customer-facing product access
+    if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+      throw new UnauthorizedProductError('[Error] Unauthorized request');
     }
 
     if (site && !siteEnrollment) {

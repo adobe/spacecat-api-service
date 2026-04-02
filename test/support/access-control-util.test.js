@@ -14,7 +14,6 @@
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import {
-  Entitlement as EntitlementModel,
   TrialUser as TrialUserModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -254,7 +253,7 @@ describe('Access Control Util', () => {
         entitlement: {
           getId: () => 'entitlement-123',
           getProductCode: () => 'llmo',
-          getTier: () => 'paid',
+          getTier: () => 'PAID',
         },
       }),
     };
@@ -644,12 +643,6 @@ describe('Access Control Util', () => {
     let mockTierClient;
 
     beforeEach(() => {
-      // Mock the constant calls directly
-      sandbox.stub(EntitlementModel, 'TIERS').value({
-        FREE_TRIAL: 'free_trial',
-        PAID: 'paid',
-      });
-
       sandbox.stub(TrialUserModel, 'STATUSES').value({
         REGISTERED: 'registered',
       });
@@ -724,7 +717,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -742,7 +735,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'other_product',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -766,7 +759,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       const siteEnrollment = {
         getId: () => 'site-enrollment-123',
@@ -785,7 +778,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       // TierClient returns no site enrollment for different product
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
@@ -803,7 +796,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       // TierClient returns no site enrollment
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
@@ -821,7 +814,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       // TierClient returns no site enrollment
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
@@ -839,7 +832,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -852,7 +845,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -885,7 +878,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -922,7 +915,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -959,7 +952,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -996,7 +989,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1033,7 +1026,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1053,7 +1046,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1077,7 +1070,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1129,7 +1122,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1174,6 +1167,40 @@ describe('Access Control Util', () => {
       const utilWithHeader = AccessControlUtil.fromContext(testContextWithHeader);
 
       await expect(utilWithHeader.hasAccess(mockOrgInstance, '', 'llmo')).to.not.be.rejected;
+    });
+
+    it('should throw UnauthorizedProductError for PLG tier entitlement', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-plg',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PLG',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo'))
+        .to.be.rejectedWith('[Error] Unauthorized request');
+    });
+
+    it('should not throw for FREE_TRIAL tier entitlement', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-ft',
+        getProductCode: () => 'llmo',
+        getTier: () => 'FREE_TRIAL',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+    });
+
+    it('should not throw for PAID tier entitlement', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
   });
 
@@ -1257,7 +1284,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1303,7 +1330,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       const siteEnrollment = {
         getId: () => 'site-enrollment-123',
@@ -1326,7 +1353,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1588,7 +1615,7 @@ describe('Access Control Util', () => {
 
       mockTierClient = {
         checkValidEntitlement: sinon.stub().resolves({
-          entitlement: { getTier: () => 'paid' },
+          entitlement: { getTier: () => 'PAID' },
           siteEnrollment: { getId: () => 'enrollment-1' },
         }),
       };
