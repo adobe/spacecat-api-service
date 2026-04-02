@@ -189,6 +189,7 @@ function mapRowToPrompt(row) {
   const topic = row.topics;
   return {
     id: row.prompt_id,
+    uuid: row.id,
     prompt: row.text,
     name: row.name,
     regions: row.regions || [],
@@ -197,15 +198,27 @@ function mapRowToPrompt(row) {
     status: row.status || 'active',
     origin: row.origin || 'human',
     source: row.source || 'config',
+    createdAt: row.created_at,
+    createdBy: row.created_by,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
     brandId: brand?.id ?? null,
     brandName: brand?.name ?? null,
     category: category
-      ? { id: category.category_id, name: category.name, origin: category.origin }
+      ? {
+        id: category.category_id,
+        uuid: category.id,
+        name: category.name,
+        origin: category.origin,
+      }
       : null,
     topic: topic
-      ? { id: topic.topic_id, name: topic.name, categoryId: category?.category_id ?? null }
+      ? {
+        id: topic.topic_id,
+        uuid: topic.id,
+        name: topic.name,
+        categoryId: category?.category_id ?? null,
+      }
       : null,
   };
 }
@@ -271,9 +284,14 @@ export async function listPrompts({
     regions,
     status,
     origin,
+    source,
     category_id,
     topic_id,
     brand_id,
+    created_at,
+    created_by,
+    updated_at,
+    updated_by,
     brands(id,name),
     categories(id,category_id,name,origin),
     topics(id,topic_id,name)
@@ -376,9 +394,14 @@ export async function getPromptById({
       regions,
       status,
       origin,
+      source,
       category_id,
       topic_id,
       brand_id,
+      created_at,
+      created_by,
+      updated_at,
+      updated_by,
       brands(id,name),
       categories(id,category_id,name,origin),
       topics(id,topic_id,name)
@@ -523,6 +546,8 @@ export async function upsertPrompts({
     status: r.status,
     origin: r.origin,
     source: r.source,
+    createdAt: r.created_at,
+    createdBy: r.created_by,
     updatedBy: r.updated_by,
     updatedAt: r.updated_at,
   }));

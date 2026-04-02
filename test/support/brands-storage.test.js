@@ -38,6 +38,33 @@ describe('brands-storage', () => {
   const ORG_ID = '11111111-1111-4111-8111-111111111111';
   const BRAND_ID = '22222222-2222-4222-8222-222222222222';
 
+  /**
+   * Builds a minimal brand DB row using the new normalized schema.
+   * All child table arrays default to empty so tests only need to specify
+   * what they're actually testing.
+   */
+  function makeBrandRow(overrides = {}) {
+    return {
+      id: BRAND_ID,
+      name: 'TestBrand',
+      status: 'active',
+      origin: 'human',
+      description: null,
+      vertical: null,
+      regions: [],
+      brand_aliases: [],
+      brand_social_accounts: [],
+      brand_earned_sources: [],
+      competitors: [],
+      brand_sites: [],
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: 'system',
+      updated_at: '2026-01-01',
+      updated_by: 'system',
+      ...overrides,
+    };
+  }
+
   describe('listBrands', () => {
     it('returns empty array when postgrestClient is missing', async () => {
       expect(await listBrands(ORG_ID, null)).to.deep.equal([]);
@@ -48,22 +75,16 @@ describe('brands-storage', () => {
     });
 
     it('lists brands and maps to V2 shape', async () => {
-      const dbRow = {
-        id: BRAND_ID,
+      const dbRow = makeBrandRow({
         name: 'TestBrand',
-        status: 'active',
-        origin: 'human',
-        description: 'A test brand',
-        vertical: 'Retail',
         regions: ['US'],
-        owned_urls: ['https://test.com'],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [{ alias: 'TB' }],
-        competitors: [{ name: 'Rival' }],
-        updated_at: '2026-01-01',
+        brand_aliases: [{ alias: 'TB', regions: ['US'] }],
+        brand_social_accounts: [{ url: 'https://twitter.com/test', regions: ['US'] }],
+        brand_earned_sources: [{ name: 'TechCrunch', url: 'https://techcrunch.com', regions: [] }],
+        competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['US'] }],
+        brand_sites: [{ site_id: 'site-uuid-1', paths: [], sites: { base_url: 'https://test.com' } }],
         updated_by: 'user@test.com',
-      };
+      });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -72,36 +93,54 @@ describe('brands-storage', () => {
 
       expect(result).to.have.length(1);
       expect(result[0]).to.include({ name: 'TestBrand', status: 'active' });
-      expect(result[0].brandAliases).to.deep.equal(['TB']);
-      expect(result[0].competitors).to.deep.equal(['Rival']);
       expect(result[0].region).to.deep.equal(['US']);
+      expect(result[0].brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
+      expect(result[0].socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
+      expect(result[0].earnedContent).to.deep.equal([{ name: 'TechCrunch', url: 'https://techcrunch.com', regions: [] }]);
+      expect(result[0].competitors).to.deep.equal([{ name: 'Rival', url: 'https://rival.com', regions: ['US'] }]);
       expect(result[0].urls).to.deep.equal([{ value: 'https://test.com' }]);
+      expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result[0].createdBy).to.equal('system');
+      expect(result[0].updatedAt).to.equal('2026-01-01');
+      expect(result[0].updatedBy).to.equal('user@test.com');
+    });
+
+    it('expands brand_sites paths into flat URL list', async () => {
+      const dbRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-1',
+          paths: ['/products', '/help'],
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].urls).to.deep.equal([
+        { value: 'https://adobe.com/products' },
+        { value: 'https://adobe.com/help' },
+      ]);
     });
 
     it('handles null arrays and defaults status in brand rows', async () => {
-      const dbRow = {
-        id: BRAND_ID,
-        name: 'MinBrand',
+      const dbRow = makeBrandRow({
         status: null,
-        origin: 'human',
-        description: null,
-        vertical: null,
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
+        regions: null,
         brand_aliases: null,
         competitors: null,
+        brand_social_accounts: null,
+        brand_earned_sources: null,
         brand_sites: null,
-        updated_at: '2026-01-01',
-        updated_by: 'system',
-      };
+      });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].status).to.equal('active');
+      expect(result[0].region).to.deep.equal([]);
       expect(result[0].brandAliases).to.deep.equal([]);
       expect(result[0].competitors).to.deep.equal([]);
       expect(result[0].siteIds).to.deep.equal([]);
@@ -132,24 +171,16 @@ describe('brands-storage', () => {
       expect(await getBrandById(ORG_ID, '', { from: () => {} })).to.be.null;
     });
 
-    it('returns mapped brand when found', async () => {
-      const dbRow = {
-        id: BRAND_ID,
-        name: 'TestBrand',
-        status: 'active',
-        origin: 'human',
-        description: 'desc',
-        vertical: 'Tech',
+    it('returns mapped brand with all normalized child fields', async () => {
+      const dbRow = makeBrandRow({
         regions: ['US'],
-        owned_urls: ['https://example.com'],
-        social: ['https://twitter.com/test'],
-        earned_sources: ['https://blog.example.com'],
-        brand_aliases: [{ alias: 'TB' }],
-        competitors: [{ name: 'Rival' }],
-        brand_sites: [{ site_id: 'site-uuid-1' }],
-        updated_at: '2026-01-01',
+        brand_aliases: [{ alias: 'TB', regions: ['US'] }],
+        brand_social_accounts: [{ url: 'https://twitter.com/test', regions: ['US'] }],
+        brand_earned_sources: [{ name: 'Blog', url: 'https://blog.example.com', regions: [] }],
+        competitors: [{ name: 'Rival', url: null, regions: [] }],
+        brand_sites: [{ site_id: 'site-uuid-1', paths: [], sites: { base_url: 'https://example.com' } }],
         updated_by: 'user@test.com',
-      };
+      });
 
       const query = createChainableQuery({ data: dbRow, error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -157,12 +188,48 @@ describe('brands-storage', () => {
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
 
       expect(result).to.include({ id: BRAND_ID, name: 'TestBrand', status: 'active' });
-      expect(result.brandAliases).to.deep.equal(['TB']);
-      expect(result.competitors).to.deep.equal(['Rival']);
+      expect(result.brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
+      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
       expect(result.siteIds).to.deep.equal(['site-uuid-1']);
       expect(result.urls).to.deep.equal([{ value: 'https://example.com' }]);
-      expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test' }]);
-      expect(result.earnedContent).to.deep.equal([{ url: 'https://blog.example.com' }]);
+      expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
+      expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.example.com', regions: [] }]);
+    });
+
+    it('defaults to empty regions when competitor regions is missing', async () => {
+      const dbRow = makeBrandRow({
+        competitors: [{ name: 'Rival', url: null }], // no regions key — triggers || []
+      });
+
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
+    });
+
+    it('applies || fallbacks for null origin, null regions on child rows, null base_url and null paths on brand_sites', async () => {
+      const dbRow = makeBrandRow({
+        origin: null, // || 'human'
+        brand_social_accounts: [{ url: 'https://x.com', regions: null }], // regions: || []
+        brand_earned_sources: [{ name: 'Blog', url: 'https://b.com', regions: null }], // || []
+        brand_aliases: [{ alias: 'TB', regions: null }], // regions: || []
+        brand_sites: [
+          { site_id: 'site-1', paths: null, sites: { base_url: 'https://x.com' } }, // paths: || []
+          { site_id: 'site-2', paths: [], sites: null }, // no base_url → skip
+        ],
+      });
+
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+      expect(result.origin).to.equal('human');
+      expect(result.socialAccounts).to.deep.equal([{ url: 'https://x.com', regions: [] }]);
+      expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://b.com', regions: [] }]);
+      expect(result.brandAliases).to.deep.equal([{ name: 'TB', regions: [] }]);
+      // site-2 skipped (no base_url); site-1 null paths → [] → no paths → base URL returned
+      expect(result.urls).to.deep.equal([{ value: 'https://x.com' }]);
     });
 
     it('returns null when brand not found', async () => {
@@ -181,16 +248,9 @@ describe('brands-storage', () => {
     });
   });
 
-  describe('listBrands', () => {
+  describe('listBrands (status filtering)', () => {
     it('filters by status when status option is provided', async () => {
-      const dbRow = {
-        id: BRAND_ID,
-        name: 'PendingBrand',
-        status: 'pending',
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+      const dbRow = makeBrandRow({ status: 'pending' });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -291,23 +351,7 @@ describe('brands-storage', () => {
     });
 
     it('successfully upserts a minimal brand with no aliases, competitors, or urls', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        origin: 'human',
-        description: null,
-        vertical: null,
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-        updated_at: '2026-01-01',
-        updated_by: 'system',
-      };
+      const fullBrandRow = makeBrandRow({ name: 'Test' });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -326,23 +370,11 @@ describe('brands-storage', () => {
     });
 
     it('successfully upserts brand with aliases and competitors', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
+      const fullBrandRow = makeBrandRow({
         name: 'Test',
-        status: 'active',
-        origin: 'human',
-        description: null,
-        vertical: null,
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [{ alias: 'TB' }, { alias: 'T' }],
-        competitors: [{ name: 'Rival' }],
-        brand_sites: [],
-        updated_at: '2026-01-01',
-        updated_by: 'system',
-      };
+        brand_aliases: [{ alias: 'TB', regions: ['US'] }, { alias: 'T', regions: [] }],
+        competitors: [{ name: 'Rival', url: null, regions: [] }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -357,42 +389,30 @@ describe('brands-storage', () => {
         organizationId: ORG_ID,
         brand: {
           name: 'Test',
-          brandAliases: ['TB', 'T'],
-          competitors: ['Rival'],
+          brandAliases: [{ name: 'TB', regions: ['US'] }, { name: 'T' }],
+          competitors: [{ name: 'Rival' }],
         },
         postgrestClient,
         updatedBy: 'user@test.com',
       });
 
-      expect(result.brandAliases).to.deep.equal(['TB', 'T']);
-      expect(result.competitors).to.deep.equal(['Rival']);
+      expect(result.brandAliases).to.deep.equal([
+        { name: 'TB', regions: ['US'] },
+        { name: 'T', regions: [] },
+      ]);
+      expect(result.competitors).to.deep.equal([{ name: 'Rival', url: null, regions: [] }]);
     });
 
-    it('handles object aliases and competitors in upsertBrand', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        origin: 'human',
-        description: null,
-        vertical: null,
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [{ alias: 'ObjAlias' }],
-        competitors: [{ name: 'ObjRival' }],
-        brand_sites: [],
-        updated_at: '2026-01-01',
-        updated_by: 'system',
-      };
+    it('handles object-only competitors with url and regions', async () => {
+      const fullBrandRow = makeBrandRow({
+        competitors: [{ name: 'ObjRival', url: 'https://rival.com', regions: ['US'] }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: fullBrandRow, error: null },
         ],
-        brand_aliases: { data: null, error: null },
         competitors: { data: null, error: null },
       });
 
@@ -400,60 +420,44 @@ describe('brands-storage', () => {
         organizationId: ORG_ID,
         brand: {
           name: 'Test',
-          brandAliases: [{ name: 'ObjAlias' }],
-          competitors: [{ name: 'ObjRival' }],
+          competitors: [{ name: 'ObjRival', url: 'https://rival.com', regions: ['US'] }],
         },
         postgrestClient,
       });
 
-      expect(result.brandAliases).to.deep.equal(['ObjAlias']);
-      expect(result.competitors).to.deep.equal(['ObjRival']);
+      expect(result.competitors).to.deep.equal([{ name: 'ObjRival', url: 'https://rival.com', regions: ['US'] }]);
     });
 
-    it('throws when alias sync fails', async () => {
+    it('throws when alias delete fails', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
-        brand_aliases: { data: null, error: { message: 'alias error' } },
+        brand_aliases: { data: null, error: { message: 'alias delete error' } },
       });
 
       await expect(upsertBrand({
         organizationId: ORG_ID,
-        brand: { name: 'Test', brandAliases: ['TB'] },
+        brand: { name: 'Test', brandAliases: [{ name: 'TB' }] },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to sync brand relations: alias error');
+      })).to.be.rejectedWith('Failed to clear brand_aliases: alias delete error');
     });
 
-    it('throws when competitor sync fails', async () => {
+    it('throws when competitor delete fails', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
-        competitors: { data: null, error: { message: 'comp error' } },
+        competitors: { data: null, error: { message: 'comp delete error' } },
       });
 
       await expect(upsertBrand({
         organizationId: ORG_ID,
-        brand: { name: 'Test', competitors: ['Rival'] },
+        brand: { name: 'Test', competitors: [{ name: 'Rival' }] },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to sync brand relations: comp error');
+      })).to.be.rejectedWith('Failed to clear competitors: comp delete error');
     });
 
     it('successfully upserts brand with urls triggering syncBrandSites', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        origin: 'human',
-        description: null,
-        vertical: null,
-        regions: [],
-        owned_urls: ['https://test.com'],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [{ site_id: 'site-uuid-1' }],
-        updated_at: '2026-01-01',
-        updated_by: 'system',
-      };
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-uuid-1', paths: [], sites: { base_url: 'https://test.com' } }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -473,11 +477,86 @@ describe('brands-storage', () => {
       expect(result.siteIds).to.deep.equal(['site-uuid-1']);
     });
 
+    it('groups paths by base URL in syncBrandSites', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-uuid-1',
+          paths: ['/products', '/help'],
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://adobe.com/products' },
+            { value: 'https://adobe.com/help' },
+          ],
+        },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com/products' },
+        { value: 'https://adobe.com/help' },
+      ]);
+    });
+
+    it('preserves base URL alongside path URLs using sentinel slash', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-uuid-1',
+          paths: ['/', '/products'],
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://adobe.com' },
+            { value: 'https://adobe.com/products' },
+          ],
+        },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com' },
+        { value: 'https://adobe.com/products' },
+      ]);
+    });
+
     it('throws when brand_sites upsert fails during syncBrandSites', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
         sites: { data: [{ id: 'site-uuid-1', base_url: 'https://test.com' }], error: null },
-        brand_sites: { data: null, error: { message: 'site sync error' } },
+        brand_sites: [
+          { data: null, error: null },
+          { data: null, error: { message: 'site sync error' } },
+        ],
       });
 
       await expect(upsertBrand({
@@ -487,15 +566,149 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Failed to sync brand_sites: site sync error');
     });
 
+    it('throws when brand_sites delete fails during syncBrandSites', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        brand_sites: { data: null, error: { message: 'delete error' } },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_sites: delete error');
+    });
+
+    it('falls back to base URL when URL string is invalid in syncBrandSites', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'not-a-valid-url' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'not-a-valid-url' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'not-a-valid-url' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('normalizes www prefix in brand URLs before site lookup', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: ['/products'], sites: { base_url: 'https://test.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://www.test.com/products' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('normalizes port numbers in brand URLs before site lookup', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: ['/products'], sites: { base_url: 'https://test.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com:8080/products' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('normalizes mixed case and trailing slash in brand URLs before site lookup', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: ['/'], sites: { base_url: 'https://test.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://WWW.Test.Com/' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('merges paths when multiple brand URLs normalize to the same site', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-1',
+          paths: ['/products', '/help'],
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://www.adobe.com/products' },
+            { value: 'https://WWW.ADOBE.COM/help' },
+          ],
+        },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com/products' },
+        { value: 'https://adobe.com/help' },
+      ]);
+    });
+
     it('skips syncBrandSites when urls resolve to no matching sites', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+      const fullBrandRow = makeBrandRow();
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -503,6 +716,7 @@ describe('brands-storage', () => {
           { data: fullBrandRow, error: null },
         ],
         sites: { data: [], error: null },
+        brand_sites: { data: null, error: null },
       });
 
       const result = await upsertBrand({
@@ -514,22 +728,12 @@ describe('brands-storage', () => {
       expect(result.siteIds).to.deep.equal([]);
     });
 
-    it('maps various input shapes for earnedContent, socialAccounts, and region', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        origin: 'human',
-        description: 'desc',
-        vertical: 'Tech',
+    it('upserts brand with socialAccounts and earnedContent to normalized tables', async () => {
+      const fullBrandRow = makeBrandRow({
         regions: ['US', 'EU'],
-        owned_urls: [],
-        social: ['https://twitter.com/test'],
-        earned_sources: ['https://blog.com'],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+        brand_social_accounts: [{ url: 'https://twitter.com/test', regions: ['US'] }],
+        brand_earned_sources: [{ name: 'Blog', url: 'https://blog.com', regions: [] }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -542,38 +746,22 @@ describe('brands-storage', () => {
         organizationId: ORG_ID,
         brand: {
           name: 'Test',
-          description: 'desc',
-          vertical: 'Tech',
-          status: 'active',
-          origin: 'human',
           region: ['US', 'EU'],
-          earnedContent: [{ url: 'https://blog.com' }],
-          socialAccounts: [{ url: 'https://twitter.com/test' }],
+          socialAccounts: [{ url: 'https://twitter.com/test', regions: ['US'] }],
+          earnedContent: [{ name: 'Blog', url: 'https://blog.com' }],
         },
         postgrestClient,
       });
 
       expect(result.region).to.deep.equal(['US', 'EU']);
-      expect(result.earnedContent).to.deep.equal([{ url: 'https://blog.com' }]);
-      expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test' }]);
+      expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/test', regions: ['US'] }]);
+      expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.com', regions: [] }]);
     });
 
-    it('handles alternative input shapes: handle-only social, string urls, non-string region', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        origin: 'human',
-        description: null,
-        vertical: null,
-        regions: ['US'],
-        owned_urls: ['https://example.com'],
-        social: ['@handle'],
-        earned_sources: ['SourceName'],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+    it('filters out earnedContent entries missing url or name', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_earned_sources: [{ name: 'Valid', url: 'https://valid.com', regions: [] }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -586,15 +774,164 @@ describe('brands-storage', () => {
         organizationId: ORG_ID,
         brand: {
           name: 'Test',
-          region: [42],
-          urls: ['https://example.com'],
-          socialAccounts: [{ handle: '@handle' }],
-          earnedContent: [{ name: 'SourceName' }],
+          earnedContent: [
+            { name: 'Valid', url: 'https://valid.com' },
+            { name: 'NoUrl' }, // missing url — filtered
+            { url: 'https://noname.com' }, // missing name — filtered
+          ],
         },
         postgrestClient,
       });
 
-      expect(result).to.include({ name: 'Test' });
+      expect(result.earnedContent).to.deep.equal([{ name: 'Valid', url: 'https://valid.com', regions: [] }]);
+    });
+
+    it('handles non-string region values in upsertBrand', async () => {
+      const fullBrandRow = makeBrandRow({ regions: ['42'] });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', region: [42] },
+        postgrestClient,
+      });
+
+      expect(result.region).to.deep.equal(['42']);
+    });
+
+    it('accepts string aliases (not objects) in brandAliases', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_aliases: [{ alias: 'StringAlias', regions: [] }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        brand_aliases: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', brandAliases: ['StringAlias'] },
+        postgrestClient,
+      });
+
+      expect(result.brandAliases).to.deep.equal([{ name: 'StringAlias', regions: [] }]);
+    });
+
+    it('accepts string competitors (not objects) in competitors', async () => {
+      const fullBrandRow = makeBrandRow({
+        competitors: [{ name: 'StringRival', url: null, regions: [] }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        competitors: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', competitors: ['StringRival'] },
+        postgrestClient,
+      });
+
+      expect(result.competitors).to.deep.equal([{ name: 'StringRival', url: null, regions: [] }]);
+    });
+
+    it('uses empty paths array when site base_url is not in pathsByBase map', async () => {
+      // Sites mock returns a different base_url than what was submitted,
+      // triggering the `pathsByBase.get(s.base_url) || []` fallback branch.
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'https://other.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        // sites returns a base_url not present in pathsByBase (which has 'https://a.com')
+        sites: { data: [{ id: 'site-1', base_url: 'https://other.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://a.com/products' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('handles empty urls array in syncBrandSites (early return branch)', async () => {
+      const fullBrandRow = makeBrandRow();
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [] },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([]);
+    });
+
+    it('accepts plain string urls in syncBrandSites', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'https://test.com' } }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: ['https://test.com'] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal(['site-1']);
+    });
+
+    it('throws when child table insert fails after delete succeeds', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        brand_aliases: [
+          { data: null, error: null }, // delete succeeds
+          { data: null, error: { message: 'insert failed' } }, // upsert fails
+        ],
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', brandAliases: [{ name: 'TB' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to sync brand_aliases: insert failed');
     });
   });
 
@@ -634,21 +971,13 @@ describe('brands-storage', () => {
     });
 
     it('successfully updates scalar fields (name, status, origin, description, vertical)', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
+      const fullBrandRow = makeBrandRow({
         name: 'NewName',
         status: 'pending',
         origin: 'ai',
         description: 'new desc',
         vertical: 'Finance',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -673,26 +1002,19 @@ describe('brands-storage', () => {
       expect(result).to.include({ name: 'NewName', status: 'pending' });
     });
 
-    it('successfully updates region, urls, socialAccounts, and earnedContent', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
+    it('successfully updates region and urls', async () => {
+      const fullBrandRow = makeBrandRow({
         regions: ['US'],
-        owned_urls: ['https://new.com'],
-        social: ['https://twitter.com/new'],
-        earned_sources: ['https://blog.new.com'],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+        brand_sites: [{ site_id: 'new-site-uuid', paths: [], sites: { base_url: 'https://new.com' } }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
           { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
-        sites: { data: [], error: null },
+        sites: { data: [{ id: 'new-site-uuid', base_url: 'https://new.com' }], error: null },
+        brand_sites: { data: null, error: null },
       });
 
       const result = await updateBrand({
@@ -701,8 +1023,6 @@ describe('brands-storage', () => {
         updates: {
           region: ['US'],
           urls: [{ value: 'https://new.com' }],
-          socialAccounts: [{ url: 'https://twitter.com/new' }],
-          earnedContent: [{ url: 'https://blog.new.com' }],
         },
         postgrestClient,
       });
@@ -711,19 +1031,37 @@ describe('brands-storage', () => {
       expect(result.urls).to.deep.equal([{ value: 'https://new.com' }]);
     });
 
-    it('successfully updates brandAliases', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [{ alias: 'TB' }],
-        competitors: [],
-        brand_sites: [],
-      };
+    it('successfully updates socialAccounts and earnedContent', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_social_accounts: [{ url: 'https://twitter.com/new', regions: [] }],
+        brand_earned_sources: [{ name: 'Blog', url: 'https://blog.new.com', regions: [] }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: {
+          socialAccounts: [{ url: 'https://twitter.com/new' }],
+          earnedContent: [{ name: 'Blog', url: 'https://blog.new.com' }],
+        },
+        postgrestClient,
+      });
+
+      expect(result.socialAccounts).to.deep.equal([{ url: 'https://twitter.com/new', regions: [] }]);
+      expect(result.earnedContent).to.deep.equal([{ name: 'Blog', url: 'https://blog.new.com', regions: [] }]);
+    });
+
+    it('successfully updates brandAliases with regions', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_aliases: [{ alias: 'TB', regions: ['US'] }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -736,33 +1074,48 @@ describe('brands-storage', () => {
       const result = await updateBrand({
         organizationId: ORG_ID,
         brandId: BRAND_ID,
-        updates: { brandAliases: ['TB'] },
+        updates: { brandAliases: [{ name: 'TB', regions: ['US'] }] },
         postgrestClient,
         updatedBy: 'user@test.com',
       });
 
-      expect(result.brandAliases).to.deep.equal(['TB']);
+      expect(result.brandAliases).to.deep.equal([{ name: 'TB', regions: ['US'] }]);
     });
 
-    it('skips syncBrandSites when all urls filter to empty', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+    it('replaces all aliases when updated (deleted aliases are removed)', async () => {
+      // Only 'NewAlias' is in the update — 'OldAlias' should be gone
+      const fullBrandRow = makeBrandRow({
+        brand_aliases: [{ alias: 'NewAlias', regions: [] }],
+      });
 
       const postgrestClient = createTableMockClient({
         brands: [
           { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
+        brand_aliases: { data: null, error: null },
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { brandAliases: [{ name: 'NewAlias' }] },
+        postgrestClient,
+      });
+
+      // The result reflects only the aliases returned by getBrandById (the mock row)
+      expect(result.brandAliases).to.deep.equal([{ name: 'NewAlias', regions: [] }]);
+    });
+
+    it('skips syncBrandSites when all urls filter to empty', async () => {
+      const fullBrandRow = makeBrandRow();
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        brand_sites: { data: null, error: null },
       });
 
       const result = await updateBrand({
@@ -776,18 +1129,7 @@ describe('brands-storage', () => {
     });
 
     it('handles null region in updates', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+      const fullBrandRow = makeBrandRow({ regions: [] });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -806,18 +1148,7 @@ describe('brands-storage', () => {
     });
 
     it('handles non-string region values in updates', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: ['42'],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+      const fullBrandRow = makeBrandRow({ regions: ['42'] });
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -835,50 +1166,8 @@ describe('brands-storage', () => {
       expect(result.region).to.deep.equal(['42']);
     });
 
-    it('handles socialAccounts with handle-only objects', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: ['@handle'],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { socialAccounts: [{ handle: '@handle' }] },
-        postgrestClient,
-      });
-
-      expect(result.socialAccounts).to.deep.equal([{ url: '@handle' }]);
-    });
-
     it('handles null values for array update fields', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
+      const fullBrandRow = makeBrandRow();
 
       const postgrestClient = createTableMockClient({
         brands: [
@@ -893,7 +1182,6 @@ describe('brands-storage', () => {
         updates: {
           brandAliases: null,
           competitors: null,
-          urls: null,
           socialAccounts: null,
           earnedContent: null,
         },
@@ -903,307 +1191,6 @@ describe('brands-storage', () => {
       expect(result.brandAliases).to.deep.equal([]);
       expect(result.competitors).to.deep.equal([]);
     });
-
-    it('handles string urls in updates', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: ['https://example.com'],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        sites: { data: [], error: null },
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { urls: ['https://example.com'] },
-        postgrestClient,
-      });
-
-      expect(result.urls).to.deep.equal([{ value: 'https://example.com' }]);
-    });
-
-    it('handles earnedContent with name-only objects', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: ['SourceName'],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { earnedContent: [{ name: 'SourceName' }] },
-        postgrestClient,
-      });
-
-      expect(result.earnedContent).to.deep.equal([{ url: 'SourceName' }]);
-    });
-
-    it('handles object aliases in brandAliases', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        brand_aliases: [{ alias: 'ObjAlias' }],
-        competitors: [],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        brand_aliases: { data: null, error: null },
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { brandAliases: [{ name: 'ObjAlias' }] },
-        postgrestClient,
-      });
-
-      expect(result.brandAliases).to.deep.equal(['ObjAlias']);
-    });
-
-    it('handles object competitors', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [{ name: 'ObjRival' }],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        competitors: { data: null, error: null },
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { competitors: [{ name: 'ObjRival' }] },
-        postgrestClient,
-      });
-
-      expect(result.competitors).to.deep.equal(['ObjRival']);
-    });
-
-    it('throws when alias sync fails during updateBrand', async () => {
-      const postgrestClient = createTableMockClient({
-        brands: { data: { id: BRAND_ID }, error: null },
-        brand_aliases: { data: null, error: { message: 'alias sync error' } },
-      });
-
-      await expect(updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { brandAliases: ['TB'] },
-        postgrestClient,
-      })).to.be.rejectedWith('Failed to sync aliases: alias sync error');
-    });
-
-    it('skips alias upsert when brandAliases array is empty', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { brandAliases: [] },
-        postgrestClient,
-      });
-
-      expect(result.brandAliases).to.deep.equal([]);
-    });
-
-    it('successfully updates competitors', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: [],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [{ name: 'Rival' }],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        competitors: { data: null, error: null },
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { competitors: ['Rival'] },
-        postgrestClient,
-      });
-
-      expect(result.competitors).to.deep.equal(['Rival']);
-    });
-
-    it('throws when competitor sync fails during updateBrand', async () => {
-      const postgrestClient = createTableMockClient({
-        brands: { data: { id: BRAND_ID }, error: null },
-        competitors: { data: null, error: { message: 'comp sync error' } },
-      });
-
-      await expect(updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { competitors: ['Rival'] },
-        postgrestClient,
-      })).to.be.rejectedWith('Failed to sync competitors: comp sync error');
-    });
-
-    it('skips competitor upsert when competitors array is empty', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { competitors: [] },
-        postgrestClient,
-      });
-
-      expect(result.competitors).to.deep.equal([]);
-    });
-
-    it('syncs brand sites when urls are updated', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        regions: [],
-        owned_urls: ['https://sync.com'],
-        social: [],
-        earned_sources: [],
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [{ site_id: 'site-sync-uuid' }],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        sites: { data: [{ id: 'site-sync-uuid', base_url: 'https://sync.com' }], error: null },
-        brand_sites: { data: null, error: null },
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { urls: [{ value: 'https://sync.com' }] },
-        postgrestClient,
-      });
-
-      expect(result.siteIds).to.deep.equal(['site-sync-uuid']);
-    });
-
-    it('does not sync brand sites when urls field is absent from updates', async () => {
-      const fullBrandRow = {
-        id: BRAND_ID,
-        name: 'Test',
-        status: 'active',
-        brand_aliases: [],
-        competitors: [],
-        brand_sites: [],
-      };
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-      });
-
-      // No sites or brand_sites entries — if syncBrandSites is called it would
-      // use the sites table entry, but since sites is absent, the proxy returns
-      // a null-data response which causes no error only because syncBrandSites
-      // guards against empty urlValues. The real check: no brand_sites upsert.
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { name: 'Test' },
-        postgrestClient,
-      });
-
-      expect(result.siteIds).to.deep.equal([]);
-    });
   });
 
   describe('deleteBrand', () => {
@@ -1211,28 +1198,25 @@ describe('brands-storage', () => {
       await expect(deleteBrand(ORG_ID, BRAND_ID, null)).to.be.rejectedWith('PostgREST client is required');
     });
 
-    it('returns true when brand is successfully deleted', async () => {
-      const postgrestClient = createTableMockClient({
-        brands: { data: { id: BRAND_ID }, error: null },
-      });
+    it('returns true when brand is found and soft-deleted', async () => {
+      const query = createChainableQuery({ data: { id: BRAND_ID }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
 
       const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient, 'user@test.com');
       expect(result).to.be.true;
     });
 
-    it('returns false when brand is not found', async () => {
-      const postgrestClient = createTableMockClient({
-        brands: { data: null, error: null },
-      });
+    it('returns false when brand not found', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
 
       const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient);
       expect(result).to.be.false;
     });
 
-    it('throws when delete query fails', async () => {
-      const postgrestClient = createTableMockClient({
-        brands: { data: null, error: { message: 'delete failed' } },
-      });
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'delete failed' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
 
       await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
     });

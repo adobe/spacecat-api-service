@@ -87,9 +87,11 @@ function isStaticRoute(routePattern) {
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
+ * @param {Object} tokensController - The tokens controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
+ * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -120,6 +122,7 @@ export default function getRouteHandlers(
   fixesController,
   llmoController,
   llmoMysticatController,
+  llmoOpportunitiesController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -133,9 +136,11 @@ export default function getRouteHandlers(
   botBlockerController,
   sentimentController,
   consumersController,
+  tokensController,
   plgOnboardingController,
   imsOrgAccessController,
   contactSalesLeadsController,
+  featureFlagsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -166,10 +171,15 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
     'GET /v2/orgs/:spaceCatId/brands': brandsController.listBrandsForOrg,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId': brandsController.getBrandForOrg,
     'GET /v2/orgs/:spaceCatId/categories': brandsController.listCategoriesForOrg,
     'POST /v2/orgs/:spaceCatId/categories': brandsController.createCategoryForOrg,
     'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': brandsController.updateCategoryForOrg,
     'DELETE /v2/orgs/:spaceCatId/categories/:categoryId': brandsController.deleteCategoryForOrg,
+    'GET /v2/orgs/:spaceCatId/topics': brandsController.listTopicsForOrg,
+    'POST /v2/orgs/:spaceCatId/topics': brandsController.createTopicForOrg,
+    'PATCH /v2/orgs/:spaceCatId/topics/:topicId': brandsController.updateTopicForOrg,
+    'DELETE /v2/orgs/:spaceCatId/topics/:topicId': brandsController.deleteTopicForOrg,
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
@@ -179,6 +189,7 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
+    'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -315,6 +326,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
     'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
+    'GET /sites/:siteId/page-citability/counts': sitesController.getPageCitabilityCounts,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
@@ -337,6 +349,7 @@ export default function getRouteHandlers(
     'POST /consent-banner': consentBannerController.takeScreenshots,
     'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
+    'GET /sites/:siteId/metadata': scrapeController.getMetadata,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
 
     // Scrape Jobs
@@ -387,6 +400,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
+    'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
+    'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
@@ -425,6 +440,11 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/all/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats': llmoMysticatController.getBrandPresenceStats,
 
+    // LLMO Opportunities (org-level)
+    'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
+    'GET /org/:spaceCatId/brands/all/opportunities': llmoOpportunitiesController.getBrandOpportunities,
+    'GET /org/:spaceCatId/brands/:brandId/opportunities': llmoOpportunitiesController.getBrandOpportunities,
+
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
@@ -433,6 +453,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+    'POST /sites/:siteId/site-enrollments': siteEnrollmentController.createPlgEnrollment,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
@@ -443,6 +464,11 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
+    'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
+      featureFlagsController.putByOrganizationProductAndName,
+    'DELETE /organizations/:organizationId/feature-flags/:product/:flagName':
+      featureFlagsController.deleteByOrganizationProductAndName,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
@@ -481,6 +507,9 @@ export default function getRouteHandlers(
     'POST /consumers/register': consumersController.register,
     'PATCH /consumers/:consumerId': consumersController.update,
     'POST /consumers/:consumerId/revoke': consumersController.revoke,
+
+    // Tokens
+    'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
 
     // IMS Org Access (cross-org delegation grants)
     'POST /sites/:siteId/ims-org-access': imsOrgAccessController.createGrant,

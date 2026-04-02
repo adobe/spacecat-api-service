@@ -302,6 +302,7 @@ export const triggerAuditForSite = async (
   auditData,
   slackContext,
   lambdaContext,
+  auditContext = {},
 ) => sendAuditMessage(
   lambdaContext.sqs,
   lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
@@ -311,6 +312,7 @@ export const triggerAuditForSite = async (
       channelId: slackContext.channelId,
       threadTs: slackContext.threadTs,
     },
+    ...auditContext,
   },
   site.getId(),
   auditData,
@@ -1130,6 +1132,254 @@ export const createEntitlementAndEnrollment = async (
   }
 };
 
+/*
+* Queues an identify redirects audit for a site.
+* @param {Object} site - The site to queue an identify redirects audit for.
+* @param {string} baseURL? - The base URL of the site.
+* @param {number} minutes? - The number of minutes to audit for.
+* @param {boolean} updateRedirects? - Whether to update the redirects.
+* @param {Object} slackContext - The Slack context object.
+* @param {Object} context - The Lambda context containing dataAccess, log, etc.
+* @returns {Promise<{ok: boolean, error?: string}>} - ok: true or { ok: false, error }.
+*/
+export async function queueIdentifyRedirectsAudit(
+  {
+    site, baseURL, minutes = 2000, updateRedirects = false, slackContext,
+  },
+  context,
+) {
+  const {
+    env,
+    log,
+    sqs,
+  } = context;
+
+  const { say, channelId, threadTs } = slackContext || {};
+  try {
+    if (!site) {
+      return { ok: false, error: `:x: No site found with base URL '${baseURL}'.` };
+    }
+
+    const resolvedBaseURL = baseURL || site.getBaseURL();
+    if (!resolvedBaseURL) {
+      return { ok: false, error: 'missing_base_url' };
+    }
+
+    // check for SQS client to talk to audit worker
+    if (!sqs) {
+      return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
+    }
+
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+    // check either authoringType or deliveryType is CS/CW
+    if (![
+      SiteModel.AUTHORING_TYPES.CS, // cs
+      SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
+    ].includes(authoringType)
+    && ![
+      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
+    ].includes(deliveryType)) {
+      return {
+        ok: false,
+        error: ':warning: identify-redirects currently supports AEM CS/CW only. '
+          + `This site authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`,
+      };
+    }
+
+    const deliveryConfig = site.getDeliveryConfig?.() || {};
+    const { programId, environmentId } = deliveryConfig;
+    if (!hasText(programId) || !hasText(environmentId)) {
+      return { ok: false, error: ':x: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for Splunk queries.' };
+    }
+
+    if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
+      return { ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' };
+    }
+    if (say) {
+      const updateRedirectsMessage = updateRedirects ? 'and update' : '';
+      await say(`:mag: Queued redirect pattern detection ${updateRedirectsMessage} for *${resolvedBaseURL}* (last ${minutes}m). I’ll reply here when it’s ready.`);
+    }
+
+    await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+      type: 'identify-redirects',
+      siteId: site.getId(),
+      baseURL: resolvedBaseURL,
+      programId: String(programId),
+      environmentId: String(environmentId),
+      minutes,
+      updateRedirects,
+      slackContext: channelId != null && threadTs != null
+        ? { channelId, threadTs }
+        : undefined,
+    });
+    return { ok: true };
+  } catch (error) {
+    log.error(error);
+    throw error;
+  }
+}
+
+/*
+ * Queues a detect-cdn audit (worker probes the URL and may persist deliveryConfig.cdn).
+ * @param {Object} params
+ * @param {Object} [params.site] - When set, job includes siteId (Slack or onboarding).
+ * @param {string} [params.baseURL] - URL to probe; falls back to site.getBaseURL().
+ * @param {Object} [params.slackContext] - Optional say, channelId, threadTs for Slack replies.
+ * @param {Object} context - Lambda context (env, sqs, log).
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function queueDetectCdnAudit(
+  { site, baseURL, slackContext },
+  context,
+) {
+  const {
+    env,
+    log,
+    sqs,
+  } = context;
+  const { say, channelId, threadTs } = slackContext || {};
+
+  try {
+    const resolvedBaseURL = (baseURL || site?.getBaseURL?.() || '').trim();
+    if (!hasText(resolvedBaseURL)) {
+      return { ok: false, error: ':warning: detect-cdn: missing or invalid URL.' };
+    }
+
+    if (!sqs) {
+      return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
+    }
+
+    if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
+      return { ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' };
+    }
+
+    const siteId = site?.getId?.();
+    const payload = {
+      type: 'detect-cdn',
+      baseURL: resolvedBaseURL,
+      ...(hasText(siteId) && { siteId }),
+      ...(channelId != null && threadTs != null
+        ? { slackContext: { channelId, threadTs } }
+        : {}),
+    };
+
+    if (say) {
+      await say(
+        `:mag: Queued CDN detection for *${resolvedBaseURL}*. I'll reply here when it's ready.`,
+      );
+    }
+
+    await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, payload);
+    return { ok: true };
+  } catch (error) {
+    log.error(error);
+    throw error;
+  }
+}
+
+/**
+ * Queues a delivery-config-writer job that runs CDN detection followed by redirect
+ * identification sequentially, eliminating race conditions during onboarding.
+ *
+ * Redirect identification is only included when the site's authoringType / deliveryType
+ * indicates AEM CS/CW and the site already has deliveryConfig.programId / environmentId.
+ *
+ * @param {Object} params
+ * @param {Object} params.site - The site object (must be non-null).
+ * @param {string} [params.baseURL] - URL to probe; falls back to site.getBaseURL().
+ * @param {number} [params.minutes=2000] - Splunk lookback window in minutes.
+ * @param {boolean} [params.updateRedirects=true] - Whether to persist the detected redirect mode.
+ * @param {Object} [params.slackContext] - Optional say, channelId, threadTs for Slack replies.
+ * @param {Object} context - Lambda context (env, sqs, log).
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function queueDeliveryConfigWriter(
+  {
+    site, baseURL, minutes = 2000, updateRedirects = true, slackContext,
+  },
+  context,
+) {
+  const { env, log, sqs } = context;
+  const { say, channelId, threadTs } = slackContext || {};
+
+  try {
+    if (!site) {
+      return { ok: false, error: `:x: No site found with base URL '${baseURL}'.` };
+    }
+
+    const resolvedBaseURL = (baseURL || site.getBaseURL() || '').trim();
+    if (!hasText(resolvedBaseURL)) {
+      return { ok: false, error: ':warning: delivery-config-writer: missing or invalid URL.' };
+    }
+
+    if (!sqs) {
+      return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
+    }
+
+    if (!hasText(env?.AUDIT_JOBS_QUEUE_URL)) {
+      return { ok: false, error: ':x: Server misconfiguration: missing `AUDIT_JOBS_QUEUE_URL`.' };
+    }
+
+    const siteId = site.getId();
+    const authoringType = site.getAuthoringType();
+    const deliveryType = site.getDeliveryType();
+
+    const validForRedirects = [
+      SiteModel.AUTHORING_TYPES.CS,
+      SiteModel.AUTHORING_TYPES.CS_CW,
+    ].includes(authoringType) || [
+      SiteModel.DELIVERY_TYPES.AEM_CS,
+    ].includes(deliveryType);
+
+    let redirectParams = {};
+    if (validForRedirects) {
+      const deliveryConfig = site.getDeliveryConfig?.() || {};
+      const { programId, environmentId } = deliveryConfig;
+      if (!hasText(programId) || !hasText(environmentId)) {
+        log.info(`[delivery-config-writer] Site ${siteId} missing programId/environmentId; skipping redirect identification.`);
+      } else {
+        redirectParams = {
+          programId: String(programId),
+          environmentId: String(environmentId),
+          minutes,
+          updateRedirects,
+        };
+      }
+    } else {
+      log.info(
+        `[delivery-config-writer] Site ${siteId} not valid for redirect identification`
+        + ` (authoringType=${authoringType}, deliveryType=${deliveryType}); CDN detection only.`,
+      );
+    }
+
+    const hasRedirectParams = Object.keys(redirectParams).length > 0;
+
+    const payload = {
+      type: 'delivery-config-writer',
+      siteId,
+      baseURL: resolvedBaseURL,
+      ...redirectParams,
+      ...(channelId != null && threadTs != null
+        ? { slackContext: { channelId, threadTs } }
+        : {}),
+    };
+
+    if (say) {
+      const redirectsNote = hasRedirectParams ? ' and redirect pattern detection' : '';
+      await say(
+        `:gear: Queued CDN detection${redirectsNote} for *${resolvedBaseURL}*. I'll reply here when it's ready.`,
+      );
+    }
+
+    await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, payload);
+    return { ok: true };
+  } catch (error) {
+    log.error(error);
+    throw error;
+  }
+}
+
 /**
  * Shared onboarding function used by both modal and command implementations.
  *
@@ -1368,6 +1618,23 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    const deliveryConfigResult = await queueDeliveryConfigWriter(
+      {
+        site,
+        baseURL: resolvedUrl,
+        minutes: 2000,
+        updateRedirects: true,
+        slackContext,
+      },
+      context,
+    );
+    if (!deliveryConfigResult.ok) {
+      reportLine.errors = deliveryConfigResult.error;
+      reportLine.status = 'Failed';
+      await say(deliveryConfigResult.error);
+      return reportLine;
+    }
+
     for (const importType of importTypes) {
       /* eslint-disable no-await-in-loop */
       await triggerImportRun(
@@ -1549,6 +1816,17 @@ export const onboardSingleSite = async (
  * @param {String} productCode - The product code.
  * @returns {Array} - The filtered sites array.
  */
+/**
+ * Allow-list of entitlement tiers that are visible to customers via the API.
+ * Any tier not in this list (e.g. PLG) is treated as internal-only.
+ * Adding a new tier here explicitly opts it into customer visibility.
+ * @type {string[]}
+ */
+export const CUSTOMER_VISIBLE_TIERS = [
+  EntitlementModel.TIERS.FREE_TRIAL,
+  EntitlementModel.TIERS.PAID,
+];
+
 export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
   const { SiteEnrollment } = context.dataAccess;
@@ -1556,6 +1834,11 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const { entitlement } = await tierClient.checkValidEntitlement();
 
   if (!isNonEmptyObject(entitlement)) {
+    return [];
+  }
+
+  // PLG and any future internal tiers are not customer-visible
+  if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
     return [];
   }
 

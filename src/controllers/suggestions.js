@@ -70,6 +70,7 @@ function SuggestionsController(ctx, sqs, env) {
     'security-permissions',
     'security-vulnerabilities',
     'security-csp',
+    'high-page-views-low-form-views',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
@@ -1045,13 +1046,16 @@ function SuggestionsController(ctx, sqs, env) {
             statusCode: 400,
           });
         /* c8 ignore stop */
-        } else if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+        } else if (
+          suggestion.getStatus() === SuggestionModel.STATUSES.NEW
+          || suggestion.getStatus() === SuggestionModel.STATUSES.PENDING_VALIDATION
+        ) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
             uuid: suggestion.getId(),
             index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Suggestion is not in NEW status',
+            message: 'Suggestion must be in NEW or PENDING_VALIDATION status for auto-fix',
             statusCode: 400,
           });
         }
@@ -1502,6 +1506,9 @@ function SuggestionsController(ctx, sqs, env) {
 
     context.log.info(`[edge-deploy] allSuggestions count: ${allSuggestions.length}`);
 
+    const isEdgeDeployableStatus = (status) => status === SuggestionModel.STATUSES.NEW
+      || status === SuggestionModel.STATUSES.PENDING_VALIDATION;
+
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
     const domainWideSuggestions = [];
@@ -1536,12 +1543,12 @@ function SuggestionsController(ctx, sqs, env) {
             statusCode: 400,
           });
         }
-      } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
-        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} (status: ${suggestion.getStatus()}) is not in NEW status`);
+      } else if (!isEdgeDeployableStatus(suggestion.getStatus())) {
+        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} (status: ${suggestion.getStatus()}) must be NEW or PENDING_VALIDATION for edge deploy`);
         failedSuggestions.push({
           uuid: suggestionId,
           index,
-          message: 'Suggestion is not in NEW status',
+          message: 'Suggestion must be in NEW or PENDING_VALIDATION status for edge deploy',
           statusCode: 400,
         });
       } else {
@@ -1725,7 +1732,7 @@ function SuggestionsController(ctx, sqs, env) {
             succeededSuggestions.push(suggestion);
             context.log.info(`[edge-deploy] Successfully deployed domain-wide suggestion ${suggestionId} by ${profile?.email || 'tokowaka-deployment'}`);
 
-            // Mark all other NEW suggestions that match allowedRegexPatterns
+            // Mark all other NEW / PENDING_VALIDATION suggestions that match allowedRegexPatterns
             try {
               // Get IDs of suggestions skipped in this batch
               const skippedInBatchIds = new Set(
@@ -1746,8 +1753,7 @@ function SuggestionsController(ctx, sqs, env) {
                   return false;
                 }
 
-                // Only process NEW suggestions
-                if (s.getStatus() !== SuggestionModel.STATUSES.NEW) {
+                if (!isEdgeDeployableStatus(s.getStatus())) {
                   return false;
                 }
 

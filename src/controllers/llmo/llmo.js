@@ -57,11 +57,19 @@ import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
+import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
+import {
+  LLMO_CONFIG_DB_SYNC_TYPE,
+  isSyncEnabledForSite,
+} from './llmo-config-sync-constants.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
+
+const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
+const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -529,6 +537,17 @@ function LlmoController(ctx) {
         });
       }
 
+      if (isSyncEnabledForSite(siteId)) {
+        log.info(`[llmo-config-db-sync] Triggering S3-to-DB config sync for siteId: ${siteId} with dryRun: false`);
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: LLMO_CONFIG_DB_SYNC_TYPE,
+          siteId,
+          dryRun: false,
+        });
+      } else {
+        log.info(`[llmo-config-db-sync] Skipping S3-to-DB config sync for siteId: ${siteId} because it is not in ALLOWED_SITE_IDS`);
+      }
+
       // Build config summary
       const summaryParts = [
         `${stats.prompts.total} prompts${stats.prompts.modified ? ` (${stats.prompts.modified} modified)` : ''}`,
@@ -837,7 +856,24 @@ function LlmoController(ctx) {
    * Onboards a new customer to LLMO.
    * This endpoint handles the complete onboarding process for net new customers
    * including organization validation, site creation, and LLMO configuration.
+   * Requires LLMO administrator access.
+   *
+   * The IMS org ID is resolved in the following order of precedence:
+   * 1. `imsOrgId` field in the request payload — must match `/^[a-z0-9]{24}@AdobeOrg$/i`.
+   *    Useful when an LLMO administrator is onboarding on behalf of another org.
+   * 2. JWT token fallback — derived from `profile.tenants[0].id` appended with
+   *    `@AdobeOrg`. This is the original behaviour and is preserved for backward
+   *    compatibility with all existing callers that do not supply `imsOrgId`.
+   *
    * @param {object} context - The request context.
+   * @param {object} context.data - Request payload.
+   * @param {string} context.data.domain - Customer domain to onboard.
+   * @param {string} context.data.brandName - Brand name for the customer.
+   * @param {string} [context.data.imsOrgId] - Optional IMS org ID override
+   *   (must match `/^[a-z0-9]{24}@AdobeOrg$/i`). When omitted the org ID
+   *   is read from the authenticated user's JWT token.
+   * @param {boolean} [context.data['temp-onboarding']] - When true, skips updating
+   *   helix-query.yaml in project-elmo-ui-data during onboarding.
    * @returns {Promise<Response>} The onboarding response.
    */
   const onboardCustomer = async (context) => {
@@ -854,27 +890,47 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
 
-      const { domain, brandName } = data;
+      const {
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence,
+      } = data;
+      const tempOnboarding = data['temp-onboarding'] === true;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
       }
 
-      const { authInfo } = attributes;
-
-      if (!authInfo) {
-        return badRequest('Authentication information is required');
+      if (cadence && !VALID_CADENCES.includes(cadence)) {
+        return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
       }
 
-      const profile = authInfo.getProfile();
+      let imsOrgId;
 
-      if (!profile || !profile.tenants?.[0]?.id) {
-        const message = 'User profile or organization ID not found in authentication token';
-        log.warn(`LLMO onboarding validation failed for domain ${domain}, brand ${brandName}. Validation Error: ${message}`);
-        return badRequest(message);
+      if (payloadImsOrgId) {
+        // Payload takes precedence — validate format before use
+        if (!IMS_ORG_ID_REGEX.test(payloadImsOrgId)) {
+          log.warn(`LLMO onboarding rejected invalid imsOrgId for domain ${domain}, brand ${brandName}`);
+          return badRequest('Invalid imsOrgId');
+        }
+        log.info(`LLMO onboarding using payload-supplied imsOrgId for domain ${domain}, brand ${brandName}`);
+        imsOrgId = payloadImsOrgId;
+      } else {
+        // Backward-compatible fallback: derive org ID from the JWT token
+        const { authInfo } = attributes;
+
+        if (!authInfo) {
+          return badRequest('Authentication information is required');
+        }
+
+        const profile = authInfo.getProfile();
+
+        if (!profile || !profile.tenants?.[0]?.id) {
+          const message = 'User profile or organization ID not found in authentication token';
+          log.warn(`LLMO onboarding validation failed for domain ${domain}, brand ${brandName}. Validation Error: ${message}`);
+          return badRequest(message);
+        }
+
+        imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
       }
-
-      const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
 
       // Construct base URL and data folder name
       const baseURL = composeBaseURL(domain);
@@ -891,7 +947,13 @@ function LlmoController(ctx) {
 
       // Perform the complete onboarding process
       const result = await performLlmoOnboarding(
-        { domain, brandName, imsOrgId },
+        {
+          domain,
+          brandName,
+          imsOrgId,
+          cadence,
+          tempOnboarding,
+        },
         context,
       );
 
@@ -1016,6 +1078,24 @@ function LlmoController(ctx) {
       return badRequest(error.message);
     }
   };
+
+  // Factory for demo fixture endpoints — validates site/LLMO access then delegates to handler
+  const createDemoFixtureHandler = (handler, label) => async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      return await handler(context);
+    } catch (error) {
+      log.error(`Unexpected error retrieving demo ${label} for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to retrieve demo fixture');
+    }
+  };
+
+  const getDemoBrandPresence = createDemoFixtureHandler(handleDemoBrandPresence, 'brand-presence');
+  const getDemoRecommendations = createDemoFixtureHandler(handleDemoRecommendations, 'recommendations');
 
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-config
@@ -1704,6 +1784,8 @@ function LlmoController(ctx) {
     queryFiles,
     getLlmoRationale,
     getBrandClaims,
+    getDemoBrandPresence,
+    getDemoRecommendations,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
     createOrUpdateStageEdgeConfig,

@@ -19,10 +19,38 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
  * spaceCatId = organization_id. brandId = 'all' or UUID.
  */
 
+/**
+ * LLM model enum values from mysticat-data-service llm_model type.
+ * Must match db/migrations/*_brand_presence_model_enum.sql exactly.
+ */
+export const LLM_MODEL_VALUES = Object.freeze([
+  'chatgpt-paid',
+  'chatgpt-free',
+  'google-ai-overview',
+  'perplexity',
+  'google-ai-mode',
+  'copilot',
+  'gemini',
+  'google',
+  'microsoft',
+  'mistral',
+  'anthropic',
+  'amazon',
+]);
+
+const LLM_MODEL_SET = new Set(LLM_MODEL_VALUES);
+const DEFAULT_MODEL = 'chatgpt-free';
+
+/** Query-string aliases (case-insensitive). Not valid `llm_model` enum literals. */
+const MODEL_QUERY_ALIASES = new Map([
+  ['all', 'chatgpt-paid'],
+  ['chatgpt', 'chatgpt-free'],
+]);
+
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
-/** High row limit for weeks query — we need all rows to extract every distinct week (200K cap). */
+/** High row limit for large execution queries (sentiment, topics, prompt-detail, etc). */
 const WEEKS_QUERY_LIMIT = 200000;
 
 /**
@@ -73,6 +101,31 @@ function shouldApplyFilter(value) {
   if (value == null) return false;
   if (typeof value === 'string' && SKIP_VALUES.has(value.trim())) return false;
   return hasText(String(value));
+}
+
+/** @internal Exported for testing */
+export function resolveModelFromRequest(model) {
+  if (!hasText(model)) return DEFAULT_MODEL;
+  const trimmed = String(model).trim();
+  const alias = MODEL_QUERY_ALIASES.get(trimmed.toLowerCase());
+  return alias ?? trimmed;
+}
+
+/**
+ * Validates model param against llm_model enum. Returns resolved model or error.
+ * @param {string} [model] - Raw model from query (optional; defaults to chatgpt-free)
+ * @returns {{ valid: boolean, model?: string, error?: string }}
+ * @internal Exported for testing
+ */
+export function validateModel(model) {
+  const resolved = resolveModelFromRequest(model);
+  if (!LLM_MODEL_SET.has(resolved)) {
+    return {
+      valid: false,
+      error: `Invalid model. Must be one of: ${LLM_MODEL_VALUES.join(', ')}`,
+    };
+  }
+  return { valid: true, model: resolved };
 }
 
 /** @internal Exported for testing null/undefined fallbacks */
@@ -128,25 +181,25 @@ function defaultDateRange() {
   };
 }
 
-function buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
+/**
+ * Same filters as rpc_brand_presence_filter_dimensions / filter-dimensions RPC; used only to
+ * collect distinct site_id rows for page_intents when a brand scope is applied without siteId.
+ */
+function buildExecutionsSiteIdsQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
   const {
-    siteId, categoryId, topicIds, regionCode, origin,
+    model, categoryId, topicIds, regionCode, origin,
   } = params;
 
   let q = client
     .from('brand_presence_executions')
-    .select('brand_id, brand_name, category_name, topic_id, topics, origin, region_code, site_id')
+    .select('site_id')
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
     .eq('model', model);
 
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
   if (filterByBrandId) {
     q = q.eq('brand_id', filterByBrandId);
   }
@@ -164,6 +217,57 @@ function buildExecutionsQuery(client, organizationId, params, defaults, filterBy
   }
 
   return q.limit(QUERY_LIMIT);
+}
+
+function buildFilterDimensionsRpcParams(organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const rpcParams = {
+    p_organization_id: organizationId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_model: params.model,
+  };
+  if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
+  if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
+  if (shouldApplyFilter(params.categoryId)) {
+    if (isValidUUID(params.categoryId)) {
+      rpcParams.p_category_id = params.categoryId;
+    } else {
+      rpcParams.p_category_name = params.categoryId;
+    }
+  }
+  if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
+  if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
+  if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
+  return rpcParams;
+}
+
+/**
+ * Normalizes RPC `stats` for the filter-dimensions HTTP response.
+ * Safe when the function omits `stats` or fields (e.g. older DB migration): each missing or
+ * non-finite value becomes 0. Non-plain objects (arrays, null stats) are treated as absent.
+ * @param {Record<string, unknown>|null|undefined} dims - Parsed RPC JSON body
+ * @returns {{ total_execution_count: number, distinct_prompt_count: number,
+ *   empty_answer_execution_count: number }}
+ */
+export function normalizeFilterDimensionsStatsFromRpc(dims) {
+  const hasPlainStats = dims != null
+    && typeof dims === 'object'
+    && dims.stats != null
+    && typeof dims.stats === 'object'
+    && !Array.isArray(dims.stats);
+  const raw = hasPlainStats ? dims.stats : {};
+  const totalExecutionCount = Number(raw.total_execution_count);
+  const distinctPromptCount = Number(raw.distinct_prompt_count);
+  const emptyAnswerExecutionCount = Number(raw.empty_answer_execution_count);
+  return {
+    total_execution_count: Number.isFinite(totalExecutionCount) ? totalExecutionCount : 0,
+    distinct_prompt_count: Number.isFinite(distinctPromptCount) ? distinctPromptCount : 0,
+    empty_answer_execution_count: Number.isFinite(emptyAnswerExecutionCount)
+      ? emptyAnswerExecutionCount
+      : 0,
+  };
 }
 
 /**
@@ -245,47 +349,6 @@ async function fetchPageIntents(client, organizationId, siteId, filterByBrandId,
     return sorted.map((p) => toFilterOption(p, p));
   }
   return [];
-}
-
-function buildDimensionOptions(rows) {
-  const brands = [];
-  const brandIds = new Set();
-  rows.forEach((r) => {
-    if (r.brand_id && r.brand_name && !brandIds.has(r.brand_id)) {
-      brandIds.add(r.brand_id);
-      brands.push(toFilterOption(r.brand_id, r.brand_name));
-    }
-  });
-  const sortedBrands = brands.toSorted((a, b) => strCompare(a.label, b.label));
-
-  const catNames = [...new Set(rows.map((r) => r.category_name).filter(Boolean))];
-  const categories = catNames.toSorted(strCompare).map((c) => toFilterOption(c, c));
-
-  const topicEntries = new Map();
-  rows.forEach((r) => {
-    if (r.topic_id && !topicEntries.has(r.topic_id)) {
-      topicEntries.set(r.topic_id, r.topics || r.topic_id);
-    }
-  });
-  const topics = [...topicEntries.entries()]
-    .toSorted((a, b) => strCompare(a[1], b[1]))
-    .map(([id, label]) => toFilterOption(id, label));
-
-  const originVals = [...new Set(
-    rows.map((r) => r.origin).filter(Boolean).map((o) => o.toLowerCase()),
-  )];
-  const origins = originVals.toSorted(strCompare).map((o) => toFilterOption(o, o));
-
-  const regionVals = [...new Set(rows.map((r) => r.region_code).filter(Boolean))];
-  const regions = regionVals.toSorted(strCompare).map((r) => toFilterOption(r, r));
-
-  return {
-    brands: sortedBrands,
-    categories,
-    topics,
-    origins,
-    regions,
-  };
 }
 
 function parseWeeksParams(context) {
@@ -379,29 +442,63 @@ export function getWeekDateRange(isoWeek) {
 }
 
 /**
- * Builds a query to fetch week values from brand_metrics_weekly.
- * Table already has week in YYYY-Wnn format; filters: organization_id, model, site_id, brand_id.
+ * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
+ * @param {string} dateStr - e.g. "2026-03-15"
+ * @returns {string} e.g. "2026-W11"
+ * @internal Exported for testing
  */
-function buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId) {
-  let q = client
-    .from('brand_metrics_weekly')
-    .select('week')
-    .eq('organization_id', organizationId)
-    .eq('model', model);
+export function dateToIsoWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dayOfWeek = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
+  const year = d.getUTCFullYear();
+  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
+}
 
-  if (shouldApplyFilter(siteId)) {
-    q = q.eq('site_id', siteId);
-  }
-  if (filterByBrandId) {
-    q = q.eq('brand_id', filterByBrandId);
+/**
+ * Generates every ISO week (YYYY-Wnn) between minDate and maxDate, inclusive,
+ * sorted newest-first.
+ *
+ * NOTE: This assumes no gaps in execution data. If a week between minDate and
+ * maxDate has no executions (e.g. a pipeline outage), it will still appear in
+ * the output. This is an accepted trade-off — a single min/max aggregation is
+ * far cheaper than scanning all rows for distinct weeks on a large table.
+ * The UI's existing empty-state handling covers the case where a selected week
+ * returns no data.
+ *
+ * @param {string|null} minDate - Earliest execution_date (YYYY-MM-DD)
+ * @param {string|null} maxDate - Latest execution_date (YYYY-MM-DD)
+ * @returns {string[]} ISO week strings sorted descending e.g. ["2026-W11", "2026-W10", ...]
+ * @internal Exported for testing
+ */
+export function generateIsoWeekRange(minDate, maxDate) {
+  if (!minDate || !maxDate) return [];
+  const minRange = getWeekDateRange(dateToIsoWeek(minDate));
+  const maxRange = getWeekDateRange(dateToIsoWeek(maxDate));
+  if (!minRange || !maxRange) return [];
+
+  const result = [];
+  let currentMs = new Date(`${minRange.startDate}T00:00:00Z`).getTime();
+  const maxMs = new Date(`${maxRange.startDate}T00:00:00Z`).getTime();
+
+  while (currentMs <= maxMs) {
+    const d = new Date(currentMs);
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    result.push(dateToIsoWeek(`${y}-${mo}-${day}`));
+    currentMs += 7 * MS_PER_DAY;
   }
 
-  return q.order('week', { ascending: false }).limit(WEEKS_QUERY_LIMIT);
+  return result.sort((a, b) => b.localeCompare(a));
 }
 
 /**
  * Creates the getBrandPresenceWeeks handler.
- * Returns distinct ISO weeks (YYYY-Wnn) for the given model, optionally filtered by brand or site.
+ * Returns all ISO weeks (YYYY-Wnn) between the earliest and latest execution_date
+ * for the given org/model, optionally filtered by brand or site.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
@@ -412,7 +509,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const params = parseWeeksParams(ctx);
       const { model: modelParam, siteId } = params;
-      const model = modelParam || 'chatgpt';
+      const model = resolveModelFromRequest(modelParam);
       const { spaceCatId, brandId } = ctx.params;
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
@@ -424,27 +521,25 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const q = buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId);
-      const { data, error } = await q;
+      const { data, error } = await client.rpc('rpc_brand_presence_execution_date_range', {
+        p_organization_id: organizationId,
+        p_model: model,
+        p_site_id: shouldApplyFilter(siteId) ? siteId : null,
+        p_brand_id: filterByBrandId || null,
+      });
 
       if (error) {
         ctx.log.error(`Brand presence weeks PostgREST error: ${error.message}`);
         return badRequest(error.message);
       }
 
-      const rows = data || [];
-      const weekSet = new Set();
-      rows.forEach((r) => {
-        const w = r.week;
-        if (w && typeof w === 'string') weekSet.add(w);
-      });
-      const sortedWeeks = [...weekSet].sort((a, b) => b.localeCompare(a));
-      const weeks = sortedWeeks.map((weekStr) => {
+      const row = (data || [])[0] || {};
+      const weeks = generateIsoWeekRange(row.min_date, row.max_date).map((weekStr) => {
         const range = getWeekDateRange(weekStr);
         return {
           week: weekStr,
-          startDate: range?.startDate ?? null,
-          endDate: range?.endDate ?? null,
+          startDate: range.startDate,
+          endDate: range.endDate,
         };
       });
 
@@ -465,22 +560,6 @@ function parseMarketTrackingTrendsParams(context) {
     categoryId: q.categoryId || q.category_id,
     regionCode: q.regionCode || q.region_code || q.region,
   };
-}
-
-/**
- * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
- * @param {string} dateStr - e.g. "2026-03-15"
- * @returns {string} e.g. "2026-W11"
- * @internal Exported for testing
- */
-export function dateToIsoWeek(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  const dayOfWeek = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
-  const year = d.getUTCFullYear();
-  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
 }
 
 function parseIsoWeek(weekStr) {
@@ -508,7 +587,7 @@ function parseIsoWeek(weekStr) {
 function buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
   const {
     siteId, categoryId, regionCode,
   } = params;
@@ -540,7 +619,7 @@ function buildBrandExecutionsQuery(client, organizationId, params, defaults, fil
 function buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
   const {
     siteId, categoryId, regionCode,
   } = params;
@@ -811,7 +890,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       let q = client
         .from('brand_presence_executions')
@@ -1089,6 +1168,8 @@ const TOPICS_SELECT = 'id, topics, prompt, region_code, mentions, citations, vis
  * Creates the getTopics handler.
  * Returns topic-level aggregated data (without individual prompts) for the
  * Data Insights table. Supports pagination, sorting, and filtering.
+ * Aggregation, sorting, and pagination are performed server-side via
+ * rpc_brand_presence_topics (PostgreSQL function).
  * Prompts are loaded separately via the /topics/:topicId/prompts endpoint.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
@@ -1105,39 +1186,6 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-      const startDate = params.startDate || defaults.startDate;
-      const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
-
-      let q = client
-        .from('brand_presence_executions')
-        .select(TOPICS_SELECT)
-        .eq('organization_id', organizationId)
-        .gte('execution_date', startDate)
-        .lte('execution_date', endDate)
-        .eq('model', model);
-
-      if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
-      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
-      if (shouldApplyFilter(params.categoryId)) {
-        q = isValidUUID(params.categoryId)
-          ? q.eq('category_id', params.categoryId)
-          : q.eq('category_name', params.categoryId);
-      }
-      if (shouldApplyFilter(params.topic)) q = q.eq('topics', params.topic);
-      if (params.topicIds?.length > 0) q = q.in('topic_id', params.topicIds);
-      if (shouldApplyFilter(params.regionCode)) {
-        q = q.eq('region_code', params.regionCode);
-      }
-      if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
-
-      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
-
-      if (error) {
-        ctx.log.error(`Brand presence topics PostgREST error: ${error.message}`);
-        return badRequest(error.message);
-      }
-
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -1149,14 +1197,48 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const topicDetails = aggregateTopicData(data || []);
-      sortTopicDetails(topicDetails, pagination.sortBy, pagination.sortOrder);
+      const { data, error } = await client.rpc('rpc_brand_presence_topics', {
+        p_organization_id: organizationId,
+        p_start_date: params.startDate || defaults.startDate,
+        p_end_date: params.endDate || defaults.endDate,
+        p_model: resolveModelFromRequest(params.model),
+        p_brand_id: filterByBrandId || null,
+        p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+        p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
+          ? params.categoryId : null,
+        p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
+          ? params.categoryId : null,
+        p_topic: shouldApplyFilter(params.topic) ? params.topic : null,
+        p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
+        p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+        p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
+        p_sort_by: pagination.sortBy,
+        p_sort_order: pagination.sortOrder,
+        p_page_offset: pagination.page * pagination.pageSize,
+        p_page_limit: pagination.pageSize,
+      });
 
-      const totalCount = topicDetails.length;
-      const start = pagination.page * pagination.pageSize;
-      const paged = topicDetails.slice(start, start + pagination.pageSize);
+      if (error) {
+        ctx.log.error(`Brand presence topics RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
 
-      return ok({ topicDetails: paged, totalCount });
+      const rows = data || [];
+      const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
+
+      const topicDetails = rows.map((row) => ({
+        topic: row.topic,
+        promptCount: Number(row.prompt_count ?? 0),
+        brandMentions: Number(row.brand_mentions ?? 0),
+        brandCitations: Number(row.brand_citations ?? 0),
+        sourceCount: Number(row.source_count ?? 0),
+        averageVisibilityScore: Number(row.avg_visibility_score ?? 0),
+        averagePosition: Number(row.avg_position ?? 0),
+        averageSentiment: Number(row.avg_sentiment ?? -1),
+        popularityVolume: row.popularity_volume || 'N/A',
+      }));
+
+      return ok({ topicDetails, totalCount });
     },
   );
 }
@@ -1184,7 +1266,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       let topicName;
       try {
@@ -1306,7 +1388,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const bounded = query.slice(0, MAX_SEARCH_QUERY_LENGTH);
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       const pattern = buildSearchPattern(bounded);
 
@@ -1538,7 +1620,7 @@ export function aggregateDetailSources(sourceRows) {
 function buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
 
   let q = client
     .from('brand_presence_executions')
@@ -1941,7 +2023,7 @@ export function volumeToPopularity(volume, avgPositiveVolume) {
 function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
+  const model = resolveModelFromRequest(params.model);
 
   return client.rpc('rpc_share_of_voice', {
     p_organization_id: organizationId,
@@ -2180,6 +2262,9 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
 
 /**
  * Creates the getFilterDimensions handler.
+ * Returns dimension option lists from `rpc_brand_presence_filter_dimensions`, plus `stats`
+ * (total_execution_count, distinct_prompt_count, empty_answer_execution_count) from the same RPC,
+ * and `page_intents` from a separate query.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
@@ -2190,28 +2275,63 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
+      params.model = resolveModelFromRequest(params.model);
+
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-
-      const q = buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
-      const { data, error } = await q;
-
-      if (error) {
-        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${error.message}`);
-        return badRequest(error.message);
-      }
-
-      const rows = data || [];
       const siteFilter = params.siteId;
+
       if (shouldApplyFilter(siteFilter)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
         if (!siteBelongsToOrg) {
           return forbidden('Site does not belong to the organization');
         }
       }
+
+      const rpcParams = buildFilterDimensionsRpcParams(
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
+      );
+      const { data: rpcData, error: rpcError } = await client.rpc(
+        'rpc_brand_presence_filter_dimensions',
+        rpcParams,
+      );
+
+      if (rpcError) {
+        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${rpcError.message}`);
+        return badRequest(rpcError.message);
+      }
+
+      const dims = rpcData && typeof rpcData === 'object' ? rpcData : {};
+      const brands = Array.isArray(dims.brands) ? dims.brands : [];
+      const categories = Array.isArray(dims.categories) ? dims.categories : [];
+      const topics = Array.isArray(dims.topics) ? dims.topics : [];
+      const origins = Array.isArray(dims.origins) ? dims.origins : [];
+      const regions = Array.isArray(dims.regions) ? dims.regions : [];
+      const stats = normalizeFilterDimensionsStatsFromRpc(dims);
+
+      let rowsForSiteIds = [];
+      if (filterByBrandId && !shouldApplyFilter(siteFilter)) {
+        const siteQ = buildExecutionsSiteIdsQuery(
+          client,
+          organizationId,
+          params,
+          defaults,
+          filterByBrandId,
+        );
+        const { data: siteRows, error: siteErr } = await siteQ;
+        if (siteErr) {
+          ctx.log.error(`Brand presence filter-dimensions site-id query error: ${siteErr.message}`);
+          return badRequest(siteErr.message);
+        }
+        rowsForSiteIds = siteRows || [];
+      }
+
       const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
-        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows)
+        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rowsForSiteIds)
         : [];
       const pageIntents = await fetchPageIntents(
         client,
@@ -2220,13 +2340,6 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         filterByBrandId,
         siteIds,
       );
-      const {
-        brands,
-        categories,
-        topics,
-        origins,
-        regions,
-      } = buildDimensionOptions(rows);
 
       return ok({
         brands,
@@ -2234,6 +2347,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         topics,
         origins,
         regions,
+        stats,
         page_intents: pageIntents,
       });
     },
@@ -2260,7 +2374,7 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
 
       const q = ctx.data || {};
       const type = (q.type || 'top').toLowerCase();
@@ -2396,7 +2510,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
-      const model = params.model || 'chatgpt';
+      const model = resolveModelFromRequest(params.model);
       const showTrends = parseShowTrends(q);
 
       if (shouldApplyFilter(params.siteId)) {

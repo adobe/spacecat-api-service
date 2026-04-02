@@ -47,6 +47,7 @@ describe('getRouteHandlers', () => {
     getAllWithLatestAudit: sinon.stub(),
     getByID: sinon.stub(),
     getByBaseURL: sinon.stub(),
+    getPageCitabilityCounts: sinon.stub(),
   };
 
   const mockPTA2Controller = {
@@ -168,6 +169,7 @@ describe('getRouteHandlers', () => {
     updatePromptByBrandAndId: sinon.stub(),
     deletePromptByBrandAndId: sinon.stub(),
     bulkDeletePromptsByBrand: sinon.stub(),
+    triggerConfigSync: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -181,6 +183,7 @@ describe('getRouteHandlers', () => {
 
   const mockScrapeController = {
     getFileByKey: sinon.stub(),
+    getMetadata: sinon.stub(),
     listScrapedContentFiles: sinon.stub(),
   };
   const mockPaidController = {
@@ -269,6 +272,11 @@ describe('getRouteHandlers', () => {
     getFilterDimensions: () => null,
   };
 
+  const mockLlmoOpportunitiesController = {
+    getOpportunityCount: () => null,
+    getBrandOpportunities: () => null,
+  };
+
   const mockLlmoController = {
     getLlmoSheetData: () => null,
     getLlmoGlobalSheetData: () => null,
@@ -295,6 +303,8 @@ describe('getRouteHandlers', () => {
     updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
+    getDemoBrandPresence: () => null,
+    getDemoRecommendations: () => null,
     markOpportunitiesReviewed: () => null,
   };
 
@@ -309,6 +319,7 @@ describe('getRouteHandlers', () => {
 
   const mockSiteEnrollmentController = {
     getBySiteID: () => null,
+    createPlgEnrollment: () => null,
   };
 
   const mockTrialUserController = {
@@ -365,6 +376,10 @@ describe('getRouteHandlers', () => {
     revoke: sinon.stub(),
   };
 
+  const mockTokensController = {
+    getByTokenType: sinon.stub(),
+  };
+
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
     getStatus: sinon.stub(),
@@ -375,6 +390,19 @@ describe('getRouteHandlers', () => {
     listGrants: sinon.stub(),
     getGrant: sinon.stub(),
     revokeGrant: sinon.stub(),
+  };
+
+  const mockContactSalesLeadsController = {
+    create: sinon.stub(),
+    getByOrganizationId: sinon.stub(),
+    checkBySite: sinon.stub(),
+    update: sinon.stub(),
+  };
+
+  const mockFeatureFlagsController = {
+    listByOrganization: () => null,
+    putByOrganizationProductAndName: () => null,
+    deleteByOrganizationProductAndName: () => null,
   };
 
   it('segregates static and dynamic routes', () => {
@@ -406,6 +434,7 @@ describe('getRouteHandlers', () => {
       mockFixesController,
       mockLlmoController,
       mockLlmoMysticatController,
+      mockLlmoOpportunitiesController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -419,14 +448,11 @@ describe('getRouteHandlers', () => {
       mockBotBlockerController,
       mockSentimentController,
       mockConsumersController,
+      mockTokensController,
       mockPlgOnboardingController,
       mockImsOrgAccessController,
-      {
-        create: sinon.stub(),
-        getByOrganizationId: sinon.stub(),
-        checkBySite: sinon.stub(),
-        update: sinon.stub(),
-      },
+      mockContactSalesLeadsController,
+      mockFeatureFlagsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -498,10 +524,15 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /v2/orgs/:spaceCatId/brands',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId',
       'GET /v2/orgs/:spaceCatId/categories',
       'POST /v2/orgs/:spaceCatId/categories',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId',
       'DELETE /v2/orgs/:spaceCatId/categories/:categoryId',
+      'GET /v2/orgs/:spaceCatId/topics',
+      'POST /v2/orgs/:spaceCatId/topics',
+      'PATCH /v2/orgs/:spaceCatId/topics/:topicId',
+      'DELETE /v2/orgs/:spaceCatId/topics/:topicId',
       'POST /v2/orgs/:spaceCatId/brands',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
@@ -511,6 +542,7 @@ describe('getRouteHandlers', () => {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
+      'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/all/brand-presence/weeks',
@@ -535,11 +567,15 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
       'GET /org/:spaceCatId/brands/all/brand-presence/stats',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+      'GET /org/:spaceCatId/opportunities/count',
+      'GET /org/:spaceCatId/brands/all/opportunities',
+      'GET /org/:spaceCatId/brands/:brandId/opportunities',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/entitlements',
+      'GET /organizations/:organizationId/feature-flags',
       'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
       'GET /organizations/:organizationId/userDetails/:externalUserId',
@@ -548,6 +584,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
+      'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
+      'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
       'DELETE /organizations/:organizationId',
       'GET /preflight/jobs/:jobId',
       'GET /projects/:projectId',
@@ -574,6 +612,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'GET /sites/:siteId/site-enrollments',
+      'POST /sites/:siteId/site-enrollments',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'DELETE /tools/api-keys/:id',
@@ -611,6 +650,8 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'GET /sites/:siteId/scraped-content/:type',
+      'GET /sites/:siteId/metadata',
+      'GET /sites/:siteId/page-citability/counts',
       'GET /sites/:siteId/top-pages',
       'GET /sites/:siteId/top-pages/:source',
       'GET /sites/:siteId/top-pages/:source/:geo',
@@ -734,6 +775,8 @@ describe('getRouteHandlers', () => {
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
+      'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
+      'GET /sites/:siteId/llmo/strategy/demo/recommendations',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
@@ -765,6 +808,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers/by-client-id/:clientId',
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
+      'GET /sites/:siteId/tokens/by-type/:tokenType',
       'GET /plg/onboard/status/:imsOrgId',
       'POST /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access',
@@ -793,8 +837,14 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId/slack-config'].paramNames).to.deep.equal(['imsOrgId']);
     expect(dynamicRoutes['GET /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.getByOrganizationID);
     expect(dynamicRoutes['GET /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].handler).to.equal(mockFeatureFlagsController.listByOrganization);
+    expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.createEntitlement);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.putByOrganizationProductAndName);
+    expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].paramNames).to.deep.equal(['organizationId', 'product', 'flagName']);
+    expect(dynamicRoutes['DELETE /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.deleteByOrganizationProductAndName);
+    expect(dynamicRoutes['DELETE /organizations/:organizationId/feature-flags/:product/:flagName'].paramNames).to.deep.equal(['organizationId', 'product', 'flagName']);
     expect(dynamicRoutes['GET /sites/:siteId'].handler).to.equal(mockSitesController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].handler).to.equal(mockSitesController.getAllByDeliveryType);
@@ -853,6 +903,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/scraped-content/:type'].handler).to.equal(mockScrapeController.listScrapedContentFiles);
     expect(dynamicRoutes['GET /sites/:siteId/scraped-content/:type'].paramNames).to.deep.equal(['siteId', 'type']);
+    expect(dynamicRoutes['GET /sites/:siteId/metadata'].handler).to.equal(mockScrapeController.getMetadata);
+    expect(dynamicRoutes['GET /sites/:siteId/metadata'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid'].handler).to.equal(mockPaidController.getTopPaidPages);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-platform-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypePlatformCampaign);
@@ -982,6 +1034,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/brand-presence'].handler).to.equal(mockLlmoController.getDemoBrandPresence);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/brand-presence'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/recommendations'].handler).to.equal(mockLlmoController.getDemoRecommendations);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy/demo/recommendations'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].handler).to.equal(mockConsentBannerController.getScreenshots);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].handler).to.equal(mockLlmoController.patchLlmoCdnLogsFilter);

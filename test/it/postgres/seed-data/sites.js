@@ -33,7 +33,7 @@ export const sites = [
     config: {
       handlers: { cwv: { groupedURLs: [{ name: 'blog', pattern: '/blog/' }] } },
       imports: [{
-        sources: ['ahrefs'], type: 'organic-traffic', enabled: true, destinations: ['default'],
+        sources: ['seo'], type: 'organic-traffic', enabled: true, destinations: ['default'],
       }],
       slack: { channel: 'C0FAKE0IT01', workspace: 'WORKSPACE_TEST' },
       llmo: { dataFolder: '/test/llmo', brand: 'site1-test-brand' },

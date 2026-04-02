@@ -16,6 +16,7 @@ import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import {
   badRequest,
+  compressResponse,
   internalServerError,
   noContent,
   notFound,
@@ -34,6 +35,7 @@ import {
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
+import { traceIdResponseWrapper } from './support/trace-id-response-wrapper.js';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -73,6 +75,7 @@ import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
+import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
@@ -86,7 +89,9 @@ import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
 import ConsumersController from './controllers/consumers.js';
+import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
+import FeatureFlagsController from './controllers/feature-flags.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 
@@ -203,6 +208,7 @@ async function run(request, context) {
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
     const llmoMysticatController = LlmoMysticatController(context);
+    const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
@@ -216,9 +222,11 @@ async function run(request, context) {
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
+    const tokensController = TokensController(context);
     const plgOnboardingController = PlgOnboardingController(context);
     const imsOrgAccessController = ImsOrgAccessController(context);
     const contactSalesLeadsController = ContactSalesLeadsController(context);
+    const featureFlagsController = FeatureFlagsController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -248,6 +256,7 @@ async function run(request, context) {
       fixesController,
       llmoController,
       llmoMysticatController,
+      llmoOpportunitiesController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,
@@ -261,9 +270,11 @@ async function run(request, context) {
       botBlockerController,
       sentimentController,
       consumersController,
+      tokensController,
       plgOnboardingController,
       imsOrgAccessController,
       contactSalesLeadsController,
+      featureFlagsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -312,6 +323,7 @@ const wrappedMain = wrap(run)
 
 export const main = wrappedMain
   .with(localCORSWrapper)
+  .with(traceIdResponseWrapper)
   .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)
@@ -322,4 +334,5 @@ export const main = wrappedMain
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(vaultSecrets)
+  .with(compressResponse)
   .with(helixStatus);

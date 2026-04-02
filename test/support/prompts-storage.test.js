@@ -176,13 +176,17 @@ describe('prompts-storage', () => {
 
     it('returns paginated result with items', async () => {
       const row = {
+        id: 'prompt-pk-uuid',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
         regions: ['us'],
         status: 'active',
         origin: 'human',
-        updated_at: '2026-01-01T00:00:00Z',
+        source: 'config',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'admin@test.com',
+        updated_at: '2026-02-01T00:00:00Z',
         updated_by: 'system',
         brands: { id: BRAND_UUID, name: 'Brand' },
         categories: null,
@@ -201,6 +205,11 @@ describe('prompts-storage', () => {
       });
       expect(result.items).to.have.lengthOf(1);
       expect(result.items[0].id).to.equal(PROMPT_ID);
+      expect(result.items[0].uuid).to.equal('prompt-pk-uuid');
+      expect(result.items[0].createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result.items[0].createdBy).to.equal('admin@test.com');
+      expect(result.items[0].updatedAt).to.equal('2026-02-01T00:00:00Z');
+      expect(result.items[0].updatedBy).to.equal('system');
       expect(result.total).to.equal(1);
       expect(result.limit).to.equal(100);
       expect(result.page).to.equal(1);
@@ -436,6 +445,7 @@ describe('prompts-storage', () => {
 
     it('applies categoryId and topicId filters when provided', async () => {
       const row = {
+        id: 'prompt-pk-uuid-2',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
@@ -468,8 +478,12 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.items).to.have.lengthOf(1);
-      expect(result.items[0].category).to.deep.include({ id: 'photoshop', name: 'Photoshop', origin: 'human' });
-      expect(result.items[0].topic).to.deep.include({ id: 'editing', name: 'Editing', categoryId: 'photoshop' });
+      expect(result.items[0].category).to.deep.include({
+        id: 'photoshop', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
+      });
+      expect(result.items[0].topic).to.deep.include({
+        id: 'editing', uuid: 'topic-uuid', name: 'Editing', categoryId: 'photoshop',
+      });
     });
 
     it('throws on query error', async () => {
@@ -508,12 +522,18 @@ describe('prompts-storage', () => {
 
     it('returns prompt when found', async () => {
       const row = {
+        id: 'prompt-pk-uuid',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
         regions: [],
         status: 'active',
         origin: 'human',
+        source: 'sheet',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'admin@test.com',
+        updated_at: '2026-02-01T00:00:00Z',
+        updated_by: 'user@test.com',
         brands: { id: BRAND_UUID, name: 'Brand' },
         categories: null,
         topics: null,
@@ -527,11 +547,18 @@ describe('prompts-storage', () => {
       });
       expect(result).to.not.be.null;
       expect(result.id).to.equal(PROMPT_ID);
+      expect(result.uuid).to.equal('prompt-pk-uuid');
       expect(result.prompt).to.equal('Prompt');
+      expect(result.source).to.equal('sheet');
+      expect(result.createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result.createdBy).to.equal('admin@test.com');
+      expect(result.updatedAt).to.equal('2026-02-01T00:00:00Z');
+      expect(result.updatedBy).to.equal('user@test.com');
     });
 
     it('returns prompt with category and topic when present', async () => {
       const row = {
+        id: 'prompt-pk-uuid-3',
         prompt_id: PROMPT_ID,
         name: 'Test',
         text: 'Prompt',
@@ -556,8 +583,13 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result).to.not.be.null;
-      expect(result.category).to.deep.equal({ id: 'photoshop', name: 'Photoshop', origin: 'human' });
-      expect(result.topic).to.deep.equal({ id: 'editing', name: 'Editing', categoryId: 'photoshop' });
+      expect(result.uuid).to.equal('prompt-pk-uuid-3');
+      expect(result.category).to.deep.equal({
+        id: 'photoshop', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
+      });
+      expect(result.topic).to.deep.equal({
+        id: 'editing', uuid: 'topic-uuid', name: 'Editing', categoryId: 'photoshop',
+      });
     });
 
     it('maps row with minimal fields and null category/topic', async () => {
@@ -591,6 +623,17 @@ describe('prompts-storage', () => {
       expect(result.topic).to.be.null;
       expect(result.brandId).to.be.null;
       expect(result.brandName).to.be.null;
+    });
+
+    it('returns null when prompt is not found', async () => {
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await getPromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        postgrestClient: client,
+      });
+      expect(result).to.be.null;
     });
 
     it('throws on query error', async () => {
@@ -1213,6 +1256,8 @@ describe('prompts-storage', () => {
       status: 'active',
       origin: 'human',
       source: 'config',
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: 'system',
       updated_at: '2026-01-01T00:00:00Z',
       updated_by: 'system',
       brands: { id: BRAND_UUID, name: 'Brand' },
@@ -1357,6 +1402,8 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.prompts[0].source).to.equal('sheet');
+      expect(result.prompts[0].createdAt).to.be.undefined;
+      expect(result.prompts[0].createdBy).to.be.undefined;
     });
 
     it('defaults source to config when not provided', async () => {

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Fastly
+
+This service runs behind Fastly CDN service `DlxppS2VoAizEqJ9bPasq6` (AEM Sites Optimizer [SpaceCat] Prod) at `spacecat.experiencecloud.live`. VCL snippets handle routing, CORS, HSTS, and API gateway auth. See [mysticat-architecture Fastly services reference](https://github.com/adobe/mysticat-architecture/blob/main/platform/reference/fastly-services.md) for full reference.
+
 ## Commands
 
 ### Development
