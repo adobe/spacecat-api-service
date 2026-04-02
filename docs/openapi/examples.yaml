@@ -666,6 +666,19 @@ FeatureFlagExample:
     updatedAt: "2026-03-26T12:30:00Z"
     updatedBy: "admin@AdobeID"
 
+TokenExample:
+  description: Example token allocation for the current cycle
+  value:
+    id: "223e4567-e89b-12d3-a456-426614174001"
+    siteId: "123e4567-e89b-12d3-a456-426614174000"
+    tokenType: grant_cwv
+    cycle: "2025-03"
+    total: 3
+    used: 1
+    remaining: 2
+    createdAt: "2025-03-01T00:00:00Z"
+    updatedAt: "2025-03-10T00:00:00Z"
+
 FeatureFlagDisabledExample:
   description: Example response after DELETE (flag persisted as false)
   value:

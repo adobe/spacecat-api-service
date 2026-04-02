@@ -376,6 +376,10 @@ describe('getRouteHandlers', () => {
     revoke: sinon.stub(),
   };
 
+  const mockTokensController = {
+    getByTokenType: sinon.stub(),
+  };
+
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
     getStatus: sinon.stub(),
@@ -437,6 +441,7 @@ describe('getRouteHandlers', () => {
       mockBotBlockerController,
       mockSentimentController,
       mockConsumersController,
+      mockTokensController,
       mockPlgOnboardingController,
       mockImsOrgAccessController,
       mockFeatureFlagsController,
@@ -515,6 +520,10 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/categories',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId',
       'DELETE /v2/orgs/:spaceCatId/categories/:categoryId',
+      'GET /v2/orgs/:spaceCatId/topics',
+      'POST /v2/orgs/:spaceCatId/topics',
+      'PATCH /v2/orgs/:spaceCatId/topics/:topicId',
+      'DELETE /v2/orgs/:spaceCatId/topics/:topicId',
       'POST /v2/orgs/:spaceCatId/brands',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
@@ -790,6 +799,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers/by-client-id/:clientId',
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
+      'GET /sites/:siteId/tokens/by-type/:tokenType',
       'GET /plg/onboard/status/:imsOrgId',
       'POST /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access',

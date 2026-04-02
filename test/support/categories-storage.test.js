@@ -50,7 +50,9 @@ describe('categories-storage', () => {
         name: 'Brand Awareness',
         status: 'active',
         origin: 'human',
-        updated_at: '2026-01-01',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'admin@test.com',
+        updated_at: '2026-02-01T00:00:00Z',
         updated_by: 'user@test.com',
       };
 
@@ -62,6 +64,10 @@ describe('categories-storage', () => {
       expect(result[0].id).to.equal('brand-awareness');
       expect(result[0].uuid).to.equal('uuid-1');
       expect(result[0].name).to.equal('Brand Awareness');
+      expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result[0].createdBy).to.equal('admin@test.com');
+      expect(result[0].updatedAt).to.equal('2026-02-01T00:00:00Z');
+      expect(result[0].updatedBy).to.equal('user@test.com');
     });
 
     it('applies status filter when provided', async () => {
@@ -71,6 +77,8 @@ describe('categories-storage', () => {
         name: 'Brand Awareness',
         status: 'pending',
         origin: 'human',
+        created_at: '2026-01-01',
+        created_by: 'system',
         updated_at: '2026-01-01',
         updated_by: 'user@test.com',
       };
@@ -98,6 +106,8 @@ describe('categories-storage', () => {
         name: 'No Defaults',
         status: null,
         origin: null,
+        created_at: null,
+        created_by: null,
         updated_at: '2026-01-01',
         updated_by: 'system',
       };
@@ -139,6 +149,8 @@ describe('categories-storage', () => {
         name: 'My New Category',
         status: 'active',
         origin: 'human',
+        created_at: '2026-03-01T00:00:00Z',
+        created_by: 'user@test.com',
         updated_at: '2026-03-01',
         updated_by: 'user@test.com',
       };
@@ -155,6 +167,8 @@ describe('categories-storage', () => {
 
       expect(result.id).to.equal('my-new-category');
       expect(result.name).to.equal('My New Category');
+      expect(result.createdAt).to.equal('2026-03-01T00:00:00Z');
+      expect(result.createdBy).to.equal('user@test.com');
     });
 
     it('throws on database error during create', async () => {
@@ -183,6 +197,8 @@ describe('categories-storage', () => {
         name: 'Test',
         status: 'pending',
         origin: 'ai',
+        created_at: '2026-01-01',
+        created_by: 'system',
         updated_at: '2026-01-01',
         updated_by: 'user@test.com',
       };

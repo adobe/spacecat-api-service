@@ -53,7 +53,7 @@ export default function siteTopPageTests(getHttpClient, resetData) {
 
       it('user: returns top pages filtered by source', async () => {
         const http = getHttpClient();
-        const res = await http.user.get(`${BASE}/ahrefs`);
+        const res = await http.user.get(`${BASE}/seo`);
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(1);
       });
@@ -67,7 +67,7 @@ export default function siteTopPageTests(getHttpClient, resetData) {
 
       it('user: returns 403 for denied site with source', async () => {
         const http = getHttpClient();
-        const res = await http.user.get(`${DENIED_BASE}/ahrefs`);
+        const res = await http.user.get(`${DENIED_BASE}/seo`);
         expect(res.status).to.equal(403);
       });
     });
@@ -84,7 +84,7 @@ export default function siteTopPageTests(getHttpClient, resetData) {
 
       it('user: returns empty for source+geo with no matches', async () => {
         const http = getHttpClient();
-        const res = await http.user.get(`${BASE}/ahrefs/us`);
+        const res = await http.user.get(`${BASE}/seo/us`);
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });

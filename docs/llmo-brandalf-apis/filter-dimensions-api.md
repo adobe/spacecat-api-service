@@ -1,6 +1,6 @@
 # Brand Presence Filter Dimensions API
 
-Returns available filter options (brands, categories, topics, origins, regions, page_intents) for the Brand Presence feature. Used to populate filter dropdowns in the UI. Data is queried from the `brand_presence_executions` table via PostgREST (mysticat-data-service).
+Returns available filter options (brands, categories, topics, origins, regions), execution **stats** from the same filtered row set, and **page_intents** for the Brand Presence feature. Dimensions and **stats** come from the PostgreSQL function `rpc_brand_presence_filter_dimensions` via PostgREST (mysticat-data-service). **page_intents** are loaded in a separate query.
 
 ---
 
@@ -28,7 +28,7 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category. If UUID → `category_id`; if not UUID (e.g. "Acrobat") → `category_name` |
 | `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated UUIDs (e.g. `uuid1,uuid2`), or repeated param. Non-UUID values are ignored. Uses `topic_id` column. |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
-| `origin` | — | string | — | Filter by origin (exact match, case-insensitive; e.g. `human`, `ai`) |
+| `origin` | — | string | — | Filter by origin (`ILIKE` pattern on executions, same as RPC; e.g. `%organic%` or `ai`) |
 
 **Parameters accepted for future schema support** (not yet applied):
 - `user_intent` / `userIntent`
@@ -83,6 +83,11 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
   "regions": [
     { "id": "US", "label": "US" }
   ],
+  "stats": {
+    "total_execution_count": 1200,
+    "distinct_prompt_count": 80,
+    "empty_answer_execution_count": 12
+  },
   "page_intents": [
     { "id": "TRANSACTIONAL", "label": "TRANSACTIONAL" },
     { "id": "INFORMATIONAL", "label": "INFORMATIONAL" }
@@ -90,44 +95,44 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 }
 ```
 
+**stats** — From the RPC, over the same filtered executions as the dimension lists. Returned as numbers; the API coerces missing or non-finite values to `0`. If the database function does not yet return a `stats` key (older deployment), the response still includes **`stats`** with all three fields set to **`0`** so clients stay stable.
+
+| Field | Meaning |
+|--------|---------|
+| `total_execution_count` | Row count after filters |
+| `distinct_prompt_count` | Distinct non-null `prompt_id` values |
+| `empty_answer_execution_count` | Rows with no answer (NULL, empty, or whitespace-only) |
+
 **page_intents** — Distinct `page_intent` values from the `page_intents` table. See [Page Intents Scenarios](#page-intents-scenarios) for how site scope is determined.
 
 ---
 
-## Internal Query (PostgREST)
+## Internal: filter dimensions RPC (PostgREST)
 
-The API builds a PostgREST query against the `brand_presence_executions` table. Equivalent logic:
+The handler calls **`rpc_brand_presence_filter_dimensions`** with organization id, date range, resolved model, and optional filters (`p_brand_id`, `p_site_id`, `p_category_id`, `p_category_name`, `p_topic_ids`, `p_region_code`, `p_origin`). The RPC returns one JSON object: dimension arrays plus **`stats`**.
 
-```javascript
-// Base query
-client
-  .from('brand_presence_executions')
-  .select('brand_id, brand_name, category_name, topic_id, topics, origin, region_code, site_id')
-  .eq('organization_id', organizationId)
-  .gte('execution_date', startDate)
-  .lte('execution_date', endDate)
-  .eq('model', model)
+**Example request:**
 
-  // Optional filters (applied when param is provided and not empty)
-  .eq('site_id', siteId)                    // if siteId
-  .eq('brand_id', brandId)                  // if brandId !== 'all' (path param)
-  .eq('category_id', categoryId)            // if categoryId is valid UUID
-  .eq('category_name', categoryId)         // if categoryId is NOT valid UUID (e.g. "Acrobat")
-  .in('topic_id', topicIds)                // if topicIds (array of valid UUIDs; single or multiple)
-  .eq('region_code', regionCode)            // if regionCode
-  .ilike('origin', origin)                  // if origin (exact match, case-insensitive)
+```
+POST /rpc/rpc_brand_presence_filter_dimensions
+Content-Type: application/json
 
-  .limit(5000)
+{
+  "p_organization_id": "44568c3e-efd4-4a7f-8ecd-8caf615f836c",
+  "p_start_date": "2025-09-27",
+  "p_end_date": "2025-09-30",
+  "p_model": "google-ai-mode",
+  "p_site_id": "c2473d89-e997-458d-a86d-b4096649c12b",
+  "p_category_name": "Acrobat",
+  "p_topic_ids": ["uuid1", "uuid2"],
+  "p_region_code": "US",
+  "p_origin": "%organic%"
+}
 ```
 
-**Equivalent PostgREST HTTP request** (example with all filters, including multiple topicIds):
-```
-GET /brand_presence_executions?select=brand_id,brand_name,category_name,topic_id,topics,origin,region_code,site_id&organization_id=eq.44568c3e-efd4-4a7f-8ecd-8caf615f836c&execution_date=gte.2025-09-27&execution_date=lte.2025-09-30&model=eq.google-ai-mode&site_id=eq.c2473d89-e997-458d-a86d-b4096649c12b&category_name=eq.Acrobat&topic_id=in.(uuid1,uuid2)&region_code=eq.US&origin=ilike.ai&limit=5000
-```
+**topicIds parsing (query string → RPC):** Comma-separated string, array, or single UUID; non-UUID tokens dropped. Passed as `p_topic_ids`.
 
-**topicIds parsing:** Accepts `topicIds` as a comma-separated string (`uuid1,uuid2`), an array, or a single UUID. Non-UUID values are filtered out. The filter uses `topic_id IN (...)` (PostgREST `topic_id=in.(...)`).
-
-**Response processing:** The API deduplicates and sorts the results to build `brands`, `categories`, `topics`, `origins`, `regions`, and `page_intents` arrays. Each array is an array of `{ id, label }` objects. For `topics`, `id` is the `topic_id` (UUID) and `label` is the denormalized topic name from the `topics` column; only rows with non-null `topic_id` are included.
+**Schema:** mysticat-data-service `docs/llmo-database-schema.md` § `rpc_brand_presence_filter_dimensions`.
 
 ---
 

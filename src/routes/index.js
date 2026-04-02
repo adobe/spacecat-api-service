@@ -87,6 +87,7 @@ function isStaticRoute(routePattern) {
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
+ * @param {Object} tokensController - The tokens controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
@@ -134,6 +135,7 @@ export default function getRouteHandlers(
   botBlockerController,
   sentimentController,
   consumersController,
+  tokensController,
   plgOnboardingController,
   imsOrgAccessController,
   featureFlagsController,
@@ -172,6 +174,10 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/categories': brandsController.createCategoryForOrg,
     'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': brandsController.updateCategoryForOrg,
     'DELETE /v2/orgs/:spaceCatId/categories/:categoryId': brandsController.deleteCategoryForOrg,
+    'GET /v2/orgs/:spaceCatId/topics': brandsController.listTopicsForOrg,
+    'POST /v2/orgs/:spaceCatId/topics': brandsController.createTopicForOrg,
+    'PATCH /v2/orgs/:spaceCatId/topics/:topicId': brandsController.updateTopicForOrg,
+    'DELETE /v2/orgs/:spaceCatId/topics/:topicId': brandsController.deleteTopicForOrg,
     'POST /v2/orgs/:spaceCatId/brands': brandsController.createBrandForOrg,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId': brandsController.updateBrandForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
@@ -499,6 +505,9 @@ export default function getRouteHandlers(
     'POST /consumers/register': consumersController.register,
     'PATCH /consumers/:consumerId': consumersController.update,
     'POST /consumers/:consumerId/revoke': consumersController.revoke,
+
+    // Tokens
+    'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
 
     // IMS Org Access (cross-org delegation grants)
     'POST /sites/:siteId/ims-org-access': imsOrgAccessController.createGrant,

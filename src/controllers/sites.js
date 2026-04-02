@@ -54,7 +54,7 @@ import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
  * @constructor
  */
 
-const AHREFS = 'ahrefs';
+const SEO = 'seo';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
@@ -187,10 +187,10 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   const { SiteTopPage } = dataAccess;
 
   // Fetch Ahrefs pages
-  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'ahrefs', geo);
+  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'seo', geo);
 
   if (!topPages || topPages.length === 0) {
-    log.warn(`No Ahrefs top pages found for site ${siteId}, returning empty result`);
+    log.warn(`No SEO top pages found for site ${siteId}, returning empty result`);
     return [];
   }
 
@@ -200,7 +200,7 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
 
     // If no pages match the base URL after filtering, return empty result
     if (topPages.length === 0) {
-      log.warn(`No Ahrefs top pages match base URL for site ${siteId}, returning empty result`);
+      log.warn(`No SEO top pages match base URL for site ${siteId}, returning empty result`);
       return [];
     }
   }
@@ -874,7 +874,7 @@ function SitesController(ctx, log, env) {
       const [domain, organicTraffic] = await Promise.all([
         resolveWwwUrl(site, context),
         getStoredMetrics(
-          { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+          { siteId, metric: ORGANIC_TRAFFIC, source: SEO },
           context,
         ),
       ]);

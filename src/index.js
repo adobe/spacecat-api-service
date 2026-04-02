@@ -89,6 +89,7 @@ import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
 import ConsumersController from './controllers/consumers.js';
+import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
@@ -220,6 +221,7 @@ async function run(request, context) {
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
+    const tokensController = TokensController(context);
     const plgOnboardingController = PlgOnboardingController(context);
     const imsOrgAccessController = ImsOrgAccessController(context);
     const featureFlagsController = FeatureFlagsController(context);
@@ -266,6 +268,7 @@ async function run(request, context) {
       botBlockerController,
       sentimentController,
       consumersController,
+      tokensController,
       plgOnboardingController,
       imsOrgAccessController,
       featureFlagsController,
