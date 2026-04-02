@@ -29,6 +29,8 @@ export const INTERNAL_ROUTES = [
   // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
   'POST /preflight/jobs',
   'GET /preflight/jobs/:jobId',
+  'POST /preflight/beta/jobs',
+  'GET /preflight/beta/jobs/:jobId',
 
   // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
   // TODO: Add these back in when we have a S2S consumer that needs them

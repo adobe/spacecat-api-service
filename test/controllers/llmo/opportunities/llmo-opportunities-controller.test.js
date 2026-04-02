@@ -38,6 +38,7 @@ function createMockOpportunity({
     getCreatedAt: () => '2026-01-01',
     getUpdatedAt: () => '2026-01-02',
     getUpdatedBy: () => 'system',
+    getLastAuditedAt: () => null,
   };
 }
 
