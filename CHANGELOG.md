@@ -1,3 +1,10 @@
+# [1.411.0](https://github.com/adobe/spacecat-api-service/compare/v1.410.0...v1.411.0) (2026-04-02)
+
+
+### Features
+
+* Prevent accidental re-onboarding of customer site which was onboarded earlier with paid profile ([#2007](https://github.com/adobe/spacecat-api-service/issues/2007)) ([f614f41](https://github.com/adobe/spacecat-api-service/commit/f614f41d31ae12cc9698bae1ada25f668ba0fd66))
+
 # [1.410.0](https://github.com/adobe/spacecat-api-service/compare/v1.409.0...v1.410.0) (2026-04-02)
 
 
