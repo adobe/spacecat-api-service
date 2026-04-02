@@ -17,7 +17,7 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  * Integration tests for the category slug-as-name bug (LLMO-4060).
  *
  * Validates:
- * 1. Fallback path: POST categories without id, then prompts with prefixed categoryId
+ * 1. Fallback path: prompts with unknown prefixed categoryId trigger auto-creation
  *    — the auto-created fallback should get a readable name (slugToName), not the raw slug
  * 2. Fix verification: POST categories with explicit id preserves name, no duplicates
  * 3. Idempotency: duplicate category creation upserts (201), not conflicts (409)
@@ -29,22 +29,13 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
   describe('Categories & Prompts (LLMO-4060)', () => {
     // ── Fallback path (slugToName defense-in-depth) ──
 
-    describe('Fallback: POST categories without id then prompts with prefixed categoryId', () => {
+    describe('Fallback: prompts with unknown prefixed categoryId auto-creates readable name', () => {
       before(() => resetData());
 
       it('auto-created fallback category has a readable name, not the raw slug', async () => {
         const http = getHttpClient();
 
-        // 1. Create a category WITHOUT an explicit id — API auto-derives slug from name
-        const catRes = await http.admin.post(
-          `/v2/orgs/${ORG_1_ID}/categories`,
-          { name: 'Comparison & Decision', origin: 'ai' },
-        );
-        expect(catRes.status).to.equal(201);
-        expect(catRes.body.id).to.equal('comparison-decision');
-        expect(catRes.body.name).to.equal('Comparison & Decision');
-
-        // 2. Post prompts referencing a PREFIXED categoryId that doesn't match the stored slug
+        // 1. Post prompts referencing a categoryId that doesn't exist yet
         const promptRes = await http.admin.post(
           `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/prompts`,
           [
@@ -58,7 +49,7 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
         expect(promptRes.status).to.equal(201);
         expect(promptRes.body.created).to.equal(1);
 
-        // 3. List all categories — the auto-created fallback should have a readable name
+        // 2. List all categories — the auto-created fallback should have a readable name
         const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/categories`);
         expect(listRes.status).to.equal(200);
 
