@@ -549,6 +549,207 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Product code required');
   });
 
+  it('returns minimal site representation when minimal=true', async () => {
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    // Mock entitlement and site enrollment for filtering
+    const mockEntitlement = {
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'abcd',
+      getTier: () => 'FREE_TRIAL',
+    };
+    const mockSiteEnrollments = [
+      {
+        getId: () => 'enrollment-1',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site1',
+      },
+      {
+        getId: () => 'enrollment-2',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site2',
+      },
+    ];
+
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
+    mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(mockSiteEnrollments);
+
+    const testContext = {
+      params: { organizationId: orgId },
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
+      invocation: {
+        event: {
+          rawQueryString: 'minimal=true',
+        },
+      },
+      attributes: { authInfo: context.attributes.authInfo },
+      dataAccess: mockDataAccess,
+      log: context.log,
+    };
+
+    const response = await organizationsController.getSitesForOrganization(testContext);
+    const body = await response.json();
+
+    expect(response.status).to.equal(200);
+    expect(body).to.be.an('array').with.lengthOf(2);
+    expect(body).to.deep.equal([
+      {
+        id: sites[0].getId(),
+        baseURL: sites[0].getBaseURL(),
+      },
+      {
+        id: sites[1].getId(),
+        baseURL: sites[1].getBaseURL(),
+      },
+    ]);
+  });
+
+  it('returns full site representation when minimal=false', async () => {
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    // Mock entitlement and site enrollment for filtering
+    const mockEntitlement = {
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'abcd',
+      getTier: () => 'FREE_TRIAL',
+    };
+    const mockSiteEnrollments = [
+      {
+        getId: () => 'enrollment-1',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site1',
+      },
+    ];
+
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
+    mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(mockSiteEnrollments);
+
+    const testContext = {
+      params: { organizationId: orgId },
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
+      invocation: {
+        event: {
+          rawQueryString: 'minimal=false',
+        },
+      },
+      attributes: { authInfo: context.attributes.authInfo },
+      dataAccess: mockDataAccess,
+      log: context.log,
+    };
+
+    const response = await organizationsController.getSitesForOrganization(testContext);
+    const body = await response.json();
+
+    expect(response.status).to.equal(200);
+    expect(body).to.be.an('array').with.lengthOf(1);
+    expect(Object.keys(body[0]).length).to.be.greaterThan(2);
+  });
+
+  it('returns full site representation when minimal parameter is omitted', async () => {
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    // Mock entitlement and site enrollment for filtering
+    const mockEntitlement = {
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'abcd',
+      getTier: () => 'FREE_TRIAL',
+    };
+    const mockSiteEnrollments = [
+      {
+        getId: () => 'enrollment-1',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site1',
+      },
+    ];
+
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
+    mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(mockSiteEnrollments);
+
+    const testContext = {
+      params: { organizationId: orgId },
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
+      invocation: {
+        event: {
+          rawQueryString: 'minimal=false',
+        },
+      },
+      attributes: { authInfo: context.attributes.authInfo },
+      dataAccess: mockDataAccess,
+      log: context.log,
+    };
+
+    const response = await organizationsController.getSitesForOrganization(testContext);
+    const body = await response.json();
+
+    expect(response.status).to.equal(200);
+    expect(body).to.be.an('array').with.lengthOf(1);
+    // Full representation includes more fields than minimal
+    expect(body[0]).to.have.property('id');
+    expect(body[0]).to.have.property('baseURL');
+    expect(body[0]).to.have.property('organizationId');
+    expect(body[0]).to.have.property('deliveryType');
+    // Verify it's NOT the minimal representation (has more than just id and baseURL)
+    expect(Object.keys(body[0]).length).to.be.greaterThan(2);
+  });
+
+  it('returns full site representation when query parameter has no value', async () => {
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    // Mock entitlement and site enrollment for filtering
+    const mockEntitlement = {
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'abcd',
+      getTier: () => 'FREE_TRIAL',
+    };
+    const mockSiteEnrollments = [
+      {
+        getId: () => 'enrollment-1',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site1',
+      },
+    ];
+
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
+    mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(mockSiteEnrollments);
+
+    const testContext = {
+      params: { organizationId: orgId },
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
+      invocation: {
+        event: {
+          rawQueryString: 'minimal', // Query param with no value
+        },
+      },
+      attributes: { authInfo: context.attributes.authInfo },
+      dataAccess: mockDataAccess,
+      log: context.log,
+    };
+
+    const response = await organizationsController.getSitesForOrganization(testContext);
+    const body = await response.json();
+
+    expect(response.status).to.equal(200);
+    expect(body).to.be.an('array').with.lengthOf(1);
+    // Should return full representation since minimal equals empty string (falsy)
+    expect(body[0]).to.have.property('id');
+    expect(body[0]).to.have.property('baseURL');
+    expect(body[0]).to.have.property('organizationId');
+    expect(body[0]).to.have.property('deliveryType');
+    expect(Object.keys(body[0]).length).to.be.greaterThan(2);
+  });
+
   it('gets an organization by id', async () => {
     mockDataAccess.Organization.findById.resolves(organizations[0]);
     const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });

@@ -192,6 +192,13 @@ sites-with-latest-audit:
 sites-for-organization:
   parameters:
     - $ref: './parameters.yaml#/organizationId'
+    - name: minimal
+      in: query
+      required: false
+      description: When true, returns only id and baseURL for each site. When false or omitted, returns full site objects.
+      schema:
+        type: boolean
+        default: false
   get:
     tags:
       - organization
@@ -199,6 +206,7 @@ sites-for-organization:
     summary: Retrieve all sites for an organization
     description: |
       This endpoint is useful for retrieving all sites for an organization.
+      Use the minimal query parameter to reduce payload size when only basic site information is needed.
     operationId: getSitesForOrganization
     responses:
       '200':
@@ -206,7 +214,30 @@ sites-for-organization:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SiteList'
+              oneOf:
+                - $ref: './schemas.yaml#/SiteList'
+                - $ref: './schemas.yaml#/SiteMinimalList'
+            examples:
+              full:
+                summary: Full site objects (minimal=false or omitted)
+                value:
+                  - id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+                    baseURL: 'https://example.com'
+                    name: 'Example Site'
+                    organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                    deliveryType: 'aem_edge'
+                    isLive: true
+                    isSandbox: false
+                    createdAt: '2024-01-20T10:00:00Z'
+                    updatedAt: '2024-01-20T10:00:00Z'
+                    config: {}
+              minimal:
+                summary: Minimal site objects (minimal=true)
+                value:
+                  - id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+                    baseURL: 'https://example.com'
+                  - id: 'b2c3d4e5-f6g7-h8i9-j0k1-l12m13n14o15'
+                    baseURL: 'https://another-example.com'
       '400':
         $ref: './responses.yaml#/400-no-organization-id'
       '401':

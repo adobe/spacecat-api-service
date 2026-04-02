@@ -79,6 +79,17 @@ export const SiteDto = {
     config: ConfigDto.toListJSON(site.getConfig()),
   }),
 
+  /**
+   * Minimal representation returning only id and baseURL.
+   * Used when clients need only basic site identification.
+   * @param {Readonly<Site>} site - Site object.
+   * @returns {object}
+   */
+  toMinimalJSON: (site) => ({
+    id: site.getId(),
+    baseURL: site.getBaseURL(),
+  }),
+
   // TODO: implement toCSV
   toCSV: () => '',
 

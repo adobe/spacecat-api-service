@@ -618,6 +618,21 @@ Site:
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
+SiteMinimal:
+  type: object
+  properties:
+    id:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+  required:
+    - id
+    - baseURL
+  example:
+    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    baseURL: 'https://example.com'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
@@ -654,6 +669,10 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteMinimalList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/SiteMinimal'
 SiteWithLatestAuditList:
   type: array
   items:

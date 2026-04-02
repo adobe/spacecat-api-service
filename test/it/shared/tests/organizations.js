@@ -250,6 +250,103 @@ export default function organizationTests(getHttpClient, resetData) {
         expect(res.body).to.be.an('array').with.lengthOf(1);
         expect(res.body[0].id).to.equal(SITE_1_ID);
       });
+
+      describe('with minimal query parameter', () => {
+        it('admin: returns only id and baseURL when minimal=true', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get(
+            `/organizations/${ORG_1_ID}/sites?minimal=true`,
+            { 'x-product': 'LLMO' },
+          );
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array');
+
+          // Should have at least SITE_1 for ORG_1
+          expect(res.body.length).to.be.greaterThan(0);
+
+          // Verify minimal format
+          res.body.forEach((site) => {
+            expect(site).to.have.property('id');
+            expect(site).to.have.property('baseURL');
+            expect(Object.keys(site)).to.have.lengthOf(2);
+            expect(site).to.not.have.property('name');
+            expect(site).to.not.have.property('organizationId');
+            expect(site).to.not.have.property('deliveryType');
+          });
+
+          // Verify SITE_1 is included
+          const site1 = res.body.find((s) => s.id === SITE_1_ID);
+          expect(site1).to.exist;
+          expect(site1.baseURL).to.be.a('string');
+        });
+
+        it('admin: returns full objects when minimal=false', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get(
+            `/organizations/${ORG_1_ID}/sites?minimal=false`,
+            { 'x-product': 'LLMO' },
+          );
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array');
+          expect(res.body.length).to.be.greaterThan(0);
+
+          // Verify full format
+          res.body.forEach((site) => {
+            expect(site).to.have.property('id');
+            expect(site).to.have.property('baseURL');
+            expect(site).to.have.property('name');
+            expect(site).to.have.property('organizationId');
+            expect(site).to.have.property('deliveryType');
+            expect(Object.keys(site).length).to.be.greaterThan(2);
+          });
+        });
+
+        it('admin: returns full objects when minimal is omitted', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get(
+            `/organizations/${ORG_1_ID}/sites`,
+            { 'x-product': 'LLMO' },
+          );
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array');
+          expect(res.body.length).to.be.greaterThan(0);
+
+          // Verify full format (backward compatibility)
+          res.body.forEach((site) => {
+            expect(site).to.have.property('id');
+            expect(site).to.have.property('baseURL');
+            expect(site).to.have.property('name');
+            expect(site).to.have.property('organizationId');
+            expect(site).to.have.property('deliveryType');
+          });
+        });
+
+        it('user: respects minimal parameter with access control', async () => {
+          const http = getHttpClient();
+          const res = await http.user.get(
+            `/organizations/${ORG_1_ID}/sites?minimal=true`,
+            { 'x-product': 'LLMO' },
+          );
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array');
+
+          // Verify minimal format
+          res.body.forEach((site) => {
+            expect(site).to.have.property('id');
+            expect(site).to.have.property('baseURL');
+            expect(Object.keys(site)).to.have.lengthOf(2);
+          });
+        });
+
+        it('user: returns 403 for denied org regardless of minimal parameter', async () => {
+          const http = getHttpClient();
+          const res = await http.user.get(
+            `/organizations/${ORG_2_ID}/sites?minimal=true`,
+            { 'x-product': 'LLMO' },
+          );
+          expect(res.status).to.equal(403);
+        });
+      });
     });
 
     // ── Write operations ──

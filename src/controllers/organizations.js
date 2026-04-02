@@ -28,6 +28,27 @@ import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
+
+/**
+ * Parses raw query string from API Gateway-style invocation.
+ * @param {object} context
+ * @returns {Record<string, string>}
+ */
+function getQueryParams(context) {
+  const rawQueryString = context.invocation?.event?.rawQueryString;
+  if (!rawQueryString) return {};
+  const params = {};
+  rawQueryString.split('&').forEach((param) => {
+    const [key, value] = param.split('=');
+    if (key) {
+      params[decodeURIComponent(key)] = value !== undefined
+        ? decodeURIComponent(value)
+        : '';
+    }
+  });
+  return params;
+}
+
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -275,7 +296,13 @@ function OrganizationsController(ctx, env) {
       productCode,
     );
 
-    return ok([...filteredSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
+    // Extract minimal query parameter
+    const queryParams = getQueryParams(context);
+    const minimal = queryParams.minimal === 'true';
+
+    // Select appropriate DTO method based on minimal parameter
+    const dtoMethod = minimal ? SiteDto.toMinimalJSON : SiteDto.toJSON;
+    return ok([...filteredSites, ...delegatedSites].map((site) => dtoMethod(site)));
   };
 
   /**
