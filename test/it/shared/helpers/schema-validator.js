@@ -11,6 +11,7 @@
  */
 
 import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -40,11 +41,13 @@ function getBundledSpec() {
   if (bundledSpec) return bundledSpec;
 
   const apiYamlPath = join(rootDir, 'docs/openapi/api.yaml');
-  const output = execSync(
-    `npx @redocly/cli bundle "${apiYamlPath}" --format json`,
+  const outPath = join(rootDir, 'docs/openapi/.bundled-api.json');
+  execSync(
+    `npx @redocly/cli bundle "${apiYamlPath}" --ext json -o "${outPath}"`,
     { cwd: rootDir, encoding: 'utf8', timeout: 30000 },
   );
-  bundledSpec = JSON.parse(output);
+  const content = readFileSync(outPath, 'utf8');
+  bundledSpec = JSON.parse(content);
   return bundledSpec;
 }
 
