@@ -268,8 +268,10 @@ export default function organizationTests(getHttpClient, resetData) {
           res.body.forEach((site) => {
             expect(site).to.have.property('id');
             expect(site).to.have.property('baseURL');
-            expect(site).to.have.property('config');
-            expect(Object.keys(site)).to.have.lengthOf(3);
+            expect(site).to.have.property('deliveryConfig');
+            expect(site).to.have.property('authoringType');
+            expect(Object.keys(site)).to.have.lengthOf(4);
+            expect(site).to.not.have.property('config');
             expect(site).to.not.have.property('name');
             expect(site).to.not.have.property('organizationId');
             expect(site).to.not.have.property('deliveryType');
@@ -335,8 +337,9 @@ export default function organizationTests(getHttpClient, resetData) {
           res.body.forEach((site) => {
             expect(site).to.have.property('id');
             expect(site).to.have.property('baseURL');
-            expect(site).to.have.property('config');
-            expect(Object.keys(site)).to.have.lengthOf(3);
+            expect(site).to.have.property('authoringType');
+            expect(site).to.have.property('deliveryConfig');
+            expect(Object.keys(site)).to.have.lengthOf(4);
           });
         });
 

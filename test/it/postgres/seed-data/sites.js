@@ -29,7 +29,9 @@ export const sites = [
     name: 'Site One',
     github_url: 'https://github.com/test-org/site1-repo',
     hlx_config: { cdnProdHost: 'main--site1-repo--test-org.aem.live', hlxVersion: 5 },
-    delivery_config: {},
+    delivery_config: {
+      authorURL: 'https://author-p000-e111.adobeaemcloud.com',
+    },
     config: {
       handlers: { cwv: { groupedURLs: [{ name: 'blog', pattern: '/blog/' }] } },
       imports: [{
