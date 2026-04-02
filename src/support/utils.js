@@ -1319,9 +1319,14 @@ export const onboardSingleSite = async (
     if (!profile.protected) {
       const siteConfig = prefetchedSite?.getConfig();
       const onboardConfig = siteConfig?.getOnboardConfig();
-      // If onboardConfig exists, trust lastProfile as the authoritative signal.
+      // If onboardConfig.lastProfile is set, trust it as the authoritative signal.
       // Fall back to the import check only for legacy sites that predate onboardConfig tracking.
-      const isPaidSite = onboardConfig
+      // Note: guard against empty onboardConfig ({}) from a partial write — check
+      // lastProfile != null rather than onboardConfig truthiness, so the import fallback fires.
+      // Note: '=== paid' relies on the profile name matching the key in profiles.json.
+      // If a new protected profile (e.g. paid-enterprise) is added in the future,
+      // this check must be updated to cover it alongside the incoming profile.protected flag.
+      const isPaidSite = onboardConfig?.lastProfile != null
         ? onboardConfig.lastProfile === 'paid'
         : isImportEnabled(PAID_PROFILE_IMPORT, siteConfig?.getImports());
       if (isPaidSite) {

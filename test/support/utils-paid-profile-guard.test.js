@@ -105,6 +105,25 @@ describe('onboardSingleSite — paid profile guard', () => {
     }),
   });
 
+  // A legacy site that has no onboardConfig (predates tracking) but has the paid import enabled.
+  // The guard must fall back to the import check to detect this as a paid site.
+  const makeLegacyPaidSite = () => ({
+    getConfig: () => ({
+      getImports: () => [{ type: 'ahref-paid-pages', enabled: true }],
+      getOnboardConfig: () => undefined,
+    }),
+  });
+
+  // A site with an empty onboardConfig {} (e.g. partial write) and a paid import.
+  // The guard must NOT treat {} as truthy proof of lastProfile and must fall through
+  // to the import check — otherwise isPaidSite would be false (undefined === 'paid').
+  const makePartialOnboardConfigPaidSite = () => ({
+    getConfig: () => ({
+      getImports: () => [{ type: 'ahref-paid-pages', enabled: true }],
+      getOnboardConfig: () => ({}),
+    }),
+  });
+
   /**
    * Builds a site mock with a fully-stubbed Config that can survive the happy path,
    * allowing tests to assert on updateOnboardConfig being called.
@@ -239,6 +258,47 @@ describe('onboardSingleSite — paid profile guard', () => {
         300,
         slackContext(),
         makeContext(makePaidOnboardConfigSite()),
+        {},
+        { profileName: 'demo' },
+      );
+
+      expect(result.status).to.equal('Failed');
+      expect(result.errors).to.match(/Blocked.*paid/);
+      expect(sayStub).to.have.been.calledWith(sinon.match(GUARD_WARNING_PATTERN));
+    });
+
+    it('blocks re-onboarding a legacy paid site (no onboardConfig, import fallback)', async () => {
+      // Legacy sites predate onboardConfig tracking — the guard falls back to the
+      // ahref-paid-pages import check to detect a prior paid onboarding.
+      const result = await onboardSingleSite(
+        SITE_URL,
+        IMS_ORG_ID,
+        {},
+        demoProfile,
+        300,
+        slackContext(),
+        makeContext(makeLegacyPaidSite()),
+        {},
+        { profileName: 'demo' },
+      );
+
+      expect(result.status).to.equal('Failed');
+      expect(result.errors).to.match(/Blocked.*paid/);
+      expect(sayStub).to.have.been.calledWith(sinon.match(GUARD_WARNING_PATTERN));
+    });
+
+    it('blocks re-onboarding when onboardConfig is empty ({}) and paid import is enabled', async () => {
+      // Guards against a partial write leaving onboardConfig as {} — lastProfile would be
+      // undefined, so the ternary must check lastProfile != null (not onboardConfig truthiness)
+      // to correctly fall through to the import-based detection.
+      const result = await onboardSingleSite(
+        SITE_URL,
+        IMS_ORG_ID,
+        {},
+        demoProfile,
+        300,
+        slackContext(),
+        makeContext(makePartialOnboardConfigPaidSite()),
         {},
         { profileName: 'demo' },
       );
