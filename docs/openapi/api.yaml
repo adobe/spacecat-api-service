@@ -460,6 +460,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-sheet-data-with-type-and-week'
   /sites/{siteId}/llmo/global-sheet-data/{configName}:
     $ref: './llmo-api.yaml#/llmo-global-sheet-data'
+  /llmo/agentic-traffic/global:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-global'
   /sites/{siteId}/llmo/config:
     $ref: './llmo-api.yaml#/llmo-config'
   /sites/{siteId}/llmo/questions:
