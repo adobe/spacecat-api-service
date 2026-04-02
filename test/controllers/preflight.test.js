@@ -979,7 +979,7 @@ describe('Preflight Controller', () => {
       const response = await preflightController.createBetaPreflightJob({
         data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
       });
-      expect(response.status).to.equal(202);
+      expect(response.status).to.equal(500);
       expect(mockBetaJob.setStatus).to.have.been.calledWith('FAILED');
       expect(mockBetaJob.setError).to.have.been.calledWithMatch({ code: 'MYSTICAT_ERROR' });
       expect(mockBetaJob.save).to.have.been.calledOnce;

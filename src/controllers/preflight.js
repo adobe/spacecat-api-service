@@ -380,6 +380,7 @@ function PreflightController(ctx, log, env) {
         job.setError({ code: 'MYSTICAT_ERROR', message: mysticatError.message });
         job.setEndedAt(new Date().toISOString());
         await job.save();
+        return internalServerError(`Mysticat analyze failed: ${mysticatError.message}`);
       }
 
       return accepted({
