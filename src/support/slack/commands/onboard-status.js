@@ -120,14 +120,12 @@ Example:
         log.warn(`[onboard-status] Could not fetch audit types for site ${siteId}: ${auditErr.message}`);
       }
 
-      // Build expected opportunity types from known audit types
+      // Build expected opportunity types from known audit types.
+      // auditTypes is already scoped to profile/map-known types so every entry has a mapping.
       let expectedOpportunityTypes = [];
-      let hasUnknownAuditTypes = false;
       for (const auditType of auditTypes) {
         const opps = AUDIT_OPPORTUNITY_MAP[auditType];
-        if (!opps || opps.length === 0) {
-          hasUnknownAuditTypes = true;
-        } else {
+        if (opps && opps.length > 0) {
           expectedOpportunityTypes.push(...opps);
         }
       }
@@ -137,9 +135,7 @@ Example:
       // Opportunities whose source audit is still pending show ⏳ instead of stale ✅/ℹ️.
       const opportunities = await site.getOpportunities();
       const processedTypes = new Set();
-      const shouldFilter = auditTypes.length > 0
-        && expectedOpportunityTypes.length > 0
-        && !hasUnknownAuditTypes;
+      const shouldFilter = auditTypes.length > 0 && expectedOpportunityTypes.length > 0;
 
       const visibleOpportunities = opportunities.filter((opportunity) => {
         const oppType = opportunity.getType();

@@ -25,6 +25,7 @@ describe('OnboardStatusCommand', () => {
   let slackContext;
   let dataAccessStub;
   let extractURLFromSlackInputStub;
+  let loadProfileConfigStub;
   let OnboardStatusCommand;
 
   const siteUrl = 'https://example.com';
@@ -39,12 +40,15 @@ describe('OnboardStatusCommand', () => {
   }
 
   function makeSite(overrides = {}) {
-    const { lastStartTime, ...siteOverrides } = overrides;
+    const { lastStartTime, lastProfile, ...siteOverrides } = overrides;
+    const onboardConfig = lastStartTime || lastProfile
+      ? { ...(lastStartTime ? { lastStartTime } : {}), ...(lastProfile ? { lastProfile } : {}) }
+      : undefined;
     return {
       getId: sinon.stub().returns(siteId),
       getOpportunities: sinon.stub().resolves([]),
       getConfig: sinon.stub().returns({
-        getOnboardConfig: sinon.stub().returns(lastStartTime ? { lastStartTime } : undefined),
+        getOnboardConfig: sinon.stub().returns(onboardConfig),
       }),
       ...siteOverrides,
     };
@@ -52,6 +56,7 @@ describe('OnboardStatusCommand', () => {
 
   beforeEach(async () => {
     extractURLFromSlackInputStub = sinon.stub().callsFake((url) => url.trim().replace(/\/$/, ''));
+    loadProfileConfigStub = sinon.stub();
 
     dataAccessStub = {
       Site: { findByBaseURL: sinon.stub() },
@@ -78,6 +83,7 @@ describe('OnboardStatusCommand', () => {
       {
         '../../../../src/utils/slack/base.js': {
           extractURLFromSlackInput: extractURLFromSlackInputStub,
+          loadProfileConfig: loadProfileConfigStub,
         },
       },
     );
@@ -258,7 +264,9 @@ describe('OnboardStatusCommand', () => {
       expect(slackContext.say).to.have.been.calledWith('No opportunities found');
     });
 
-    it('does not filter when auditTypes contain unknown types', async () => {
+    it('shows all opportunities when only unknown audit types are in DB (no profile set)', async () => {
+      // unknown-audit-type is not in AUDIT_OPPORTUNITY_MAP → filtered from auditTypes →
+      // auditTypes is empty → shouldFilter is false → all opportunities shown
       const opp = { getType: sinon.stub().returns('some-opp'), getSuggestions: sinon.stub().resolves([]) };
       const siteWithUnknown = makeSite({ getOpportunities: sinon.stub().resolves([opp]) });
       dataAccessStub.Site.findByBaseURL.resolves(siteWithUnknown);
@@ -415,6 +423,89 @@ describe('OnboardStatusCommand', () => {
       const disclaimer = calls.find((m) => m.includes('may still be in progress'));
       // Opportunity type titles, not the audit type fallback "Forms Opportunities"
       expect(disclaimer).to.include('High Form Views Low Conversions');
+    });
+  });
+
+  describe('handleExecution — profile-scoped filtering', () => {
+    it('restricts audit types and pending check to profile when lastProfile is set', async () => {
+      // plg profile has cwv and broken-backlinks; site also has a meta-tags record from a prior run
+      loadProfileConfigStub.returns({
+        audits: { cwv: {}, 'broken-backlinks': {} },
+        imports: {},
+      });
+      const opp = { getType: sinon.stub().returns('cwv'), getSuggestions: sinon.stub().resolves([{ id: 's1' }]) };
+      const metaTagsOpp = { getType: sinon.stub().returns('meta-tags'), getSuggestions: sinon.stub().resolves([]) };
+      const site = makeSite({
+        lastProfile: 'plg',
+        lastStartTime: onboardTime,
+        getOpportunities: sinon.stub().resolves([opp, metaTagsOpp]),
+      });
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
+        makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
+        makeAudit('meta-tags', new Date(onboardTime + 1000).toISOString()), // pre-existing, not in profile
+      ]);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      // cwv opp shown; meta-tags opp filtered out
+      expect(slackContext.say).to.have.been.calledWith('Core Web Vitals :white_check_mark:');
+      expect(metaTagsOpp.getSuggestions).to.not.have.been.called;
+    });
+
+    it('falls back to all map-known types and logs warning when loadProfileConfig throws', async () => {
+      loadProfileConfigStub.throws(new Error('profile not found'));
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastProfile: 'unknown-profile' }));
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        sinon.match(/Could not load profile "unknown-profile", falling back to all known types/),
+      );
+      // Still shows pending disclaimer (all map types pending since no audit records)
+      const calls = slackContext.say.args.map((a) => a[0]);
+      expect(calls.some((m) => m.includes('may still be in progress'))).to.be.true;
+    });
+
+    it('filters out profile audit types not in AUDIT_OPPORTUNITY_MAP', async () => {
+      // Profile has cwv (known) and scrape-top-pages (not in map) — only cwv should scope
+      loadProfileConfigStub.returns({
+        audits: { cwv: {}, 'scrape-top-pages': {} },
+        imports: {},
+      });
+      const site = makeSite({ lastProfile: 'demo', lastStartTime: onboardTime });
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.LatestAudit.allBySiteId.resolves([
+        makeAudit('cwv', new Date(onboardTime + 1000).toISOString()),
+      ]);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      // Only cwv is in scopedTypes; broken-backlinks (in map but not in profile) stays pending
+      expect(slackContext.say).to.have.been.calledWith('No opportunities found');
+      const calls = slackContext.say.args.map((a) => a[0]);
+      // The pending check should NOT include scrape-top-pages (no opp mapping)
+      const disclaimer = calls.find((m) => m.includes('may still be in progress'));
+      expect(disclaimer).to.not.exist; // cwv completed, scrape-top-pages has no opp mapping
+    });
+
+    it('uses all map-known types when lastProfile is absent', async () => {
+      // No lastProfile stored → scopedTypes falls back to Object.keys(AUDIT_OPPORTUNITY_MAP)
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite()); // no lastProfile
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      // loadProfileConfig must not be called
+      expect(loadProfileConfigStub).to.not.have.been.called;
+      // All map types are pending — disclaimer is shown
+      const calls = slackContext.say.args.map((a) => a[0]);
+      expect(calls.some((m) => m.includes('may still be in progress'))).to.be.true;
     });
   });
 
