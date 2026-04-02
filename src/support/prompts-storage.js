@@ -184,9 +184,13 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
             data.forEach((c) => categoryMap.set(c.category_id, c.id));
             return;
           }
-          // Upsert failed (likely uq_category_name_per_org). Try resolving each
-          // missing category by its unprefixed slug — the old category_id before
-          // DRS started adding source prefixes.
+          // Only attempt fallback for unique constraint violations (23505).
+          // Re-throw unexpected errors (network, auth, etc.).
+          if (error.code !== '23505') {
+            throw new Error(`Failed to auto-create categories: ${error.message}`);
+          }
+          // uq_category_name_per_org hit. Try resolving each missing category
+          // by its unprefixed slug — the old category_id before DRS added prefixes.
           const unresolved = [];
           for (const catId of unique) {
             if (!categoryMap.has(catId)) {
@@ -232,7 +236,10 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
             data.forEach((t) => topicMap.set(t.topic_id, t.id));
             return;
           }
-          // Upsert failed — try resolving by unprefixed slug.
+          if (error.code !== '23505') {
+            throw new Error(`Failed to auto-create topics: ${error.message}`);
+          }
+          // Unique constraint — try resolving by unprefixed slug.
           const unresolved = [];
           for (const topId of unique) {
             if (!topicMap.has(topId)) {

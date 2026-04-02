@@ -950,7 +950,7 @@ describe('prompts-storage', () => {
               return {
                 upsert: () => ({
                   select: () => ({
-                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
                     catch: () => {},
                   }),
                 }),
@@ -1000,7 +1000,7 @@ describe('prompts-storage', () => {
               return {
                 upsert: () => ({
                   select: () => ({
-                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
                     catch: () => {},
                   }),
                 }),
@@ -1050,7 +1050,7 @@ describe('prompts-storage', () => {
               return {
                 upsert: () => ({
                   select: () => ({
-                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
                     catch: () => {},
                   }),
                 }),
@@ -1101,7 +1101,7 @@ describe('prompts-storage', () => {
               return {
                 upsert: () => ({
                   select: () => ({
-                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
                     catch: () => {},
                   }),
                 }),
@@ -1128,6 +1128,58 @@ describe('prompts-storage', () => {
       });
       expect(warnStub.calledOnce).to.be.true;
       expect(warnStub.firstCall.args[0]).to.include('gsc-unknown-topic');
+    });
+
+    it('throws when category upsert fails with non-constraint error', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'categories') {
+            return makeChain({ data: null, error: { code: '42501', message: 'permission denied' } });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await expect(
+        upsertPrompts({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          prompts: [{ prompt: 'X', regions: [], categoryId: 'bad-cat' }],
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('Failed to auto-create categories');
+    });
+
+    it('throws when topic upsert fails with non-constraint error', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            return makeChain({ data: null, error: { code: '42501', message: 'permission denied' } });
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await expect(
+        upsertPrompts({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          prompts: [{ prompt: 'X', regions: [], topicId: 'bad-topic' }],
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('Failed to auto-create topics');
     });
 
     it('handles existing prompts with null regions', async () => {
