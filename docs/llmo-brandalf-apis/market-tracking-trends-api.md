@@ -1,6 +1,6 @@
 # Brand Presence Market Tracking Trends API
 
-Returns weekly **brand** mention/citation counts (after prompt-level deduplication) plus per-competitor mention/citation totals per week for market-tracking charts. Data comes from `brand_presence_executions` and `executions_competitor_data` via PostgREST (mysticat-data-service).
+Returns weekly **brand** mention/citation counts (after prompt-level deduplication) plus per-competitor mention/citation totals per week for market-tracking charts. Uses `rpc_market_tracking_trends` — a PostgreSQL RPC that aggregates `brand_presence_executions` and `executions_competitor_data` server-side.
 
 ---
 
@@ -56,31 +56,23 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 
 ---
 
-## Internal Queries (PostgREST)
+## Internal Query (PostgREST RPC)
 
-Two queries run in parallel.
+A single RPC call to `rpc_market_tracking_trends` performs all filtering, deduplication, and aggregation server-side in PostgreSQL.
 
-### 1. Brand executions (`brand_presence_executions`)
-
-- **Columns:** `execution_date`, `prompt`, `topics`, `region_code`, `site_id`, `mentions`, `citations`
-- **Filters:** `organization_id`, `model`, date range, optional `site_id`, `brand_id`, `category_id` / `category_name`, `region_code`
-
-### 2. Competitor aggregates (`executions_competitor_data`)
-
-- **Columns:** `execution_date`, `competitor`, `mentions`, `citations`
-- **Same dimension filters** as the brand query
-
-There is no RPC; aggregation is done in the API service (`aggregateWeeklyTrends`).
+**RPC parameters:** `p_organization_id`, `p_start_date`, `p_end_date`, `p_model`, optional `p_brand_id`, `p_site_id`, `p_category_id`, `p_category_name`, `p_region_code`, `p_max_competitors` (default 100).
 
 ---
 
-## Aggregation (`aggregateWeeklyTrends`)
+## Aggregation (server-side in `rpc_market_tracking_trends`)
 
-**Brand side:** For each ISO week (derived from `execution_date` via `dateToIsoWeek`), rows are deduplicated by `prompt|topics|region_code|site_id`. Unique keys with `mentions === true` increment the week’s mention count; unique keys with `citations === true` increment the citation count.
+**Brand dedup:** Within each ISO week, rows from `brand_presence_executions` are deduplicated by `(prompt, topics, region_code, site_id)` using `BOOL_OR`. A key counts as mentioned/cited if any row for that key has the flag set.
 
-**Competitor side:** Rows are grouped by week and competitor name; `mentions` and `citations` from `executions_competitor_data` are summed (no prompt-level deduplication on this table).
+**Competitor aggregation:** Rows from `executions_competitor_data` are grouped by `(week, competitor)` with `SUM(mentions)` / `SUM(citations)`. Competitors are ranked per week and capped at `p_max_competitors` (default 100).
 
-**Ordering:** Weeks ascending. Competitors within a week are sorted by `mentions + citations` descending.
+**Ordering:** Weeks ascending. Competitors within a week sorted by `mentions + citations` descending.
+
+The API handler (`reshapeMarketTrackingRows`) reshapes the flat RPC rows into the nested response format.
 
 ---
 
@@ -127,7 +119,7 @@ The JSON body includes `weeklyTrends` and `weeklyTrendsForComparison`. Both prop
 |--------|-----------|
 | 400 | PostgREST not configured (`DATA_SERVICE_PROVIDER` ≠ postgres) |
 | 400 | Organization not found |
-| 400 | PostgREST/PostgreSQL query error on either query |
+| 400 | RPC query error |
 | 403 | User does not belong to the organization |
 | 403 | Site does not belong to the organization (when `siteId` provided; validated before queries) |
 

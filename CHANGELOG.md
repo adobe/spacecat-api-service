@@ -1,3 +1,45 @@
+# [1.405.0](https://github.com/adobe/spacecat-api-service/compare/v1.404.0...v1.405.0) (2026-04-02)
+
+
+### Features
+
+* add global agentic traffic endpoints ([#2107](https://github.com/adobe/spacecat-api-service/issues/2107)) ([6c8df27](https://github.com/adobe/spacecat-api-service/commit/6c8df27c36bfc1055d0b3b65ad6fb1b76b1e616a))
+
+# [1.404.0](https://github.com/adobe/spacecat-api-service/compare/v1.403.1...v1.404.0) (2026-04-02)
+
+
+### Features
+
+* remove llmo-prompts-ahrefs from run-import ([#2111](https://github.com/adobe/spacecat-api-service/issues/2111)) ([023d77c](https://github.com/adobe/spacecat-api-service/commit/023d77c74e2f4f3c8f1ce691a95cd13fa1266c54))
+
+## [1.403.1](https://github.com/adobe/spacecat-api-service/compare/v1.403.0...v1.403.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* use readable names for auto-created category/topic fallbacks (LLMO-4060) ([#2108](https://github.com/adobe/spacecat-api-service/issues/2108)) ([7a3acc6](https://github.com/adobe/spacecat-api-service/commit/7a3acc6f590d8285e6ee1a145a259ddd773e7ef8))
+
+# [1.403.0](https://github.com/adobe/spacecat-api-service/compare/v1.402.0...v1.403.0) (2026-04-02)
+
+
+### Features
+
+* transition to RPC for market tracking trends | LLMO-3922 ([#2044](https://github.com/adobe/spacecat-api-service/issues/2044)) ([9fce656](https://github.com/adobe/spacecat-api-service/commit/9fce65646e929ddece40f548a8b4e46434c52b45))
+
+# [1.402.0](https://github.com/adobe/spacecat-api-service/compare/v1.401.2...v1.402.0) (2026-04-02)
+
+
+### Features
+
+* enforce PLG tier invisibility at API filter layer (ASO-PLG) ([#2081](https://github.com/adobe/spacecat-api-service/issues/2081)) ([c2e2cba](https://github.com/adobe/spacecat-api-service/commit/c2e2cba6f2bf0809113a2789a2155741bd005533))
+
+## [1.401.2](https://github.com/adobe/spacecat-api-service/compare/v1.401.1...v1.401.2) (2026-04-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.4.1 ([#2105](https://github.com/adobe/spacecat-api-service/issues/2105)) ([e4a86b7](https://github.com/adobe/spacecat-api-service/commit/e4a86b728ba289a4ec89480b903d0f6cd4f882c3))
+
 ## [1.401.1](https://github.com/adobe/spacecat-api-service/compare/v1.401.0...v1.401.1) (2026-04-01)
 
 
