@@ -24,6 +24,10 @@ import {
   deltaEnableAudits,
   enqueueSiteJobs,
   buildTeardownWorkflowInput,
+  getParentAuditType,
+  isScrapeRecent,
+  buildOpportunityFreshnessMap,
+  getAuditTypesToSkipForSite,
   runEphemeralRunBatch,
   PRESETS,
   MAX_BATCH_SITES,
@@ -111,6 +115,8 @@ function createMockContext(overrides = {}) {
       Site: { findById: sinon.stub() },
       Configuration: { findLatest: sinon.stub() },
       Organization: { findById: sinon.stub().resolves(createMockOrganization()) },
+      LatestAudit: { allBySiteIdAndAuditType: sinon.stub().resolves([]) },
+      Opportunity: { allBySiteId: sinon.stub().resolves([]) },
       ...(dataAccessOverrides || {}),
     },
     sqs: { sendMessage: sinon.stub().resolves() },
@@ -253,6 +259,59 @@ describe('ephemeral-run-service', () => {
     it('uses explicit trafficAnalysisWeeks', () => {
       const result = resolvePayload({ imports: { trafficAnalysisWeeks: 3 } });
       expect(result.imports.trafficAnalysisWeeks).to.equal(3);
+    });
+
+    it('sets forceRun=false by default', () => {
+      const result = resolvePayload({});
+      expect(result.forceRun).to.equal(false);
+    });
+
+    it('sets forceRun=true when body.forceRun is true', () => {
+      const result = resolvePayload({ forceRun: true });
+      expect(result.forceRun).to.equal(true);
+    });
+
+    it('sets forceRunSiteIds to empty Set by default', () => {
+      const result = resolvePayload({});
+      expect(result.forceRunSiteIds.size).to.equal(0);
+    });
+
+    it('populates forceRunSiteIds from body array', () => {
+      const result = resolvePayload({ forceRunSiteIds: ['s-1', 's-2'] });
+      expect(result.forceRunSiteIds.has('s-1')).to.equal(true);
+      expect(result.forceRunSiteIds.has('s-2')).to.equal(true);
+      expect(result.forceRunSiteIds.size).to.equal(2);
+    });
+
+    it('ignores non-array forceRunSiteIds', () => {
+      const result = resolvePayload({ forceRunSiteIds: 's-1' });
+      expect(result.forceRunSiteIds.size).to.equal(0);
+    });
+
+    it('defaults scrapeFreshnessDays to 30 when not provided', () => {
+      const result = resolvePayload({});
+      expect(result.scrapeFreshnessDays).to.equal(30);
+    });
+
+    it('defaults opportunityFreshnessDays to 7 when not provided', () => {
+      const result = resolvePayload({});
+      expect(result.opportunityFreshnessDays).to.equal(7);
+    });
+
+    it('accepts custom scrapeFreshnessDays from body.freshness.scrapeDays', () => {
+      const result = resolvePayload({ freshness: { scrapeDays: 10 } });
+      expect(result.scrapeFreshnessDays).to.equal(10);
+    });
+
+    it('accepts custom opportunityFreshnessDays from body.freshness.opportunityDays', () => {
+      const result = resolvePayload({ freshness: { opportunityDays: 3 } });
+      expect(result.opportunityFreshnessDays).to.equal(3);
+    });
+
+    it('ignores non-numeric freshness values and falls back to defaults', () => {
+      const result = resolvePayload({ freshness: { scrapeDays: 'ten', opportunityDays: null } });
+      expect(result.scrapeFreshnessDays).to.equal(30);
+      expect(result.opportunityFreshnessDays).to.equal(7);
     });
   });
 
@@ -494,6 +553,499 @@ describe('ephemeral-run-service', () => {
         workflowWaitTime: 3600,
       });
       expect(input.bulkDisableJob.taskContext.scheduledRun).to.equal(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getParentAuditType
+  // -----------------------------------------------------------------------
+  describe('getParentAuditType()', () => {
+    it('maps -auto-suggest-mystique variant to parent', () => {
+      expect(getParentAuditType('alt-text-auto-suggest-mystique')).to.equal('alt-text');
+    });
+
+    it('maps -auto-suggest variant to parent', () => {
+      expect(getParentAuditType('broken-backlinks-auto-suggest')).to.equal('broken-backlinks');
+      expect(getParentAuditType('broken-internal-links-auto-suggest')).to.equal('broken-internal-links');
+      expect(getParentAuditType('meta-tags-auto-suggest')).to.equal('meta-tags');
+      expect(getParentAuditType('security-vulnerabilities-auto-suggest')).to.equal('security-vulnerabilities');
+      expect(getParentAuditType('security-csp-auto-suggest')).to.equal('security-csp');
+    });
+
+    it('maps data-collection audits to security-csp parent (lhs-mobile)', () => {
+      expect(getParentAuditType('lhs-mobile')).to.equal('security-csp');
+    });
+
+    it('returns paid unchanged (paid opportunity mapping is in LOCAL_OPPORTUNITY_MAP, not AUDIT_PARENT_MAP)', () => {
+      expect(getParentAuditType('paid')).to.equal('paid');
+    });
+
+    it('returns type unchanged when no explicit mapping exists', () => {
+      expect(getParentAuditType('cwv')).to.equal('cwv');
+      expect(getParentAuditType('meta-tags')).to.equal('meta-tags');
+      expect(getParentAuditType('unknown-type')).to.equal('unknown-type');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // isScrapeRecent
+  // -----------------------------------------------------------------------
+  describe('isScrapeRecent()', () => {
+    const log = { warn: sinon.stub(), info: sinon.stub() };
+
+    it('returns false when no scrape audit record exists', async () => {
+      const LatestAudit = { allBySiteIdAndAuditType: sinon.stub().resolves([]) };
+      expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(false);
+    });
+
+    it('returns false when the scrape record is older than 30 days', async () => {
+      const oldDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+      const LatestAudit = {
+        allBySiteIdAndAuditType: sinon.stub().resolves([{ getAuditedAt: () => oldDate }]),
+      };
+      expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(false);
+    });
+
+    it('returns true when the scrape record is within 30 days', async () => {
+      const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      const LatestAudit = {
+        allBySiteIdAndAuditType: sinon.stub().resolves([{ getAuditedAt: () => recentDate }]),
+      };
+      expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(true);
+    });
+
+    it('returns false and warns when the query throws', async () => {
+      const warnStub = sinon.stub();
+      const LatestAudit = {
+        allBySiteIdAndAuditType: sinon.stub().rejects(new Error('DB error')),
+      };
+      const result = await isScrapeRecent('s-1', LatestAudit, { warn: warnStub, info: sinon.stub() });
+      expect(result).to.equal(false);
+      expect(warnStub).to.have.been.called;
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // buildOpportunityFreshnessMap
+  // -----------------------------------------------------------------------
+  describe('buildOpportunityFreshnessMap()', () => {
+    const log = { warn: sinon.stub(), info: sinon.stub() };
+
+    it('returns empty map when site has no opportunities', async () => {
+      const Opportunity = { allBySiteId: sinon.stub().resolves([]) };
+      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, log);
+      expect(map.size).to.equal(0);
+    });
+
+    it('builds a map of opportunityType → updatedAt Date', async () => {
+      const date = new Date('2026-01-15T00:00:00Z');
+      const Opportunity = {
+        allBySiteId: sinon.stub().resolves([
+          { getType: () => 'cwv', getUpdatedAt: () => date.toISOString() },
+        ]),
+      };
+      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, log);
+      expect(map.get('cwv').getTime()).to.equal(date.getTime());
+    });
+
+    it('keeps the newest updatedAt when multiple opportunities share a type', async () => {
+      const older = new Date('2026-01-01T00:00:00Z');
+      const newer = new Date('2026-01-20T00:00:00Z');
+      const Opportunity = {
+        allBySiteId: sinon.stub().resolves([
+          { getType: () => 'cwv', getUpdatedAt: () => older.toISOString() },
+          { getType: () => 'cwv', getUpdatedAt: () => newer.toISOString() },
+        ]),
+      };
+      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, log);
+      expect(map.get('cwv').getTime()).to.equal(newer.getTime());
+    });
+
+    it('returns empty map and warns when the query throws', async () => {
+      const warnStub = sinon.stub();
+      const Opportunity = { allBySiteId: sinon.stub().rejects(new Error('DB error')) };
+      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, { warn: warnStub, info: sinon.stub() });
+      expect(map.size).to.equal(0);
+      expect(warnStub).to.have.been.called;
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getAuditTypesToSkipForSite
+  // -----------------------------------------------------------------------
+  describe('getAuditTypesToSkipForSite()', () => {
+    const log = { warn: sinon.stub(), info: sinon.stub() };
+
+    function makeDataAccess({ scrapeAuditedAt = null, opportunities = [] } = {}) {
+      const scrapeRecord = scrapeAuditedAt
+        ? [{ getAuditedAt: () => scrapeAuditedAt }]
+        : [];
+      return {
+        LatestAudit: { allBySiteIdAndAuditType: sinon.stub().resolves(scrapeRecord) },
+        Opportunity: { allBySiteId: sinon.stub().resolves(opportunities) },
+      };
+    }
+
+    it('adds scrape-top-pages to skip set when scrape is recent', async () => {
+      const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ scrapeAuditedAt: recentDate });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log);
+      expect(skip.has('scrape-top-pages')).to.equal(true);
+    });
+
+    it('does NOT skip scrape-top-pages when scrape is stale', async () => {
+      const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ scrapeAuditedAt: oldDate });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log);
+      expect(skip.has('scrape-top-pages')).to.equal(false);
+    });
+
+    it('adds cwv to skip set when cwv opportunity is fresh', async () => {
+      const recentDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => recentDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
+      expect(skip.has('cwv')).to.equal(true);
+    });
+
+    it('does NOT skip cwv when cwv opportunity is stale', async () => {
+      const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => oldDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
+      expect(skip.has('cwv')).to.equal(false);
+    });
+
+    it('skips broken-backlinks-auto-suggest when parent broken-backlinks opportunity is fresh', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'broken-backlinks', getUpdatedAt: () => recentDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['broken-backlinks-auto-suggest'], da, log);
+      expect(skip.has('broken-backlinks-auto-suggest')).to.equal(true);
+    });
+
+    it('skips alt-text-auto-suggest-mystique when alt-text opportunity is fresh', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'alt-text', getUpdatedAt: () => recentDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['alt-text-auto-suggest-mystique'], da, log);
+      expect(skip.has('alt-text-auto-suggest-mystique')).to.equal(true);
+    });
+
+    it('does NOT skip forms-opportunities when only some mapped opportunities are fresh', async () => {
+      // ALL mapped opportunity types must be fresh to skip — missing counts as stale
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [
+          { getType: () => 'high-form-views-low-conversions', getUpdatedAt: () => recentDate },
+          // other 3 mapped types missing → treated as stale → audit runs
+        ],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['forms-opportunities'], da, log);
+      expect(skip.has('forms-opportunities')).to.equal(false);
+    });
+
+    it('skips accessibility when both a11y-assistive and a11y-color-contrast are fresh', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [
+          { getType: () => 'a11y-assistive', getUpdatedAt: () => recentDate },
+          { getType: () => 'a11y-color-contrast', getUpdatedAt: () => recentDate },
+        ],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
+      expect(skip.has('accessibility')).to.equal(true);
+    });
+
+    it('does NOT skip accessibility when a11y-assistive is fresh but a11y-color-contrast is stale', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [
+          { getType: () => 'a11y-assistive', getUpdatedAt: () => recentDate },
+          { getType: () => 'a11y-color-contrast', getUpdatedAt: () => oldDate },
+        ],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
+      expect(skip.has('accessibility')).to.equal(false);
+    });
+
+    it('does NOT skip accessibility when a11y-assistive is fresh but a11y-color-contrast was never created', async () => {
+      // Missing mapped type counts as stale → audit runs
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [
+          { getType: () => 'a11y-assistive', getUpdatedAt: () => recentDate },
+        ],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
+      expect(skip.has('accessibility')).to.equal(false);
+    });
+
+    it('does NOT skip accessibility when neither a11y opportunity has ever been created', async () => {
+      const da = makeDataAccess({ opportunities: [] });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
+      expect(skip.has('accessibility')).to.equal(false);
+    });
+
+    it('does NOT skip audit types with no opportunity mapping', async () => {
+      // e.g. a custom audit type not in AUDIT_OPPORTUNITY_MAP
+      const da = makeDataAccess();
+      const skip = await getAuditTypesToSkipForSite('s-1', ['unknown-audit-type'], da, log);
+      expect(skip.has('unknown-audit-type')).to.equal(false);
+    });
+
+    it('returns empty skip set when no audits are fresh', async () => {
+      const da = makeDataAccess();
+      const skip = await getAuditTypesToSkipForSite('s-1', ['cwv', 'meta-tags'], da, log);
+      expect(skip.size).to.equal(0);
+    });
+
+    it('respects custom scrapeFreshnessDays — skips scrape when within custom window', async () => {
+      // 10-day-old scrape: stale under default 30d, but inside custom 15d window
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ scrapeAuditedAt: tenDaysAgo });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log, false, 15);
+      expect(skip.has('scrape-top-pages')).to.equal(true);
+    });
+
+    it('respects custom scrapeFreshnessDays — runs scrape when outside custom window', async () => {
+      // 20-day-old scrape: fresh under default 30d, but outside custom 15d window
+      const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ scrapeAuditedAt: twentyDaysAgo });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log, false, 15);
+      expect(skip.has('scrape-top-pages')).to.equal(false);
+    });
+
+    it('respects custom opportunityFreshnessDays — skips when within custom window', async () => {
+      // 3-day-old opportunity: fresh under default 7d and custom 5d
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => threeDaysAgo }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log, false, 30, 5);
+      expect(skip.has('cwv')).to.equal(true);
+    });
+
+    it('respects custom opportunityFreshnessDays — runs when outside custom window', async () => {
+      // 4-day-old opportunity: fresh under default 7d but stale under custom 3d
+      const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => fourDaysAgo }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log, false, 30, 3);
+      expect(skip.has('cwv')).to.equal(false);
+    });
+
+    it('skips lhs-mobile when security-csp opportunity is fresh', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'security-csp', getUpdatedAt: () => recentDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['lhs-mobile', 'cwv'], da, log);
+      expect(skip.has('lhs-mobile')).to.equal(true);
+      expect(skip.has('cwv')).to.equal(false);
+    });
+
+    it('skips paid when consent-banner opportunity is fresh', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'consent-banner', getUpdatedAt: () => recentDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['paid', 'cwv'], da, log);
+      expect(skip.has('paid')).to.equal(true);
+      expect(skip.has('cwv')).to.equal(false);
+    });
+
+    it('does NOT skip paid when only security-csp opportunity is fresh (paid gates on consent-banner)', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        opportunities: [{ getType: () => 'security-csp', getUpdatedAt: () => recentDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['paid'], da, log);
+      expect(skip.has('paid')).to.equal(false);
+    });
+
+    it('returns empty set immediately when forceRun is true', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({
+        scrapeAuditedAt: recentDate,
+        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => recentDate }],
+      });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log, true);
+      expect(skip.size).to.equal(0);
+      // dataAccess should not have been queried
+      expect(da.LatestAudit.allBySiteIdAndAuditType).to.not.have.been.called;
+      expect(da.Opportunity.allBySiteId).to.not.have.been.called;
+    });
+
+    it('does not query LatestAudit when scrape-top-pages is not in audit types', async () => {
+      const da = makeDataAccess();
+      await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
+      expect(da.LatestAudit.allBySiteIdAndAuditType).to.not.have.been.called;
+    });
+
+    it('does not query Opportunity when all audit types have no opportunity mapping', async () => {
+      const da = makeDataAccess();
+      // unknown-audit-type has no mapping → no opportunity fetch needed
+      await getAuditTypesToSkipForSite('s-1', ['unknown-audit-type'], da, log);
+      expect(da.Opportunity.allBySiteId).to.not.have.been.called;
+    });
+
+    it('queries both LatestAudit and Opportunity when both types are present', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ scrapeAuditedAt: recentDate });
+      await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log);
+      expect(da.LatestAudit.allBySiteIdAndAuditType).to.have.been.called;
+      expect(da.Opportunity.allBySiteId).to.have.been.called;
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // runEphemeralRunBatch — audit skip integration
+  // -----------------------------------------------------------------------
+  describe('runEphemeralRunBatch() — audit skip logic', () => {
+    it('enables scrape-top-pages in config but does not enqueue it to SQS when scrape is recent', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([
+        { getAuditedAt: () => recentDate },
+      ]);
+
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['scrape-top-pages', 'cwv'] } }, ctx);
+
+      // scrape-top-pages IS enabled in config (delta-enable still runs)
+      expect(config.isHandlerEnabledForSite('scrape-top-pages', site)).to.equal(true);
+      // but NOT sent to SQS
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
+      expect(sqsCalls).to.not.include('scrape-top-pages');
+      // cwv (no fresh opportunity) should still be enabled and enqueued
+      expect(config.isHandlerEnabledForSite('cwv', site)).to.equal(true);
+      expect(sqsCalls).to.include('cwv');
+    });
+
+    it('enqueues all audits when forceRun is true, ignoring freshness', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([
+        { getAuditedAt: () => recentDate },
+      ]);
+      ctx.dataAccess.Opportunity.allBySiteId.resolves([
+        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
+      ]);
+
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { audits: { types: ['scrape-top-pages', 'cwv'] }, forceRun: true },
+        ctx,
+      );
+
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
+      expect(sqsCalls).to.include('scrape-top-pages');
+      expect(sqsCalls).to.include('cwv');
+    });
+
+    it('does not enqueue audit to SQS when its opportunity is fresh', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      const recentDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.dataAccess.Opportunity.allBySiteId.resolves([
+        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
+      ]);
+
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['cwv', 'meta-tags'] } }, ctx);
+
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
+      expect(sqsCalls).to.not.include('cwv');
+      // meta-tags opportunity is not fresh → should be enqueued
+      expect(sqsCalls).to.include('meta-tags');
+    });
+
+    it('enqueues all audits for a specific site when it appears in forceRunSiteIds', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([
+        { getAuditedAt: () => recentDate },
+      ]);
+      ctx.dataAccess.Opportunity.allBySiteId.resolves([
+        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
+      ]);
+
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { audits: { types: ['scrape-top-pages', 'cwv'] }, forceRunSiteIds: ['s-1'] },
+        ctx,
+      );
+
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
+      expect(sqsCalls).to.include('scrape-top-pages');
+      expect(sqsCalls).to.include('cwv');
+    });
+
+    it('applies freshness skip for sites NOT in forceRunSiteIds', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.dataAccess.Opportunity.allBySiteId.resolves([
+        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
+      ]);
+
+      // s-1 is NOT in forceRunSiteIds — freshness check applies
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { audits: { types: ['cwv'] }, forceRunSiteIds: ['s-99'] },
+        ctx,
+      );
+
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
+      expect(sqsCalls).to.not.include('cwv');
+    });
+
+    it('global forceRun=true overrides forceRunSiteIds — all sites bypass freshness', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+      ctx.dataAccess.Opportunity.allBySiteId.resolves([
+        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
+      ]);
+
+      // forceRun=true, forceRunSiteIds omitted (irrelevant) — all sites still bypass
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { audits: { types: ['cwv'] }, forceRun: true },
+        ctx,
+      );
+
+      // freshness DB call should not have been made
+      expect(ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType).to.not.have.been.called;
+      expect(ctx.dataAccess.Opportunity.allBySiteId).to.not.have.been.called;
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
+      expect(sqsCalls).to.include('cwv');
     });
   });
 

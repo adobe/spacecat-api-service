@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'crypto';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
-import { isObject } from '@adobe/spacecat-shared-utils';
+import { isObject, getOpportunitiesForAudit } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
   triggerImportRun,
@@ -29,6 +29,10 @@ const TRAFFIC_ANALYSIS_IMPORT_TYPE = 'traffic-analysis';
 
 /** Option key for how many weeks of traffic-analysis backfill to queue. */
 const TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY = 'backfillWeeks';
+
+const SCRAPE_AUDIT_TYPE = 'scrape-top-pages';
+const SCRAPE_FRESHNESS_DAYS = 30;
+const OPPORTUNITY_FRESHNESS_DAYS = 7;
 
 /**
  * Preset / request `imports` may include:
@@ -177,12 +181,202 @@ function resolvePayload(body) {
     MAX_TEARDOWN_DELAY_SECONDS,
   );
 
-  return { imports, audits, teardownDelaySeconds };
+  const forceRun = body.forceRun === true;
+  const forceRunSiteIds = new Set(
+    Array.isArray(body.forceRunSiteIds) ? body.forceRunSiteIds : [],
+  );
+
+  const scrapeFreshnessDays = typeof body.freshness?.scrapeDays === 'number'
+    ? body.freshness.scrapeDays
+    : SCRAPE_FRESHNESS_DAYS;
+  const opportunityFreshnessDays = typeof body.freshness?.opportunityDays === 'number'
+    ? body.freshness.opportunityDays
+    : OPPORTUNITY_FRESHNESS_DAYS;
+
+  return {
+    imports,
+    audits,
+    teardownDelaySeconds,
+    forceRun,
+    forceRunSiteIds,
+    scrapeFreshnessDays,
+    opportunityFreshnessDays,
+  };
 }
 
 function isImportEnabled(importType, imports) {
   const found = imports?.find((cfg) => cfg.type === importType);
   return found ? found.enabled : false;
+}
+
+/**
+ * Maps audit types to the parent audit type used for opportunity-freshness lookups.
+ * Covers -auto-suggest/-auto-suggest-mystique variants and data-collection audits
+ * that share freshness with a parent audit's opportunities.
+ * lhs-mobile and security-csp-auto-suggest are only enabled/run when security-csp
+ * opportunities are not fresh.
+ */
+const AUDIT_PARENT_MAP = {
+  // -auto-suggest variants
+  'broken-backlinks-auto-suggest': 'broken-backlinks',
+  'broken-internal-links-auto-suggest': 'broken-internal-links',
+  'meta-tags-auto-suggest': 'meta-tags',
+  'alt-text-auto-suggest-mystique': 'alt-text',
+  'security-vulnerabilities-auto-suggest': 'security-vulnerabilities',
+  'security-csp-auto-suggest': 'security-csp',
+  // data-collection audits gated on security-csp opportunity freshness
+  'lhs-mobile': 'security-csp',
+};
+
+/**
+ * Local opportunity overrides for audit types that are excluded from the shared
+ * AUDIT_OPPORTUNITY_MAP (e.g. listed as data-collection only) but do produce
+ * opportunities that can be used for freshness checks.
+ */
+const LOCAL_OPPORTUNITY_MAP = {
+  paid: ['consent-banner'],
+  // accessibility creates a11y-* types, not the 'accessibility' type listed in the shared map
+  accessibility: ['a11y-assistive', 'a11y-color-contrast'],
+};
+
+/**
+ * Returns the opportunity types for a given audit type, checking the local
+ * override map first and falling back to the shared AUDIT_OPPORTUNITY_MAP.
+ */
+function getOpportunityTypesForAudit(auditType) {
+  return LOCAL_OPPORTUNITY_MAP[auditType] ?? getOpportunitiesForAudit(auditType);
+}
+
+/**
+ * Returns the parent audit type for opportunity-freshness lookups.
+ * Falls back to the audit type itself when no explicit mapping exists.
+ */
+function getParentAuditType(auditType) {
+  return AUDIT_PARENT_MAP[auditType] ?? auditType;
+}
+
+/**
+ * Returns true if the site has a scrape-top-pages audit result that is
+ * younger than SCRAPE_FRESHNESS_DAYS days.
+ */
+async function isScrapeRecent(
+  siteId,
+  LatestAudit,
+  log,
+  scrapeFreshnessDays = SCRAPE_FRESHNESS_DAYS,
+) {
+  try {
+    const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, SCRAPE_AUDIT_TYPE);
+    if (!audits || audits.length === 0) return false;
+    const auditedAt = new Date(audits[0].getAuditedAt()).getTime();
+    const ageInDays = (Date.now() - auditedAt) / (1000 * 60 * 60 * 24);
+    return ageInDays < scrapeFreshnessDays;
+  } catch (err) {
+    log.warn(`Failed to check scrape freshness for site ${siteId}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Fetches all opportunities for a site and returns a Map of
+ * opportunityType → latest updatedAt Date. When multiple opportunities share
+ * the same type, the newest updatedAt wins.
+ */
+async function buildOpportunityFreshnessMap(siteId, Opportunity, log) {
+  const map = new Map();
+  try {
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    for (const opp of opportunities) {
+      const type = opp.getType();
+      const updatedAt = new Date(opp.getUpdatedAt());
+      if (!map.has(type) || updatedAt > map.get(type)) {
+        map.set(type, updatedAt);
+      }
+    }
+  } catch (err) {
+    log.warn(`Failed to build opportunity freshness map for site ${siteId}:`, err);
+  }
+  return map;
+}
+
+/**
+ * Returns a Set of audit types that should be skipped from SQS enqueue for
+ * this site. Audit types are still enabled in Configuration (Phase 1) —
+ * only the SQS message is suppressed.
+ *
+ * Returns an empty Set immediately when forceRun is true (bypass all checks).
+ *
+ * Skip rules:
+ * - scrape-top-pages: skip if site has a scrape result within scrapeFreshnessDays
+ * - all others: resolve parent via AUDIT_PARENT_MAP, look up opportunity types,
+ *   skip if ALL of them have updatedAt within opportunityFreshnessDays.
+ *   If there are no mapped opportunity types, never skip (unknown = run it).
+ */
+async function getAuditTypesToSkipForSite(
+  siteId,
+  auditTypes,
+  dataAccess,
+  log,
+  forceRun = false,
+  scrapeFreshnessDays = SCRAPE_FRESHNESS_DAYS,
+  opportunityFreshnessDays = OPPORTUNITY_FRESHNESS_DAYS,
+) {
+  if (forceRun) {
+    log.info(`Site ${siteId}: forceRun=true — skipping all freshness checks`);
+    return new Set();
+  }
+
+  const { LatestAudit, Opportunity } = dataAccess;
+
+  const hasScrapeAudit = auditTypes.includes(SCRAPE_AUDIT_TYPE);
+  const nonScrapeTypes = auditTypes.filter((t) => t !== SCRAPE_AUDIT_TYPE);
+  const hasOpportunityAudits = nonScrapeTypes.some(
+    (t) => getOpportunityTypesForAudit(getParentAuditType(t)).length > 0,
+  );
+
+  const [scrapeRecent, opportunityMap] = await Promise.all([
+    hasScrapeAudit
+      ? isScrapeRecent(siteId, LatestAudit, log, scrapeFreshnessDays)
+      : Promise.resolve(false),
+    hasOpportunityAudits
+      ? buildOpportunityFreshnessMap(siteId, Opportunity, log)
+      : Promise.resolve(new Map()),
+  ]);
+
+  const now = Date.now();
+  const freshnessThresholdMs = opportunityFreshnessDays * 24 * 60 * 60 * 1000;
+  const skip = new Set();
+
+  for (const auditType of auditTypes) {
+    if (auditType === SCRAPE_AUDIT_TYPE) {
+      if (scrapeRecent) {
+        log.info(`Site ${siteId}: skipping SQS enqueue for ${SCRAPE_AUDIT_TYPE} — scrape within ${scrapeFreshnessDays} days`);
+        skip.add(auditType);
+      }
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    const parent = getParentAuditType(auditType);
+    const opportunityTypes = getOpportunityTypesForAudit(parent);
+    if (opportunityTypes.length === 0) {
+      // No known opportunity mapping — always run
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    const allFresh = opportunityTypes.every((oppType) => {
+      const updatedAt = opportunityMap.get(oppType);
+      return updatedAt && (now - updatedAt.getTime()) < freshnessThresholdMs;
+    });
+
+    if (allFresh) {
+      log.info(`Site ${siteId}: skipping SQS enqueue for ${auditType} — all opportunities fresh within ${opportunityFreshnessDays} days`);
+      skip.add(auditType);
+    }
+  }
+
+  return skip;
 }
 
 function deltaEnableImports(site, importTypes) {
@@ -438,12 +632,22 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
   const {
     dataAccess, s3, env, log,
   } = context;
-  const { Site, Configuration } = dataAccess;
+  const {
+    Site, Configuration, Opportunity, LatestAudit,
+  } = dataAccess;
   const batchId = randomUUID();
   const uniqueSiteIds = [...new Set(siteIds)];
   const effectiveSiteIds = uniqueSiteIds.slice(0, MAX_BATCH_SITES);
 
-  const { imports, audits, teardownDelaySeconds } = resolvePayload(body);
+  const {
+    imports,
+    audits,
+    teardownDelaySeconds,
+    forceRun,
+    forceRunSiteIds,
+    scrapeFreshnessDays,
+    opportunityFreshnessDays,
+  } = resolvePayload(body);
   const auditTypes = audits.types;
   const workflowSlackContext = ephemeralRunWorkflowSlackContext(body, env);
   const configuration = await Configuration.findLatest();
@@ -547,10 +751,23 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
   for (const siteId of Object.keys(perSiteSetup)) {
     let result;
     try {
+      // Global forceRun takes full precedence; per-site check is only evaluated when not set
+      const siteForceRun = forceRun ? true : forceRunSiteIds.has(siteId);
+      // eslint-disable-next-line no-await-in-loop
+      const auditTypesToSkip = await getAuditTypesToSkipForSite(
+        siteId,
+        auditTypes,
+        { LatestAudit, Opportunity },
+        log,
+        siteForceRun,
+        scrapeFreshnessDays,
+        opportunityFreshnessDays,
+      );
+      const filteredAuditTypes = audits.types.filter((t) => !auditTypesToSkip.has(t));
       // eslint-disable-next-line no-await-in-loop
       const jobResult = await enqueueSiteJobs(
         siteId,
-        { imports, audits },
+        { imports, audits: { ...audits, types: filteredAuditTypes } },
         configuration,
         context,
         workflowSlackContext,
@@ -622,6 +839,10 @@ export {
   deltaEnableAudits,
   enqueueSiteJobs,
   buildTeardownWorkflowInput,
+  getParentAuditType,
+  isScrapeRecent,
+  buildOpportunityFreshnessMap,
+  getAuditTypesToSkipForSite,
   PRESETS,
   MAX_BATCH_SITES,
 };
