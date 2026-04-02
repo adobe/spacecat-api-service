@@ -138,16 +138,6 @@ describe('ephemeral-run controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 400 when slack is not an object', async () => {
-      const ctx = createCtx();
-      const { batchRun } = EphemeralRunController(ctx);
-
-      const response = await batchRun({
-        data: { siteIds: [VALID_UUID], slack: 'not-an-object' },
-      });
-      expect(response.status).to.equal(400);
-    });
-
     it('returns 403 when not admin', async () => {
       const ctx = createCtx();
       accessControlStub.hasAdminAccess.returns(false);
@@ -223,6 +213,15 @@ describe('ephemeral-run controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.status).to.equal('completed');
+    });
+
+    it('returns 410 when batch is expired', async () => {
+      const ctx = createCtx();
+      readBatchStatusStub.resolves({ batchId: VALID_UUID, status: 'expired' });
+      const { batchStatus } = EphemeralRunController(ctx);
+
+      const response = await batchStatus({ params: { batchId: VALID_UUID } });
+      expect(response.status).to.equal(410);
     });
 
     it('returns 500 on read error', async () => {

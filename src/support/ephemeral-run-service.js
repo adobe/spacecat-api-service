@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'crypto';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
-import { isObject, getOpportunitiesForAudit } from '@adobe/spacecat-shared-utils';
+import { getOpportunitiesForAudit } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
   triggerImportRun,
@@ -466,37 +466,22 @@ function buildTeardownWorkflowInput({
   return { bulkDisableJob, workflowWaitTime };
 }
 
-function coerceSlackField(value) {
-  if (value === undefined || value === null) {
-    return '';
-  }
-  return String(value).trim();
-}
-
 /**
  * Slack context for ephemeral-run teardown (Step Functions) and audit enqueue.
- * Omit `body.slack` to use env only. Pass `body.slack` with optional keys:
- * each key present uses its value (empty string skips posting for that field pair via say()).
- * Keys omitted on `body.slack` fall back to env for that field.
+ * Sourced exclusively from environment variables — not overridable via API payload.
  */
-function ephemeralRunWorkflowSlackContext(body, env) {
-  const envChannel = env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID || '';
-  const envThread = env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS
-    || env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS
-    || '';
-
-  const slack = body?.slack;
-  if (isObject(slack)) {
-    return {
-      channelId: 'channelId' in slack ? coerceSlackField(slack.channelId) : envChannel,
-      threadTs: 'threadTs' in slack ? coerceSlackField(slack.threadTs) : envThread,
-    };
-  }
-  return { channelId: envChannel, threadTs: envThread };
+function ephemeralRunWorkflowSlackContext(env) {
+  return {
+    channelId: env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID || '',
+    threadTs: env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS
+      || env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS
+      || '',
+  };
 }
 
 async function scheduleTeardown(params) {
   const {
+    batchId,
     sites,
     delaySeconds,
     slackContext,
@@ -533,7 +518,7 @@ async function scheduleTeardown(params) {
     workflowWaitTime,
   });
 
-  const workflowName = sanitizeExecutionName(`ephemeral-run-teardown-${Date.now()}`);
+  const workflowName = sanitizeExecutionName(`ephemeral-run-teardown-${batchId}`);
 
   await sfnClient.send(new StartExecutionCommand({
     stateMachineArn,
@@ -567,10 +552,24 @@ async function enqueueSiteJobs(
   const enqueued = { imports: [], audits: [] };
   const skipped = [];
 
+  const trafficAnalysisHandledByBackfill = imports.trafficAnalysisWeeks > 0;
   for (const importType of imports.types) {
+    // traffic-analysis with weeks > 0 is handled by triggerTrafficAnalysisBackfill below
+    if (importType === TRAFFIC_ANALYSIS_IMPORT_TYPE && trafficAnalysisHandledByBackfill) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
     try {
       // eslint-disable-next-line no-await-in-loop
-      await triggerImportRun(configuration, importType, siteId, undefined, undefined, {}, context);
+      await triggerImportRun(
+        configuration,
+        importType,
+        siteId,
+        undefined,
+        undefined,
+        slackContext,
+        context,
+      );
       enqueued.imports.push({ type: importType, status: 'queued' });
     } catch (e) {
       log.error(`Failed to enqueue import ${importType} for site ${siteId}`, e);
@@ -578,10 +577,10 @@ async function enqueueSiteJobs(
     }
   }
 
-  if (imports.trafficAnalysisWeeks > 0) {
+  if (trafficAnalysisHandledByBackfill) {
     try {
       const weeks = imports.trafficAnalysisWeeks;
-      await triggerTrafficAnalysisBackfill(siteId, configuration, {}, context, weeks);
+      await triggerTrafficAnalysisBackfill(siteId, configuration, slackContext, context, weeks);
       for (let w = 1; w <= weeks; w += 1) {
         enqueued.imports.push({ type: 'traffic-analysis', status: 'queued', week: w });
       }
@@ -649,7 +648,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
     opportunityFreshnessDays,
   } = resolvePayload(body);
   const auditTypes = audits.types;
-  const workflowSlackContext = ephemeralRunWorkflowSlackContext(body, env);
+  const workflowSlackContext = ephemeralRunWorkflowSlackContext(env);
   const configuration = await Configuration.findLatest();
 
   const now = new Date();
@@ -677,7 +676,6 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
       imports: body.imports,
       audits: body.audits,
       teardown: body.teardown,
-      slack: body.slack,
     },
   });
 
@@ -818,6 +816,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
   if (teardownSites.length > 0) {
     try {
       await scheduleTeardown({
+        batchId,
         sites: teardownSites,
         delaySeconds: teardownDelaySeconds,
         slackContext: workflowSlackContext,

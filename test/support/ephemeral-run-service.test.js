@@ -413,15 +413,16 @@ describe('ephemeral-run-service', () => {
       expect(trafficEntries).to.have.length(3);
     });
 
-    it('enqueues traffic-analysis import and default backfill when only type is traffic-analysis', async () => {
+    it('enqueues traffic-analysis via backfill only (no duplicate triggerImportRun) when trafficAnalysisWeeks > 0', async () => {
       const ctx = createMockContext();
       const config = createMockConfiguration();
       const resolved = resolvePayload({ imports: { types: ['traffic-analysis'] } });
 
       const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
 
+      // Only the 5 backfill week entries — no extra triggerImportRun for traffic-analysis
       const trafficEntries = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
-      expect(trafficEntries).to.have.length(6); // one import run + 5 default backfill weeks
+      expect(trafficEntries).to.have.length(5);
     });
 
     it('records skipped imports on failure', async () => {
@@ -1299,7 +1300,7 @@ describe('ephemeral-run-service', () => {
       expect(body.error.code).to.equal('ENQUEUE_FAILURE');
     });
 
-    it('passes body.slack channelId and threadTs into SFN workflow and audit enqueue', async () => {
+    it('uses env channelId and threadTs for SFN workflow and audit enqueue', async () => {
       const ctx = createMockContext();
       ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
       ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
@@ -1311,82 +1312,20 @@ describe('ephemeral-run-service', () => {
       await runEphemeralRunBatch(['s-1'], {
         imports: { types: ['top-pages'] },
         audits: { types: ['lhs-mobile'] },
-        slack: { channelId: 'C-payload', threadTs: 'ts-payload' },
       }, ctx);
 
       const auditCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[0] === 'audit-queue-url');
       expect(auditCall).to.exist;
       expect(auditCall.args[1].auditContext.slackContext).to.deep.equal({
-        channelId: 'C-payload',
-        threadTs: 'ts-payload',
+        channelId: 'C-env',
+        threadTs: 'ts-env',
       });
 
       expect(sfnSendStub).to.have.been.calledOnce;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
       expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
-        channelId: 'C-payload',
-        threadTs: 'ts-payload',
-      });
-    });
-
-    it('uses env threadTs when body.slack sets only channelId', async () => {
-      const ctx = createMockContext();
-      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
-      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runEphemeralRunBatch(['s-1'], {
-        audits: { types: ['lhs-mobile'] },
-        slack: { channelId: 'C-only' },
-      }, ctx);
-
-      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
-        channelId: 'C-only',
+        channelId: 'C-env',
         threadTs: 'ts-env',
-      });
-    });
-
-    it('allows explicit empty slack strings to skip posting despite env', async () => {
-      const ctx = createMockContext();
-      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
-      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runEphemeralRunBatch(['s-1'], {
-        audits: { types: ['lhs-mobile'] },
-        slack: { channelId: '', threadTs: '' },
-      }, ctx);
-
-      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
-        channelId: '',
-        threadTs: '',
-      });
-    });
-
-    it('coerces null and undefined slack fields via coerceSlackField', async () => {
-      const ctx = createMockContext();
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runEphemeralRunBatch(['s-1'], {
-        audits: { types: ['lhs-mobile'] },
-        slack: { channelId: null, threadTs: undefined },
-      }, ctx);
-
-      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
-        channelId: '',
-        threadTs: '',
       });
     });
 
@@ -1399,34 +1338,10 @@ describe('ephemeral-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runEphemeralRunBatch(['s-1'], {
-        audits: { types: ['lhs-mobile'] },
-        slack: { channelId: 'C1' },
-      }, ctx);
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
 
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
       expect(input.bulkDisableJob.taskContext.slackContext.threadTs).to.equal('ts-insights');
-    });
-
-    it('uses env channel when body.slack sets only threadTs', async () => {
-      const ctx = createMockContext();
-      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
-      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
-      const site = createMockSite();
-      const config = createMockConfiguration();
-      ctx.dataAccess.Site.findById.resolves(site);
-      ctx.dataAccess.Configuration.findLatest.resolves(config);
-
-      await runEphemeralRunBatch(['s-1'], {
-        audits: { types: ['lhs-mobile'] },
-        slack: { threadTs: 'ts-only' },
-      }, ctx);
-
-      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
-      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
-        channelId: 'C-env',
-        threadTs: 'ts-only',
-      });
     });
 
     it('uses EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN for teardown', async () => {

@@ -14,11 +14,11 @@ import {
   isNonEmptyObject,
   isValidUUID,
   isArray,
-  isObject,
 } from '@adobe/spacecat-shared-utils';
 import {
   accepted,
   badRequest,
+  createResponse,
   notFound,
   forbidden,
   internalServerError,
@@ -73,11 +73,7 @@ function EphemeralRunController(ctx) {
       return badRequest(`Unknown preset: ${body.preset}. Available: ${Object.keys(PRESETS).join(', ')}`);
     }
 
-    if (body.slack !== undefined && body.slack !== null && !isObject(body.slack)) {
-      return badRequest('slack must be an object with optional channelId and threadTs');
-    }
-
-    const accessControlUtil = AccessControlUtil.fromContext(ctx);
+    const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Ephemeral run batch requires admin access');
     }
@@ -103,15 +99,18 @@ function EphemeralRunController(ctx) {
       return badRequest('Valid batchId path parameter is required');
     }
 
-    const accessControlUtil = AccessControlUtil.fromContext(ctx);
+    const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Ephemeral run batch status requires admin access');
     }
 
     try {
-      const result = await readBatchStatus(ctx.s3, batchId);
+      const result = await readBatchStatus(context.s3, batchId);
       if (!result) {
         return notFound(`Batch not found: ${batchId}`);
+      }
+      if (result.status === 'expired') {
+        return createResponse(result, 410);
       }
       return ok(result);
     } catch (error) {
