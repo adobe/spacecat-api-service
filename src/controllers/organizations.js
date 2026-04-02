@@ -27,7 +27,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { filterSitesForProductCode } from '../support/utils.js';
+import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -238,6 +238,9 @@ function OrganizationsController(ctx, env) {
             uniqueTargetOrgIds.map(async (targetOrgId, i) => {
               const entitlement = entitlementResults[i];
               if (entitlement) {
+                // PLG and any future internal tiers are not customer-visible
+                if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) return;
+
                 const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
                 // eslint-disable-next-line max-len
                 enrolledByTargetOrg.set(targetOrgId, new Set(enrollments.map((e) => e.getSiteId())));

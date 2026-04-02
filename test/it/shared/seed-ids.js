@@ -37,6 +37,10 @@ export const SITE_2_BASE_URL = 'https://site2.example.com';
 export const SITE_3_ID = '55555555-5555-4555-9555-555555555555';
 export const SITE_3_BASE_URL = 'https://site3-denied.example.com';
 
+// ── Brands ──
+
+export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
+
 // ── Audits ──
 
 export const AUDIT_TYPE_CWV = 'cwv';
