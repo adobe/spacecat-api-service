@@ -23,6 +23,12 @@ import {
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
 } from './llmo-brand-presence.js';
+import {
+  createUrlInspectorStatsHandler,
+  createUrlInspectorOwnedUrlsHandler,
+  createUrlInspectorTrendingUrlsHandler,
+  createUrlInspectorCitedDomainsHandler,
+} from './llmo-url-inspector.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -58,6 +64,14 @@ function LlmoMysticatController(ctx) {
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorStats = createUrlInspectorStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorOwnedUrls = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorTrendingUrls = createUrlInspectorTrendingUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorCitedDomains = createUrlInspectorCitedDomainsHandler(
+    getOrgAndValidateAccess,
+  );
 
   return {
     getFilterDimensions,
@@ -72,6 +86,10 @@ function LlmoMysticatController(ctx) {
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
+    getUrlInspectorStats,
+    getUrlInspectorOwnedUrls,
+    getUrlInspectorTrendingUrls,
+    getUrlInspectorCitedDomains,
   };
 }
 
