@@ -22,11 +22,6 @@ import {
   BASIC_AUDITS,
   enableAudits,
   enableImports,
-  enrollGeoBrandPresence,
-  isAnyFreeSplitEnabled,
-  GEO_BRAND_PRESENCE_WEEKLY_FREE,
-  GEO_BRAND_PRESENCE_WEEKLY_PAID,
-  GEO_BRAND_PRESENCE_DAILY,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
@@ -181,55 +176,13 @@ async function fullOnboardingModal(body, client, respond, brandURL, tempOnboardi
             text: 'Delivery Type',
           },
         },
-        {
-          type: 'input',
-          block_id: 'brand_presence_cadence_input',
-          element: {
-            type: 'static_select',
-            action_id: 'brand_presence_cadence',
-            initial_option: {
-              text: {
-                type: 'plain_text',
-                text: 'Weekly',
-              },
-              value: 'weekly',
-            },
-            options: [
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Weekly',
-                },
-                value: 'weekly',
-              },
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Weekly (Paid)',
-                },
-                value: 'weekly-paid',
-              },
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Daily',
-                },
-                value: 'daily',
-              },
-            ],
-          },
-          label: {
-            type: 'plain_text',
-            text: 'Brand Presence Cadence',
-          },
-        },
       ],
     },
   });
 }
 
 // site is already on spacecat
-async function elmoOnboardingModal(body, client, respond, brandURL, currentCadence = 'weekly', tempOnboarding = false) {
+async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboarding = false) {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -303,48 +256,6 @@ async function elmoOnboardingModal(body, client, respond, brandURL, currentCaden
           label: {
             type: 'plain_text',
             text: 'IMS Organization ID',
-          },
-        },
-        {
-          type: 'input',
-          block_id: 'brand_presence_cadence_input',
-          element: {
-            type: 'static_select',
-            action_id: 'brand_presence_cadence',
-            initial_option: {
-              text: {
-                type: 'plain_text',
-                text: currentCadence === 'daily' ? 'Daily' : 'Weekly',
-              },
-              value: currentCadence,
-            },
-            options: [
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Weekly',
-                },
-                value: 'weekly',
-              },
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Weekly (Paid)',
-                },
-                value: 'weekly-paid',
-              },
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Daily',
-                },
-                value: 'daily',
-              },
-            ],
-          },
-          label: {
-            type: 'plain_text',
-            text: 'Brand Presence Cadence',
           },
         },
       ],
@@ -434,27 +345,7 @@ export function startLLMOOnboarding(lambdaContext) {
         return;
       }
 
-      // Detect current cadence for existing site
-      const { Configuration } = dataAccess;
-      const configuration = await Configuration.findLatest();
-      const isWeeklyFreeEnabled = configuration.isHandlerEnabledForSite(
-        GEO_BRAND_PRESENCE_WEEKLY_FREE,
-        site,
-      ) || isAnyFreeSplitEnabled(configuration, site);
-      const isWeeklyPaidEnabled = configuration.isHandlerEnabledForSite(
-        GEO_BRAND_PRESENCE_WEEKLY_PAID,
-        site,
-      );
-      const isDailyEnabled = configuration.isHandlerEnabledForSite(
-        GEO_BRAND_PRESENCE_DAILY,
-        site,
-      );
-
-      // Prefer daily if both are enabled (edge case), otherwise use what's enabled
-      const currentCadence = isDailyEnabled ? 'daily' : 'weekly';
-      log.debug(`Site ${site.getId()} current brand presence config: weekly-free=${isWeeklyFreeEnabled}, weekly-paid=${isWeeklyPaidEnabled}, daily=${isDailyEnabled}, detected cadence=${currentCadence}`);
-
-      await elmoOnboardingModal(body, client, respond, brandURL, currentCadence, tempOnboarding);
+      await elmoOnboardingModal(body, client, respond, brandURL, tempOnboarding);
       log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
@@ -472,8 +363,6 @@ export function startLLMOOnboarding(lambdaContext) {
  * @param {string} input.brandName
  * @param {string} input.imsOrgId
  * @param {string} [input.deliveryType]
- * @param {'weekly-free' | 'weekly-paid' | 'daily' | 'weekly'} [input.brandPresenceCadence]
- *   'weekly' is a legacy alias for 'weekly-free' (from the Slack modal dropdown).
  * @param {boolean} [input.tempOnboarding] If true, skip helix-query.yaml update.
  * @param {Object} lambdaCtx
  * @param {Object} slackCtx
@@ -482,7 +371,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, env } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId, deliveryType, brandPresenceCadence = 'weekly-free', tempOnboarding,
+    baseURL, brandName, imsOrgId, deliveryType, tempOnboarding,
   } = input;
 
   const dataFolder = generateDataFolder(baseURL, env.ENV);
@@ -502,15 +391,13 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   }
 
   try {
-    // Core onboarding (shared with HTTP) — includes geo-brand-presence enrollment
-    const cadence = brandPresenceCadence === 'weekly' ? 'weekly-free' : brandPresenceCadence;
+    // Core onboarding (shared with HTTP)
     const result = await performLlmoOnboarding(
       {
         baseURL,
         brandName,
         imsOrgId,
         deliveryType,
-        cadence,
         ...(tempOnboarding ? { tempOnboarding: true } : {}),
       },
       lambdaCtx,
@@ -526,7 +413,6 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 :file_folder: *Data Folder:* ${dataFolder}
 :label: *Brand:* ${brandName}
 :identification_card: *IMS Org ID:* ${imsOrgId}
-:calendar: *Brand Presence Cadence:* ${brandPresenceCadence}
 
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
@@ -576,12 +462,6 @@ export function onboardLLMOModal(lambdaContext) {
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
-      const brandPresenceCadenceRaw = values.brand_presence_cadence_input
-        ?.brand_presence_cadence?.selected_option?.value;
-      const validCadences = ['daily', 'weekly', 'weekly-paid'];
-      const brandPresenceCadence = validCadences.includes(brandPresenceCadenceRaw)
-        ? brandPresenceCadenceRaw
-        : 'weekly';
 
       if (!brandName || !imsOrgId) {
         await ack({
@@ -598,7 +478,6 @@ export function onboardLLMOModal(lambdaContext) {
         brandName,
         imsOrgId,
         deliveryType: deliveryType ?? 'not set',
-        brandPresenceCadence,
         brandURL,
         originalChannel,
         originalThreadTs,
@@ -632,7 +511,6 @@ export function onboardLLMOModal(lambdaContext) {
         baseURL: brandURL,
         imsOrgId,
         deliveryType,
-        brandPresenceCadence,
         ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }, lambdaContext, slackContext);
 
@@ -907,7 +785,7 @@ export function reEnableDefaultsAction(lambdaContext) {
         blocks: [],
       });
 
-      const { Site, Configuration } = dataAccess;
+      const { Site } = dataAccess;
       const site = await Site.findById(siteId);
 
       if (!site) {
@@ -938,23 +816,6 @@ export function reEnableDefaultsAction(lambdaContext) {
       // Enable default audits
       await enableAudits(site, lambdaContext, defaultAudits, safeSay);
 
-      // Enable default brand presence audit only if no variant is already enabled
-      const configuration = await Configuration.findLatest();
-      const hasExistingGeoBrandPresence = configuration.isHandlerEnabledForSite(
-        GEO_BRAND_PRESENCE_WEEKLY_FREE,
-        site,
-      )
-        || configuration.isHandlerEnabledForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site)
-        || configuration.isHandlerEnabledForSite(GEO_BRAND_PRESENCE_DAILY, site)
-        || isAnyFreeSplitEnabled(configuration, site);
-
-      let geoBrandPresenceStatus;
-      if (!hasExistingGeoBrandPresence) {
-        geoBrandPresenceStatus = await enrollGeoBrandPresence(site, lambdaContext, 'weekly-free', safeSay);
-      } else {
-        geoBrandPresenceStatus = 'geo-brand-presence (existing configuration preserved)';
-      }
-
       // Enable default imports
       const siteConfig = site.getConfig();
       await enableImports(siteConfig, [{ type: 'top-pages' }], log, safeSay);
@@ -965,7 +826,7 @@ export function reEnableDefaultsAction(lambdaContext) {
         channel: originalChannel,
         text: `:white_check_mark: Successfully re-enabled default audits and imports for *${brandURL}* (brand: *${existingBrand}*).
 
-:clipboard: *Audits enabled:* ${defaultAudits.join(', ')}, ${geoBrandPresenceStatus}
+:clipboard: *Audits enabled:* ${defaultAudits.join(', ')}
 :inbox_tray: *Imports enabled:* top-pages`,
         thread_ts: originalThreadTs,
       });
