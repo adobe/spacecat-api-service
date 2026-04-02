@@ -273,6 +273,16 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new sites');
   });
 
+  it('returns forbidden for read-only admin when creating a site', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new sites');
+  });
+
   it('returns bad request when creating a site without baseURL', async () => {
     const response = await sitesController.createSite({ data: {} });
 

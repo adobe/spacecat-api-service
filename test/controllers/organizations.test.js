@@ -317,6 +317,18 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new Organizations');
   });
 
+  it('returns forbidden for read-only admin when creating an organization', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    const controller = OrganizationsController(context, env);
+    const response = await controller.createOrganization({
+      data: { name: 'Org 1' },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new Organizations');
+  });
+
   it('returns bad request when creating an organization fails', async () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
     const response = await organizationsController.createOrganization({

@@ -1837,5 +1837,15 @@ describe('Access Control Util', () => {
       const result = await util.hasAccess(org);
       expect(result).to.be.false;
     });
+
+    it('hasAdminReadAccess returns false when isReadOnlyAdmin is absent (legacy authInfo)', () => {
+      // Legacy authInfo objects may not have isReadOnlyAdmin at all; optional chaining must
+      // handle the missing method gracefully without throwing.
+      const ctx = makeContext({ isAdmin: () => false });
+      // Ensure the method is truly absent, not just returning false
+      delete ctx.attributes.authInfo.isReadOnlyAdmin;
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.false;
+    });
   });
 });

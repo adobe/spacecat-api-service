@@ -161,7 +161,10 @@ export default class AccessControlUtil {
     }
 
     const { authInfo } = this;
-    // Check admin read access first - full and read-only admins bypass org/product validation
+    // Full admins and read-only admins both bypass org/product validation for data reads.
+    // Write operations are protected separately: the readOnlyAdminWrapper middleware blocks
+    // all non-GET requests for read-only admin tokens before they reach any controller,
+    // so a read-only admin can never mutate data even though hasAccess() returns true here.
     if (this.hasAdminReadAccess()) {
       return true;
     }

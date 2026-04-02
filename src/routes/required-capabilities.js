@@ -390,6 +390,10 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
+  // These POST sheet-data routes use POST only to accommodate complex query payloads that exceed
+  // URL length limits. They are non-mutating (no side effects) and intentionally require
+  // only site:read, which also allows read-only admins and S2S consumers with read-only tokens
+  // to query sheet data.
   'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
   'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
   'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
