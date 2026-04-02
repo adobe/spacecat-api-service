@@ -14,6 +14,7 @@ import {
   badRequest,
   created,
   createResponse,
+  forbidden,
   internalServerError,
   notFound,
   ok,
@@ -27,6 +28,7 @@ import {
 import { ContactSalesLead as ContactSalesLeadModel } from '@adobe/spacecat-shared-data-access';
 
 import { ContactSalesLeadDto } from '../dto/contact-sales-lead.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * ContactSalesLeads controller. Provides methods to create and query contact sales leads.
@@ -45,13 +47,14 @@ function ContactSalesLeadsController(ctx) {
   }
 
   const { ContactSalesLead, Organization } = dataAccess;
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Resolves the internal organization ID from the authenticated user's IMS org.
+   * Resolves the internal organization from the authenticated user's IMS org.
    * @param {object} context - Request context.
-   * @returns {Promise<string|null>} Organization ID or null.
+   * @returns {Promise<object|null>} Organization or null.
    */
-  const resolveOrganizationId = async (context) => {
+  const resolveOrganization = async (context) => {
     const authInfo = context.attributes?.authInfo;
     if (!authInfo) return null;
 
@@ -62,9 +65,9 @@ function ContactSalesLeadsController(ctx) {
     const imsOrgId = tenantId.includes('@') ? tenantId : `${tenantId}@AdobeOrg`;
 
     try {
-      const org = await Organization.findByImsOrgId(imsOrgId);
-      return org ? org.getId() : null;
-    } catch {
+      return await Organization.findByImsOrgId(imsOrgId);
+    } catch (e) {
+      context.log.error(`Error resolving organization for IMS org ${imsOrgId}: ${e.message}`);
       return null;
     }
   };
@@ -92,38 +95,36 @@ function ContactSalesLeadsController(ctx) {
     }
 
     try {
-      const organizationId = await resolveOrganizationId(context);
+      const organization = await resolveOrganization(context);
+      if (!organization) {
+        return badRequest('Unable to resolve organization from authentication context');
+      }
 
-      if (organizationId) {
-        const leads = await ContactSalesLead.allByOrganizationId(organizationId);
-        if (hasText(siteId) && isValidUUID(siteId)) {
-          const duplicateForSite = leads.find((lead) => lead.getSiteId() === siteId);
-          if (duplicateForSite) {
-            return createResponse(
-              {
-                message:
-                  'A contact sales request has already been submitted for this site.',
-              },
-              409,
-            );
-          }
-        } else {
-          const duplicateEmailNoSite = leads.find(
-            (lead) => lead.getEmail() === email && !lead.getSiteId(),
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const organizationId = organization.getId();
+
+      if (hasText(siteId) && isValidUUID(siteId)) {
+        const existingLead = await ContactSalesLead.findByAll(
+          { organizationId, siteId },
+        );
+        if (existingLead) {
+          return createResponse(
+            {
+              message:
+                'A contact sales request has already been submitted for this site.',
+            },
+            409,
           );
-          if (duplicateEmailNoSite) {
-            return createResponse(
-              {
-                message:
-                  'A contact sales request has already been submitted for this email.',
-              },
-              409,
-            );
-          }
         }
       } else {
-        const existingLead = await ContactSalesLead.findByEmail(email);
-        if (existingLead) {
+        const leads = await ContactSalesLead.allByOrganizationId(organizationId);
+        const duplicateEmailNoSite = leads.find(
+          (lead) => lead.getEmail() === email && !lead.getSiteId(),
+        );
+        if (duplicateEmailNoSite) {
           return createResponse(
             {
               message:
@@ -137,6 +138,7 @@ function ContactSalesLeadsController(ctx) {
       const leadData = {
         name,
         email,
+        organizationId,
         status: ContactSalesLeadModel.STATUSES.NEW,
       };
 
@@ -152,15 +154,11 @@ function ContactSalesLeadsController(ctx) {
         leadData.notes = notes;
       }
 
-      if (organizationId) {
-        leadData.organizationId = organizationId;
-      }
-
       const lead = await ContactSalesLead.create(leadData);
       return created(ContactSalesLeadDto.toJSON(lead));
     } catch (e) {
       context.log.error(`Error creating contact sales lead: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to create contact sales lead');
     }
   };
 
@@ -179,14 +177,18 @@ function ContactSalesLeadsController(ctx) {
     try {
       const organization = await Organization.findById(organizationId);
       if (!organization) {
-        return badRequest('Organization not found');
+        return notFound('Organization not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only users belonging to the organization can view its leads');
       }
 
       const leads = await ContactSalesLead.allByOrganizationId(organizationId);
       return ok(leads.map((lead) => ContactSalesLeadDto.toJSON(lead)));
     } catch (e) {
       context.log.error(`Error getting contact sales leads for org ${organizationId}: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to retrieve contact sales leads');
     }
   };
 
@@ -208,8 +210,16 @@ function ContactSalesLeadsController(ctx) {
     }
 
     try {
-      const leads = await ContactSalesLead.allByOrganizationId(organizationId);
-      const match = leads.find((lead) => lead.getSiteId() === siteId);
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only users belonging to the organization can check its leads');
+      }
+
+      const match = await ContactSalesLead.findByAll({ organizationId, siteId });
 
       if (match) {
         return ok({ exists: true, lead: ContactSalesLeadDto.toJSON(match) });
@@ -217,26 +227,30 @@ function ContactSalesLeadsController(ctx) {
       return ok({ exists: false });
     } catch (e) {
       context.log.error(`Error checking contact sales lead for org ${organizationId}, site ${siteId}: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to check contact sales lead');
     }
   };
 
   const VALID_STATUSES = Object.values(ContactSalesLeadModel.STATUSES);
 
   /**
-   * Updates the status of a contact sales lead.
+   * Updates a contact sales lead (partial update).
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Updated ContactSalesLead response.
    */
-  const updateStatus = async (context) => {
+  const update = async (context) => {
     const { contactSalesLeadId } = context.params;
-    const { status } = context.data || {};
+    const { status, notes } = context.data || {};
 
     if (!isValidUUID(contactSalesLeadId)) {
       return badRequest('Contact sales lead ID required');
     }
 
-    if (!hasText(status) || !VALID_STATUSES.includes(status)) {
+    if (!hasText(status) && !hasText(notes)) {
+      return badRequest('At least one of status or notes is required');
+    }
+
+    if (hasText(status) && !VALID_STATUSES.includes(status)) {
       return badRequest(`Status must be one of: ${VALID_STATUSES.join(', ')}`);
     }
 
@@ -246,12 +260,28 @@ function ContactSalesLeadsController(ctx) {
         return notFound('Contact sales lead not found');
       }
 
-      lead.setStatus(status);
+      const orgId = lead.getOrganizationId();
+      if (orgId) {
+        const organization = await Organization.findById(orgId);
+        if (organization && !await accessControlUtil.hasAccess(organization)) {
+          return forbidden('User does not have access to update this lead');
+        }
+      } else if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can update leads without an organization');
+      }
+
+      if (hasText(status)) {
+        lead.setStatus(status);
+      }
+      if (hasText(notes)) {
+        lead.setNotes(notes);
+      }
+
       const updatedLead = await lead.save();
       return ok(ContactSalesLeadDto.toJSON(updatedLead));
     } catch (e) {
       context.log.error(`Error updating contact sales lead ${contactSalesLeadId}: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to update contact sales lead');
     }
   };
 
@@ -259,7 +289,7 @@ function ContactSalesLeadsController(ctx) {
     create,
     getByOrganizationId,
     checkBySite,
-    updateStatus,
+    update,
   };
 }
 

@@ -421,6 +421,12 @@ describe('getRouteHandlers', () => {
       mockConsumersController,
       mockPlgOnboardingController,
       mockImsOrgAccessController,
+      {
+        create: sinon.stub(),
+        getByOrganizationId: sinon.stub(),
+        checkBySite: sinon.stub(),
+        update: sinon.stub(),
+      },
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -455,6 +461,7 @@ describe('getRouteHandlers', () => {
       'PATCH /trial-users/email-preferences',
       'GET /consumers',
       'POST /consumers/register',
+      'POST /contact-sales-leads',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -763,6 +770,9 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access/:accessId',
       'DELETE /sites/:siteId/ims-org-access/:accessId',
+      'GET /organizations/:organizationId/contact-sales-leads',
+      'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+      'PATCH /contact-sales-leads/:contactSalesLeadId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

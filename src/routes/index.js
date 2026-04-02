@@ -492,7 +492,7 @@ export default function getRouteHandlers(
     'POST /contact-sales-leads': contactSalesLeadsController.create,
     'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
     'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
-    'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.updateStatus,
+    'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
   };
 
   // Initialization of static and dynamic routes

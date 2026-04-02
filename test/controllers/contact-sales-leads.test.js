@@ -18,7 +18,8 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-import esmock from 'esmock';
+import ContactSalesLeadsController from '../../src/controllers/contact-sales-leads.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -41,15 +42,18 @@ describe('ContactSalesLeads Controller', () => {
     getName: () => 'Test User',
     getEmail: () => 'test@example.com',
     getDomain: () => 'https://example.com',
+    getNotes: () => null,
     getStatus: () => 'NEW',
     getCreatedAt: () => '2026-01-01T00:00:00Z',
     getUpdatedAt: () => '2026-01-01T00:00:00Z',
   };
 
+  let mockAccessControlUtil;
+
   const mockDataAccess = {
     ContactSalesLead: {
-      findByEmail: sandbox.stub(),
       findById: sandbox.stub(),
+      findByAll: sandbox.stub(),
       create: sandbox.stub(),
       allByOrganizationId: sandbox.stub(),
     },
@@ -72,36 +76,54 @@ describe('ContactSalesLeads Controller', () => {
 
   let contactSalesLeadsController;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     sandbox.restore();
 
-    const ControllerUnderTest = await esmock('../../src/controllers/contact-sales-leads.js', {});
+    mockAccessControlUtil = {
+      hasAccess: sandbox.stub().resolves(true),
+      hasAdminAccess: sandbox.stub().returns(true),
+    };
 
-    mockDataAccess.ContactSalesLead.findByEmail.resolves(null);
-    mockDataAccess.ContactSalesLead.create.resolves(mockLead);
-    mockDataAccess.ContactSalesLead.allByOrganizationId.resolves([]);
-    mockDataAccess.Organization.findById.resolves(mockOrganization);
-    mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
 
-    const authInfo = new AuthInfo()
-      .withAuthenticated(true)
-      .withProfile({
-        email: 'test@example.com',
-        name: 'Test User',
-        tenants: [{ id: 'test-ims-org-id' }],
-      })
-      .withType('ims');
+    mockDataAccess.ContactSalesLead.findByAll = sandbox.stub().resolves(null);
+    mockDataAccess.ContactSalesLead.findById = sandbox.stub();
+    mockDataAccess.ContactSalesLead.create = sandbox.stub().resolves(mockLead);
+    mockDataAccess.ContactSalesLead.allByOrganizationId = sandbox.stub().resolves([]);
+    mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
+    mockDataAccess.Organization.findByImsOrgId = sandbox.stub().resolves(mockOrganization);
 
-    contactSalesLeadsController = ControllerUnderTest.default({
+    contactSalesLeadsController = ContactSalesLeadsController({
       dataAccess: mockDataAccess,
       log: mockLogger,
       pathInfo: { method: 'POST', suffix: '/contact-sales-leads', headers: {} },
-      attributes: { authInfo },
+      attributes: {
+        authInfo: new AuthInfo()
+          .withAuthenticated(true)
+          .withProfile({
+            email: 'test@example.com',
+            name: 'Test User',
+            tenants: [{ id: 'test-ims-org-id' }],
+          })
+          .withType('ims'),
+      },
     });
   });
 
   afterEach(() => {
     sandbox.restore();
+  });
+
+  describe('constructor', () => {
+    it('throws when context is missing', () => {
+      expect(() => ContactSalesLeadsController())
+        .to.throw('Context required');
+    });
+
+    it('throws when data access is missing', () => {
+      expect(() => ContactSalesLeadsController({ log: mockLogger }))
+        .to.throw('Data access required');
+    });
   });
 
   describe('create', () => {
@@ -112,6 +134,7 @@ describe('ContactSalesLeads Controller', () => {
           email: 'test@example.com',
           domain: 'https://example.com',
           siteId,
+          notes: 'Some notes',
         },
         log: mockLogger,
         attributes: {
@@ -166,6 +189,63 @@ describe('ContactSalesLeads Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when context data is missing', async () => {
+      const context = {
+        log: mockLogger,
+        attributes: { authInfo: new AuthInfo().withAuthenticated(true).withType('ims') },
+      };
+
+      const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when authInfo has no tenants (org unresolvable)', async () => {
+      const context = {
+        data: { name: 'Test User', email: 'test@example.com' },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withAuthenticated(true)
+            .withProfile({ email: 'test@example.com' })
+            .withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when authInfo is missing (org unresolvable)', async () => {
+      const context = {
+        data: { name: 'Test User', email: 'test@example.com' },
+        log: mockLogger,
+        attributes: {},
+      };
+
+      const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('handles tenantId already containing @ sign', async () => {
+      const context = {
+        data: { name: 'Test User', email: 'test@example.com', siteId },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withAuthenticated(true)
+            .withProfile({
+              email: 'test@example.com',
+              tenants: [{ id: 'test-ims-org-id@AdobeOrg' }],
+            })
+            .withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(201);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('test-ims-org-id@AdobeOrg');
+    });
+
     it('returns 400 when email is missing', async () => {
       const context = {
         data: { name: 'Test User' },
@@ -188,8 +268,33 @@ describe('ContactSalesLeads Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 403 when user does not have access to the organization', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = {
+        data: {
+          name: 'Test User',
+          email: 'test@example.com',
+          siteId,
+        },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withAuthenticated(true)
+            .withProfile({
+              email: 'test@example.com',
+              tenants: [{ id: 'test-ims-org-id' }],
+            })
+            .withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(403);
+    });
+
     it('returns 409 when a lead already exists for the same org and site', async () => {
-      mockDataAccess.ContactSalesLead.allByOrganizationId.resolves([mockLead]);
+      mockDataAccess.ContactSalesLead.findByAll.resolves(mockLead);
 
       const context = {
         data: {
@@ -238,8 +343,8 @@ describe('ContactSalesLeads Controller', () => {
       expect(response.status).to.equal(409);
     });
 
-    it('returns 500 on unexpected error', async () => {
-      mockDataAccess.ContactSalesLead.allByOrganizationId.rejects(new Error('DB error'));
+    it('returns 400 when organization cannot be resolved from IMS org', async () => {
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
 
       const context = {
         data: { name: 'Test User', email: 'test@example.com' },
@@ -256,7 +361,52 @@ describe('ContactSalesLeads Controller', () => {
       };
 
       const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 500 on unexpected error with generic message', async () => {
+      mockDataAccess.ContactSalesLead.findByAll.rejects(new Error('DB connection refused'));
+
+      const context = {
+        data: { name: 'Test User', email: 'test@example.com', siteId },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withAuthenticated(true)
+            .withProfile({
+              email: 'test@example.com',
+              tenants: [{ id: 'test-ims-org-id' }],
+            })
+            .withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.create(context);
       expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.equal('Failed to create contact sales lead');
+    });
+
+    it('returns 400 when resolveOrganization fails due to DB error', async () => {
+      mockDataAccess.Organization.findByImsOrgId.rejects(new Error('DB down'));
+
+      const context = {
+        data: { name: 'Test User', email: 'test@example.com' },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withAuthenticated(true)
+            .withProfile({
+              email: 'test@example.com',
+              tenants: [{ id: 'test-ims-org-id' }],
+            })
+            .withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.create(context);
+      expect(response.status).to.equal(400);
+      expect(mockLogger.error).to.have.been.calledWithMatch(/Error resolving organization/);
     });
   });
 
@@ -295,7 +445,7 @@ describe('ContactSalesLeads Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 400 when organization is not found', async () => {
+    it('returns 404 when organization is not found', async () => {
       mockDataAccess.Organization.findById.resolves(null);
 
       const context = {
@@ -307,16 +457,46 @@ describe('ContactSalesLeads Controller', () => {
       };
 
       const response = await contactSalesLeadsController.getByOrganizationId(context);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user does not have access to the organization', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = {
+        params: { organizationId },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.getByOrganizationId(context);
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 on unexpected error with generic message', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('DB error'));
+
+      const context = {
+        params: { organizationId },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.getByOrganizationId(context);
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.equal('Failed to retrieve contact sales leads');
     });
   });
 
   describe('checkBySite', () => {
-    beforeEach(() => {
-      mockDataAccess.ContactSalesLead.allByOrganizationId.resolves([mockLead]);
-    });
-
     it('returns exists=true when a lead matches the org and site', async () => {
+      mockDataAccess.ContactSalesLead.findByAll.resolves(mockLead);
+
       const context = {
         params: { organizationId, siteId },
         log: mockLogger,
@@ -334,9 +514,10 @@ describe('ContactSalesLeads Controller', () => {
     });
 
     it('returns exists=false when no lead matches the site', async () => {
-      const otherSiteId = '333e4567-e89b-12d3-a456-426614174099';
+      mockDataAccess.ContactSalesLead.findByAll.resolves(null);
+
       const context = {
-        params: { organizationId, siteId: otherSiteId },
+        params: { organizationId, siteId },
         log: mockLogger,
         attributes: {
           authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
@@ -376,8 +557,38 @@ describe('ContactSalesLeads Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 500 on unexpected error', async () => {
-      mockDataAccess.ContactSalesLead.allByOrganizationId.rejects(new Error('DB error'));
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const context = {
+        params: { organizationId, siteId },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.checkBySite(context);
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user does not have access to the organization', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = {
+        params: { organizationId, siteId },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.checkBySite(context);
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 on unexpected error with generic message', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('DB error'));
 
       const context = {
         params: { organizationId, siteId },
@@ -389,10 +600,12 @@ describe('ContactSalesLeads Controller', () => {
 
       const response = await contactSalesLeadsController.checkBySite(context);
       expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.equal('Failed to check contact sales lead');
     });
   });
 
-  describe('updateStatus', () => {
+  describe('update', () => {
     const contactSalesLeadId = '123e4567-e89b-12d3-a456-426614174001';
 
     const mockUpdatableLead = {
@@ -402,15 +615,18 @@ describe('ContactSalesLeads Controller', () => {
       getName: () => 'Test User',
       getEmail: () => 'test@example.com',
       getDomain: () => 'https://example.com',
+      getNotes: () => 'Updated notes',
       getStatus: () => 'CONTACTED',
       getCreatedAt: () => '2026-01-01T00:00:00Z',
       getUpdatedAt: () => '2026-01-15T00:00:00Z',
       setStatus: sandbox.stub(),
+      setNotes: sandbox.stub(),
       save: sandbox.stub(),
     };
 
     beforeEach(() => {
       mockUpdatableLead.setStatus.resetHistory();
+      mockUpdatableLead.setNotes.resetHistory();
       mockUpdatableLead.save.resetHistory();
       mockUpdatableLead.save.resolves(mockUpdatableLead);
       mockDataAccess.ContactSalesLead.findById.resolves(mockUpdatableLead);
@@ -426,12 +642,48 @@ describe('ContactSalesLeads Controller', () => {
         },
       };
 
-      const response = await contactSalesLeadsController.updateStatus(context);
+      const response = await contactSalesLeadsController.update(context);
       expect(response.status).to.equal(200);
 
       const body = await response.json();
       expect(body.status).to.equal('CONTACTED');
       expect(mockUpdatableLead.setStatus).to.have.been.calledWith('CONTACTED');
+      expect(mockUpdatableLead.save).to.have.been.calledOnce;
+    });
+
+    it('updates notes successfully', async () => {
+      const context = {
+        params: { contactSalesLeadId },
+        data: { notes: 'Some notes' },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.update(context);
+      expect(response.status).to.equal(200);
+
+      expect(mockUpdatableLead.setNotes).to.have.been.calledWith('Some notes');
+      expect(mockUpdatableLead.setStatus).not.to.have.been.called;
+      expect(mockUpdatableLead.save).to.have.been.calledOnce;
+    });
+
+    it('updates both status and notes', async () => {
+      const context = {
+        params: { contactSalesLeadId },
+        data: { status: 'CONTACTED', notes: 'Called the customer' },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.update(context);
+      expect(response.status).to.equal(200);
+
+      expect(mockUpdatableLead.setStatus).to.have.been.calledWith('CONTACTED');
+      expect(mockUpdatableLead.setNotes).to.have.been.calledWith('Called the customer');
       expect(mockUpdatableLead.save).to.have.been.calledOnce;
     });
 
@@ -445,7 +697,34 @@ describe('ContactSalesLeads Controller', () => {
         },
       };
 
-      const response = await contactSalesLeadsController.updateStatus(context);
+      const response = await contactSalesLeadsController.update(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when data is missing entirely', async () => {
+      const context = {
+        params: { contactSalesLeadId },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.update(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when neither status nor notes is provided', async () => {
+      const context = {
+        params: { contactSalesLeadId },
+        data: {},
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.update(context);
       expect(response.status).to.equal(400);
     });
 
@@ -459,7 +738,7 @@ describe('ContactSalesLeads Controller', () => {
         },
       };
 
-      const response = await contactSalesLeadsController.updateStatus(context);
+      const response = await contactSalesLeadsController.update(context);
       expect(response.status).to.equal(400);
     });
 
@@ -475,11 +754,48 @@ describe('ContactSalesLeads Controller', () => {
         },
       };
 
-      const response = await contactSalesLeadsController.updateStatus(context);
+      const response = await contactSalesLeadsController.update(context);
       expect(response.status).to.equal(404);
     });
 
-    it('returns 500 on unexpected error', async () => {
+    it('returns 403 when user does not have access to the lead organization', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = {
+        params: { contactSalesLeadId },
+        data: { status: 'CONTACTED' },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.update(context);
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 403 for non-admin updating lead without organization', async () => {
+      const leadNoOrg = {
+        ...mockUpdatableLead,
+        getOrganizationId: () => null,
+      };
+      mockDataAccess.ContactSalesLead.findById.resolves(leadNoOrg);
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+
+      const context = {
+        params: { contactSalesLeadId },
+        data: { status: 'CONTACTED' },
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo().withAuthenticated(true).withType('ims'),
+        },
+      };
+
+      const response = await contactSalesLeadsController.update(context);
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 on unexpected error with generic message', async () => {
       mockDataAccess.ContactSalesLead.findById.rejects(new Error('DB error'));
 
       const context = {
@@ -491,8 +807,10 @@ describe('ContactSalesLeads Controller', () => {
         },
       };
 
-      const response = await contactSalesLeadsController.updateStatus(context);
+      const response = await contactSalesLeadsController.update(context);
       expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.equal('Failed to update contact sales lead');
     });
   });
 });
