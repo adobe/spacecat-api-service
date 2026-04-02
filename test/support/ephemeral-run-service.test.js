@@ -930,6 +930,14 @@ describe('ephemeral-run-service', () => {
       // cwv (no fresh opportunity) should still be enabled and enqueued
       expect(config.isHandlerEnabledForSite('cwv', site)).to.equal(true);
       expect(sqsCalls).to.include('cwv');
+
+      // freshnessSkipped written to S3 site result
+      const s3Calls = ctx.s3.s3Client.send.getCalls().map((c) => c.args[0]?.input);
+      const siteResultCall = s3Calls.find((i) => i?.Key?.includes('/results/'));
+      const siteResult = JSON.parse(siteResultCall.Body);
+      expect(siteResult.freshnessSkipped).to.deep.equal([
+        { type: 'scrape-top-pages', reason: 'scrape-fresh' },
+      ]);
     });
 
     it('enqueues all audits when forceRun is true, ignoring freshness', async () => {

@@ -764,6 +764,10 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
         opportunityFreshnessDays,
       );
       const filteredAuditTypes = audits.types.filter((t) => !auditTypesToSkip.has(t));
+      const freshnessSkipped = [...auditTypesToSkip].map((type) => ({
+        type,
+        reason: type === SCRAPE_AUDIT_TYPE ? 'scrape-fresh' : 'opportunity-fresh',
+      }));
       // eslint-disable-next-line no-await-in-loop
       const jobResult = await enqueueSiteJobs(
         siteId,
@@ -779,6 +783,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
         completedAt: new Date().toISOString(),
         enqueued: jobResult.enqueued,
         skipped: jobResult.skipped,
+        freshnessSkipped,
       };
     } catch (error) {
       log.error(`Batch ${batchId}: failed to enqueue jobs for site ${siteId}`, error);

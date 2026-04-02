@@ -130,6 +130,8 @@ function assembleBatchResponse(batchId, manifest, siteResults) {
         ...(result.error ? { error: result.error } : {}),
         ...(result.enqueued ? { jobsEnqueued: result.enqueued } : {}),
         ...(result.skipped?.length ? { jobsSkipped: result.skipped } : {}),
+        ...(result.freshnessSkipped?.length
+          ? { jobsFreshnessSkipped: result.freshnessSkipped } : {}),
       };
       if (TERMINAL_STATUSES.includes(result.status)) {
         failedSiteIds.push(siteId);

@@ -223,6 +223,80 @@ describe('ephemeral-run-batch-store', () => {
       expect(result.jobsPlan).to.deep.equal(manifest.jobsPlan);
       expect(result.sites['s-1'].jobsEnqueued).to.deep.equal(siteResult.enqueued);
       expect(result.sites['s-1'].jobsSkipped).to.deep.equal(siteResult.skipped);
+      expect(result.sites['s-1'].jobsFreshnessSkipped).to.be.undefined;
+    });
+
+    it('includes jobsFreshnessSkipped in site status when audits were skipped due to freshness', async () => {
+      const manifest = {
+        batchId: 'b-1',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        enqueuedSiteIds: ['s-1'],
+        totalSites: 1,
+        failedToEnqueue: [],
+      };
+      const siteResult = {
+        siteId: 's-1',
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        enqueued: { imports: [], audits: [{ type: 'meta-tags', status: 'queued' }] },
+        skipped: [],
+        freshnessSkipped: [
+          { type: 'scrape-top-pages', reason: 'scrape-fresh' },
+          { type: 'cwv', reason: 'opportunity-fresh' },
+        ],
+      };
+
+      let callCount = 0;
+      s3.sendStub.callsFake(() => {
+        callCount += 1;
+        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 2) {
+          return Promise.resolve({
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
+            IsTruncated: false,
+          });
+        }
+        return Promise.resolve(makeBody(siteResult));
+      });
+
+      const result = await readBatchStatus(s3, 'b-1');
+      expect(result.sites['s-1'].jobsFreshnessSkipped).to.deep.equal(siteResult.freshnessSkipped);
+    });
+
+    it('omits jobsFreshnessSkipped when freshnessSkipped array is empty', async () => {
+      const manifest = {
+        batchId: 'b-1',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        enqueuedSiteIds: ['s-1'],
+        totalSites: 1,
+        failedToEnqueue: [],
+      };
+      const siteResult = {
+        siteId: 's-1',
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        enqueued: { imports: [], audits: [] },
+        skipped: [],
+        freshnessSkipped: [],
+      };
+
+      let callCount = 0;
+      s3.sendStub.callsFake(() => {
+        callCount += 1;
+        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 2) {
+          return Promise.resolve({
+            Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
+            IsTruncated: false,
+          });
+        }
+        return Promise.resolve(makeBody(siteResult));
+      });
+
+      const result = await readBatchStatus(s3, 'b-1');
+      expect(result.sites['s-1'].jobsFreshnessSkipped).to.be.undefined;
     });
 
     it('returns completed when all sites have results', async () => {
