@@ -1029,6 +1029,107 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(1);
     });
 
+    it('warns when category upsert fails and fallback also finds nothing', async () => {
+      let catCallCount = 0;
+      const warnStub = sandbox.stub(console, 'warn');
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'categories') {
+            catCallCount += 1;
+            if (catCallCount === 1) {
+              return makeChain({ data: [], error: null });
+            }
+            if (catCallCount === 2) {
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            // Fallback lookup finds nothing
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], categoryId: 'baseurl-unknown-cat' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.calledOnce).to.be.true;
+      expect(warnStub.firstCall.args[0]).to.include('baseurl-unknown-cat');
+    });
+
+    it('warns when topic upsert fails and fallback also finds nothing', async () => {
+      let topicCallCount = 0;
+      const warnStub = sandbox.stub(console, 'warn');
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            topicCallCount += 1;
+            if (topicCallCount === 1) {
+              return makeChain({ data: [], error: null });
+            }
+            if (topicCallCount === 2) {
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], topicId: 'gsc-unknown-topic' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.calledOnce).to.be.true;
+      expect(warnStub.firstCall.args[0]).to.include('gsc-unknown-topic');
+    });
+
     it('handles existing prompts with null regions', async () => {
       const existingData = {
         data: [{
