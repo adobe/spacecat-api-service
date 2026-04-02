@@ -109,6 +109,18 @@ async function buildLookupMaps(organizationId, postgrestClient) {
 }
 
 /**
+ * Best-effort conversion of a category/topic slug back to a readable name.
+ * Strips known DRS source prefixes and title-cases the remainder.
+ */
+function slugToName(slug) {
+  const stripped = slug.replace(/^(baseurl|gsc|agentic)-/, '');
+  return stripped
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
  * Ensures that all referenced categories and topics exist in their respective
  * tables. Creates any missing ones and updates the lookup maps in place.
  */
@@ -133,7 +145,7 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
     const rows = unique.map((catId) => ({
       organization_id: organizationId,
       category_id: catId,
-      name: catId,
+      name: slugToName(catId),
       origin: 'human',
       status: 'active',
       updated_by: updatedBy,
@@ -155,7 +167,7 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
     const rows = unique.map((topId) => ({
       organization_id: organizationId,
       topic_id: topId,
-      name: topId,
+      name: slugToName(topId),
       status: 'active',
       updated_by: updatedBy,
     }));
