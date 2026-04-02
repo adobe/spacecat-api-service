@@ -1,3 +1,24 @@
+# [1.407.0](https://github.com/adobe/spacecat-api-service/compare/v1.406.0...v1.407.0) (2026-04-02)
+
+
+### Features
+
+* add contact sales leads endpoints (SITES-42069) ([#2053](https://github.com/adobe/spacecat-api-service/issues/2053)) ([915702e](https://github.com/adobe/spacecat-api-service/commit/915702e08002990c5d51f2bb2d7b396363e55402))
+
+# [1.406.0](https://github.com/adobe/spacecat-api-service/compare/v1.405.0...v1.406.0) (2026-04-02)
+
+
+### Features
+
+* edge deploy API async support ([#1980](https://github.com/adobe/spacecat-api-service/issues/1980)) ([d25c328](https://github.com/adobe/spacecat-api-service/commit/d25c3282e877de72ba621b2413b3d47464897399))
+
+# [1.405.0](https://github.com/adobe/spacecat-api-service/compare/v1.404.0...v1.405.0) (2026-04-02)
+
+
+### Features
+
+* add global agentic traffic endpoints ([#2107](https://github.com/adobe/spacecat-api-service/issues/2107)) ([6c8df27](https://github.com/adobe/spacecat-api-service/commit/6c8df27c36bfc1055d0b3b65ad6fb1b76b1e616a))
+
 # [1.404.0](https://github.com/adobe/spacecat-api-service/compare/v1.403.1...v1.404.0) (2026-04-02)
 
 

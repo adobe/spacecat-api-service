@@ -38,6 +38,10 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
 
+  // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
+  'GET /sites/:siteId/geo-experiments',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
   'POST /slack/events',
@@ -93,6 +97,12 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/ims-org-access',
   'GET /sites/:siteId/ims-org-access/:accessId',
   'DELETE /sites/:siteId/ims-org-access/:accessId',
+
+  // Contact sales leads - IMS-authenticated, end-user UI only; not for S2S consumers
+  'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+  'GET /organizations/:organizationId/contact-sales-leads',
+  'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+  'PATCH /contact-sales-leads/:contactSalesLeadId',
 
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
@@ -420,6 +430,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /llmo/agentic-traffic/global': 'report:read',
+  'POST /llmo/agentic-traffic/global': 'report:write',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
