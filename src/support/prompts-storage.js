@@ -109,8 +109,44 @@ async function buildLookupMaps(organizationId, postgrestClient) {
 }
 
 /**
+ * DRS source prefix pattern. Must stay in sync with DRS _build_gsc /
+ * _build_base_url / _build_agentic_traffic in spacecat_v2_prompts_sync.py.
+ */
+const DRS_PREFIX_RE = /^(baseurl|gsc|agentic)-/;
+
+/**
+ * Strips known DRS source prefixes from a slug.
+ * e.g. "baseurl-comparison-decision" → "comparison-decision"
+ */
+function stripDrsPrefix(slug) {
+  return slug.replace(DRS_PREFIX_RE, '');
+}
+
+/**
+ * Best-effort conversion of a category/topic slug back to a readable name.
+ * Strips known DRS source prefixes and title-cases each word. Two-word slugs
+ * are joined with " & " to match the DRS naming convention (e.g.
+ * "comparison-decision" → "Comparison & Decision"). Slugs with more or fewer
+ * words are joined with spaces.
+ *
+ * This is a fallback — the primary fix is DRS sending explicit `id` so this
+ * path rarely executes.
+ */
+function slugToName(slug) {
+  const words = stripDrsPrefix(slug)
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  return words.join(words.length === 2 ? ' & ' : ' ');
+}
+
+/**
  * Ensures that all referenced categories and topics exist in their respective
  * tables. Creates any missing ones and updates the lookup maps in place.
+ *
+ * The fallback path (prefix-stripping lookup) depends on the
+ * uq_category_name_per_org / uq_topic_name_per_org unique constraints in
+ * mysticat-data-service to trigger an upsert failure when a prefixed slug
+ * collides with an existing unprefixed entry's name.
  */
 // eslint-disable-next-line max-len
 async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy) {
@@ -133,7 +169,7 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
     const rows = unique.map((catId) => ({
       organization_id: organizationId,
       category_id: catId,
-      name: catId,
+      name: slugToName(catId),
       origin: 'human',
       status: 'active',
       updated_by: updatedBy,
@@ -143,9 +179,40 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .from('categories')
         .upsert(rows, { onConflict: 'organization_id,category_id' })
         .select('id,category_id')
-        .then(({ data, error }) => {
-          if (error) throw new Error(`Failed to auto-create categories: ${error.message}`);
-          data.forEach((c) => categoryMap.set(c.category_id, c.id));
+        .then(async ({ data, error }) => {
+          if (!error) {
+            data.forEach((c) => categoryMap.set(c.category_id, c.id));
+            return;
+          }
+          // Only attempt fallback for unique constraint violations (23505).
+          // Re-throw unexpected errors (network, auth, etc.).
+          if (error.code !== '23505') {
+            throw new Error(`Failed to auto-create categories: ${error.message}`);
+          }
+          // uq_category_name_per_org hit. Try resolving each missing category
+          // by its unprefixed slug — the old category_id before DRS added prefixes.
+          const unresolved = [];
+          for (const catId of unique) {
+            if (!categoryMap.has(catId)) {
+              const unprefixed = stripDrsPrefix(catId);
+              // eslint-disable-next-line no-await-in-loop
+              const { data: existing } = await postgrestClient
+                .from('categories')
+                .select('id,category_id')
+                .eq('organization_id', organizationId)
+                .eq('category_id', unprefixed)
+                .maybeSingle();
+              if (existing) {
+                categoryMap.set(catId, existing.id);
+              } else {
+                unresolved.push(catId);
+              }
+            }
+          }
+          if (unresolved.length > 0) {
+            // eslint-disable-next-line no-console
+            console.warn(`Failed to auto-create or resolve categories: ${unresolved.join(', ')} (org: ${organizationId}, upsert error: ${error.message})`);
+          }
         }),
     );
   }
@@ -155,7 +222,7 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
     const rows = unique.map((topId) => ({
       organization_id: organizationId,
       topic_id: topId,
-      name: topId,
+      name: slugToName(topId),
       status: 'active',
       updated_by: updatedBy,
     }));
@@ -164,9 +231,37 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
         .from('topics')
         .upsert(rows, { onConflict: 'organization_id,topic_id' })
         .select('id,topic_id')
-        .then(({ data, error }) => {
-          if (error) throw new Error(`Failed to auto-create topics: ${error.message}`);
-          data.forEach((t) => topicMap.set(t.topic_id, t.id));
+        .then(async ({ data, error }) => {
+          if (!error) {
+            data.forEach((t) => topicMap.set(t.topic_id, t.id));
+            return;
+          }
+          if (error.code !== '23505') {
+            throw new Error(`Failed to auto-create topics: ${error.message}`);
+          }
+          // Unique constraint — try resolving by unprefixed slug.
+          const unresolved = [];
+          for (const topId of unique) {
+            if (!topicMap.has(topId)) {
+              const unprefixed = stripDrsPrefix(topId);
+              // eslint-disable-next-line no-await-in-loop
+              const { data: existing } = await postgrestClient
+                .from('topics')
+                .select('id,topic_id')
+                .eq('organization_id', organizationId)
+                .eq('topic_id', unprefixed)
+                .maybeSingle();
+              if (existing) {
+                topicMap.set(topId, existing.id);
+              } else {
+                unresolved.push(topId);
+              }
+            }
+          }
+          if (unresolved.length > 0) {
+            // eslint-disable-next-line no-console
+            console.warn(`Failed to auto-create or resolve topics: ${unresolved.join(', ')} (org: ${organizationId}, upsert error: ${error.message})`);
+          }
         }),
     );
   }
