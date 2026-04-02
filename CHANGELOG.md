@@ -1,3 +1,10 @@
+# [1.404.0](https://github.com/adobe/spacecat-api-service/compare/v1.403.1...v1.404.0) (2026-04-02)
+
+
+### Features
+
+* remove llmo-prompts-ahrefs from run-import ([#2111](https://github.com/adobe/spacecat-api-service/issues/2111)) ([023d77c](https://github.com/adobe/spacecat-api-service/commit/023d77c74e2f4f3c8f1ce691a95cd13fa1266c54))
+
 ## [1.403.1](https://github.com/adobe/spacecat-api-service/compare/v1.403.0...v1.403.1) (2026-04-02)
 
 
