@@ -919,13 +919,13 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
 
-      // slugToName strips "baseurl-" and title-cases
+      // slugToName strips "baseurl-" prefix and joins with " & "
       expect(upsertedRows.categories).to.be.an('array').with.lengthOf(1);
-      expect(upsertedRows.categories[0].name).to.equal('Comparison Decision');
+      expect(upsertedRows.categories[0].name).to.equal('Comparison & Decision');
 
-      // slugToName strips "gsc-" and title-cases
+      // slugToName strips "gsc-" prefix and joins with " & "
       expect(upsertedRows.topics).to.be.an('array').with.lengthOf(1);
-      expect(upsertedRows.topics[0].name).to.equal('Photo Editing Topic');
+      expect(upsertedRows.topics[0].name).to.equal('Photo & Editing & Topic');
     });
 
     it('throws when auto-creating categories fails', async () => {

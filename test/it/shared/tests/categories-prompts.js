@@ -65,8 +65,8 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
         const cats = listRes.body.categories;
         const fallback = cats.find((c) => c.id === 'baseurl-comparison-decision');
         expect(fallback, 'fallback category should exist').to.be.an('object');
-        // slugToName strips "baseurl-" prefix and title-cases
-        expect(fallback.name).to.equal('Comparison Decision');
+        // slugToName strips "baseurl-" prefix and joins with " & "
+        expect(fallback.name).to.equal('Comparison & Decision');
         expect(fallback.origin).to.equal('human');
       });
     });
