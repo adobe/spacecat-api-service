@@ -13,9 +13,9 @@
 /**
  * Immutable baseline site top pages for IT tests.
  *
- * - Page 1: SITE_1, ahrefs, global — filter by source
+ * - Page 1: SITE_1, seo, global — filter by source
  * - Page 2: SITE_1, rum, us — filter by source + geo
- * - Page 3: SITE_3 (denied), ahrefs, global — 403 test
+ * - Page 3: SITE_3 (denied), seo, global — 403 test
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -24,7 +24,7 @@ export const siteTopPages = [
     site_id: '33333333-3333-4333-b333-333333333333',
     url: 'https://site1.example.com/page1',
     traffic: 1000,
-    source: 'ahrefs',
+    source: 'seo',
     top_keyword: 'example keyword',
     geo: 'global',
     imported_at: '2025-01-20T10:00:00.000Z',
@@ -42,7 +42,7 @@ export const siteTopPages = [
     site_id: '55555555-5555-4555-9555-555555555555',
     url: 'https://site3-denied.example.com/page1',
     traffic: 200,
-    source: 'ahrefs',
+    source: 'seo',
     geo: 'global',
     imported_at: '2025-01-20T10:00:00.000Z',
   },
