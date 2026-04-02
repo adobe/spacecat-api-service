@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { validateResponseSchema } from './schema-validator.js';
+import { validateResponseSchema, validateRequestSchema } from './schema-validator.js';
 
 const ISO_8601_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 
@@ -146,10 +146,52 @@ export function expectSchemaValid(res, method, openApiPath) {
   if (res.status >= 400 || res.body == null) return;
 
   const statusCode = String(res.status);
-  const { errors } = validateResponseSchema(method, openApiPath, statusCode, res.body);
+  const result = validateResponseSchema(method, openApiPath, statusCode, res.body);
+
+  expect(
+    result.errors,
+    `OpenAPI schema mismatch [${method} ${openApiPath} ${statusCode}]:\n${result.errors.join('\n')}`,
+  ).to.have.lengthOf(0);
+}
+
+/**
+ * Strict variant of expectSchemaValid that also rejects undocumented fields.
+ * Injects `additionalProperties: false` into every object schema that doesn't
+ * explicitly set it, catching fields returned by DTOs but missing from the spec.
+ *
+ * @param {object} res - HTTP response { status, body }
+ * @param {string} method - HTTP method
+ * @param {string} openApiPath - OpenAPI path template
+ */
+export function expectSchemaValidStrict(res, method, openApiPath) {
+  if (res.status >= 400 || res.body == null) return;
+
+  const statusCode = String(res.status);
+  const opts = { strict: true };
+  const result = validateResponseSchema(method, openApiPath, statusCode, res.body, opts);
+
+  expect(
+    result.errors,
+    `OpenAPI strict schema mismatch [${method} ${openApiPath} ${statusCode}]:\n${result.errors.join('\n')}`,
+  ).to.have.lengthOf(0);
+}
+
+/**
+ * Validates that a request body conforms to the declared OpenAPI requestBody
+ * schema. Proves that input parameter types and required fields are
+ * documented correctly.
+ *
+ * @param {*} body - The request body that will be / was sent
+ * @param {string} method - HTTP method (POST, PATCH, etc.)
+ * @param {string} openApiPath - OpenAPI path template
+ */
+export function expectRequestSchemaValid(body, method, openApiPath) {
+  if (body == null) return;
+
+  const { errors } = validateRequestSchema(method, openApiPath, body);
 
   expect(
     errors,
-    `OpenAPI schema mismatch [${method} ${openApiPath} ${statusCode}]:\n${errors.join('\n')}`,
+    `OpenAPI request schema mismatch [${method} ${openApiPath}]:\n${errors.join('\n')}`,
   ).to.have.lengthOf(0);
 }

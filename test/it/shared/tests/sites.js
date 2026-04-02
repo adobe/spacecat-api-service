@@ -11,7 +11,12 @@
  */
 
 import { expect } from 'chai';
-import { expectISOTimestamp, expectSchemaValid } from '../helpers/assertions.js';
+import {
+  expectISOTimestamp,
+  expectSchemaValid,
+  expectSchemaValidStrict,
+  expectRequestSchemaValid,
+} from '../helpers/assertions.js';
 import {
   ORG_1_ID,
   ORG_2_ID,
@@ -83,6 +88,7 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
         expectSchemaValid(res, 'GET', '/sites');
+        expectSchemaValidStrict(res, 'GET', '/sites');
         // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
         // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3)
         expect(res.body).to.be.an('array').with.lengthOf(2);
@@ -105,6 +111,7 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.admin.get(`/sites/${SITE_1_ID}`);
         expect(res.status).to.equal(200);
         expectSchemaValid(res, 'GET', '/sites/{siteId}');
+        expectSchemaValidStrict(res, 'GET', '/sites/{siteId}');
         expectSiteDto(res.body);
         expect(res.body.id).to.equal(SITE_1_ID);
         expect(res.body.baseURL).to.equal(SITE_1_BASE_URL);
@@ -264,11 +271,12 @@ export default function siteTests(getHttpClient, resetData) {
 
       it('admin: creates a new site', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post('/sites', {
-          baseURL: 'https://new-it-site.example.com',
-        });
+        const body = { baseURL: 'https://new-it-site.example.com' };
+        expectRequestSchemaValid(body, 'POST', '/sites');
+        const res = await http.admin.post('/sites', body);
         expect(res.status).to.equal(201);
         expectSchemaValid(res, 'POST', '/sites');
+        expectSchemaValidStrict(res, 'POST', '/sites');
         expectSiteDto(res.body);
         expect(res.body.baseURL).to.equal('https://new-it-site.example.com');
         expect(res.body.organizationId).to.equal(ORG_1_ID);
@@ -309,11 +317,12 @@ export default function siteTests(getHttpClient, resetData) {
 
       it('user: updates accessible site name', async () => {
         const http = getHttpClient();
-        const res = await http.user.patch(`/sites/${testSiteId}`, {
-          name: 'Updated Site Name',
-        });
+        const body = { name: 'Updated Site Name' };
+        expectRequestSchemaValid(body, 'PATCH', '/sites/{siteId}');
+        const res = await http.user.patch(`/sites/${testSiteId}`, body);
         expect(res.status).to.equal(200);
         expectSchemaValid(res, 'PATCH', '/sites/{siteId}');
+        expectSchemaValidStrict(res, 'PATCH', '/sites/{siteId}');
         expectSiteDto(res.body);
         expect(res.body.id).to.equal(testSiteId);
         expect(res.body.name).to.equal('Updated Site Name');

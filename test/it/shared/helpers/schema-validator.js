@@ -21,7 +21,7 @@ const rootDir = join(testDir, '../../../..');
 
 /**
  * OpenAPI-specific keywords that are not part of JSON Schema and must be stripped
- * before AJV compilation to keep strict mode enabled.
+ * before AJV compilation.
  */
 const OPENAPI_KEYWORDS = [
   'example', 'examples', 'externalDocs', 'discriminator',
@@ -74,12 +74,80 @@ function stripOpenApiKeywords(schema) {
 }
 
 /**
- * Retrieves the response schema for a given method, path, and status code.
+ * Recursively injects `additionalProperties: false` into every object schema
+ * that has `properties` defined but no explicit `additionalProperties` setting.
+ * This enables strict validation that catches undocumented fields in responses.
  *
- * @param {string} method - HTTP method (GET, POST, etc.)
- * @param {string} openApiPath - OpenAPI path template (e.g., '/sites/{siteId}')
- * @param {string} statusCode - HTTP status code (e.g., '200')
- * @returns {object|null} The JSON Schema for the response body, or null if not defined
+ * Skips schemas that already set `additionalProperties` (true, false, or schema),
+ * and schemas without `properties` (e.g., free-form objects, maps).
+ */
+function injectStrictAdditionalProperties(schema) {
+  if (schema == null || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(injectStrictAdditionalProperties);
+
+  const result = {};
+  for (const [key, value] of Object.entries(schema)) {
+    result[key] = injectStrictAdditionalProperties(value);
+  }
+
+  if (
+    result.type === 'object'
+    && result.properties
+    && !('additionalProperties' in result)
+  ) {
+    result.additionalProperties = false;
+  }
+
+  return result;
+}
+
+/**
+ * Compiles and caches an AJV validator for a given schema.
+ */
+function compileValidator(cacheKey, schema, { strict = false } = {}) {
+  const fullKey = strict ? `strict:${cacheKey}` : cacheKey;
+  let validate = validatorCache.get(fullKey);
+
+  if (!validate) {
+    let cleaned = stripOpenApiKeywords(schema);
+    if (strict) {
+      cleaned = injectStrictAdditionalProperties(cleaned);
+    }
+    const ajvInstance = getAjv();
+    try {
+      validate = ajvInstance.compile(cleaned);
+    } catch (err) {
+      return {
+        valid: false,
+        errors: [`Schema compilation failed for ${fullKey}: ${err.message}`],
+      };
+    }
+    validatorCache.set(fullKey, validate);
+  }
+
+  return validate;
+}
+
+/**
+ * Runs an AJV validator against a body and formats errors.
+ */
+function runValidation(validate, body) {
+  // compileValidator may return an error object instead of a function
+  if (validate.valid === false) return validate;
+
+  const valid = validate(body);
+  if (valid) return { valid: true, errors: [] };
+
+  const errors = validate.errors.map((err) => {
+    const path = err.instancePath || '(root)';
+    return `${path}: ${err.message} (${JSON.stringify(err.params)})`;
+  });
+
+  return { valid: false, errors };
+}
+
+/**
+ * Retrieves the response schema for a given method, path, and status code.
  */
 export function getSchemaForResponse(method, openApiPath, statusCode) {
   const spec = getBundledSpec();
@@ -96,51 +164,66 @@ export function getSchemaForResponse(method, openApiPath, statusCode) {
 }
 
 /**
+ * Retrieves the request body schema for a given method and path.
+ */
+export function getSchemaForRequest(method, openApiPath) {
+  const spec = getBundledSpec();
+  const pathDef = spec.paths?.[openApiPath];
+  if (!pathDef) return null;
+
+  const operation = pathDef[method.toLowerCase()];
+  if (!operation) return null;
+
+  return operation.requestBody?.content?.['application/json']?.schema ?? null;
+}
+
+/**
  * Validates a response body against the declared OpenAPI schema.
  *
  * @param {string} method - HTTP method
  * @param {string} openApiPath - OpenAPI path template
  * @param {string} statusCode - HTTP status code as string
  * @param {*} body - The response body to validate
+ * @param {object} [options]
+ * @param {boolean} [options.strict=false] - When true, injects
+ *   additionalProperties: false into all object schemas that don't
+ *   explicitly set it. This catches undocumented fields in responses.
  * @returns {{ valid: boolean, errors: string[] }}
  */
-export function validateResponseSchema(method, openApiPath, statusCode, body) {
-  // Skip validation for empty bodies
+export function validateResponseSchema(
+  method,
+  openApiPath,
+  statusCode,
+  body,
+  { strict = false } = {},
+) {
   if (body == null) return { valid: true, errors: [] };
 
   const schema = getSchemaForResponse(method, openApiPath, statusCode);
-  if (!schema) {
-    // No schema defined for this response — nothing to validate
-    return { valid: true, errors: [] };
-  }
+  if (!schema) return { valid: true, errors: [] };
 
-  const cacheKey = `${method}:${openApiPath}:${statusCode}`;
-  let validate = validatorCache.get(cacheKey);
+  const cacheKey = `res:${method}:${openApiPath}:${statusCode}`;
+  const validate = compileValidator(cacheKey, schema, { strict });
 
-  if (!validate) {
-    const cleaned = stripOpenApiKeywords(schema);
-    const ajvInstance = getAjv();
-    try {
-      validate = ajvInstance.compile(cleaned);
-    } catch (err) {
-      return {
-        valid: false,
-        errors: [`Schema compilation failed for ${cacheKey}: ${err.message}`],
-      };
-    }
-    validatorCache.set(cacheKey, validate);
-  }
+  return runValidation(validate, body);
+}
 
-  // For array responses, validate the body directly
-  // For object responses, validate the body directly
-  const valid = validate(body);
+/**
+ * Validates a request body against the declared OpenAPI requestBody schema.
+ *
+ * @param {string} method - HTTP method
+ * @param {string} openApiPath - OpenAPI path template
+ * @param {*} body - The request body to validate
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+export function validateRequestSchema(method, openApiPath, body) {
+  if (body == null) return { valid: true, errors: [] };
 
-  if (valid) return { valid: true, errors: [] };
+  const schema = getSchemaForRequest(method, openApiPath);
+  if (!schema) return { valid: true, errors: [] };
 
-  const errors = validate.errors.map((err) => {
-    const path = err.instancePath || '(root)';
-    return `${path}: ${err.message} (${JSON.stringify(err.params)})`;
-  });
+  const cacheKey = `req:${method}:${openApiPath}`;
+  const validate = compileValidator(cacheKey, schema);
 
-  return { valid: false, errors };
+  return runValidation(validate, body);
 }
