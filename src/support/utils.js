@@ -37,6 +37,13 @@ import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 
+// Two signals indicate a previous paid onboarding:
+// 1. ahref-paid-pages import — unique to the paid profile's import set.
+// 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
+//    after onboardConfig tracking was introduced.
+const PAID_PROFILE_IMPORT = 'ahref-paid-pages';
+const MAX_ONBOARD_HISTORY = 10;
+
 /**
  * Step Functions execution names must be 1–80 chars and may only contain
  * letters, numbers, hyphens, or underscores
@@ -971,6 +978,7 @@ const createSiteAndOrganization = async (
   reportLine,
   context,
   deliveryConfig,
+  prefetchedSite = null,
 ) => {
   const { imsClient, dataAccess, log } = context;
   const { Site, Organization } = dataAccess;
@@ -978,7 +986,7 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
-  let site = await Site.findByBaseURL(baseURL);
+  let site = prefetchedSite ?? await Site.findByBaseURL(baseURL);
   let organizationId;
 
   if (site) {
@@ -1398,6 +1406,7 @@ export async function queueDeliveryConfigWriter(
  * @param {string} options.profileName - The profile name for logging and reporting
  * @returns {Promise<Object>} Report line object
  */
+
 export const onboardSingleSite = async (
   baseURLInput,
   imsOrganizationID,
@@ -1421,9 +1430,6 @@ export const onboardSingleSite = async (
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
-
-  await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
-  await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
     site: baseURL,
@@ -1457,6 +1463,47 @@ export const onboardSingleSite = async (
       await say(`:x: Invalid IMS Org ID: ${imsOrgID}`);
       return reportLine;
     }
+
+    // Single site lookup shared between the guard and createSiteAndOrganization.
+    // Fail-open on DB error: guard is skipped, onboarding proceeds normally.
+    const { Site: SiteLookup } = dataAccess;
+    let prefetchedSite = null;
+    try {
+      prefetchedSite = await SiteLookup.findByBaseURL(baseURL);
+    } catch (lookupError) {
+      log.warn(`Site lookup failed for ${baseURL}, skipping paid profile guard:`, lookupError);
+    }
+
+    // Prevent downgrading a site that was previously onboarded with the paid profile.
+    // A non-protected incoming profile cannot override a paid onboarding unless force=true.
+    if (!profile.protected) {
+      const siteConfig = prefetchedSite?.getConfig();
+      const onboardConfig = siteConfig?.getOnboardConfig();
+      // If onboardConfig.lastProfile is set, trust it as the authoritative signal.
+      // Fall back to the import check only for legacy sites that predate onboardConfig tracking.
+      // Note: guard against empty onboardConfig ({}) from a partial write — check
+      // lastProfile != null rather than onboardConfig truthiness, so the import fallback fires.
+      // Note: '=== paid' relies on the profile name matching the key in profiles.json.
+      // If a new protected profile (e.g. paid-enterprise) is added in the future,
+      // this check must be updated to cover it alongside the incoming profile.protected flag.
+      const isPaidSite = onboardConfig?.lastProfile != null
+        ? onboardConfig.lastProfile === 'paid'
+        : isImportEnabled(PAID_PROFILE_IMPORT, siteConfig?.getImports());
+      if (isPaidSite) {
+        if (additionalParams.force) {
+          log.warn(`Force re-onboarding ${baseURL}: overriding paid profile with "${profileName}"`);
+          await say(`:warning: Force re-onboarding \`${baseURL}\` - overriding paid profile with *${profileName}*.`);
+        } else {
+          reportLine.errors = 'Blocked: site already onboarded with paid profile';
+          reportLine.status = 'Failed';
+          await say(`:warning: Site \`${baseURL}\` was last onboarded with the *paid* profile. To override with non-paid profile, re-run the onboard site command and select *Force Onboard* in the Onboard Site modal window.`);
+          return reportLine;
+        }
+      }
+    }
+
+    await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
+    await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
     let language = additionalParams.language?.toLowerCase();
     let region = additionalParams.region?.toUpperCase();
@@ -1496,6 +1543,7 @@ export const onboardSingleSite = async (
       reportLine,
       context,
       additionalParams.deliveryConfig,
+      prefetchedSite,
     );
 
     // Validate tier
@@ -1606,6 +1654,13 @@ export const onboardSingleSite = async (
         overrideBaseURL,
       });
     }
+
+    const onboardStartTime = Date.now();
+    siteConfig.updateOnboardConfig({
+      lastProfile: profileName.toLowerCase(),
+      lastStartTime: onboardStartTime,
+      ...(additionalParams.force ? { forcedOverride: true } : {}),
+    }, { maxHistory: MAX_ONBOARD_HISTORY });
 
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
@@ -1789,7 +1844,7 @@ export const onboardSingleSite = async (
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
-    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`);
+    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${onboardStartTime}`);
 
     const startCommand = new StartExecutionCommand({
       stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,
