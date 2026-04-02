@@ -1910,6 +1910,42 @@ describe('PlgOnboardingController', () => {
         );
       });
 
+      it('returns 200 with one-item array when limit is 1 (data access returns single instance)', async () => {
+        const record = createMockOnboarding({
+          id: 'limit-1-rec',
+          domain: 'one.example.com',
+          status: 'ONBOARDED',
+        });
+        mockDataAccess.PlgOnboarding.all.resolves(record);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').with.length(1);
+        expect(res.value[0].id).to.equal('limit-1-rec');
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { limit: 1 },
+        );
+      });
+
+      it('returns 200 with empty array when limit is 1 and data access returns null', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves(null);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').that.is.empty;
+      });
+
       it('returns 400 when limit is not a positive integer', async () => {
         const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
           dataAccess: mockDataAccess,

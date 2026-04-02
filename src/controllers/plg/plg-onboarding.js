@@ -624,7 +624,16 @@ function PlgOnboardingController(ctx) {
 
     try {
       const { PlgOnboarding } = context.dataAccess;
-      const records = await PlgOnboarding.all({}, listOptions);
+      const raw = await PlgOnboarding.all({}, listOptions);
+      // Data access returns a single instance when limit === 1, not an array (BaseCollection).
+      let records;
+      if (Array.isArray(raw)) {
+        records = raw;
+      } else if (raw == null) {
+        records = [];
+      } else {
+        records = [raw];
+      }
       return ok(records.map(PlgOnboardingDto.toJSON));
     } catch (error) {
       log.error(`Failed to list PLG onboardings: ${error.message}`, error);
