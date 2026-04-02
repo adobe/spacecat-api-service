@@ -38,6 +38,10 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
 
+  // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
+  'GET /sites/:siteId/geo-experiments',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
   'POST /slack/events',

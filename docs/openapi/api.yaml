@@ -258,6 +258,12 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/edge-deploy:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-edge-deploy'
+  /sites/{siteId}/geo-experiments:
+    $ref: './site-opportunities.yaml#/site-geo-experiments'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}:
+    $ref: './site-opportunities.yaml#/site-geo-experiment'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:

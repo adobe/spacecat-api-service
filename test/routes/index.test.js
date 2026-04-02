@@ -661,6 +661,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/top-pages/:source',
       'GET /sites/:siteId/top-pages/:source/:geo',
       'GET /sites/:siteId/files',
+      'GET /sites/:siteId/geo-experiments',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId',
       'POST /sites/:siteId/graph',
       'POST /event/fulfillment/:eventType',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
