@@ -1,3 +1,10 @@
+# [1.405.0](https://github.com/adobe/spacecat-api-service/compare/v1.404.0...v1.405.0) (2026-04-02)
+
+
+### Features
+
+* add global agentic traffic endpoints ([#2107](https://github.com/adobe/spacecat-api-service/issues/2107)) ([6c8df27](https://github.com/adobe/spacecat-api-service/commit/6c8df27c36bfc1055d0b3b65ad6fb1b76b1e616a))
+
 # [1.404.0](https://github.com/adobe/spacecat-api-service/compare/v1.403.1...v1.404.0) (2026-04-02)
 
 
