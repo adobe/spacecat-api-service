@@ -286,7 +286,7 @@ function PreflightController(ctx, log, env) {
   /**
    * Creates a new beta preflight job by proxying to Mysticat's analyze endpoint.
    * For promise-based authoring types (CS, CS_CW, AMS), the promise token is resolved
-   * from the x-promise-token request header if present, otherwise falls back to IMS.
+   * from the promiseToken cookie if present, otherwise falls back to IMS.
    * The resolved token is forwarded to Mysticat as x-promise-token so it can authenticate
    * against the CMS when fetching the page.
    * @param {Object} context - The request context
