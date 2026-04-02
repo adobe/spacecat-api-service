@@ -92,6 +92,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
+ * @param {Object} preflightChecksController - Preflight checks controller for autofix deploy.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -141,6 +142,7 @@ export default function getRouteHandlers(
   imsOrgAccessController,
   contactSalesLeadsController,
   featureFlagsController,
+  preflightChecksController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -528,6 +530,9 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
     'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
     'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
+
+    // Preflight checks (autofix deploy permission/capability validation)
+    'POST /sites/:siteId/preflight-checks': preflightChecksController.runChecks,
   };
 
   // Initialization of static and dynamic routes

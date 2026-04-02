@@ -407,6 +407,10 @@ describe('getRouteHandlers', () => {
     deleteByOrganizationProductAndName: () => null,
   };
 
+  const mockPreflightChecksController = {
+    runChecks: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -455,6 +459,7 @@ describe('getRouteHandlers', () => {
       mockImsOrgAccessController,
       mockContactSalesLeadsController,
       mockFeatureFlagsController,
+      mockPreflightChecksController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -827,6 +832,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/contact-sales-leads',
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
+      'POST /sites/:siteId/preflight-checks',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

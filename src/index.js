@@ -92,6 +92,7 @@ import ConsumersController from './controllers/consumers.js';
 import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
+import PreflightChecksController from './controllers/preflight-checks.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 
@@ -227,6 +228,7 @@ async function run(request, context) {
     const imsOrgAccessController = ImsOrgAccessController(context);
     const contactSalesLeadsController = ContactSalesLeadsController(context);
     const featureFlagsController = FeatureFlagsController(context);
+    const preflightChecksController = PreflightChecksController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -275,6 +277,7 @@ async function run(request, context) {
       imsOrgAccessController,
       contactSalesLeadsController,
       featureFlagsController,
+      preflightChecksController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
