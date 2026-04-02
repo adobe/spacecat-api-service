@@ -593,10 +593,13 @@ function PlgOnboardingController(ctx) {
   };
 
   /**
-   * Lists every row in the PLG onboardings store (`plg_onboardings` via PostgREST;
-   * schema in `@adobe/spacecat-shared-data-access` plg-onboarding.schema.js).
+   * Handler for `GET /plg/sites`. Lists rows in the PLG onboardings store (`plg_onboardings`
+   * via PostgREST; schema in `@adobe/spacecat-shared-data-access` plg-onboarding.schema.js).
    * Each record is one PLG site onboarding (domain, baseURL, optional SpaceCat siteId).
    * Cross-tenant; restricted to SpaceCat admins.
+   *
+   * Query `limit` (optional): caps how many rows are returned. When omitted, all pages are
+   * loaded until exhaustion (unbounded client-side cap; payload can be very large).
    * @param {object} context - Request context.
    * @returns {Promise<Response>} Array of onboarding DTOs.
    */
@@ -606,12 +609,22 @@ function PlgOnboardingController(ctx) {
       return forbidden('Only admins can list all PLG onboarding records');
     }
 
+    const rawLimit = context.data?.limit;
+    let listOptions;
+    if (rawLimit === undefined || rawLimit === null || rawLimit === '') {
+      // Unbounded: follow every PostgREST page until empty (payload can be very large).
+      listOptions = { fetchAllPages: true };
+    } else {
+      const n = parseInt(String(rawLimit), 10);
+      if (Number.isNaN(n) || n < 1) {
+        return badRequest('limit must be a positive integer');
+      }
+      listOptions = { limit: n };
+    }
+
     try {
       const { PlgOnboarding } = context.dataAccess;
-      const records = await PlgOnboarding.all(
-        {},
-        { fetchAllPages: true },
-      );
+      const records = await PlgOnboarding.all({}, listOptions);
       return ok(records.map(PlgOnboardingDto.toJSON));
     } catch (error) {
       log.error(`Failed to list PLG onboardings: ${error.message}`, error);

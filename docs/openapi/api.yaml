@@ -522,8 +522,8 @@ paths:
     $ref: './tokens-api.yaml#/site-token-by-type'
   /plg/onboard:
     $ref: './plg-onboarding-api.yaml#/plg-onboard'
-  /aso-plg-sites:
-    $ref: './plg-onboarding-api.yaml#/aso-plg-sites'
+  /plg/sites:
+    $ref: './plg-onboarding-api.yaml#/plg-sites'
   /plg/onboard/status/{imsOrgId}:
     $ref: './plg-onboarding-api.yaml#/plg-onboard-status'
 

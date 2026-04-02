@@ -1894,6 +1894,34 @@ describe('PlgOnboardingController', () => {
         );
       });
 
+      it('returns 200 and passes limit when admin sends limit', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves([]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '50' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { limit: 50 },
+        );
+      });
+
+      it('returns 400 when limit is not a positive integer', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '0' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
       it('returns 500 when data access fails', async () => {
         mockDataAccess.PlgOnboarding.all.rejects(new Error('db unavailable'));
 

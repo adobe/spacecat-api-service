@@ -6747,9 +6747,6 @@ PlgOnboarding:
         auditsEnabled:
           type: boolean
           description: Whether audits were enabled for the site
-        deliveryConfigQueued:
-          type: boolean
-          description: Whether delivery config processing was queued
         entitlementCreated:
           type: boolean
           description: Whether the ASO entitlement was provisioned
@@ -6761,7 +6758,6 @@ PlgOnboarding:
         siteResolved: true
         configUpdated: true
         auditsEnabled: true
-        deliveryConfigQueued: true
         entitlementCreated: true
     error:
       type:
