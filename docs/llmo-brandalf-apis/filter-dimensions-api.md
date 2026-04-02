@@ -1,6 +1,6 @@
 # Brand Presence Filter Dimensions API
 
-Returns available filter options (brands, categories, topics, origins, regions, page_intents) for the Brand Presence feature. Used to populate filter dropdowns in the UI. Data is queried from the `brand_presence_executions` table via PostgREST (mysticat-data-service).
+Returns available filter options (brands, categories, topics, origins, regions), execution **stats** from the same filtered row set, and **page_intents** for the Brand Presence feature. Dimensions and **stats** come from the PostgreSQL function `rpc_brand_presence_filter_dimensions` via PostgREST (mysticat-data-service). **page_intents** are loaded in a separate query.
 
 ---
 
@@ -23,12 +23,12 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 |-----------|---------|------|---------|-------------|
 | `startDate` | `start_date` | string (YYYY-MM-DD) | 28 days ago | Start of date range |
 | `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
-| `model` | — | string | `chatgpt` | LLM model (e.g. chatgpt, gemini, copilot) |
+| `model` | — | enum | `chatgpt-free` | LLM model. Must be one of: `chatgpt-paid`, `chatgpt-free`, `google-ai-overview`, `perplexity`, `google-ai-mode`, `copilot`, `gemini`, `google`, `microsoft`, `mistral`, `anthropic`, `amazon`. Returns 400 if invalid. |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site |
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category. If UUID → `category_id`; if not UUID (e.g. "Acrobat") → `category_name` |
 | `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated UUIDs (e.g. `uuid1,uuid2`), or repeated param. Non-UUID values are ignored. Uses `topic_id` column. |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
-| `origin` | — | string | — | Filter by origin (exact match, case-insensitive; e.g. `human`, `ai`) |
+| `origin` | — | string | — | Filter by origin (`ILIKE` pattern on executions, same as RPC; e.g. `%organic%` or `ai`) |
 
 **Parameters accepted for future schema support** (not yet applied):
 - `user_intent` / `userIntent`
@@ -42,14 +42,14 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 |-----------|---------|
 | `startDate` | 28 days before today |
 | `endDate` | Today |
-| `model` | `chatgpt` |
+| `model` | `chatgpt-free` |
 
 ---
 
 ## Sample URL (All Parameters)
 
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=ai
 ```
 
 **Multiple topicIds (comma-separated):**
@@ -59,7 +59,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-d
 
 **Single brand variant:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt-free&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=ai
 ```
 
 ---
@@ -83,6 +83,11 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
   "regions": [
     { "id": "US", "label": "US" }
   ],
+  "stats": {
+    "total_execution_count": 1200,
+    "distinct_prompt_count": 80,
+    "empty_answer_execution_count": 12
+  },
   "page_intents": [
     { "id": "TRANSACTIONAL", "label": "TRANSACTIONAL" },
     { "id": "INFORMATIONAL", "label": "INFORMATIONAL" }
@@ -90,44 +95,44 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
 }
 ```
 
+**stats** — From the RPC, over the same filtered executions as the dimension lists. Returned as numbers; the API coerces missing or non-finite values to `0`. If the database function does not yet return a `stats` key (older deployment), the response still includes **`stats`** with all three fields set to **`0`** so clients stay stable.
+
+| Field | Meaning |
+|--------|---------|
+| `total_execution_count` | Row count after filters |
+| `distinct_prompt_count` | Distinct non-null `prompt_id` values |
+| `empty_answer_execution_count` | Rows with no answer (NULL, empty, or whitespace-only) |
+
 **page_intents** — Distinct `page_intent` values from the `page_intents` table. See [Page Intents Scenarios](#page-intents-scenarios) for how site scope is determined.
 
 ---
 
-## Internal Query (PostgREST)
+## Internal: filter dimensions RPC (PostgREST)
 
-The API builds a PostgREST query against the `brand_presence_executions` table. Equivalent logic:
+The handler calls **`rpc_brand_presence_filter_dimensions`** with organization id, date range, resolved model, and optional filters (`p_brand_id`, `p_site_id`, `p_category_id`, `p_category_name`, `p_topic_ids`, `p_region_code`, `p_origin`). The RPC returns one JSON object: dimension arrays plus **`stats`**.
 
-```javascript
-// Base query
-client
-  .from('brand_presence_executions')
-  .select('brand_id, brand_name, category_name, topic_id, topics, origin, region_code, site_id')
-  .eq('organization_id', organizationId)
-  .gte('execution_date', startDate)
-  .lte('execution_date', endDate)
-  .eq('model', model)
+**Example request:**
 
-  // Optional filters (applied when param is provided and not empty)
-  .eq('site_id', siteId)                    // if siteId
-  .eq('brand_id', brandId)                  // if brandId !== 'all' (path param)
-  .eq('category_id', categoryId)            // if categoryId is valid UUID
-  .eq('category_name', categoryId)         // if categoryId is NOT valid UUID (e.g. "Acrobat")
-  .in('topic_id', topicIds)                // if topicIds (array of valid UUIDs; single or multiple)
-  .eq('region_code', regionCode)            // if regionCode
-  .ilike('origin', origin)                  // if origin (exact match, case-insensitive)
+```
+POST /rpc/rpc_brand_presence_filter_dimensions
+Content-Type: application/json
 
-  .limit(5000)
+{
+  "p_organization_id": "44568c3e-efd4-4a7f-8ecd-8caf615f836c",
+  "p_start_date": "2025-09-27",
+  "p_end_date": "2025-09-30",
+  "p_model": "google-ai-mode",
+  "p_site_id": "c2473d89-e997-458d-a86d-b4096649c12b",
+  "p_category_name": "Acrobat",
+  "p_topic_ids": ["uuid1", "uuid2"],
+  "p_region_code": "US",
+  "p_origin": "%organic%"
+}
 ```
 
-**Equivalent PostgREST HTTP request** (example with all filters, including multiple topicIds):
-```
-GET /brand_presence_executions?select=brand_id,brand_name,category_name,topic_id,topics,origin,region_code,site_id&organization_id=eq.44568c3e-efd4-4a7f-8ecd-8caf615f836c&execution_date=gte.2025-09-27&execution_date=lte.2025-09-30&model=eq.google-ai-mode&site_id=eq.c2473d89-e997-458d-a86d-b4096649c12b&category_name=eq.Acrobat&topic_id=in.(uuid1,uuid2)&region_code=eq.US&origin=ilike.ai&limit=5000
-```
+**topicIds parsing (query string → RPC):** Comma-separated string, array, or single UUID; non-UUID tokens dropped. Passed as `p_topic_ids`.
 
-**topicIds parsing:** Accepts `topicIds` as a comma-separated string (`uuid1,uuid2`), an array, or a single UUID. Non-UUID values are filtered out. The filter uses `topic_id IN (...)` (PostgREST `topic_id=in.(...)`).
-
-**Response processing:** The API deduplicates and sorts the results to build `brands`, `categories`, `topics`, `origins`, `regions`, and `page_intents` arrays. Each array is an array of `{ id, label }` objects. For `topics`, `id` is the `topic_id` (UUID) and `label` is the denormalized topic name from the `topics` column; only rows with non-null `topic_id` are included.
+**Schema:** mysticat-data-service `docs/llmo-database-schema.md` § `rpc_brand_presence_filter_dimensions`.
 
 ---
 
@@ -171,6 +176,7 @@ client.from('page_intents').select('page_intent').eq('site_id', siteId).limit(50
 | Status | Condition |
 |--------|-----------|
 | 400 | PostgREST not configured (DATA_SERVICE_PROVIDER ≠ postgres) |
+| 400 | Invalid `model` query parameter (not in llm_model enum) |
 | 400 | Organization not found |
 | 400 | PostgREST/PostgreSQL error |
 | 403 | User does not belong to the organization |
@@ -180,6 +186,8 @@ client.from('page_intents').select('page_intent').eq('site_id', siteId).limit(50
 ## Related APIs
 
 - [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks for a given model, optionally filtered by brand or site.
+- [Brand Presence Sentiment Overview API](sentiment-overview-api.md) — Weekly sentiment percentages
+- [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly mentions, citations, and competitor breakdown
 
 ---
 

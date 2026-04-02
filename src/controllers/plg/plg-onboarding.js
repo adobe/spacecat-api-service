@@ -11,6 +11,7 @@
  */
 
 // TODO: re-export from @adobe/spacecat-shared-data-access package root
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
@@ -41,6 +42,7 @@ import {
 import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
+import AccessControlUtil from '../../support/access-control-util.js';
 
 const { STATUSES } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
@@ -48,6 +50,7 @@ const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const PLG_PROFILE_KEY = 'aso_plg';
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
+const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
@@ -180,6 +183,18 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
+  // Guard: only one domain per IMS org can be onboarded
+  const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
+  const alreadyOnboarded = existingRecords
+    .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
+  if (alreadyOnboarded) {
+    log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG}`);
+    await onboarding.save();
+    return onboarding;
+  }
+
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
@@ -211,14 +226,24 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setOrganizationId(organizationId);
     steps.orgResolved = true;
 
-    // Step 2: RUM check — informational, does not block onboarding
+    // Step 2: AEM verification — domain must be an AEM site (RUM check OR delivery type)
     const rumApiClient = RUMAPIClient.createFrom(context);
+    let cachedDeliveryType = null;
     try {
       await rumApiClient.retrieveDomainkey(domain);
       steps.rumVerified = true;
     } catch {
       steps.rumVerified = false;
-      log.info(`No RUM data for ${domain}, continuing onboarding`);
+      log.info(`No RUM data for ${domain}, checking delivery type`);
+      cachedDeliveryType = await findDeliveryType(baseURL);
+      if (cachedDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
+        log.info(`Domain ${domain} is not an AEM site, moving to waitlist`);
+        onboarding.setStatus(STATUSES.WAITLISTED);
+        onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
+        onboarding.setSteps(steps);
+        await onboarding.save();
+        return onboarding;
+      }
     }
 
     // Step 3: Check site ownership
@@ -268,7 +293,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 
     // Step 5: Create site if new
     if (!site) {
-      const deliveryType = await findDeliveryType(baseURL);
+      const deliveryType = cachedDeliveryType ?? await findDeliveryType(baseURL);
       site = await Site.create({
         baseURL,
         organizationId,
@@ -280,65 +305,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
 
-    // Step 5b: Auto-resolve author URL and RUM host
-    let rumHost = null;
-    try {
-      const resolvedConfig = await autoResolveAuthorUrl(site, context);
-      rumHost = resolvedConfig?.host || null;
-
-      // Only update deliveryConfig if authorURL is not already set
-      const existingDeliveryConfig = site.getDeliveryConfig() || {};
-      if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
-        site.setDeliveryConfig({
-          ...existingDeliveryConfig,
-          authorURL: resolvedConfig.authorURL,
-          programId: resolvedConfig.programId,
-          environmentId: resolvedConfig.environmentId,
-          preferContentApi: true,
-          imsOrgId,
-        });
-        log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
-        steps.authorUrlResolved = true;
-      }
-    } catch (error) {
-      log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
-    }
-
-    // Step 5c: Resolve EDS code config and hlxConfig from RUM host
-    try {
-      await updateCodeConfig(site, rumHost, { say: () => {} }, log);
-      if (site.getCode()?.owner) {
-        steps.codeConfigResolved = true;
-      }
-    } catch (error) {
-      log.warn(`Failed to resolve code config for site ${site.getId()}: ${error.message}`);
-    }
-
-    // Step 5d: Set hlxConfig for EDS sites from RUM host
-    if (rumHost && !site.getHlxConfig()) {
-      const edsMatch = rumHost.match(EDS_HOST_PATTERN);
-      if (edsMatch) {
-        const [, ref, repo, owner, tld] = edsMatch;
-        site.setHlxConfig({
-          hlxVersion: 5,
-          rso: {
-            ref, site: repo, owner, tld,
-          },
-        });
-        log.info(`Set hlxConfig for site ${site.getId()}: ${ref}--${repo}--${owner}.${tld}`);
-        steps.hlxConfigSet = true;
-      }
-    }
-
-    // Step 6: Update configs
+    // Step 5b: Resolve canonical URL early so the RUM lookup uses the correct hostname
+    // (e.g. example.com may redirect to www.example.com which is what RUM is keyed on)
     const siteConfig = site.getConfig();
-
-    // Enable imports from PLG profile
-    const importDefs = Object.keys(profile.imports || {})
-      .map((type) => ({ type }));
-    await enableImports(siteConfig, importDefs, log);
-
-    // Resolve canonical URL for overrideBaseURL
     const currentFetchConfig = siteConfig.getFetchConfig() || {};
     if (!currentFetchConfig.overrideBaseURL) {
       try {
@@ -364,6 +333,63 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
         log.warn(`Failed to resolve canonical URL for ${baseURL}: ${error.message}`);
       }
     }
+
+    // Step 5c: Auto-resolve author URL and RUM host
+    let rumHost = null;
+    try {
+      const resolvedConfig = await autoResolveAuthorUrl(site, context);
+      rumHost = resolvedConfig?.host || null;
+
+      // Only update deliveryConfig if authorURL is not already set
+      const existingDeliveryConfig = site.getDeliveryConfig() || {};
+      if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+        site.setDeliveryConfig({
+          ...existingDeliveryConfig,
+          authorURL: resolvedConfig.authorURL,
+          programId: resolvedConfig.programId,
+          environmentId: resolvedConfig.environmentId,
+          preferContentApi: true,
+          imsOrgId,
+        });
+        log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
+        steps.authorUrlResolved = true;
+      }
+    } catch (error) {
+      log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
+    }
+
+    // Step 5d: Resolve EDS code config and hlxConfig from RUM host
+    try {
+      await updateCodeConfig(site, rumHost, { say: () => {} }, log);
+      if (site.getCode()?.owner) {
+        steps.codeConfigResolved = true;
+      }
+    } catch (error) {
+      log.warn(`Failed to resolve code config for site ${site.getId()}: ${error.message}`);
+    }
+
+    // Step 5e: Set hlxConfig for EDS sites from RUM host
+    if (rumHost && !site.getHlxConfig()) {
+      const edsMatch = rumHost.match(EDS_HOST_PATTERN);
+      if (edsMatch) {
+        const [, ref, repo, owner, tld] = edsMatch;
+        site.setHlxConfig({
+          hlxVersion: 5,
+          rso: {
+            ref, site: repo, owner, tld,
+          },
+        });
+        log.info(`Set hlxConfig for site ${site.getId()}: ${ref}--${repo}--${owner}.${tld}`);
+        steps.hlxConfigSet = true;
+      }
+    }
+
+    // Step 6: Update configs
+
+    // Enable imports from PLG profile
+    const importDefs = Object.keys(profile.imports || {})
+      .map((type) => ({ type }));
+    await enableImports(siteConfig, importDefs, log);
 
     // Detect and set locale
     if (!site.getLanguage() || !site.getRegion()) {
@@ -398,15 +424,28 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     await enableAudits(site, context, auditTypes);
     steps.auditsEnabled = true;
 
-    // Step 7b: Enroll site in summit-plg config handler
+    // Step 7b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
     try {
       const { Configuration } = dataAccess;
       const configuration = await Configuration.findLatest();
-      configuration.enableHandlerForSite('summit-plg', site);
+      const configHandlers = [
+        'summit-plg',
+        'broken-backlinks-auto-suggest',
+        'broken-backlinks-auto-fix',
+        'alt-text-auto-fix',
+        'alt-text-auto-suggest-mystique',
+        'alt-text',
+        'cwv-auto-fix',
+        'cwv-auto-suggest',
+        'cwv',
+      ];
+      configHandlers.forEach((handler) => {
+        configuration.enableHandlerForSite(handler, site);
+      });
       await configuration.save();
-      log.info(`Enrolled site ${site.getId()} in summit-plg config`);
+      log.info(`Enrolled site ${site.getId()} in config handlers: ${configHandlers.join(', ')}`);
     } catch (error) {
-      log.warn(`Failed to enroll site in summit-plg config: ${error.message}`);
+      log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
     // Step 8: Add ASO entitlement
@@ -526,16 +565,21 @@ function PlgOnboardingController(ctx) {
       return badRequest('Authentication information is required');
     }
 
-    const profile = authInfo.getProfile();
+    // Admin/API key holders can access any org's status
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      // Non-admin: validate caller's IMS tenant matches requested imsOrgId
+      const profile = authInfo.getProfile();
 
-    if (!profile?.tenants?.[0]?.id) {
-      return badRequest('User profile or organization ID not found in authentication token');
-    }
+      if (!profile?.tenants?.[0]?.id) {
+        return badRequest('User profile or organization ID not found in authentication token');
+      }
 
-    const matchedTenant = profile.tenants
-      .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
-    if (!matchedTenant) {
-      return forbidden('Not authorized for this IMS org');
+      const matchedTenant = profile.tenants
+        .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
+      if (!matchedTenant) {
+        return forbidden('Not authorized for this IMS org');
+      }
     }
 
     const { PlgOnboarding } = da;

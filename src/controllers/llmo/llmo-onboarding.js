@@ -20,6 +20,20 @@ import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
+import {
+  readCustomerConfigV2FromPostgres,
+  writeCustomerConfigV2ToPostgres,
+} from '../../support/customer-config-v2-storage.js';
+import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
+import {
+  resolveLlmoOnboardingMode,
+  LLMO_ONBOARDING_MODE_V1,
+  LLMO_ONBOARDING_MODE_V2,
+  LLMO_FEATURE_FLAG_PRODUCT,
+  LLMO_BRANDALF_FLAG,
+} from '../../support/llmo-onboarding-mode.js';
+import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
+import { upsertBrand } from '../../support/brands-storage.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -41,6 +55,255 @@ export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
 export const ASO_CRITICAL_SITES = [];
 const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
+
+function resolveUpdatedBy(context) {
+  return context.attributes?.authInfo?.profile?.email
+    || context.attributes?.authInfo?.getProfile?.()?.email
+    || 'system';
+}
+
+function buildOnboardingMetadata({
+  siteId, imsOrgId, brandName, onboardingMode, extra = {},
+}) {
+  return {
+    site_id: siteId,
+    imsOrgId,
+    brand: brandName,
+    onboarding_mode: onboardingMode,
+    ...extra,
+  };
+}
+
+function buildBrandalfMetadata({
+  organizationId,
+  siteId,
+  imsOrgId,
+  brandName,
+  companyWebsite,
+  onboardingMode,
+}) {
+  const { hostname } = new URL(companyWebsite);
+  return buildOnboardingMetadata({
+    siteId,
+    imsOrgId,
+    brandName,
+    onboardingMode,
+    extra: {
+      site: hostname,
+      spaceCatId: organizationId,
+      company_website: companyWebsite,
+    },
+  });
+}
+
+export async function triggerBrandalfOnboardingJob({
+  drsClient,
+  organizationId,
+  siteId,
+  imsOrgId,
+  brandName,
+  companyWebsite,
+  onboardingMode,
+  log,
+  say = () => {},
+}) {
+  const metadata = buildBrandalfMetadata({
+    organizationId,
+    siteId,
+    imsOrgId,
+    brandName,
+    companyWebsite,
+    onboardingMode,
+  });
+
+  const drsJob = await drsClient.submitJob({
+    provider_id: 'single_shot_prompt',
+    priority: 'HIGH',
+    source: 'onboarding',
+    parameters: {
+      prompt_type: 'brandalf',
+      name: brandName,
+      company_website: companyWebsite,
+      metadata,
+    },
+  });
+
+  log.info(`Started DRS Brandalf flow: job=${drsJob.job_id}`);
+  say(`:label: Started DRS Brandalf job: ${drsJob.job_id}`);
+  return drsJob;
+}
+
+function buildPromptGenerationMetadata({
+  siteId,
+  imsOrgId,
+  baseUrl,
+  brandName,
+  region,
+  onboardingMode,
+}) {
+  return buildOnboardingMetadata({
+    siteId,
+    imsOrgId,
+    brandName,
+    onboardingMode,
+    extra: {
+      base_url: baseUrl,
+      region,
+    },
+  });
+}
+
+export async function submitOnboardingPromptGenerationJob({
+  drsClient,
+  baseUrl,
+  brandName,
+  audience,
+  region = 'US',
+  numPrompts = 50,
+  siteId,
+  imsOrgId,
+  onboardingMode,
+}) {
+  return drsClient.submitJob({
+    provider_id: 'prompt_generation_base_url',
+    source: 'onboarding',
+    parameters: {
+      base_url: baseUrl,
+      brand: brandName,
+      audience,
+      region,
+      num_prompts: numPrompts,
+      model: 'gpt-5-nano',
+      metadata: buildPromptGenerationMetadata({
+        siteId,
+        imsOrgId,
+        baseUrl,
+        brandName,
+        region,
+        onboardingMode,
+      }),
+    },
+  });
+}
+
+export function buildInitialCustomerConfigV2({
+  brandName,
+  imsOrgId,
+  siteId,
+  baseURL,
+  overrideBaseURL,
+  updatedBy = 'system',
+}) {
+  const primaryUrl = overrideBaseURL || baseURL;
+  const config = convertV1ToV2({
+    brands: {
+      aliases: [{
+        name: brandName,
+        regions: ['gl'],
+        status: 'active',
+      }],
+    },
+    competitors: { competitors: [] },
+    categories: {},
+    topics: {},
+  }, brandName, imsOrgId);
+
+  const [brand] = config.customer.brands;
+  const timestamp = new Date().toISOString();
+
+  brand.v1SiteId = siteId;
+  brand.baseUrl = primaryUrl;
+  brand.updatedAt = timestamp;
+  brand.updatedBy = updatedBy;
+  brand.urls = [{ value: primaryUrl, type: 'url' }];
+  brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
+
+  config.customer.customerName = brandName;
+
+  return config;
+}
+
+export async function ensureInitialCustomerConfigV2({
+  organizationId,
+  brandName,
+  imsOrgId,
+  siteId,
+  baseURL,
+  overrideBaseURL,
+  context,
+}) {
+  const postgrestClient = context.dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.from) {
+    throw new Error('V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)');
+  }
+
+  const existingConfig = await readCustomerConfigV2FromPostgres(organizationId, postgrestClient);
+  if (existingConfig) {
+    if (!existingConfig.customer) existingConfig.customer = {};
+    if (!existingConfig.customer.brands) existingConfig.customer.brands = [];
+    const { brands } = existingConfig.customer;
+    const siteAlreadyRegistered = brands.some((b) => b.v1SiteId === siteId);
+
+    if (siteAlreadyRegistered) {
+      context.log.info(`V2 customer config already exists for organization ${organizationId} with site ${siteId}, skipping`);
+      return existingConfig;
+    }
+
+    // Add the new site as a brand to the existing config
+    const primaryUrl = overrideBaseURL || baseURL;
+    const timestamp = new Date().toISOString();
+    const trimmedName = brandName.trim();
+    let brandId = generateBrandId(trimmedName);
+
+    // Ensure brand ID is unique within the config
+    const existingIds = new Set(brands.map((b) => b.id));
+    if (existingIds.has(brandId)) {
+      brandId = `${brandId}-${siteId.slice(0, 8)}`;
+    }
+
+    brands.push({
+      id: brandId,
+      v1SiteId: siteId,
+      name: trimmedName,
+      baseUrl: primaryUrl,
+      status: 'active',
+      origin: 'system',
+      regions: ['gl'],
+      updatedAt: timestamp,
+      updatedBy: resolveUpdatedBy(context),
+      urls: [{ value: primaryUrl, type: 'url' }],
+      brandAliases: [{ name: trimmedName, regions: ['gl'] }],
+    });
+
+    await writeCustomerConfigV2ToPostgres(
+      organizationId,
+      existingConfig,
+      postgrestClient,
+      resolveUpdatedBy(context),
+    );
+    context.log.info(`Added site ${siteId} as brand "${brandName}" to existing V2 config for organization ${organizationId}`);
+    return existingConfig;
+  }
+
+  const config = buildInitialCustomerConfigV2({
+    brandName: brandName.trim(),
+    imsOrgId,
+    siteId,
+    baseURL,
+    overrideBaseURL,
+    updatedBy: resolveUpdatedBy(context),
+  });
+
+  await writeCustomerConfigV2ToPostgres(
+    organizationId,
+    config,
+    postgrestClient,
+    resolveUpdatedBy(context),
+  );
+  context.log.info(`Initialized V2 customer config for organization ${organizationId} during onboarding`);
+
+  return config;
+}
 
 /**
  * Generates the data folder name from a domain.
@@ -268,12 +531,12 @@ export async function startBulkStatusJob(path, env, log) {
   const site = 'project-elmo-ui-data';
   const ref = 'main';
   const headers = {
-    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
     'Content-Type': 'application/json',
   };
 
-  if (!env.HLX_ADMIN_TOKEN) {
-    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     return null;
   }
 
@@ -312,10 +575,10 @@ export async function pollJobStatus(jobName, env, log) {
   const site = 'project-elmo-ui-data';
   const ref = 'main';
   const topic = 'status';
-  const headers = { Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}` };
+  const headers = { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
 
-  if (!env.HLX_ADMIN_TOKEN) {
-    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     return null;
   }
 
@@ -374,12 +637,12 @@ export async function bulkUnpublishPaths(paths, dataFolder, env, log) {
   const site = 'project-elmo-ui-data';
   const ref = 'main';
   const headers = {
-    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
     'Content-Type': 'application/json',
   };
 
-  if (!env.HLX_ADMIN_TOKEN) {
-    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     return;
   }
 
@@ -830,13 +1093,7 @@ export async function removeLlmoConfig(site, config, context) {
     'llm-error-pages',
     'cdn-logs-analysis',
     'cdn-logs-report',
-    'geo-brand-presence',
-    'geo-brand-presence-free',
-    'geo-brand-presence-paid',
-    'geo-brand-presence-daily',
     'wikipedia-analysis',
-    // geo-brand-presence-free splits
-    ...Array.from({ length: 23 }, (_, i) => `geo-brand-presence-free-${i + 1}`),
   ];
 
   // Update configuration to disable audits
@@ -975,6 +1232,8 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
+ * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
+ *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
@@ -982,6 +1241,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
+    tempOnboarding,
   } = params;
   const { env, log } = context;
 
@@ -995,11 +1255,12 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
+    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
     // Create site
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
 
-    log.info(`Created site ${site.getId()} for ${baseURL}`);
+    log.info(`Created site ${site.getId()} for ${baseURL} using LLMO onboarding mode ${onboardingMode}`);
 
     // Create entitlement and enrollment
     await createEntitlementAndEnrollment(site, context, say);
@@ -1013,8 +1274,13 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
     }
 
-    // Update index config
-    await updateIndexConfig(dataFolder, context, say);
+    // Update helix-query.yaml in project-elmo-ui-data (skip for temporary onboarding)
+    if (tempOnboarding) {
+      log.info(`Skipping helix-query.yaml update (temp-onboarding) for data folder ${dataFolder}`);
+      await say(`:information_source: Skipping helix-query.yaml update (temp-onboarding) for ${dataFolder}`);
+    } else {
+      await updateIndexConfig(dataFolder, context, say);
+    }
 
     // Enable audits (continues on partial failure, logs warnings)
     await enableAudits(
@@ -1057,6 +1323,80 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
+    if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
+      await ensureInitialCustomerConfigV2({
+        organizationId: organization.getId(),
+        brandName,
+        imsOrgId,
+        siteId: site.getId(),
+        baseURL,
+        overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
+        context,
+      });
+
+      // Enable brandalf flag so DRS scheduler uses v2 prompts for this org
+      const postgrestClient = context.dataAccess?.services?.postgrestClient;
+      await upsertFeatureFlag({
+        organizationId: organization.getId(),
+        product: LLMO_FEATURE_FLAG_PRODUCT,
+        flagName: LLMO_BRANDALF_FLAG,
+        value: true,
+        updatedBy: 'llmo-onboarding',
+        postgrestClient,
+      });
+      log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
+
+      // Write initial brand to normalized brands table so DRS prompt sync can
+      // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
+      // Brandalf will upsert over this with LLM-identified sub-brands later.
+      // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
+      // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
+      // and would fail the exact-match lookup against the sites table.
+      try {
+        await upsertBrand({
+          organizationId: organization.getId(),
+          brand: {
+            name: brandName.trim(),
+            status: 'active',
+            urls: [{ value: baseURL, type: 'url' }],
+            brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
+          },
+          postgrestClient,
+          updatedBy: 'llmo-onboarding',
+        });
+        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+      } catch (brandError) {
+        log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+      }
+
+      // Trigger Brandalf immediately after the v2 config exists so downstream
+      // brand sync can attach results to the newly created organization.
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        if (drsClient.isConfigured()) {
+          const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+          await triggerBrandalfOnboardingJob({
+            drsClient,
+            organizationId: organization.getId(),
+            siteId: site.getId(),
+            imsOrgId,
+            brandName: brandName.trim(),
+            companyWebsite,
+            onboardingMode,
+            log,
+            say,
+          });
+        } else {
+          log.debug('DRS client not configured, skipping Brandalf flow');
+        }
+      } catch (drsError) {
+        log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+        say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+      }
+    } else {
+      log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
+    }
+
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
     await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
@@ -1070,7 +1410,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         const audience = brandProfile?.main_profile?.target_audience
           || `General consumers interested in ${brandName} products and services`;
 
-        const drsJob = await drsClient.submitPromptGenerationJob({
+        const drsJob = await submitOnboardingPromptGenerationJob({
+          drsClient,
           baseUrl: baseURL,
           brandName: brandName.trim(),
           audience,
@@ -1078,6 +1419,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           numPrompts: 50,
           siteId: site.getId(),
           imsOrgId,
+          onboardingMode,
         });
         log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
         say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
@@ -1105,7 +1447,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     if (site) {
       await revokeEnrollment(site, context);
     }
-    // Rolling back llmo config is not required, as it's the last step and won't have been saved
+    // Note: some config may already be persisted (audits, v2 customer config).
+    // Full rollback is not attempted; cleanup is limited to SharePoint and enrollment.
     throw error;
   }
 }

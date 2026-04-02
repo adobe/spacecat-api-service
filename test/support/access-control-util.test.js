@@ -14,7 +14,6 @@
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import {
-  Entitlement as EntitlementModel,
   TrialUser as TrialUserModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -254,7 +253,7 @@ describe('Access Control Util', () => {
         entitlement: {
           getId: () => 'entitlement-123',
           getProductCode: () => 'llmo',
-          getTier: () => 'paid',
+          getTier: () => 'PAID',
         },
       }),
     };
@@ -644,12 +643,6 @@ describe('Access Control Util', () => {
     let mockTierClient;
 
     beforeEach(() => {
-      // Mock the constant calls directly
-      sandbox.stub(EntitlementModel, 'TIERS').value({
-        FREE_TRIAL: 'free_trial',
-        PAID: 'paid',
-      });
-
       sandbox.stub(TrialUserModel, 'STATUSES').value({
         REGISTERED: 'registered',
       });
@@ -724,7 +717,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -742,7 +735,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'other_product',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -766,7 +759,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       const siteEnrollment = {
         getId: () => 'site-enrollment-123',
@@ -785,7 +778,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       // TierClient returns no site enrollment for different product
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
@@ -803,7 +796,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       // TierClient returns no site enrollment
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
@@ -821,7 +814,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       // TierClient returns no site enrollment
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
@@ -839,7 +832,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -852,7 +845,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -885,7 +878,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -922,7 +915,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -959,7 +952,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -996,7 +989,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1033,7 +1026,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1053,7 +1046,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getTier: () => 'FREE_TRIAL',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1077,7 +1070,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1129,7 +1122,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1174,6 +1167,40 @@ describe('Access Control Util', () => {
       const utilWithHeader = AccessControlUtil.fromContext(testContextWithHeader);
 
       await expect(utilWithHeader.hasAccess(mockOrgInstance, '', 'llmo')).to.not.be.rejected;
+    });
+
+    it('should throw UnauthorizedProductError for PLG tier entitlement', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-plg',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PLG',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo'))
+        .to.be.rejectedWith('[Error] Unauthorized request');
+    });
+
+    it('should not throw for FREE_TRIAL tier entitlement', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-ft',
+        getProductCode: () => 'llmo',
+        getTier: () => 'FREE_TRIAL',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+    });
+
+    it('should not throw for PAID tier entitlement', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
   });
 
@@ -1257,7 +1284,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1303,7 +1330,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       const siteEnrollment = {
         getId: () => 'site-enrollment-123',
@@ -1326,7 +1353,7 @@ describe('Access Control Util', () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
-        getTier: () => 'paid',
+        getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -1466,6 +1493,7 @@ describe('Access Control Util', () => {
       const mockTrialUser = {};
       const mockIdentityProvider = {};
       const mockSiteEnrollment = {};
+      const mockSiteImsOrgAccess = {};
 
       const testContext = {
         log: {
@@ -1489,6 +1517,7 @@ describe('Access Control Util', () => {
           TrialUser: mockTrialUser,
           OrganizationIdentityProvider: mockIdentityProvider,
           SiteEnrollment: mockSiteEnrollment,
+          SiteImsOrgAccess: mockSiteImsOrgAccess,
         },
       };
 
@@ -1498,6 +1527,246 @@ describe('Access Control Util', () => {
       expect(util.TrialUser).to.equal(mockTrialUser);
       expect(util.IdentityProvider).to.equal(mockIdentityProvider);
       expect(util.SiteEnrollment).to.equal(mockSiteEnrollment);
+      expect(util.SiteImsOrgAccess).to.equal(mockSiteImsOrgAccess);
+    });
+  });
+
+  describe('canManageImsOrgAccess', () => {
+    function makeUtil(type, isAdmin) {
+      const authInfo = {
+        getType: () => type,
+        isAdmin: () => isAdmin,
+        getScopes: () => [],
+      };
+      return AccessControlUtil.fromContext({
+        log: { info: logSpy, error: logSpy, warn: logSpy },
+        pathInfo: { headers: {} },
+        attributes: { authInfo },
+        dataAccess: { Entitlement: {}, TrialUser: {}, OrganizationIdentityProvider: {} },
+      });
+    }
+
+    it('returns true for IMS admin', () => {
+      expect(makeUtil('ims', true).canManageImsOrgAccess()).to.be.true;
+    });
+
+    it('returns true for JWT admin', () => {
+      expect(makeUtil('jwt', true).canManageImsOrgAccess()).to.be.true;
+    });
+
+    it('returns false for non-admin IMS user', () => {
+      expect(makeUtil('ims', false).canManageImsOrgAccess()).to.be.false;
+    });
+
+    it('returns false for api_key type (even if admin flag set)', () => {
+      expect(makeUtil('api_key', true).canManageImsOrgAccess()).to.be.false;
+    });
+  });
+
+  describe('hasAccess — delegation fallthrough', () => {
+    let mockSiteImsOrgAccess;
+    let mockGrant;
+    let mockSite;
+    let mockOrg;
+    let mockAuthInfo;
+    let delegationContext;
+    let mockTierClient;
+
+    beforeEach(() => {
+      mockGrant = {
+        getId: () => 'grant-1',
+        getRole: () => 'agency',
+        getProductCode: () => 'llmo',
+        getOrganizationId: () => 'delegate-org-uuid',
+        getTargetOrganizationId: () => 'target-org-uuid',
+        getExpiresAt: () => undefined,
+      };
+
+      mockSiteImsOrgAccess = {
+        findBySiteIdAndOrganizationIdAndProductCode: sinon.stub().resolves(mockGrant),
+        allBySiteId: sinon.stub().resolves([mockGrant]),
+      };
+
+      mockOrg = {
+        getId: () => 'target-org-uuid',
+        getImsOrgId: () => 'TARGET@AdobeOrg',
+      };
+
+      mockSite = {
+        getId: () => 'site-uuid',
+        getOrganization: async () => mockOrg,
+      };
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
+
+      mockAuthInfo = {
+        getType: () => 'jwt',
+        isAdmin: () => false,
+        getScopes: () => [],
+        hasOrganization: sinon.stub().returns(false),
+        hasScope: sinon.stub().returns(true),
+        isDelegatedTenantsComplete: sinon.stub().returns(true),
+        getDelegatedTenant: sinon.stub().returns({
+          id: 'TARGET@AdobeOrg',
+          sourceOrganizationId: 'delegate-org-uuid',
+        }),
+        getDelegatedTenants: sinon.stub().returns([{ sourceOrganizationId: 'delegate-org-uuid' }]),
+        getProfile: () => ({}),
+      };
+
+      mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: { getTier: () => 'PAID' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      sandbox.stub(TierClient, 'createForSite').resolves(mockTierClient);
+
+      delegationContext = {
+        log: { info: logSpy, error: logSpy, warn: logSpy },
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: mockAuthInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+          SiteImsOrgAccess: mockSiteImsOrgAccess,
+        },
+      };
+    });
+
+    it('Path A: grant in JWT + active DB grant → allow', async () => {
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.have.been.calledWith('site-uuid', 'delegate-org-uuid', 'llmo');
+    });
+
+    it('Path A: delegatedTenant has no sourceOrganizationId → warn + deny', async () => {
+      mockAuthInfo.getDelegatedTenant.returns({ id: 'TARGET@AdobeOrg', sourceOrganizationId: undefined });
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(logSpy).to.have.been.called;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path A: org NOT in JWT → deny (zero DB calls)', async () => {
+      mockAuthInfo.getDelegatedTenant.returns(undefined);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path A: grant found but expired → deny', async () => {
+      mockGrant.getExpiresAt = () => new Date(Date.now() - 1000).toISOString();
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+    });
+
+    it('Path A: no grant in DB → deny', async () => {
+      mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode.resolves(null);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+    });
+
+    it('Path A: entity type gating — Organization → skip delegation', async () => {
+      const org = { getImsOrgId: () => 'OTHER@AdobeOrg' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(org, '', 'llmo');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path A: productCode missing → skip delegation entirely', async () => {
+      mockAuthInfo.hasOrganization.returns(false);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', '');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path A: isDelegatedAccess=true → subService check skipped', async () => {
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, 'some_subservice', 'llmo');
+      // delegated access: returns hasOrgAccess (true), ignores subService scope check
+      expect(result).to.be.true;
+      expect(mockAuthInfo.hasScope).to.not.have.been.called;
+    });
+
+    it('Path A: log fields — actorOrg is agency org, resourceOrg is site-owner IMS org', async () => {
+      const util = AccessControlUtil.fromContext(delegationContext);
+      await util.hasAccess(mockSite, '', 'llmo');
+      const logCall = logSpy.args.find((a) => a[0] === '[AccessControl] Delegated access granted');
+      expect(logCall).to.exist;
+      const fields = logCall[1];
+      expect(fields.actorOrg).to.equal('delegate-org-uuid'); // agency org UUID
+      expect(fields.resourceOrg).to.equal('TARGET@AdobeOrg'); // site-owner IMS org ID
+    });
+
+    it('Path B: complete=false, uses allBySiteId to find matching grant → allow', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+      expect(mockSiteImsOrgAccess.allBySiteId).to.have.been.calledWith('site-uuid');
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('Path B: multi-org user — finds grant matching second sourceOrganizationId', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockAuthInfo.getDelegatedTenants.returns([
+        { sourceOrganizationId: 'other-org-uuid' }, // no matching grant
+        { sourceOrganizationId: 'delegate-org-uuid' }, // matches mockGrant.getOrganizationId()
+      ]);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+      expect(mockSiteImsOrgAccess.allBySiteId).to.have.been.calledWith('site-uuid');
+    });
+
+    it('Path B: complete=false, no sourceOrganizationId → warn + deny', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockAuthInfo.getDelegatedTenants.returns([]);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(logSpy).to.have.been.called;
+    });
+
+    it('Path B: grant with future expiresAt → allow', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockGrant.getExpiresAt = () => new Date(Date.now() + 86400000).toISOString();
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.true;
+    });
+
+    it('Path B: no matching grant in allBySiteId → deny', async () => {
+      mockAuthInfo.isDelegatedTenantsComplete.returns(false);
+      mockSiteImsOrgAccess.allBySiteId.resolves([]);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+    });
+
+    it('SiteImsOrgAccess absent → delegation skipped', async () => {
+      delegationContext.dataAccess.SiteImsOrgAccess = undefined;
+      mockAuthInfo.hasOrganization.returns(false);
+      const util = AccessControlUtil.fromContext(delegationContext);
+      const result = await util.hasAccess(mockSite, '', 'llmo');
+      expect(result).to.be.false;
+      expect(mockSiteImsOrgAccess.findBySiteIdAndOrganizationIdAndProductCode)
+        .to.not.have.been.called;
     });
   });
 });

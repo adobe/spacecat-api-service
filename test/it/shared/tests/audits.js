@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import {
   SITE_1_ID,
   SITE_3_ID,
+  SITE_4_ID,
   NON_EXISTENT_SITE_ID,
   AUDIT_TYPE_CWV,
   AUDIT_TYPE_APEX,
@@ -86,6 +87,22 @@ export default function auditTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/not-a-uuid/audits');
         expect(res.status).to.equal(400);
+      });
+
+      // ── Delegation persona smoke tests ──
+      // Audits use hasAccess(site) without productCode — delegation does not apply.
+
+      it('delegatedUser: returns 403 for SITE_1 (ORG_1, no primary-org access)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_1_ID}/audits`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('delegatedUser: returns empty audits for SITE_4 (primary org ORG_3, no audits seeded)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(`/sites/${SITE_4_ID}/audits`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(0);
       });
     });
 

@@ -1739,7 +1739,7 @@ SiteTopPage:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     url: 'https://example-site.com/foo/bar'
     traffic: 360420000
-    source: 'ahrefs'
+    source: 'seo'
     geo: 'au'
     importedAt: '2024-04-29T15:14:33.653Z'
 SiteTopPageList:
@@ -2167,7 +2167,7 @@ SiteMetric:
       $ref: '#/DateTime'
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-traffic'
     value: 37900
     time: '2024-04-29T00:00:00.000Z'
@@ -2217,7 +2217,7 @@ PageOrganicKeywords:
       type: boolean
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-keywords'
     time: '2024-04-29T00:00:00.000Z'
     url: 'https://example.com/foo/bar'
@@ -2727,6 +2727,7 @@ OpportunityType:
   enum:
     - 'broken-backlinks'
     - 'broken-internal-links'
+    - 'info-gain'
   example: 'broken-backlinks'
 OpportunityOrigin:
   description: |
@@ -2800,6 +2801,9 @@ Opportunity:
       $ref: '#/DateTime'
     updatedAt:
       description: UTC timestamp of when the opportunity was last updated
+      $ref: '#/DateTime'
+    lastAuditedAt:
+      description: UTC timestamp of when the opportunity was last audited
       $ref: '#/DateTime'
   required:
     - id
@@ -5102,6 +5106,101 @@ Entitlement:
     updatedAt: "2024-01-15T10:30:00Z"
     updatedBy: "system"
 
+FeatureFlagProduct:
+  type: string
+  description: Product surface for org-scoped feature flags (matches mysticat enum)
+  enum: [ASO, LLMO]
+
+FeatureFlag:
+  type: object
+  description: Org-scoped boolean feature flag (mysticat `feature_flags`)
+  properties:
+    id:
+      description: Row id (UUIDv7)
+      $ref: '#/Id'
+    organizationId:
+      description: Organization id (SpaceCat / mysticat `organizations.id`)
+      $ref: '#/Id'
+    product:
+      $ref: '#/FeatureFlagProduct'
+    flagName:
+      description: Stable flag key
+      type: string
+    flagValue:
+      description: Whether the flag is enabled
+      type: boolean
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      description: IMS user id, service id, or similar; who last changed the row
+      oneOf:
+        - type: string
+        - type: 'null'
+
+FeatureFlagList:
+  type: array
+  items:
+    $ref: '#/FeatureFlag'
+
+AgenticTrafficGlobalWeek:
+  type: object
+  description: Weekly aggregate global agentic traffic row from mysticat `agentic_traffic_global`
+  properties:
+    id:
+      $ref: '#/Id'
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      oneOf:
+        - type: string
+        - type: 'null'
+  required:
+    - id
+    - year
+    - week
+    - hits
+    - createdAt
+    - updatedAt
+
+AgenticTrafficGlobalWeekList:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficGlobalWeek'
+
+AgenticTrafficGlobalWeekUpsert:
+  type: object
+  properties:
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+  required:
+    - year
+    - week
+    - hits
+
 SiteEnrollment:
   type: object
   description: A site enrollment represents a site's participation in a product or service
@@ -5768,6 +5867,187 @@ CustomerConfigTopic:
       type: string
       description: ID of the category this topic belongs to
       example: "photoshop-photo-editing"
+V2PromptListResponse:
+  type: object
+  description: Paginated list of prompts for a brand
+  required:
+    - items
+    - total
+    - limit
+    - page
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/V2Prompt'
+    total:
+      type: integer
+      description: Total number of prompts matching the filter
+    limit:
+      type: integer
+      description: Page size (items per page)
+    page:
+      type: integer
+      description: Current page number (1-based)
+
+V2Prompt:
+  type: object
+  description: A prompt with brand, category, and topic enrichment
+  properties:
+    id:
+      type: string
+      description: Business key (prompt_id)
+      example: "photoshop-prompt-1"
+    uuid:
+      type: string
+      format: uuid
+      description: UUID primary key (prompts.id)
+    prompt:
+      type: string
+      description: The search query prompt text
+    name:
+      type: string
+      description: Display name
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this prompt is applicable
+    categoryId:
+      type: string
+      description: Category business key
+    topicId:
+      type: string
+      description: Topic business key
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      default: active
+    origin:
+      type: string
+      enum: [ai, human]
+      default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      example: "config"
+      default: "config"
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      type: string
+    brandId:
+      type: string
+      format: uuid
+      description: brands.id (uuid)
+    brandName:
+      type: string
+    category:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Business key (category_id)
+        uuid:
+          type: string
+          format: uuid
+          description: UUID primary key (categories.id)
+        name:
+          type: string
+        origin:
+          type: string
+    topic:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Business key (topic_id)
+        uuid:
+          type: string
+          format: uuid
+          description: UUID primary key (topics.id)
+        name:
+          type: string
+        categoryId:
+          type: string
+
+V2PromptInput:
+  type: object
+  description: Input for creating/updating a prompt
+  required:
+    - prompt
+  properties:
+    id:
+      type: string
+      description: Optional business key; auto-generated if omitted
+    prompt:
+      type: string
+      description: The search query prompt text
+    name:
+      type: string
+      description: Display name (defaults to prompt slice)
+    regions:
+      type: array
+      items:
+        type: string
+      default: []
+    categoryId:
+      type: string
+    topicId:
+      type: string
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      default: active
+    origin:
+      type: string
+      enum: [ai, human]
+      default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      default: "config"
+
+V2PromptBulkDeleteRequest:
+  type: object
+  description: Request body for bulk-deleting prompts
+  required:
+    - promptIds
+  properties:
+    promptIds:
+      type: array
+      items:
+        type: string
+      minItems: 1
+      maxItems: 100
+      description: Array of prompt business keys to soft-delete
+
+V2PromptBulkDeleteResponse:
+  type: object
+  description: Response from bulk-deleting prompts
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of prompt IDs in request
+        success:
+          type: integer
+          description: Number of successfully deleted prompts
+        failure:
+          type: integer
+          description: Number of failed deletions
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          promptId:
+            type: string
+          reason:
+            type: string
+
 CustomerConfigPrompt:
   type: object
   description: A search prompt with category and topic ID references
@@ -6310,7 +6590,7 @@ SentimentGuideline:
       items:
         type: string
       description: Enabled audit types
-      example: ["wikipedia-analysis", "reddit-analysis"]
+      example: ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
     enabled:
       type: boolean
       description: Whether guideline is active
@@ -6347,7 +6627,7 @@ SentimentGuidelineInput:
       items:
         type: string
       description: Audit types to associate
-      example: ["wikipedia-analysis", "reddit-analysis"]
+      example: ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
     enabled:
       type: boolean
       default: true
@@ -6579,3 +6859,452 @@ PlgOnboarding:
       $ref: '#/DateTime'
     updatedAt:
       $ref: '#/DateTime'
+
+Token:
+  type: object
+  description: A token allocation for a site within a billing cycle
+  properties:
+    id:
+      $ref: '#/Id'
+    siteId:
+      $ref: '#/Id'
+    tokenType:
+      type: string
+      description: Token type key, e.g. `grant_cwv`, `grant_broken_backlinks`
+      example: grant_cwv
+    cycle:
+      type: string
+      description: Billing cycle identifier, e.g. `2025-03`
+      example: '2025-03'
+    total:
+      type: integer
+      description: Total tokens allocated for this cycle
+      example: 3
+    used:
+      type: integer
+      description: Tokens consumed so far in this cycle
+      example: 1
+    remaining:
+      type: integer
+      description: Tokens remaining (total - used)
+      example: 2
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+  required:
+    - id
+    - siteId
+    - tokenType
+    - cycle
+    - total
+    - used
+    - remaining
+    - createdAt
+    - updatedAt
+
+PresignedUrlResponse:
+  type: object
+  description: A short-lived presigned S3 URL and its expiry time
+  properties:
+    presignedUrl:
+      type: string
+      format: uri
+      description: Presigned S3 URL to download the resource
+    expiresAt:
+      type: string
+      format: date-time
+      description: ISO 8601 timestamp when the presigned URL expires
+      example: '2026-06-15T12:00:00.000Z'
+  required:
+    - presignedUrl
+    - expiresAt
+  additionalProperties: false
+
+# ── V2 Brand schemas (PostgREST-backed, /v2/orgs/{spaceCatId}/brands) ──
+
+V2BrandUrl:
+  type: object
+  properties:
+    value:
+      type: string
+      description: Full URL (base URL + optional path)
+      example: 'https://www.example.com/products'
+  required:
+    - value
+
+V2BrandSocialAccount:
+  type: object
+  properties:
+    url:
+      type: string
+      description: Social media account URL
+      example: 'https://twitter.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes this account targets
+      example: ['US', 'DE']
+
+V2BrandEarnedContent:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Name of the earned content source
+      example: 'TechCrunch'
+    url:
+      type: string
+      description: URL of the earned content source
+      example: 'https://techcrunch.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandAlias:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Alias name for the brand
+      example: 'Example Corp'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandCompetitor:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Competitor name
+      example: 'Acme Inc'
+    url:
+      type:
+        - string
+        - 'null'
+      description: Competitor URL
+      example: 'https://www.acme.com'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2Brand:
+  type: object
+  description: A brand managed via the v2 PostgREST-backed API
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Brand UUID
+    name:
+      type: string
+      description: Brand name (unique per organization)
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      description: Brand status
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      description: How the brand was created
+      default: human
+    description:
+      type:
+        - string
+        - 'null'
+      description: Brand description
+    vertical:
+      type:
+        - string
+        - 'null'
+      description: Industry vertical
+    region:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes the brand targets
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+      description: Brand site URLs (derived from brand_sites)
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+    siteIds:
+      type: array
+      items:
+        type: string
+        format: uuid
+      description: IDs of sites linked to this brand (read-only, derived from brand_sites)
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      type:
+        - string
+        - 'null'
+      description: Email of the user who last modified the brand
+  required:
+    - id
+    - name
+    - status
+    - origin
+    - region
+    - urls
+    - socialAccounts
+    - earnedContent
+    - brandAliases
+    - competitors
+    - siteIds
+    - updatedAt
+  example:
+    id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    name: 'Example Brand'
+    status: 'active'
+    origin: 'human'
+    description: 'An example brand'
+    vertical: 'technology'
+    region: ['US', 'DE']
+    urls:
+      - value: 'https://www.example.com'
+      - value: 'https://www.example.com/products'
+    socialAccounts:
+      - url: 'https://twitter.com/example'
+        regions: ['US']
+    earnedContent:
+      - name: 'TechCrunch'
+        url: 'https://techcrunch.com/example'
+        regions: ['US']
+    brandAliases:
+      - name: 'Example Corp'
+        regions: ['US']
+    competitors:
+      - name: 'Acme Inc'
+        url: 'https://www.acme.com'
+        regions: ['US']
+    siteIds: ['b2c3d4e5-6789-01ab-cdef-2345678901ab']
+    updatedAt: '2026-03-15T10:30:00Z'
+    updatedBy: 'user@adobe.com'
+
+V2BrandInput:
+  type: object
+  description: Request body for creating a brand. Upserts on conflict (organization_id, name).
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      description: Brand name (unique per organization, used as upsert key)
+    status:
+      type: string
+      enum: [active, pending]
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      default: human
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandUpdateInput:
+  type: object
+  description: Request body for updating a brand. All fields are optional.
+  properties:
+    name:
+      type: string
+    status:
+      type: string
+      enum: [active, pending]
+    origin:
+      type: string
+      enum: [human, ai]
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandListResponse:
+  type: object
+  description: Response envelope for listing brands
+  required:
+    - brands
+  properties:
+    brands:
+      type: array
+      items:
+        $ref: '#/V2Brand'
+
+V2Topic:
+  type: object
+  description: A topic in the normalized topics table
+  required:
+    - id
+    - uuid
+    - name
+    - status
+  properties:
+    id:
+      type: string
+      description: Topic business key (topic_id)
+      example: 'baseurl-discovery-research-topic'
+    uuid:
+      type: string
+      format: uuid
+      description: UUID primary key (topics.id)
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type:
+        - string
+        - 'null'
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+      description: Topic status
+      example: 'active'
+    brandId:
+      type:
+        - string
+        - 'null'
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    updatedAt:
+      type: string
+      format: date-time
+      description: Last update timestamp
+    updatedBy:
+      type: string
+      description: User or system that last updated the topic
+
+V2TopicInput:
+  type: object
+  description: Request body for creating a topic
+  required:
+    - name
+  properties:
+    id:
+      type: string
+      description: Topic business key. Auto-generated from name if omitted.
+      example: 'baseurl-discovery-research-topic'
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type: string
+      description: Optional topic description
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    status:
+      type: string
+      enum: [active, pending, ignored]
+      default: 'active'
+
+V2TopicUpdateInput:
+  type: object
+  description: Request body for updating a topic (partial update)
+  properties:
+    name:
+      type: string
+      description: Human-readable topic name
+    description:
+      type: string
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID
+
+V2TopicListResponse:
+  type: object
+  description: Response envelope for listing topics
+  required:
+    - topics
+  properties:
+    topics:
+      type: array
+      items:
+        $ref: '#/V2Topic'

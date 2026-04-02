@@ -18,6 +18,7 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
 
@@ -58,6 +59,8 @@ const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, 
 describe('LlmoController', () => {
   let controller;
   let controllerWithAccessDenied;
+  let controllerWithThrowingAccess;
+  let controllerWithBusinessError;
   let LlmoController;
   let mockContext;
   let mockSite;
@@ -271,6 +274,57 @@ describe('LlmoController', () => {
       },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
+
+    // Controller where hasAccess throws '[Error] Unauthorized request'
+    // → getSiteAndValidateLlmo returns 403
+    const LlmoControllerThrowAuth = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/support/access-control-util.js': {
+        default: {
+          fromContext() {
+            return {
+              async hasAccess() {
+                throw new UnauthorizedProductError('[Error] Unauthorized request');
+              },
+              hasAdminAccess() { return true; },
+              isLLMOAdministrator() { return true; },
+              async isOwnerOfSite() { return true; },
+            };
+          },
+        },
+      },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+    });
+    controllerWithThrowingAccess = LlmoControllerThrowAuth;
+
+    // Controller where hasAccess throws a business error (not Unauthorized) → rethrow → 400
+    const LlmoControllerThrowBusiness = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/support/access-control-util.js': {
+        default: {
+          fromContext() {
+            return {
+              async hasAccess() { throw new Error('emailId is required'); },
+              hasAdminAccess() { return true; },
+              isLLMOAdministrator() { return true; },
+              async isOwnerOfSite() { return true; },
+            };
+          },
+        },
+      },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+    });
+    controllerWithBusinessError = LlmoControllerThrowBusiness;
   });
 
   beforeEach(async () => {
@@ -600,9 +654,23 @@ describe('LlmoController', () => {
 
       const result = await deniedController.getLlmoSheetData(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 403 when hasAccess throws [Error] Unauthorized request', async () => {
+      const ctrl = controllerWithThrowingAccess(mockContext);
+      const result = await ctrl.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 400 when hasAccess throws a business error', async () => {
+      const ctrl = controllerWithBusinessError(mockContext);
+      const result = await ctrl.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('emailId is required');
     });
 
     it('should handle response headers correctly', async () => {
@@ -1488,6 +1556,30 @@ describe('LlmoController', () => {
       await controller.updateLlmoConfig(mockContext);
 
       expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('should trigger llmo-config-db-sync when site is in ALLOWED_SITE_IDS', async () => {
+      mockContext.params.siteId = '00000000-0000-0000-0000-000000000001';
+
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+        TEST_QUEUE_URL,
+        {
+          type: 'llmo-config-db-sync',
+          siteId: '00000000-0000-0000-0000-000000000001',
+          dryRun: false,
+        },
+      );
+    });
+
+    it('should not trigger llmo-config-db-sync when site is not in ALLOWED_SITE_IDS', async () => {
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.not.have.been.calledWith(
+        TEST_QUEUE_URL,
+        sinon.match({ type: 'llmo-config-db-sync' }),
+      );
     });
 
     it('should return bad request when payload is not an object', async () => {
@@ -2513,7 +2605,7 @@ describe('LlmoController', () => {
       mockEnv.SHAREPOINT_AUTHORITY = 'test-authority';
       mockEnv.SHAREPOINT_DOMAIN_ID = 'test-domain-id';
       mockEnv.LLMO_ONBOARDING_GITHUB_TOKEN = 'test-github-token';
-      mockEnv.HLX_ADMIN_TOKEN = 'test-hlx-token';
+      mockEnv.HLX_ONBOARDING_TOKEN = 'test-hlx-token';
       mockEnv.DEFAULT_ORGANIZATION_ID = 'default-org-id';
 
       onboardingContext = {
@@ -2582,6 +2674,52 @@ describe('LlmoController', () => {
       expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+    });
+
+    it('should pass tempOnboarding when temp-onboarding is true', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const ctxWithTemp = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          'temp-onboarding': true,
+        },
+      };
+
+      const result = await testController.onboardCustomer(ctxWithTemp);
+
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+      expect(performLlmoOnboardingStub.firstCall.args[0].tempOnboarding).to.equal(true);
     });
 
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
@@ -2668,6 +2806,44 @@ describe('LlmoController', () => {
       const testController = LlmoControllerOnboard(mockContext);
 
       const result = await testController.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for invalid cadence value', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: () => 'dev/example-com',
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => `https://${domain}`,
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const invalidCadenceContext = {
+        ...onboardingContext,
+        data: { domain: 'example.com', brandName: 'Test Brand', cadence: 'invalid-value' },
+      };
+
+      const result = await testController.onboardCustomer(invalidCadenceContext);
 
       expect(result.status).to.equal(400);
       expect(performLlmoOnboardingStub).to.not.have.been.called;
@@ -2770,6 +2946,192 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can onboard');
+    });
+
+    it('should use imsOrgId from payload when provided and valid, even with no authInfo', async () => {
+      const payloadImsOrgId = 'abcdef123456789012345678@AdobeOrg';
+      const contextWithPayloadOrg = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, imsOrgId: payloadImsOrgId },
+        // No authInfo at all — proves JWT fallback path is never reached
+        attributes: {},
+      };
+
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(contextWithPayloadOrg);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.imsOrgId).to.equal(payloadImsOrgId);
+      expect(performLlmoOnboardingStub).to.have.been.calledOnceWith(
+        sinon.match({ imsOrgId: payloadImsOrgId }),
+        sinon.match.any,
+      );
+    });
+
+    it('should return bad request when payload imsOrgId has invalid format', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: () => 'dev/example-com',
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => `https://${domain}`,
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      for (const invalid of [
+        'not-valid',
+        'tooshort@AdobeOrg',
+        'abcdef123456789012345678',
+        'abcdef123456789012345678@WrongSuffix',
+        'PREFIXabcdef123456789012345678@AdobeOrg', // missing ^ anchor
+        'abcdef123456789012345678@AdobeOrg_SUFFIX', // missing $ anchor
+        'abcdef1234567890123456789@AdobeOrg', // 25 chars (off-by-one)
+      ]) {
+        const contextWithBadOrg = {
+          ...onboardingContext,
+          data: { ...onboardingContext.data, imsOrgId: invalid },
+        };
+        // eslint-disable-next-line no-await-in-loop
+        const result = await testController.onboardCustomer(contextWithBadOrg);
+        expect(result.status, `expected 400 for imsOrgId="${invalid}"`).to.equal(400);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await result.json();
+        expect(body.message).to.equal('Invalid imsOrgId');
+      }
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should fall back to JWT token when imsOrgId is not in payload (backward compat)', async () => {
+      // onboardingContext has no imsOrgId in data but has tenants in the profile
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      // JWT-derived org ID: tenants[0].id + '@AdobeOrg'
+      expect(responseBody.imsOrgId).to.equal('test-tenant-id@AdobeOrg');
+      expect(performLlmoOnboardingStub).to.have.been.calledOnceWith(
+        sinon.match({ imsOrgId: 'test-tenant-id@AdobeOrg' }),
+        sinon.match.any,
+      );
+    });
+
+    it('should accept payload imsOrgId with uppercase letters (/i flag)', async () => {
+      const upperCaseImsOrgId = 'ABCDEF123456789012345678@ADOBEORG';
+      const contextWithUpperOrg = {
+        ...onboardingContext,
+        data: { ...onboardingContext.data, imsOrgId: upperCaseImsOrgId },
+        attributes: {},
+      };
+
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(contextWithUpperOrg);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.imsOrgId).to.equal(upperCaseImsOrgId);
     });
   });
 
@@ -3440,7 +3802,7 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
     });
 
-    it('should return 400 when LLMO access validation fails', async () => {
+    it('should return 403 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const contextWithParams = {
         ...rationaleContext,
@@ -3450,13 +3812,21 @@ describe('LlmoController', () => {
       };
       const result = await controllerDenied.getLlmoRationale(contextWithParams);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
 
-      expect(mockLog.error).to.have.been.calledWith(
-        `Error getting LLMO rationale for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
-      );
+    it('should return 400 when LLMO is not enabled for site', async () => {
+      mockConfig.getLlmoConfig.returns({});
+      const contextWithParams = {
+        ...rationaleContext,
+        data: { topic: 'any topic' },
+      };
+      const result = await controller.getLlmoRationale(contextWithParams);
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
     });
 
     it('should return 404 when site is not found', async () => {
@@ -3694,17 +4064,13 @@ describe('LlmoController', () => {
       expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
     });
 
-    it('should return 400 when LLMO access validation fails', async () => {
+    it('should return 403 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const result = await controllerDenied.getBrandClaims(brandClaimsContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
-
-      expect(mockLog.error).to.have.been.calledWith(
-        `Error getting brand claims for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
-      );
     });
 
     it('should return 400 when S3 is not configured', async () => {
@@ -3737,6 +4103,130 @@ describe('LlmoController', () => {
       const result = await controller.getBrandClaims(brandClaimsContext);
       expect(result.status).to.equal(404);
     });
+
+    it('should return 400 when LLMO is not enabled for site', async () => {
+      mockConfig.getLlmoConfig.returns({});
+      const result = await controller.getBrandClaims(brandClaimsContext);
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+    });
+  });
+
+  describe('getDemoBrandPresence', () => {
+    let demoContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      demoContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {},
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should return presigned URL for demo brand presence fixture', async () => {
+      const result = await controller.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(
+        'workspace/llmo/demo/summit-demo-brand-presence.json',
+      );
+    });
+
+    it('should return 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 500 when S3 is not configured', async () => {
+      const result = await controller.getDemoBrandPresence({ ...demoContext, s3: null });
+
+      expect(result.status).to.equal(500);
+    });
+
+    it('should return 500 for unexpected errors', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const result = await controller.getDemoBrandPresence(demoContext);
+
+      expect(result.status).to.equal(500);
+    });
+  });
+
+  describe('getDemoRecommendations', () => {
+    let demoContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      demoContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {},
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should return presigned URL for demo recommendations fixture', async () => {
+      const result = await controller.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(
+        'workspace/llmo/demo/summit-demo-recommendations.json',
+      );
+    });
+
+    it('should return 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 500 when S3 is not configured', async () => {
+      const result = await controller.getDemoRecommendations({ ...demoContext, s3: null });
+
+      expect(result.status).to.equal(500);
+    });
+
+    it('should return 500 for unexpected errors', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const result = await controller.getDemoRecommendations(demoContext);
+
+      expect(result.status).to.equal(500);
+    });
   });
 
   describe('createOrUpdateEdgeConfig', () => {
@@ -3751,6 +4241,11 @@ describe('LlmoController', () => {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
         data: { tokowakaEnabled: true },
+        env: {
+          ...mockContext.env,
+          SLACK_LLMO_ALERTS_CHANNEL_ID: undefined,
+          SLACK_BOT_TOKEN: undefined,
+        },
       };
     });
 
