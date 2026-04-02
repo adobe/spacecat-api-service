@@ -1,3 +1,10 @@
+# [1.407.0](https://github.com/adobe/spacecat-api-service/compare/v1.406.0...v1.407.0) (2026-04-02)
+
+
+### Features
+
+* add contact sales leads endpoints (SITES-42069) ([#2053](https://github.com/adobe/spacecat-api-service/issues/2053)) ([915702e](https://github.com/adobe/spacecat-api-service/commit/915702e08002990c5d51f2bb2d7b396363e55402))
+
 # [1.406.0](https://github.com/adobe/spacecat-api-service/compare/v1.405.0...v1.406.0) (2026-04-02)
 
 
