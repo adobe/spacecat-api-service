@@ -229,9 +229,8 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
-   * For PLG (sites-optimizer-ui) clients, limits CWV suggestions to the top N entries.
-   * The suggestions are already ordered by page views descending from the audit-worker,
-   * so slicing gives the highest-traffic pages with failing metrics.
+   * For PLG (sites-optimizer-ui) clients, limits CWV suggestions to the top N entries
+   * by page views descending.
    * Returns all suggestions unchanged for non-CWV types, non-PLG clients, or sites
    * that do not have the summit-plg handler enabled.
    * @param {Object} site - Site entity.
@@ -245,7 +244,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (context.pathInfo?.headers?.['x-client-type'] !== 'sites-optimizer-ui') return entities;
     const configuration = await Configuration.findLatest();
     if (!configuration?.isHandlerEnabledForSite('summit-plg', site)) return entities;
-    return entities.slice(0, CWV_PLG_SUGGESTION_LIMIT);
+    return [...entities]
+      .sort((a, b) => (b.getData()?.pageviews || 0) - (a.getData()?.pageviews || 0))
+      .slice(0, CWV_PLG_SUGGESTION_LIMIT);
   };
 
   /**
