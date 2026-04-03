@@ -90,6 +90,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} tokensController - The tokens controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
+ * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -138,6 +139,7 @@ export default function getRouteHandlers(
   tokensController,
   plgOnboardingController,
   imsOrgAccessController,
+  contactSalesLeadsController,
   featureFlagsController,
 ) {
   const staticRoutes = {};
@@ -201,6 +203,8 @@ export default function getRouteHandlers(
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
+    'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
+    'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
@@ -256,6 +260,8 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
+    'GET /sites/:siteId/geo-experiments': suggestionsController.listGeoExperiments,
+    'GET /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.getGeoExperiment,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
     'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,
@@ -410,6 +416,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+    'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
+    'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
@@ -515,6 +523,12 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/ims-org-access': imsOrgAccessController.listGrants,
     'GET /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.getGrant,
     'DELETE /sites/:siteId/ims-org-access/:accessId': imsOrgAccessController.revokeGrant,
+
+    // Contact Sales Leads
+    'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.create,
+    'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
+    'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
+    'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
   };
 
   // Initialization of static and dynamic routes
