@@ -16,6 +16,7 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 import { SFNClient } from '@aws-sdk/client-sfn';
 import { Config, DEFAULT_CONFIG } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
@@ -618,6 +619,19 @@ describe('ephemeral-run-service', () => {
       expect(jobArg.metaData.slackData).to.deep.equal({ channel: 'C123', thread_ts: '1234.5' });
     });
 
+    it('defaults slackContext channelId and threadTs to empty string when null', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      ctx.dataAccess.Site.findById.resolves(site);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      await enqueueSiteJobs('s-1', resolved, config, ctx, { channelId: null, threadTs: null });
+
+      const jobArg = ctx.scrapeClient.createScrapeJob.firstCall.args[0];
+      expect(jobArg.metaData.slackData).to.deep.equal({ channel: '', thread_ts: '' });
+    });
+
     it('skips scrape-top-pages when site is not found', async () => {
       const ctx = createMockContext();
       ctx.dataAccess.Site.findById.resolves(null);
@@ -634,6 +648,20 @@ describe('ephemeral-run-service', () => {
       const ctx = createMockContext();
       const site = createMockSite();
       site.getSiteTopPagesBySourceAndGeo.resolves([]);
+      ctx.dataAccess.Site.findById.resolves(site);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      expect(ctx.scrapeClient.createScrapeJob).to.not.have.been.called;
+      expect(result.skipped).to.deep.equal([{ type: 'scrape-top-pages', kind: 'audit', reason: 'No top pages found' }]);
+    });
+
+    it('skips scrape-top-pages when getSiteTopPagesBySourceAndGeo returns null', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      site.getSiteTopPagesBySourceAndGeo.resolves(null);
       ctx.dataAccess.Site.findById.resolves(site);
       const config = createMockConfiguration();
       const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
@@ -690,6 +718,36 @@ describe('ephemeral-run-service', () => {
       expect(trafficEntries).to.have.length(1);
       // Should be a regular enqueue, not backfill weeks
       expect(trafficEntries[0]).to.not.have.property('week');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // enqueueSiteJobs — ScrapeClient.createFrom fallback
+  // -----------------------------------------------------------------------
+  describe('enqueueSiteJobs() — ScrapeClient.createFrom fallback', () => {
+    it('falls back to ScrapeClient.createFrom when scrapeClient is not in context', async () => {
+      const mockCreateScrapeJob = sinon.stub().resolves();
+      const MockScrapeClient = {
+        createFrom: sinon.stub().returns({ createScrapeJob: mockCreateScrapeJob }),
+      };
+
+      const { enqueueSiteJobs: enqueueSiteJobsWithMock } = await esmock(
+        '../../src/support/ephemeral-run-service.js',
+        { '@adobe/spacecat-shared-scrape-client': { ScrapeClient: MockScrapeClient } },
+      );
+
+      const ctx = createMockContext();
+      delete ctx.scrapeClient;
+      const site = createMockSite();
+      ctx.dataAccess.Site.findById.resolves(site);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      const result = await enqueueSiteJobsWithMock('s-1', resolved, config, ctx);
+
+      expect(MockScrapeClient.createFrom).to.have.been.calledOnce;
+      expect(mockCreateScrapeJob).to.have.been.calledOnce;
+      expect(result.enqueued.audits).to.deep.equal([{ type: 'scrape-top-pages', status: 'queued' }]);
     });
   });
 
