@@ -1655,6 +1655,8 @@ export const onboardSingleSite = async (
       });
     }
 
+    // Persist onboard start time so onboard-status can detect stale audit records.
+    // Computed once and reused in the task context below.
     const onboardStartTime = Date.now();
     siteConfig.updateOnboardConfig({
       lastProfile: profileName.toLowerCase(),
@@ -1771,7 +1773,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
-        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
+        onboardStartTime, // Same timestamp persisted to site config as lastStartTime
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
