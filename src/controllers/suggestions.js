@@ -47,6 +47,11 @@ import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-han
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
+// Maximum number of CWV suggestions returned to PLG (sites-optimizer-ui) clients.
+// The audit-worker already stores only failing-metric pages sorted by page views desc,
+// so slicing to this limit gives the top N most-viewed pages with CWV issues.
+const CWV_PLG_SUGGESTION_LIMIT = 3;
+
 const GEO_EXPERIMENT_SCHEDULE = Object.freeze({
   PRE_CRON_EXPRESSION: '0 * * * *', // hourly (fires immediately via triggerImmediately: true)
   // 5 minutes — only needs to live long enough for the immediate trigger
@@ -224,6 +229,26 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * For PLG (sites-optimizer-ui) clients, limits CWV suggestions to the top N entries.
+   * The suggestions are already ordered by page views descending from the audit-worker,
+   * so slicing gives the highest-traffic pages with failing metrics.
+   * Returns all suggestions unchanged for non-CWV types, non-PLG clients, or sites
+   * that do not have the summit-plg handler enabled.
+   * @param {Object} site - Site entity.
+   * @param {Array} entities - Suggestion entities to limit.
+   * @param {Object} opportunity - Opportunity entity (may be null if no suggestions).
+   * @param {Object} context - Request context.
+   * @returns {Promise<Array>} Limited suggestion entities.
+   */
+  const applyPlgCwvLimit = async (site, entities, opportunity, context) => {
+    if (opportunity?.getType() !== 'cwv') return entities;
+    if (context.pathInfo?.headers?.['x-client-type'] !== 'sites-optimizer-ui') return entities;
+    const configuration = await Configuration.findLatest();
+    if (!configuration?.isHandlerEnabledForSite('summit-plg', site)) return entities;
+    return entities.slice(0, CWV_PLG_SUGGESTION_LIMIT);
+  };
+
+  /**
    * Gets all suggestions for a given site and opportunity
    * @param {Object} context of the request
    * @returns {Promise<Response>} Array of suggestions response.
@@ -286,7 +311,8 @@ function SuggestionsController(ctx, sqs, env) {
       );
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const limitedEntities = await applyPlgCwvLimit(site, grantedEntities, opportunity, context);
+    const suggestions = limitedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -345,7 +371,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const limitedEntities = await applyPlgCwvLimit(site, grantedEntities, opportunity, context);
+    const suggestions = limitedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
 
@@ -401,7 +428,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const limitedEntities = await applyPlgCwvLimit(site, grantedEntities, opportunity, context);
+    const suggestions = limitedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -460,7 +488,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const suggestions = grantedEntities.map(
+    const limitedEntities = await applyPlgCwvLimit(site, grantedEntities, opportunity, context);
+    const suggestions = limitedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok({
