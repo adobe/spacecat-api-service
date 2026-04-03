@@ -70,7 +70,9 @@ plg-sites:
         required: false
         description: |
           Maximum number of onboarding records to return from the backing query. When omitted,
-          all pages are fetched (unbounded row count; see description). Must be a positive integer.
+          all pages are fetched (unbounded row count; see description). Must be a positive integer
+          (decimal fractions, signs, or trailing non-digits such as `1.5` or `50abc` are rejected
+          with 400).
         schema:
           type: integer
           minimum: 1

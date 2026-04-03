@@ -120,6 +120,24 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           expect(res.status).to.equal(400);
         });
 
+        it('admin: returns 400 for limit that is not an integer token', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=1.5');
+          expect(res.status).to.equal(400);
+        });
+
+        it('admin: returns 400 for limit with trailing junk', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=50abc');
+          expect(res.status).to.equal(400);
+        });
+
+        it('admin: returns 400 for negative limit', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=-1');
+          expect(res.status).to.equal(400);
+        });
+
         it('admin: respects limit query when listing', async () => {
           const http = getHttpClient();
           const res = await http.admin.get('/plg/sites?limit=1');

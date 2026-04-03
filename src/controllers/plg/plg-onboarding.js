@@ -604,39 +604,62 @@ function PlgOnboardingController(ctx) {
    * @returns {Promise<Response>} Array of onboarding DTOs.
    */
   const getAllOnboardings = async (context) => {
-    const accessControlUtil = AccessControlUtil.fromContext(context);
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can list all PLG onboarding records');
-    }
-
-    const rawLimit = context.data?.limit;
-    let listOptions;
-    if (rawLimit === undefined || rawLimit === null || rawLimit === '') {
-      // Unbounded: follow every PostgREST page until empty (payload can be very large).
-      listOptions = { fetchAllPages: true };
-    } else {
-      const n = parseInt(String(rawLimit), 10);
-      if (Number.isNaN(n) || n < 1) {
-        return badRequest('limit must be a positive integer');
-      }
-      listOptions = { limit: n };
-    }
-
     try {
+      const accessControlUtil = AccessControlUtil.fromContext(context);
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can list all PLG onboarding records');
+      }
+
+      const rawLimit = context.data?.limit;
+      let listOptions;
+      if (rawLimit === undefined || rawLimit === null || rawLimit === '') {
+        // TODO: implement proper pagination or filtering to stay under AWS Lambda
+        // response size limits (6MB). Without `limit`, all pages are loaded into memory before
+        // responding (OOM / timeout risk as the table grows).
+        listOptions = { fetchAllPages: true };
+      } else {
+        const limitStr = String(rawLimit).trim();
+        if (!/^\d+$/.test(limitStr)) {
+          return badRequest('limit must be a positive integer');
+        }
+        const n = Number.parseInt(limitStr, 10);
+        if (n < 1) {
+          return badRequest('limit must be a positive integer');
+        }
+        listOptions = { limit: n };
+      }
+
       const { PlgOnboarding } = context.dataAccess;
       const raw = await PlgOnboarding.all({}, listOptions);
       // Data access returns a single instance when limit === 1, not an array (BaseCollection).
       let records;
       if (Array.isArray(raw)) {
         records = raw;
-      } else if (raw == null) {
+      } else if (raw === null || raw === undefined) {
         records = [];
-      } else {
+      } else if (typeof raw === 'object' && typeof raw.getId === 'function') {
         records = [raw];
+      } else {
+        log.error(
+          `Unexpected PLG onboarding list result shape from data access: ${Object.prototype.toString.call(raw)}`,
+        );
+        return internalServerError('Failed to list PLG onboarding records');
       }
-      return ok(records.map(PlgOnboardingDto.toJSON));
+
+      let payload;
+      try {
+        payload = records.map(PlgOnboardingDto.toJSON);
+      } catch (serializationError) {
+        const serMsg = serializationError instanceof Error
+          ? serializationError.message
+          : String(serializationError);
+        log.error(`Failed to serialize PLG onboarding records: ${serMsg}`, serializationError);
+        return internalServerError('Failed to serialize PLG onboarding records');
+      }
+      return ok(payload);
     } catch (error) {
-      log.error(`Failed to list PLG onboardings: ${error.message}`, error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log.error(`Failed to list PLG onboardings: ${errMsg}`, error);
       return internalServerError('Failed to list PLG onboarding records');
     }
   };
