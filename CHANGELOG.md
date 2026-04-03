@@ -1,3 +1,10 @@
+# [1.412.0](https://github.com/adobe/spacecat-api-service/compare/v1.411.0...v1.412.0) (2026-04-03)
+
+
+### Features
+
+* onboard status command ([#1986](https://github.com/adobe/spacecat-api-service/issues/1986)) ([631e7fe](https://github.com/adobe/spacecat-api-service/commit/631e7fed12be33277d11068415f5db227da33a3a))
+
 # [1.411.0](https://github.com/adobe/spacecat-api-service/compare/v1.410.0...v1.411.0) (2026-04-02)
 
 
