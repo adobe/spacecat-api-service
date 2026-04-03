@@ -37,7 +37,11 @@ import {
   ASO_DEMO_ORG,
 } from '../llmo/llmo-onboarding.js';
 import {
-  autoResolveAuthorUrl, findDeliveryType, deriveProjectName, updateCodeConfig,
+  autoResolveAuthorUrl,
+  findDeliveryType,
+  deriveProjectName,
+  updateCodeConfig,
+  queueDeliveryConfigWriter,
 } from '../../support/utils.js';
 import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -419,12 +423,32 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     await site.save();
     steps.configUpdated = true;
 
-    // Step 7: Enable audits from PLG profile
+    // Step 7: update redirects source and mode for AEM CS/CW site.
+    // Skip for non-CS/CW sites, or if programID and environmentID are missing
+    const deliveryConfigResult = await queueDeliveryConfigWriter(
+      {
+        site,
+        baseURL,
+        minutes: 2000, // 33 hours, same as default. Lower values may miss redirects.
+        updateRedirects: true,
+        slackContext: {},
+      },
+      context,
+    );
+
+    if (deliveryConfigResult.ok) {
+      steps.deliveryConfigQueued = true;
+    } else {
+      steps.deliveryConfigQueued = false;
+      log.warn(`Failed to queue delivery config writer for site ${site.getId()}: ${deliveryConfigResult.error}`);
+    }
+
+    // Step 8: Enable audits from PLG profile
     const auditTypes = Object.keys(profile.audits || {});
     await enableAudits(site, context, auditTypes);
     steps.auditsEnabled = true;
 
-    // Step 7b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
+    // Step 8b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
     try {
       const { Configuration } = dataAccess;
       const configuration = await Configuration.findLatest();
@@ -448,14 +472,14 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
-    // Step 8: Add ASO entitlement
+    // Step 9: Add ASO entitlement
     await ensureAsoEntitlement(site, context);
     steps.entitlementCreated = true;
 
-    // Step 9: Trigger audit runs
+    // Step 10: Trigger audit runs
     await triggerAudits(auditTypes, context, site);
 
-    // Step 10: Trigger brand profile (non-blocking)
+    // Step 11: Trigger brand profile (non-blocking)
     try {
       await triggerBrandProfileAgent({
         context, site, reason: 'plg-onboarding',
