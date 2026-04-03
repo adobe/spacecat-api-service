@@ -1,3 +1,10 @@
+# [1.413.0](https://github.com/adobe/spacecat-api-service/compare/v1.412.0...v1.413.0) (2026-04-03)
+
+
+### Features
+
+* integrate update redirect with self onboarding ([#2027](https://github.com/adobe/spacecat-api-service/issues/2027)) ([2a72a95](https://github.com/adobe/spacecat-api-service/commit/2a72a957320a78fe7e81105e20b5f25dff88c3ce))
+
 # [1.412.0](https://github.com/adobe/spacecat-api-service/compare/v1.411.0...v1.412.0) (2026-04-03)
 
 
