@@ -313,6 +313,57 @@ describe('ephemeral-run-service', () => {
       expect(result.scrapeFreshnessDays).to.equal(30);
       expect(result.opportunityFreshnessDays).to.equal(7);
     });
+
+    it('legacy trafficAnalysisWeeks wins over optionsByImportType.backfillWeeks when both are provided', () => {
+      const result = resolvePayload({
+        imports: {
+          types: ['traffic-analysis'],
+          trafficAnalysisWeeks: 3,
+          optionsByImportType: { 'traffic-analysis': { backfillWeeks: 10 } },
+        },
+      });
+      // trafficAnalysisWeeks (legacy) is applied AFTER optionsByImportType merge and overrides it
+      expect(result.imports.trafficAnalysisWeeks).to.equal(3);
+      expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(3);
+    });
+
+    it('body optionsByImportType merges with preset — body wins on conflict and custom keys survive', () => {
+      const result = resolvePayload({
+        preset: 'insights-report-default',
+        imports: {
+          optionsByImportType: {
+            'traffic-analysis': { backfillWeeks: 8, customParam: 'kept' },
+          },
+        },
+      });
+      expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(8);
+      expect(result.imports.optionsByImportType['traffic-analysis'].customParam).to.equal('kept');
+    });
+
+    it('teardown delaySeconds: 0 stays 0 (is NOT replaced by default 14400)', () => {
+      const result = resolvePayload({ teardown: { delaySeconds: 0 } });
+      expect(result.teardownDelaySeconds).to.equal(0);
+    });
+
+    it('teardown delaySeconds: 86400 stays at max boundary', () => {
+      const result = resolvePayload({ teardown: { delaySeconds: 86400 } });
+      expect(result.teardownDelaySeconds).to.equal(86400);
+    });
+
+    it('teardown delaySeconds: 86401 clamps to 86400', () => {
+      const result = resolvePayload({ teardown: { delaySeconds: 86401 } });
+      expect(result.teardownDelaySeconds).to.equal(86400);
+    });
+
+    it('forceRun: false (explicit boolean) remains false', () => {
+      const result = resolvePayload({ forceRun: false });
+      expect(result.forceRun).to.equal(false);
+    });
+
+    it('forceRun: "true" (string) is NOT treated as true — strict === true check applies', () => {
+      const result = resolvePayload({ forceRun: 'true' });
+      expect(result.forceRun).to.equal(false);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -505,6 +556,38 @@ describe('ephemeral-run-service', () => {
         channelId: '',
         threadTs: '',
       });
+    });
+
+    it('sets onDemand: true in auditContext for all preset audit types', async () => {
+      const ctx = createMockContext();
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ preset: 'insights-report-default' });
+
+      await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      const auditCalls = ctx.sqs.sendMessage.getCalls().filter((c) => c.args[0] === 'audit-queue-url');
+      expect(auditCalls.length).to.be.greaterThan(0);
+      auditCalls.forEach((call) => {
+        expect(call.args[1].auditContext.onDemand).to.equal(true);
+      });
+    });
+
+    it('enqueues traffic-analysis via triggerImportRun (not backfill) when trafficAnalysisWeeks is explicit 0', async () => {
+      const ctx = createMockContext();
+      const config = createMockConfiguration();
+      // trafficAnalysisWeeks=0 explicitly: no backfill loop runs, but traffic-analysis in types
+      const resolved = resolvePayload({
+        imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 0 },
+      });
+      expect(resolved.imports.trafficAnalysisWeeks).to.equal(0);
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      // With weeks=0, no backfill entries. traffic-analysis in types → triggerImportRun path.
+      const trafficEntries = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
+      expect(trafficEntries).to.have.length(1);
+      // Should be a regular enqueue, not backfill weeks
+      expect(trafficEntries[0]).to.not.have.property('week');
     });
   });
 
@@ -1344,6 +1427,36 @@ describe('ephemeral-run-service', () => {
       expect(input.bulkDisableJob.taskContext.slackContext.threadTs).to.equal('ts-insights');
     });
 
+    it('payload slack field overrides env slack context', async () => {
+      const ctx = createMockContext();
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID = 'C-env';
+      ctx.env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS = 'ts-env';
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {
+        imports: { types: ['top-pages'] },
+        audits: { types: ['lhs-mobile'] },
+        slack: { channelId: 'C-payload', threadTs: 'ts-payload' },
+      }, ctx);
+
+      const auditCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[0] === 'audit-queue-url');
+      expect(auditCall).to.exist;
+      expect(auditCall.args[1].auditContext.slackContext).to.deep.equal({
+        channelId: 'C-payload',
+        threadTs: 'ts-payload',
+      });
+
+      expect(sfnSendStub).to.have.been.calledOnce;
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      expect(input.bulkDisableJob.taskContext.slackContext).to.deep.equal({
+        channelId: 'C-payload',
+        threadTs: 'ts-payload',
+      });
+    });
+
     it('uses EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN for teardown', async () => {
       const ctx = createMockContext();
       ctx.env.EPHEMERAL_RUN_TEARDOWN_STATE_MACHINE_ARN = 'arn:aws:states:ephemeral';
@@ -1470,6 +1583,29 @@ describe('ephemeral-run-service', () => {
       }, ctx);
 
       expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown/);
+    });
+
+    it('teardown sites list includes only newly-enabled sites — already-enabled sites excluded', async () => {
+      const ctx = createMockContext();
+      // site1 has top-pages already enabled → deltaEnableImports returns importsEnabled=[]
+      const site1 = createMockSite('s-1', 'https://site1.com');
+      site1.importsState.push({ type: 'top-pages', enabled: true });
+      // site2 has nothing enabled → deltaEnableImports returns importsEnabled=['top-pages']
+      const site2 = createMockSite('s-2', 'https://site2.com');
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById
+        .onFirstCall().resolves(site1)
+        .onSecondCall().resolves(site2);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1', 's-2'], { imports: { types: ['top-pages'] } }, ctx);
+
+      expect(sfnSendStub).to.have.been.calledOnce;
+      const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      const teardownSites = input.bulkDisableJob.sites;
+      // only site2 should appear — site1 was already enabled (importsEnabled=[])
+      expect(teardownSites).to.have.length(1);
+      expect(teardownSites[0].siteId).to.equal('s-2');
     });
   });
 

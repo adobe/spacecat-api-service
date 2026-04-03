@@ -67,6 +67,7 @@ const PRESETS = {
         'broken-internal-links',
         'broken-internal-links-auto-suggest',
         'cwv',
+        'cwv-auto-suggest',
         'meta-tags',
         'meta-tags-auto-suggest',
         'alt-text',
@@ -468,12 +469,13 @@ function buildTeardownWorkflowInput({
 
 /**
  * Slack context for ephemeral-run teardown (Step Functions) and audit enqueue.
- * Sourced exclusively from environment variables — not overridable via API payload.
+ * Defaults to environment variables; API payload `slack` field overrides individual fields.
  */
-function ephemeralRunWorkflowSlackContext(env) {
+function ephemeralRunWorkflowSlackContext(env, payloadSlack = {}) {
   return {
-    channelId: env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID || '',
-    threadTs: env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS
+    channelId: payloadSlack.channelId || env.EPHEMERAL_RUN_WORKFLOW_SLACK_CHANNEL_ID || '',
+    threadTs: payloadSlack.threadTs
+      || env.EPHEMERAL_RUN_WORKFLOW_SLACK_THREAD_TS
       || env.INSIGHTS_WORKFLOW_SLACK_THREAD_TS
       || '',
   };
@@ -648,7 +650,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
     opportunityFreshnessDays,
   } = resolvePayload(body);
   const auditTypes = audits.types;
-  const workflowSlackContext = ephemeralRunWorkflowSlackContext(env);
+  const workflowSlackContext = ephemeralRunWorkflowSlackContext(env, body.slack);
   const configuration = await Configuration.findLatest();
 
   const now = new Date();

@@ -172,6 +172,60 @@ describe('ephemeral-run controller', () => {
       const response = await batchRun({});
       expect(response.status).to.equal(400);
     });
+
+    it('accepts exactly 1000 sites (boundary — should succeed)', async () => {
+      const ctx = createCtx();
+      const ids = Array.from({ length: 1000 }, () => VALID_UUID);
+      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1000 });
+      const { batchRun } = EphemeralRunController(ctx);
+
+      const response = await batchRun({ data: { siteIds: ids } });
+      expect(response.status).to.equal(202);
+    });
+
+    it('accepts valid preset insights-report-default (should not return 400)', async () => {
+      const ctx = createCtx();
+      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
+      const { batchRun } = EphemeralRunController(ctx);
+
+      const response = await batchRun({
+        data: { siteIds: [VALID_UUID], preset: 'insights-report-default' },
+      });
+      expect(response.status).to.equal(202);
+    });
+
+    it('forwards slack context in body to runEphemeralRunBatch', async () => {
+      const ctx = createCtx();
+      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
+      const { batchRun } = EphemeralRunController(ctx);
+
+      await batchRun({
+        data: { siteIds: [VALID_UUID], slack: { channelId: 'C1', threadTs: 'ts1' } },
+      });
+
+      expect(runEphemeralRunBatchStub).to.have.been.calledOnce;
+      const passedBody = runEphemeralRunBatchStub.firstCall.args[1];
+      expect(passedBody.slack).to.deep.equal({ channelId: 'C1', threadTs: 'ts1' });
+    });
+
+    it('forwards preset and audits fields in body to runEphemeralRunBatch', async () => {
+      const ctx = createCtx();
+      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
+      const { batchRun } = EphemeralRunController(ctx);
+
+      await batchRun({
+        data: {
+          siteIds: [VALID_UUID],
+          preset: 'insights-report-default',
+          audits: { types: ['cwv'] },
+        },
+      });
+
+      expect(runEphemeralRunBatchStub).to.have.been.calledOnce;
+      const passedBody = runEphemeralRunBatchStub.firstCall.args[1];
+      expect(passedBody.preset).to.equal('insights-report-default');
+      expect(passedBody.audits).to.deep.equal({ types: ['cwv'] });
+    });
   });
 
   // -----------------------------------------------------------------------
