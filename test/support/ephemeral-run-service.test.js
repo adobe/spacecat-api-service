@@ -85,6 +85,10 @@ function createMockSite(siteId = 's-1', baseURL = 'https://example.com') {
     getConfig: () => siteConfig,
     setConfig: sinon.stub().returnsThis(),
     save: sinon.stub().resolves(),
+    getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+      { getUrl: () => `${baseURL}/page1` },
+      { getUrl: () => `${baseURL}/page2` },
+    ]),
     importsState,
   };
 }
@@ -120,6 +124,7 @@ function createMockContext(overrides = {}) {
       ...(dataAccessOverrides || {}),
     },
     sqs: { sendMessage: sinon.stub().resolves() },
+    scrapeClient: { createScrapeJob: sinon.stub().resolves({ jobId: 'test-scrape-job' }) },
     s3: {
       s3Client: { send: sinon.stub().resolves() },
       s3Bucket: 'test-bucket',
@@ -190,7 +195,7 @@ describe('ephemeral-run-service', () => {
 
     it('defaults trafficAnalysisWeeks when traffic-analysis is requested without weeks', () => {
       const result = resolvePayload({ imports: { types: ['traffic-analysis'] } });
-      expect(result.imports.trafficAnalysisWeeks).to.equal(5);
+      expect(result.imports.trafficAnalysisWeeks).to.equal(52);
     });
 
     it('does not override explicit trafficAnalysisWeeks 0 when traffic-analysis is requested', () => {
@@ -256,9 +261,14 @@ describe('ephemeral-run-service', () => {
       expect(result.audits.types).to.deep.equal([]);
     });
 
-    it('uses explicit trafficAnalysisWeeks', () => {
-      const result = resolvePayload({ imports: { trafficAnalysisWeeks: 3 } });
+    it('uses explicit trafficAnalysisWeeks when traffic-analysis is in types', () => {
+      const result = resolvePayload({ imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 3 } });
       expect(result.imports.trafficAnalysisWeeks).to.equal(3);
+    });
+
+    it('ignores trafficAnalysisWeeks when traffic-analysis is not in types', () => {
+      const result = resolvePayload({ imports: { trafficAnalysisWeeks: 3 } });
+      expect(result.imports.trafficAnalysisWeeks).to.equal(0);
     });
 
     it('sets forceRun=false by default', () => {
@@ -456,12 +466,14 @@ describe('ephemeral-run-service', () => {
     it('enqueues traffic analysis backfill', async () => {
       const ctx = createMockContext();
       const config = createMockConfiguration();
-      const resolved = resolvePayload({ imports: { types: [], trafficAnalysisWeeks: 3 } });
+      const resolved = resolvePayload({ imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 3 } });
 
       const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
 
       const trafficEntries = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
       expect(trafficEntries).to.have.length(3);
+      expect(trafficEntries[0]).to.have.property('week');
+      expect(trafficEntries[0]).to.have.property('year');
     });
 
     it('enqueues traffic-analysis via backfill only (no duplicate triggerImportRun) when trafficAnalysisWeeks > 0', async () => {
@@ -471,9 +483,11 @@ describe('ephemeral-run-service', () => {
 
       const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
 
-      // Only the 5 backfill week entries — no extra triggerImportRun for traffic-analysis
+      // Only the 52 backfill week entries — no extra triggerImportRun for traffic-analysis
       const trafficEntries = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
-      expect(trafficEntries).to.have.length(5);
+      expect(trafficEntries).to.have.length(52);
+      expect(trafficEntries[0]).to.have.property('week');
+      expect(trafficEntries[0]).to.have.property('year');
     });
 
     it('records skipped imports on failure', async () => {
@@ -504,7 +518,7 @@ describe('ephemeral-run-service', () => {
       const ctx = createMockContext();
       ctx.sqs.sendMessage.rejects(new Error('SQS down'));
       const config = createMockConfiguration();
-      const resolved = resolvePayload({ imports: { types: [], trafficAnalysisWeeks: 2 } });
+      const resolved = resolvePayload({ imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 2 } });
 
       const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
 
@@ -570,6 +584,94 @@ describe('ephemeral-run-service', () => {
       auditCalls.forEach((call) => {
         expect(call.args[1].auditContext.onDemand).to.equal(true);
       });
+    });
+
+    it('routes scrape-top-pages to ScrapeClient, not AUDIT_JOBS_QUEUE_URL', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      ctx.dataAccess.Site.findById.resolves(site);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      expect(ctx.scrapeClient.createScrapeJob).to.have.been.calledOnce;
+      const jobArg = ctx.scrapeClient.createScrapeJob.firstCall.args[0];
+      expect(jobArg.processingType).to.equal('default');
+      expect(jobArg.urls).to.deep.equal(['https://example.com/page1', 'https://example.com/page2']);
+      expect(jobArg.maxScrapeAge).to.equal(0);
+      const auditSqsCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[1]?.type === 'scrape-top-pages');
+      expect(auditSqsCall).to.be.undefined;
+      expect(result.enqueued.audits).to.deep.equal([{ type: 'scrape-top-pages', status: 'queued' }]);
+    });
+
+    it('includes slackContext in scrape job metadata', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      ctx.dataAccess.Site.findById.resolves(site);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      await enqueueSiteJobs('s-1', resolved, config, ctx, { channelId: 'C123', threadTs: '1234.5' });
+
+      const jobArg = ctx.scrapeClient.createScrapeJob.firstCall.args[0];
+      expect(jobArg.metaData.slackData).to.deep.equal({ channel: 'C123', thread_ts: '1234.5' });
+    });
+
+    it('skips scrape-top-pages when site is not found', async () => {
+      const ctx = createMockContext();
+      ctx.dataAccess.Site.findById.resolves(null);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      expect(ctx.scrapeClient.createScrapeJob).to.not.have.been.called;
+      expect(result.skipped).to.deep.equal([{ type: 'scrape-top-pages', kind: 'audit', reason: 'Site not found' }]);
+    });
+
+    it('skips scrape-top-pages when site has no top pages', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      site.getSiteTopPagesBySourceAndGeo.resolves([]);
+      ctx.dataAccess.Site.findById.resolves(site);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      expect(ctx.scrapeClient.createScrapeJob).to.not.have.been.called;
+      expect(result.skipped).to.deep.equal([{ type: 'scrape-top-pages', kind: 'audit', reason: 'No top pages found' }]);
+    });
+
+    it('records error when ScrapeClient.createScrapeJob throws', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.scrapeClient.createScrapeJob.rejects(new Error('scraper unavailable'));
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages'] } });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      expect(result.skipped).to.deep.equal([{ type: 'scrape-top-pages', kind: 'audit', reason: 'scraper unavailable' }]);
+    });
+
+    it('enqueues scrape-top-pages via ScrapeClient and other audits via AUDIT_JOBS_QUEUE_URL', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      ctx.dataAccess.Site.findById.resolves(site);
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ imports: { types: [] }, audits: { types: ['scrape-top-pages', 'lhs-mobile'] } });
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      expect(ctx.scrapeClient.createScrapeJob).to.have.been.calledOnce;
+      const auditSqsCalls = ctx.sqs.sendMessage.getCalls().filter((c) => c.args[0] === 'audit-queue-url');
+      expect(auditSqsCalls).to.have.length(1);
+      expect(auditSqsCalls[0].args[1].type).to.equal('lhs-mobile');
+      expect(result.enqueued.audits.map((a) => a.type)).to.include('scrape-top-pages');
+      expect(result.enqueued.audits.map((a) => a.type)).to.include('lhs-mobile');
     });
 
     it('enqueues traffic-analysis via triggerImportRun (not backfill) when trafficAnalysisWeeks is explicit 0', async () => {
@@ -1044,8 +1146,9 @@ describe('ephemeral-run-service', () => {
         ctx,
       );
 
+      expect(ctx.scrapeClient.createScrapeJob).to.have.been.called;
       const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
-      expect(sqsCalls).to.include('scrape-top-pages');
+      expect(sqsCalls).to.not.include('scrape-top-pages');
       expect(sqsCalls).to.include('cwv');
     });
 
@@ -1088,8 +1191,9 @@ describe('ephemeral-run-service', () => {
         ctx,
       );
 
+      expect(ctx.scrapeClient.createScrapeJob).to.have.been.called;
       const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
-      expect(sqsCalls).to.include('scrape-top-pages');
+      expect(sqsCalls).to.not.include('scrape-top-pages');
       expect(sqsCalls).to.include('cwv');
     });
 

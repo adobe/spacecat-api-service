@@ -12,8 +12,9 @@
 
 import { randomUUID } from 'crypto';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
-import { getOpportunitiesForAudit } from '@adobe/spacecat-shared-utils';
+import { getOpportunitiesForAudit, getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { ScrapeClient } from '@adobe/spacecat-shared-scrape-client';
 import {
   triggerImportRun,
   triggerTrafficAnalysisBackfill,
@@ -88,7 +89,7 @@ const PRESETS = {
   },
 };
 
-const DEFAULT_TRAFFIC_ANALYSIS_BACKFILL_WEEKS = 5;
+const DEFAULT_TRAFFIC_ANALYSIS_BACKFILL_WEEKS = 52;
 const DEFAULT_TEARDOWN_DELAY_SECONDS = 14400; // 4 hours
 const MAX_TEARDOWN_DELAY_SECONDS = 86400; // 24 hours
 const MAX_BATCH_SITES = 1000;
@@ -139,7 +140,7 @@ function resolveImportsFromPreset(baseImports, bodyImports) {
     ?.[TRAFFIC_ANALYSIS_BACKFILL_WEEKS_KEY];
   trafficAnalysisWeeks = trafficAnalysisWeeks ?? 0;
 
-  if (!explicitTaWeeks && !types.includes(TRAFFIC_ANALYSIS_IMPORT_TYPE)) {
+  if (!types.includes(TRAFFIC_ANALYSIS_IMPORT_TYPE)) {
     trafficAnalysisWeeks = 0;
   }
 
@@ -582,9 +583,12 @@ async function enqueueSiteJobs(
   if (trafficAnalysisHandledByBackfill) {
     try {
       const weeks = imports.trafficAnalysisWeeks;
+      const weekYearPairs = getLastNumberOfWeeks(weeks);
       await triggerTrafficAnalysisBackfill(siteId, configuration, slackContext, context, weeks);
-      for (let w = 1; w <= weeks; w += 1) {
-        enqueued.imports.push({ type: 'traffic-analysis', status: 'queued', week: w });
+      for (const { week, year } of weekYearPairs) {
+        enqueued.imports.push({
+          type: 'traffic-analysis', status: 'queued', week, year,
+        });
       }
     } catch (e) {
       log.error(`Failed to enqueue traffic-analysis backfill for site ${siteId}`, e);
@@ -592,6 +596,44 @@ async function enqueueSiteJobs(
     }
   }
 
+  // scrape-top-pages goes to the scraping pipeline (ScrapeClient), not the audit queue
+  if (audits.types.includes(SCRAPE_AUDIT_TYPE)) {
+    try {
+      const { Site } = context.dataAccess;
+      const site = await Site.findById(siteId);
+      if (!site) {
+        log.warn(`Site ${siteId}: not found, skipping ${SCRAPE_AUDIT_TYPE}`);
+        skipped.push({ type: SCRAPE_AUDIT_TYPE, kind: 'audit', reason: 'Site not found' });
+      } else {
+        const topPages = (await site.getSiteTopPagesBySourceAndGeo('seo', 'global')) || [];
+        if (topPages.length === 0) {
+          log.warn(`Site ${siteId}: no top pages found, skipping ${SCRAPE_AUDIT_TYPE}`);
+          skipped.push({ type: SCRAPE_AUDIT_TYPE, kind: 'audit', reason: 'No top pages found' });
+        } else {
+          const urls = topPages.map((page) => page.getUrl());
+          // allow injection via context for testability, fall back to creating from context
+          const scrapeClient = context.scrapeClient ?? ScrapeClient.createFrom(context);
+          await scrapeClient.createScrapeJob({
+            processingType: 'default',
+            urls,
+            maxScrapeAge: 0,
+            metaData: {
+              slackData: {
+                channel: slackContext.channelId ?? '',
+                thread_ts: slackContext.threadTs ?? '',
+              },
+            },
+          });
+          enqueued.audits.push({ type: SCRAPE_AUDIT_TYPE, status: 'queued' });
+        }
+      }
+    } catch (e) {
+      log.error(`Failed to enqueue ${SCRAPE_AUDIT_TYPE} for site ${siteId}`, e);
+      skipped.push({ type: SCRAPE_AUDIT_TYPE, kind: 'audit', reason: e.message });
+    }
+  }
+
+  const nonScrapeTypes = audits.types.filter((t) => t !== SCRAPE_AUDIT_TYPE);
   const auditQueueUrl = env.AUDIT_JOBS_QUEUE_URL;
   const auditContext = {
     onDemand: true,
@@ -600,9 +642,9 @@ async function enqueueSiteJobs(
       threadTs: slackContext.threadTs ?? '',
     },
   };
-  if (audits.types.length > 0 && !auditQueueUrl) {
+  if (nonScrapeTypes.length > 0 && !auditQueueUrl) {
     log.error('No audit queue URL: set env AUDIT_JOBS_QUEUE_URL');
-    for (const auditType of audits.types) {
+    for (const auditType of nonScrapeTypes) {
       skipped.push({
         type: auditType,
         kind: 'audit',
@@ -610,7 +652,7 @@ async function enqueueSiteJobs(
       });
     }
   } else {
-    for (const auditType of audits.types) {
+    for (const auditType of nonScrapeTypes) {
       try {
         // eslint-disable-next-line no-await-in-loop
         await sendAuditMessage(context.sqs, auditQueueUrl, auditType, auditContext, siteId);
