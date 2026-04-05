@@ -12,7 +12,9 @@
 
 import { randomUUID } from 'crypto';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
-import { getLastNumberOfWeeks, composeBaseURL, getStoredMetrics } from '@adobe/spacecat-shared-utils';
+import {
+  getLastNumberOfWeeks, getDateRanges, composeBaseURL, getStoredMetrics,
+} from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ScrapeClient } from '@adobe/spacecat-shared-scrape-client';
 import {
@@ -217,43 +219,27 @@ async function isScrapeRecent(
  */
 async function isTrafficAnalysisWeekPresent(siteId, context) {
   const { s3 } = context;
-  const { s3Client, s3Bucket, ListObjectsV2Command } = s3;
+  const {
+    s3Client, s3Bucket, ListObjectsV2Command,
+  } = s3;
 
-  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  // Same week/year source as the import worker (getLastNumberOfWeeks → getLastFullCalendarWeek)
+  const [{ week, year }] = getLastNumberOfWeeks(1);
 
-  // Replicate getLastFullCalendarWeek: anchor on the Thursday of last week
-  const prevWeekDate = new Date(Date.now() - 7 * MS_PER_DAY);
-  const thursday = new Date(prevWeekDate);
-  thursday.setUTCDate(prevWeekDate.getUTCDate() + 4 - (prevWeekDate.getUTCDay() || 7));
-
-  const year = thursday.getUTCFullYear();
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  const firstMonday = new Date(Date.UTC(year, 0, 4 - (jan4.getUTCDay() || 7) + 1));
-  const thursdayOfWeek1 = new Date(firstMonday.getTime() + 3 * MS_PER_DAY);
-  const week = Math.ceil(
-    (thursday.getTime() - thursdayOfWeek1.getTime()) / (7 * MS_PER_DAY),
-  ) + 1;
+  // Use same month resolution as the import worker (getDateRanges handles week-spans-two-months)
+  const dateRanges = getDateRanges(week, year);
 
   const paddedWeek = String(week).padStart(2, '0');
 
-  // Compute the Monday and Sunday of this week to determine the month(s)
-  const weekMonday = new Date(firstMonday.getTime() + (week - 1) * 7 * MS_PER_DAY);
-  const weekSunday = new Date(weekMonday.getTime() + 6 * MS_PER_DAY);
-  const startMonth = String(weekMonday.getUTCMonth() + 1).padStart(2, '0');
-  const endMonth = String(weekSunday.getUTCMonth() + 1).padStart(2, '0');
-  const endYear = weekSunday.getUTCFullYear();
-
-  const hasFile = async (y, m) => {
-    const prefix = `${TRAFFIC_ANALYSIS_S3_PREFIX}/siteid=${siteId}/year=${y}/month=${m}/week=${paddedWeek}/`;
+  for (const { year: y, month: m } of dateRanges) {
+    const paddedMonth = String(m).padStart(2, '0');
+    const prefix = `${TRAFFIC_ANALYSIS_S3_PREFIX}/siteid=${siteId}/year=${y}/month=${paddedMonth}/week=${paddedWeek}/`;
+    // eslint-disable-next-line no-await-in-loop
     const resp = await s3Client.send(
       new ListObjectsV2Command({ Bucket: s3Bucket, Prefix: prefix, MaxKeys: 1 }),
     );
-    return (resp.Contents || []).length > 0;
-  };
-
-  if (await hasFile(year, startMonth)) return true;
-  // Week spans two months — check the second month too
-  if (startMonth !== endMonth) return hasFile(endYear, endMonth);
+    if ((resp.Contents || []).length > 0) return true;
+  }
   return false;
 }
 

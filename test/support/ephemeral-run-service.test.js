@@ -267,6 +267,11 @@ describe('ephemeral-run-service', () => {
       expect(result.auditFreshnessDays).to.equal(3);
     });
 
+    it('accepts custom importFreshnessDays from body.freshness.importDays', () => {
+      const result = resolvePayload({ freshness: { importDays: 5 } });
+      expect(result.importFreshnessDays).to.equal(5);
+    });
+
     it('ignores non-numeric freshness values and falls back to defaults', () => {
       const result = resolvePayload({ freshness: { scrapeDays: 'ten', auditDays: null } });
       expect(result.scrapeFreshnessDays).to.equal(30);
@@ -1197,6 +1202,20 @@ describe('ephemeral-run-service', () => {
       expect(result).to.equal(false);
     });
 
+    it('returns false for traffic-analysis when S3 response has no Contents property', async () => {
+      const sendStub = sinon.stub().resolves({});
+      const ctx = {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: { send: sendStub },
+          ListObjectsV2Command: class { constructor(p) { this.input = p; } },
+        },
+        log,
+      };
+      const result = await isImportFresh('s-1', 'traffic-analysis', {}, ctx, log);
+      expect(result).to.equal(false);
+    });
+
     it('returns true for traffic-analysis when S3 file exists in the first month partition', async () => {
       const ctx = makeTrafficAnalysisS3Context(true);
       const result = await isImportFresh('s-1', 'traffic-analysis', {}, ctx, log);
@@ -1520,6 +1539,40 @@ describe('ephemeral-run-service', () => {
       expect(ctx.dataAccess.LatestAudit.findById).to.not.have.been.called;
       const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
       expect(sqsCalls).to.include('cwv');
+    });
+
+    it('does not enqueue import to SQS when S3 metrics are fresh, records import-fresh in site result', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      const recentDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      // GetObjectCommand (getStoredMetrics) returns fresh organic-traffic metrics;
+      // all other send calls (PutObjectCommand for manifest/result) resolve normally
+      ctx.s3.s3Client.send.callsFake((cmd) => {
+        if (cmd.constructor.name === 'GetObjectCommand') {
+          return Promise.resolve({
+            Body: { transformToString: () => Promise.resolve(JSON.stringify([{ time: recentDate }])) }, // eslint-disable-line max-len
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      await runEphemeralRunBatch(['s-1'], { imports: { types: ['organic-traffic'] } }, ctx);
+
+      // organic-traffic should NOT be enqueued — data is fresh
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
+      expect(sqsCalls).to.not.include('organic-traffic');
+
+      // freshnessSkipped written to S3 site result should contain import-fresh entry
+      const s3Calls = ctx.s3.s3Client.send.getCalls().map((c) => c.args[0]?.input);
+      const siteResultCall = s3Calls.find((i) => i?.Key?.includes('/results/'));
+      const siteResult = JSON.parse(siteResultCall.Body);
+      expect(siteResult.freshnessSkipped).to.deep.include(
+        { type: 'organic-traffic', kind: 'import', reason: 'import-fresh' },
+      );
     });
   });
 
