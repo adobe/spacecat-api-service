@@ -840,6 +840,7 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
             auditsEnabled,
             baseURL: site.getBaseURL(),
             organizationId: site.getOrganizationId(),
+            site,
           };
         }
       } catch (error) {
@@ -881,8 +882,7 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
     try {
       // Global forceRun takes full precedence; per-site check is only evaluated when not set
       const siteForceRun = forceRun ? true : forceRunSiteIds.has(siteId);
-      // eslint-disable-next-line no-await-in-loop
-      const siteForFreshness = await Site.findById(siteId);
+      const { site: siteForFreshness } = perSiteSetup[siteId];
 
       const isTrafficAnalysisBackfillMode = imports.types.includes(TRAFFIC_ANALYSIS_IMPORT_TYPE)
         && imports.trafficAnalysisWeeks > 0;
