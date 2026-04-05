@@ -17,7 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
-import { LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { LOG_SOURCES, CdnApiError } from '../../../src/support/edge-routing-utils.js';
 import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
@@ -87,6 +87,8 @@ describe('LlmoController', () => {
   let getServicePrincipalTokenStub;
   let isUserInImsGroupStub;
   let getOrgGroupsStub;
+  let probeSiteAndResolveDomainStub;
+  let callCdnRoutingApiStub;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -199,7 +201,7 @@ describe('LlmoController', () => {
         fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
-        ImsServiceClient: {
+        ImsEdgeClient: {
           createFrom: () => ({
             getServicePrincipalToken: (...args) => getServicePrincipalTokenStub(...args),
           }),
@@ -252,6 +254,31 @@ describe('LlmoController', () => {
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+      '../../../src/support/edge-routing-utils.js': {
+        probeSiteAndResolveDomain: (...args) => probeSiteAndResolveDomainStub(...args),
+        callCdnRoutingApi: (...args) => callCdnRoutingApiStub(...args),
+        parseEdgeRoutingConfig: (json, cdnType) => {
+          const parsed = JSON.parse(json);
+          const config = parsed[cdnType];
+          if (!config || typeof config !== 'object' || !config.cdnRoutingUrl || !/^https?:\/\//.test(config.cdnRoutingUrl)) {
+            throw new Error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnType}`);
+          }
+          return config;
+        },
+        CdnApiError,
+        EDGE_OPTIMIZE_CDN_STRATEGIES: {
+          'aem-cs-fastly': {
+            buildUrl: (cdnConfig, domain) => `${cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '')}/${domain}/edgeoptimize`,
+            buildBody: (enabled) => ({ enabled }),
+            method: 'POST',
+          },
+        },
+        EDGE_OPTIMIZE_CDN_TYPES: ['aem-cs-fastly'],
+        SUPPORTED_EDGE_ROUTING_CDN_TYPES: ['aem-cs-fastly'],
+        OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE: 'optimize-at-edge-enabled-marking',
+        EDGE_OPTIMIZE_MARKING_DELAY_SECONDS: 300,
+        LOG_SOURCES,
       },
     });
 
@@ -527,6 +554,8 @@ describe('LlmoController', () => {
     getServicePrincipalTokenStub = sinon.stub().resolves({ access_token: 'sp-access-token' });
     isUserInImsGroupStub = sinon.stub().resolves(false);
     getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
+    probeSiteAndResolveDomainStub = sinon.stub().resolves('www.example.com');
+    callCdnRoutingApiStub = sinon.stub().resolves();
     tracingFetchStub = sinon.stub();
     fetchWithTimeoutStub = sinon.stub();
     readConfigStub = sinon.stub();
@@ -4666,6 +4695,9 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
         '@adobe/spacecat-shared-tokowaka-client': {
           default: {
             createFrom: () => mockTokowakaClient,
@@ -4691,7 +4723,10 @@ describe('LlmoController', () => {
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(edgeConfigContext);
+      const result = await controllerNoAdmin.createOrUpdateEdgeConfig({
+        ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
+      });
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
@@ -4998,6 +5033,7 @@ describe('LlmoController', () => {
       getOrgGroupsStub.resolves([{ groupName: 'Administrators', ident: 11111 }]);
       const ctx = {
         ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
         imsClient: {
           isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
           getOrgGroups: (...args) => getOrgGroupsStub(...args),
@@ -5006,6 +5042,9 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
         '@adobe/spacecat-shared-tokowaka-client': {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
@@ -5019,7 +5058,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '@adobe/spacecat-shared-ims-client': {
-          ImsServiceClient: {
+          ImsEdgeClient: {
             createFrom: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
           },
         },
@@ -5034,6 +5073,7 @@ describe('LlmoController', () => {
       isUserInImsGroupStub.resolves(false);
       const ctx = {
         ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
         imsClient: {
           isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
           getOrgGroups: (...args) => getOrgGroupsStub(...args),
@@ -5042,6 +5082,9 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
         '@adobe/spacecat-shared-tokowaka-client': {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
@@ -5055,7 +5098,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '@adobe/spacecat-shared-ims-client': {
-          ImsServiceClient: {
+          ImsEdgeClient: {
             createFrom: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
           },
         },
@@ -5070,6 +5113,7 @@ describe('LlmoController', () => {
       getOrgGroupsStub.rejects(new Error('IMS API error'));
       const ctx = {
         ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
         imsClient: {
           isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
           getOrgGroups: (...args) => getOrgGroupsStub(...args),
@@ -5078,6 +5122,9 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
         '@adobe/spacecat-shared-tokowaka-client': {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
@@ -5091,7 +5138,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '@adobe/spacecat-shared-ims-client': {
-          ImsServiceClient: {
+          ImsEdgeClient: {
             createFrom: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
           },
         },
@@ -5103,13 +5150,16 @@ describe('LlmoController', () => {
 
     // ── cdnType / enabled input validation ─────────────────────────────────────
 
-    it('returns 400 when cdnType is not a supported value', async () => {
+    it('skips automated CDN routing when cdnType is not supported for routing (logs only)', async () => {
       const result = await controller.createOrUpdateEdgeConfig({
         ...edgeConfigContext,
         data: { cdnType: 'unknown-cdn' },
       });
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('cdnType must be one of');
+      expect(result.status).to.equal(200);
+      expect(callCdnRoutingApiStub).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/not eligible for automated routing/),
+      );
     });
 
     it('returns 400 when enabled is not a boolean', async () => {
@@ -5131,7 +5181,12 @@ describe('LlmoController', () => {
         return {
           ...edgeConfigContext,
           data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY, ...overrides.data },
-          env: { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly, ...overrides.env },
+          env: {
+            ...edgeConfigContext.env,
+            ENV: 'prod',
+            EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly,
+            ...overrides.env,
+          },
         };
       }
 
@@ -5166,87 +5221,59 @@ describe('LlmoController', () => {
         expect(result.status).to.equal(503);
       });
 
-      it('returns 500 when IMS org ID is missing on the site org', async () => {
-        const orgNoIms = {
-          getId: sinon.stub().returns(TEST_ORG_ID),
-          getImsOrgId: sinon.stub().returns(''),
-        };
-        mockSite.getOrganization = sinon.stub().resolves(orgNoIms);
-        tracingFetchStub.resolves({ ok: true });
-        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.equal(500);
-        expect((await result.json()).message).to.include('IMS org ID not found');
-      });
-
       it('returns 400 when site probe throws', async () => {
-        tracingFetchStub.rejects(new Error('Connection refused'));
+        probeSiteAndResolveDomainStub.rejects(new Error('Connection refused'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(400);
-        expect((await result.json()).message).to.include('Error probing site');
+        expect((await result.json()).message).to.include('Connection refused');
       });
 
       it('returns 400 when probe returns non-2xx non-301', async () => {
-        tracingFetchStub.resolves({ ok: false, status: 404 });
+        probeSiteAndResolveDomainStub.rejects(new Error('did not return 2xx or 301'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(400);
         expect((await result.json()).message).to.include('did not return 2xx');
       });
 
       it('returns 400 when probe returns 301 but domains do not match', async () => {
-        tracingFetchStub.resolves({
-          ok: false,
-          status: 301,
-          headers: { get: (n) => (n === 'location' ? 'https://other-domain.com/' : null) },
-        });
+        probeSiteAndResolveDomainStub.rejects(new Error('does not match probe domain'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(400);
         expect((await result.json()).message).to.include('does not match');
       });
 
       it('returns 401 when SP token request fails', async () => {
-        tracingFetchStub.resolves({ ok: true });
         getServicePrincipalTokenStub.rejects(new Error('IMS error'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(401);
-        expect((await result.json()).message).to.equal(
-          'Authentication failed with upstream IMS service',
-        );
+        expect((await result.json()).message).to.equal('Authentication failed');
       });
 
       it('returns 403 when CDN API responds 403', async () => {
-        tracingFetchStub.onFirstCall().resolves({ ok: true });
-        tracingFetchStub.onSecondCall().resolves({
-          ok: false,
-          status: 403,
-          text: sinon.stub().resolves('forbidden'),
-        });
+        callCdnRoutingApiStub.rejects(new CdnApiError('User is not authorized to update CDN routing', 403));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(403);
         expect((await result.json()).message).to.include('not authorized');
       });
 
-      it('returns 500 when CDN API responds with non-401/403 error', async () => {
-        tracingFetchStub.onFirstCall().resolves({ ok: true });
-        tracingFetchStub.onSecondCall().resolves({
-          ok: false,
-          status: 503,
-          text: sinon.stub().resolves('unavailable'),
-        });
+      it('returns upstream status when CDN API responds with non-401/403 error', async () => {
+        callCdnRoutingApiStub.rejects(new CdnApiError('Upstream call failed with status 503', 503));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.equal(500);
-        expect((await result.json()).message).to.include('Upstream call failed');
+        expect(result.status).to.equal(503);
+        expect((await result.json()).message).to.equal('Upstream call failed with status 503');
       });
 
       it('returns 200 with routing data when CDN routing succeeds', async () => {
-        tracingFetchStub.onFirstCall().resolves({ ok: true });
-        tracingFetchStub.onSecondCall().resolves({ ok: true });
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
         const body = await result.json();
-        expect(body).to.include.keys('domain', 'cdnType');
-        expect(body).to.not.have.key('enabled');
-        expect(body.cdnType).to.equal(LOG_SOURCES.AEM_CS_FASTLY);
-        expect(mockConfig.updateEdgeOptimizeConfig).to.not.have.been.called;
+        expect(body).to.include.key('apiKeys');
+        expect(body).to.not.have.property('domain');
+        expect(body).to.not.have.property('cdnType');
+        expect(body).to.not.have.property('enabled');
+        // opted field updated, but enabled flag NOT written (import worker handles it)
+        expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledOnce;
+        expect(mockConfig.updateEdgeOptimizeConfig.firstCall.args[0]).to.not.have.property('enabled');
         expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
           mockEnv.IMPORT_WORKER_QUEUE_URL,
           { type: 'optimize-at-edge-enabled-marking' },
@@ -5256,8 +5283,6 @@ describe('LlmoController', () => {
       });
 
       it('returns 200 with routing data when CDN routing disabled (enabled=false)', async () => {
-        tracingFetchStub.onFirstCall().resolves({ ok: true });
-        tracingFetchStub.onSecondCall().resolves({ ok: true });
         const routingData = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: false };
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ data: routingData }),
@@ -5265,42 +5290,31 @@ describe('LlmoController', () => {
         expect(result.status).to.equal(200);
         const body = await result.json();
         expect(body).to.not.have.key('enabled');
-        expect(mockConfig.updateEdgeOptimizeConfig).to.not.have.been.called;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockEnv.IMPORT_WORKER_QUEUE_URL,
-          { type: 'optimize-at-edge-enabled-marking' },
-          undefined,
-          { delaySeconds: 300 },
-        );
+        // enabled=false is written directly to site config, no SQS message
+        expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledTwice;
+        expect(mockConfig.updateEdgeOptimizeConfig.secondCall.args[0]).to.include({
+          enabled: false,
+        });
+        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
       });
 
       it('returns 200 with routing on 301 redirect to same root domain', async () => {
-        mockSite.getBaseURL = sinon.stub().returns('https://example.com');
-        tracingFetchStub.onFirstCall().resolves({
-          ok: false,
-          status: 301,
-          headers: {
-            get: (n) => (n === 'location' ? 'https://www.example.com/' : null),
-          },
-        });
-        tracingFetchStub.onSecondCall().resolves({ ok: true });
+        probeSiteAndResolveDomainStub.resolves('www.example.com');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
         const body = await result.json();
-        expect(body.domain).to.be.a('string');
+        expect(body.apiKeys).to.deep.equal(['k']);
+        expect(callCdnRoutingApiStub).to.have.been.calledOnce;
       });
 
-      it('uses status from thrown CDN error when available', async () => {
-        tracingFetchStub.onFirstCall().resolves({ ok: true });
-        const err = Object.assign(new Error('CDN failed'), { status: 418 });
-        tracingFetchStub.onSecondCall().rejects(err);
+      it('uses status from CdnApiError when CDN call throws', async () => {
+        callCdnRoutingApiStub.rejects(new CdnApiError('CDN failed', 418));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(418);
       });
 
-      it('returns 500 when CDN fetch throws without a status', async () => {
-        tracingFetchStub.onFirstCall().resolves({ ok: true });
-        tracingFetchStub.onSecondCall().rejects(new Error('Network error'));
+      it('returns 500 when CDN call throws a plain error', async () => {
+        callCdnRoutingApiStub.rejects(new Error('Network error'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(500);
       });

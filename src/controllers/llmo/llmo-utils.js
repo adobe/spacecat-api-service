@@ -13,44 +13,7 @@
 // LLMO constants
 export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
-// Supported CDN / log source types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
-export const LOG_SOURCES = {
-  BYOCDN_FASTLY: 'byocdn-fastly',
-  BYOCDN_AKAMAI: 'byocdn-akamai',
-  BYOCDN_CLOUDFRONT: 'byocdn-cloudfront',
-  BYOCDN_CLOUDFLARE: 'byocdn-cloudflare',
-  BYOCDN_IMPERVA: 'byocdn-imperva',
-  BYOCDN_OTHER: 'byocdn-other',
-  AMS_CLOUDFRONT: 'ams-cloudfront',
-  AMS_FRONTDOOR: 'ams-frontdoor',
-  AEM_CS_FASTLY: 'aem-cs-fastly',
-  COMMERCE_FASTLY: 'commerce-fastly',
-};
-
-// Per-CDN strategies for edge optimize routing.
-export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
-  [LOG_SOURCES.AEM_CS_FASTLY]: {
-    buildUrl: (cdnConfig, domain) => {
-      const base = cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '');
-      return `${base}/${domain}/edgeoptimize`;
-    },
-    buildBody: (enabled) => ({ enabled }),
-    method: 'POST',
-  },
-};
-
-export const EDGE_OPTIMIZE_CDN_TYPES = Object.keys(EDGE_OPTIMIZE_CDN_STRATEGIES);
-
 export const LLMO_ADMIN_GROUP_NAME = 'LLMO Admin';
-
-// Import worker job type for edge optimize enabled detection.
-// The import worker handler iterates all opted-in sites and stamps edgeOptimizeConfig.enabled
-// when Tokowaka confirms the site is serving edge-optimized content.
-export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-marking';
-
-// Delay (seconds) before triggering the edge-optimize enabled marking job after CDN routing update.
-// Gives the CDN API time to propagate before Tokowaka detects the change.
-export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
 
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
