@@ -29,6 +29,7 @@ import {
   getAuditTypesToSkipForSite,
   isImportFresh,
   getImportTypesToSkipForSite,
+  getMissingTrafficAnalysisWeeks,
   runEphemeralRunBatch,
   MAX_BATCH_SITES,
   AUDIT_HANDLER_FLAGS,
@@ -673,6 +674,46 @@ describe('ephemeral-run-service', () => {
       expect(trafficEntries).to.have.length(1);
       // Should be a regular enqueue, not backfill weeks
       expect(trafficEntries[0]).to.not.have.property('week');
+    });
+
+    it('sends only the specific trafficAnalysisWeekYearPairs when provided', async () => {
+      const ctx = createMockContext();
+      const config = createMockConfiguration();
+      const specificPairs = [
+        { week: 10, year: 2025 },
+        { week: 8, year: 2025 },
+      ];
+      const resolved = resolvePayload({
+        imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 52 },
+      });
+      resolved.imports.trafficAnalysisWeekYearPairs = specificPairs;
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      const trafficEntries = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
+      expect(trafficEntries).to.have.length(2);
+      expect(trafficEntries[0]).to.deep.include({ week: 10, year: 2025 });
+      expect(trafficEntries[1]).to.deep.include({ week: 8, year: 2025 });
+      // SQS messages sent with specific week/year
+      const sqsCalls = ctx.sqs.sendMessage.getCalls().filter((c) => c.args[1]?.type === 'traffic-analysis');
+      expect(sqsCalls).to.have.length(2);
+      expect(sqsCalls[0].args[1]).to.include({ week: 10, year: 2025, trigger: 'backfill' });
+    });
+
+    it('sends no traffic-analysis SQS messages when trafficAnalysisWeekYearPairs is empty (all weeks present)', async () => {
+      const ctx = createMockContext();
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({
+        imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 5 },
+      });
+      resolved.imports.trafficAnalysisWeekYearPairs = []; // all weeks already present
+
+      const result = await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      const trafficSqsCalls = ctx.sqs.sendMessage.getCalls().filter((c) => c.args[1]?.type === 'traffic-analysis');
+      expect(trafficSqsCalls).to.have.length(0);
+      const trafficEnqueued = result.enqueued.imports.filter((e) => e.type === 'traffic-analysis');
+      expect(trafficEnqueued).to.have.length(0);
     });
   });
 
@@ -1393,6 +1434,92 @@ describe('ephemeral-run-service', () => {
       const skip10 = await getImportTypesToSkipForSite('s-1', ['organic-traffic'], site, ctx2, log, false, 10);
       expect(skip10.has('organic-traffic')).to.equal(true);
     });
+
+    it('does NOT skip traffic-analysis when trafficAnalysisWeeks > 0 (per-week handled separately)', async () => {
+      const site = {};
+      // Even with fresh S3, traffic-analysis is excluded when trafficAnalysisWeeks > 0
+      const ctx = {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: { send: sinon.stub().resolves({ Contents: [{ Key: 'data.parquet' }] }) },
+          ListObjectsV2Command: class { constructor(p) { this.input = p; } },
+        },
+        log,
+      };
+      const skip = await getImportTypesToSkipForSite('s-1', ['traffic-analysis'], site, ctx, log, false, 7, 5);
+      expect(skip.has('traffic-analysis')).to.equal(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getMissingTrafficAnalysisWeeks
+  // -----------------------------------------------------------------------
+  describe('getMissingTrafficAnalysisWeeks()', () => {
+    const log = { warn: sinon.stub(), info: sinon.stub(), debug: sinon.stub() };
+
+    function makeListContext(presentWeekNumbers) {
+      // presentWeekNumbers: array of week numbers (integers) that should appear "present"
+      // The stub returns Contents if the prefix contains one of those week numbers
+      const send = sinon.stub().callsFake((cmd) => {
+        const prefix = cmd?.input?.Prefix ?? '';
+        const match = prefix.match(/week=(\d+)/);
+        const weekNum = match ? parseInt(match[1], 10) : -1;
+        return Promise.resolve(
+          presentWeekNumbers.includes(weekNum) ? { Contents: [{ Key: 'data.parquet' }] } : { Contents: [] },
+        );
+      });
+      return {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: { send },
+          ListObjectsV2Command: class { constructor(p) { this.input = p; } },
+        },
+        log,
+      };
+    }
+
+    it('returns all weeks when none have S3 files', async () => {
+      const ctx = makeListContext([]);
+      const missing = await getMissingTrafficAnalysisWeeks('s-1', 3, ctx, log);
+      expect(missing).to.have.length(3);
+      missing.forEach((p) => {
+        expect(p).to.have.property('week');
+        expect(p).to.have.property('year');
+      });
+    });
+
+    it('returns empty array when all weeks have S3 files', async () => {
+      // getLastNumberOfWeeks(3) returns [w, w-1, w-2]; stub all as present
+      const { getLastNumberOfWeeks: getRealWeeks } = await import('@adobe/spacecat-shared-utils');
+      const weeks = getRealWeeks(3);
+      const weekNums = weeks.map((p) => p.week);
+      const ctx = makeListContext(weekNums);
+      const missing = await getMissingTrafficAnalysisWeeks('s-1', 3, ctx, log);
+      expect(missing).to.have.length(0);
+    });
+
+    it('returns only missing weeks when some weeks have S3 files', async () => {
+      const { getLastNumberOfWeeks: getRealWeeks } = await import('@adobe/spacecat-shared-utils');
+      const weeks = getRealWeeks(3);
+      // Mark only the most-recent week as present
+      const ctx = makeListContext([weeks[0].week]);
+      const missing = await getMissingTrafficAnalysisWeeks('s-1', 3, ctx, log);
+      expect(missing).to.have.length(2);
+    });
+
+    it('treats a week as missing (fail-open) when S3 check throws', async () => {
+      const send = sinon.stub().rejects(new Error('S3 error'));
+      const ctx = {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: { send },
+          ListObjectsV2Command: class { constructor(p) { this.input = p; } },
+        },
+        log,
+      };
+      const missing = await getMissingTrafficAnalysisWeeks('s-1', 2, ctx, log);
+      expect(missing).to.have.length(2);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -1573,6 +1700,102 @@ describe('ephemeral-run-service', () => {
       expect(siteResult.freshnessSkipped).to.deep.include(
         { type: 'organic-traffic', kind: 'import', reason: 'import-fresh' },
       );
+    });
+
+    it('enqueues only missing traffic-analysis weeks when some weeks already have S3 files', async () => {
+      const { getLastNumberOfWeeks: getRealWeeks } = await import('@adobe/spacecat-shared-utils');
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      // Mark only the most-recent week as present in S3; the other 2 are missing
+      const weeks = getRealWeeks(3);
+      ctx.s3.s3Client.send.callsFake((cmd) => {
+        const prefix = cmd?.input?.Prefix ?? '';
+        const match = prefix.match(/week=(\d+)/);
+        const weekNum = match ? parseInt(match[1], 10) : -1;
+        if (weekNum === weeks[0].week) return Promise.resolve({ Contents: [{ Key: 'data.parquet' }] });
+        return Promise.resolve({});
+      });
+
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 3 } },
+        ctx,
+      );
+
+      const trafficSqsCalls = ctx.sqs.sendMessage.getCalls()
+        .filter((c) => c.args[1]?.type === 'traffic-analysis');
+      // Only 2 missing weeks should be enqueued, not all 3
+      expect(trafficSqsCalls).to.have.length(2);
+      const enqueuedWeeks = trafficSqsCalls.map((c) => c.args[1].week);
+      expect(enqueuedWeeks).to.not.include(weeks[0].week);
+    });
+
+    it('skips all traffic-analysis weeks and records import-fresh when all weeks have S3 files', async () => {
+      const { getLastNumberOfWeeks: getRealWeeks } = await import('@adobe/spacecat-shared-utils');
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      // All 3 weeks present
+      const weeks = getRealWeeks(3);
+      const presentWeeks = weeks.map((p) => p.week);
+      ctx.s3.s3Client.send.callsFake((cmd) => {
+        const prefix = cmd?.input?.Prefix ?? '';
+        const match = prefix.match(/week=(\d+)/);
+        const weekNum = match ? parseInt(match[1], 10) : -1;
+        if (presentWeeks.includes(weekNum)) return Promise.resolve({ Contents: [{ Key: 'data.parquet' }] });
+        return Promise.resolve({});
+      });
+
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 3 } },
+        ctx,
+      );
+
+      const trafficSqsCalls = ctx.sqs.sendMessage.getCalls()
+        .filter((c) => c.args[1]?.type === 'traffic-analysis');
+      expect(trafficSqsCalls).to.have.length(0);
+
+      const s3Calls = ctx.s3.s3Client.send.getCalls().map((c) => c.args[0]?.input);
+      const siteResultCall = s3Calls.find((i) => i?.Key?.includes('/results/'));
+      const siteResult = JSON.parse(siteResultCall.Body);
+      expect(siteResult.freshnessSkipped).to.deep.include(
+        { type: 'traffic-analysis', kind: 'import', reason: 'import-fresh' },
+      );
+    });
+
+    it('enqueues all traffic-analysis weeks when forceRun=true, ignoring S3 files', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      // All weeks appear present in S3
+      ctx.s3.s3Client.send.callsFake((cmd) => {
+        if (cmd?.input?.Prefix?.includes('rum-metrics-compact')) {
+          return Promise.resolve({ Contents: [{ Key: 'data.parquet' }] });
+        }
+        return Promise.resolve({});
+      });
+
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { imports: { types: ['traffic-analysis'], trafficAnalysisWeeks: 3 }, forceRun: true },
+        ctx,
+      );
+
+      const trafficSqsCalls = ctx.sqs.sendMessage.getCalls()
+        .filter((c) => c.args[1]?.type === 'traffic-analysis');
+      // forceRun=true → all 3 weeks enqueued regardless of S3 state
+      expect(trafficSqsCalls).to.have.length(3);
     });
   });
 
@@ -2063,6 +2286,22 @@ describe('ephemeral-run-service', () => {
 
       expect(config.isHandlerEnabledForSite('security-csp', site)).to.equal(true);
       expect(config.isHandlerEnabledForSite('security-csp-auto-suggest', site)).to.equal(true);
+    });
+
+    it('includes companion handler flags in teardown auditTypes so they are disabled after the run', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
+
+      const sfnInput = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
+      const teardownAuditTypes = sfnInput.bulkDisableJob.sites[0].auditTypes;
+      expect(teardownAuditTypes).to.include('lhs-mobile');
+      expect(teardownAuditTypes).to.include('security-csp');
+      expect(teardownAuditTypes).to.include('security-csp-auto-suggest');
     });
 
     it('does not send security-csp-auto-suggest as an SQS audit message', async () => {

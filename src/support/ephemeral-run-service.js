@@ -19,7 +19,6 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import { ScrapeClient } from '@adobe/spacecat-shared-scrape-client';
 import {
   triggerImportRun,
-  triggerTrafficAnalysisBackfill,
   sendAuditMessage,
   sanitizeExecutionName,
 } from './utils.js';
@@ -217,20 +216,11 @@ async function isScrapeRecent(
  * week to determine the exact month(s) and make 1–2 targeted ListObjectsV2 calls
  * with MaxKeys=1 — no pagination, no key scanning.
  */
-async function isTrafficAnalysisWeekPresent(siteId, context) {
+async function isTrafficAnalysisWeekPresent(siteId, week, year, context) {
   const { s3 } = context;
-  const {
-    s3Client, s3Bucket, ListObjectsV2Command,
-  } = s3;
-
-  // Same week/year source as the import worker (getLastNumberOfWeeks → getLastFullCalendarWeek)
-  const [{ week, year }] = getLastNumberOfWeeks(1);
-
-  // Use same month resolution as the import worker (getDateRanges handles week-spans-two-months)
+  const { s3Client, s3Bucket, ListObjectsV2Command } = s3;
   const dateRanges = getDateRanges(week, year);
-
   const paddedWeek = String(week).padStart(2, '0');
-
   for (const { year: y, month: m } of dateRanges) {
     const paddedMonth = String(m).padStart(2, '0');
     const prefix = `${TRAFFIC_ANALYSIS_S3_PREFIX}/siteid=${siteId}/year=${y}/month=${paddedMonth}/week=${paddedWeek}/`;
@@ -241,6 +231,27 @@ async function isTrafficAnalysisWeekPresent(siteId, context) {
     if ((resp.Contents || []).length > 0) return true;
   }
   return false;
+}
+
+/**
+ * Returns only the {week, year} pairs from the last weekCount weeks that have no Parquet
+ * file in S3. Weeks where the check itself fails are treated as missing (fail-open) so
+ * transient S3 errors never silently suppress a needed import run.
+ */
+async function getMissingTrafficAnalysisWeeks(siteId, weekCount, context, log) {
+  const weekYearPairs = getLastNumberOfWeeks(weekCount);
+  const results = await Promise.all(
+    weekYearPairs.map(async ({ week, year }) => {
+      try {
+        const present = await isTrafficAnalysisWeekPresent(siteId, week, year, context);
+        return { week, year, present };
+      } catch (err) {
+        log.warn(`Failed to check traffic-analysis week ${week}/${year} for site ${siteId}:`, err);
+        return { week, year, present: false };
+      }
+    }),
+  );
+  return results.filter((r) => !r.present).map(({ week, year }) => ({ week, year }));
 }
 
 /**
@@ -269,7 +280,8 @@ async function isImportFresh(siteId, importType, site, context, log, freshnessDa
     }
 
     if (importType === TRAFFIC_ANALYSIS_IMPORT_TYPE) {
-      return isTrafficAnalysisWeekPresent(siteId, context);
+      const [{ week, year }] = getLastNumberOfWeeks(1);
+      return isTrafficAnalysisWeekPresent(siteId, week, year, context);
     }
 
     const metricsConfig = IMPORT_METRICS_SOURCE_MAP[importType];
@@ -307,14 +319,20 @@ async function getImportTypesToSkipForSite(
   log,
   forceRun = false,
   freshnessDay = IMPORT_FRESHNESS_DAYS,
+  trafficAnalysisWeeks = 0,
 ) {
   if (forceRun) {
     log.info(`Site ${siteId}: forceRun=true — skipping all import freshness checks`);
     return new Set();
   }
 
+  // traffic-analysis in backfill mode is handled per-week by getMissingTrafficAnalysisWeeks
+  const typesToCheck = trafficAnalysisWeeks > 0
+    ? importTypes.filter((t) => t !== TRAFFIC_ANALYSIS_IMPORT_TYPE)
+    : importTypes;
+
   const skip = new Set();
-  await Promise.all(importTypes.map(async (importType) => {
+  await Promise.all(typesToCheck.map(async (importType) => {
     const fresh = await isImportFresh(siteId, importType, site, context, log, freshnessDay);
     if (fresh) {
       log.info(`Site ${siteId}: skipping import ${importType} — data fetched within ${freshnessDay} days`);
@@ -588,10 +606,17 @@ async function enqueueSiteJobs(
   const enqueued = { imports: [], audits: [] };
   const skipped = [];
 
-  const trafficAnalysisHandledByBackfill = imports.trafficAnalysisWeeks > 0;
+  const { trafficAnalysisWeekYearPairs } = imports;
+  // When specific pairs are provided (per-week freshness from batch run), use those.
+  // Fall back to trafficAnalysisWeeks count for direct callers (e.g. Slack commands).
+  const trafficAnalysisHandledByBackfill = trafficAnalysisWeekYearPairs !== undefined
+    ? trafficAnalysisWeekYearPairs.length > 0
+    : imports.trafficAnalysisWeeks > 0;
+
   for (const importType of imports.types) {
-    // traffic-analysis with weeks > 0 is handled by triggerTrafficAnalysisBackfill below
-    if (importType === TRAFFIC_ANALYSIS_IMPORT_TYPE && trafficAnalysisHandledByBackfill) {
+    // Exclude traffic-analysis from the single-message path when backfill or per-week pairs apply
+    if (importType === TRAFFIC_ANALYSIS_IMPORT_TYPE
+      && (trafficAnalysisWeekYearPairs !== undefined || imports.trafficAnalysisWeeks > 0)) {
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -614,13 +639,24 @@ async function enqueueSiteJobs(
   }
 
   if (trafficAnalysisHandledByBackfill) {
+    const pairsToRun = trafficAnalysisWeekYearPairs
+      ?? getLastNumberOfWeeks(imports.trafficAnalysisWeeks);
     try {
-      const weeks = imports.trafficAnalysisWeeks;
-      const weekYearPairs = getLastNumberOfWeeks(weeks);
-      await triggerTrafficAnalysisBackfill(siteId, configuration, slackContext, context, weeks);
-      for (const { week, year } of weekYearPairs) {
+      await Promise.all(
+        pairsToRun.map(({ week, year }) => context.sqs.sendMessage(
+          configuration.getQueues().imports,
+          {
+            type: TRAFFIC_ANALYSIS_IMPORT_TYPE,
+            trigger: 'backfill',
+            siteId,
+            week,
+            year,
+          },
+        )),
+      );
+      for (const { week, year } of pairsToRun) {
         enqueued.imports.push({
-          type: 'traffic-analysis', status: 'queued', week, year,
+          type: TRAFFIC_ANALYSIS_IMPORT_TYPE, status: 'queued', week, year,
         });
       }
     } catch (e) {
@@ -782,6 +818,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
           for (const flag of (AUDIT_HANDLER_FLAGS[auditType] || [])) {
             if (!configuration.isHandlerEnabledForSite(flag, site)) {
               configuration.enableHandlerForSite(flag, site);
+              auditsEnabled.push(flag);
               log.info(`Site ${siteId}: enabling handler flag '${flag}' required by '${auditType}'`);
             }
           }
@@ -840,8 +877,12 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
       const siteForceRun = forceRun ? true : forceRunSiteIds.has(siteId);
       // eslint-disable-next-line no-await-in-loop
       const siteForFreshness = await Site.findById(siteId);
+
+      const isTrafficAnalysisBackfillMode = imports.types.includes(TRAFFIC_ANALYSIS_IMPORT_TYPE)
+        && imports.trafficAnalysisWeeks > 0;
+
       // eslint-disable-next-line no-await-in-loop
-      const [auditTypesToSkip, importTypesToSkip] = await Promise.all([
+      const [auditTypesToSkip, importTypesToSkip, missingTrafficAnalysisWeeks] = await Promise.all([
         getAuditTypesToSkipForSite(
           siteId,
           auditTypes,
@@ -861,10 +902,29 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
           log,
           siteForceRun,
           importFreshnessDays,
+          imports.trafficAnalysisWeeks,
         ),
+        // Per-week S3 check: only missing weeks get an SQS message
+        (isTrafficAnalysisBackfillMode && !siteForceRun)
+          ? getMissingTrafficAnalysisWeeks(siteId, imports.trafficAnalysisWeeks, context, log)
+          : Promise.resolve(null),
       ]);
+
+      // Specific pairs to enqueue: undefined means not in backfill mode (fall back to legacy path)
+      let trafficAnalysisWeekYearPairs;
+      if (isTrafficAnalysisBackfillMode) {
+        trafficAnalysisWeekYearPairs = siteForceRun
+          ? getLastNumberOfWeeks(imports.trafficAnalysisWeeks)
+          : missingTrafficAnalysisWeeks;
+      }
+
       const filteredAuditTypes = audits.types.filter((t) => !auditTypesToSkip.has(t));
-      const filteredImportTypes = imports.types.filter((t) => !importTypesToSkip.has(t));
+      // Exclude traffic-analysis from single-message path when in backfill mode (handled via pairs)
+      const filteredImportTypes = imports.types.filter((t) => {
+        if (importTypesToSkip.has(t)) return false;
+        if (t === TRAFFIC_ANALYSIS_IMPORT_TYPE && isTrafficAnalysisBackfillMode) return false;
+        return true;
+      });
       const freshnessSkipped = [
         ...[...auditTypesToSkip].map((type) => ({
           type,
@@ -877,11 +937,16 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
           reason: 'import-fresh',
         })),
       ];
+      // traffic-analysis is per-week: skipped only when every requested week is already present
+      if (isTrafficAnalysisBackfillMode && trafficAnalysisWeekYearPairs?.length === 0) {
+        // eslint-disable-next-line max-len
+        freshnessSkipped.push({ type: TRAFFIC_ANALYSIS_IMPORT_TYPE, kind: 'import', reason: 'import-fresh' });
+      }
       // eslint-disable-next-line no-await-in-loop
       const jobResult = await enqueueSiteJobs(
         siteId,
         {
-          imports: { ...imports, types: filteredImportTypes },
+          imports: { ...imports, types: filteredImportTypes, trafficAnalysisWeekYearPairs },
           audits: { ...audits, types: filteredAuditTypes },
         },
         configuration,
@@ -963,6 +1028,7 @@ export {
   getAuditTypesToSkipForSite,
   isImportFresh,
   getImportTypesToSkipForSite,
+  getMissingTrafficAnalysisWeeks,
   MAX_BATCH_SITES,
   AUDIT_HANDLER_FLAGS,
   AUTO_SUGGEST_PARENT_MAP,
