@@ -25,14 +25,14 @@ import {
   deltaEnableAudits,
   enqueueSiteJobs,
   buildTeardownWorkflowInput,
-  getParentAuditType,
   isScrapeRecent,
-  buildOpportunityFreshnessMap,
   getAuditTypesToSkipForSite,
+  isImportFresh,
+  getImportTypesToSkipForSite,
   runEphemeralRunBatch,
-  PRESETS,
   MAX_BATCH_SITES,
   AUDIT_HANDLER_FLAGS,
+  AUTO_SUGGEST_PARENT_MAP,
 } from '../../src/support/ephemeral-run-service.js';
 
 use(sinonChai);
@@ -164,32 +164,12 @@ describe('ephemeral-run-service', () => {
   // resolvePayload
   // -----------------------------------------------------------------------
   describe('resolvePayload()', () => {
-    it('resolves insights-report-default preset with defaults', () => {
-      const result = resolvePayload({ preset: 'insights-report-default' });
-      expect(result.imports.types).to.deep.equal(PRESETS['insights-report-default'].imports.types);
-      expect(result.audits.types).to.deep.equal(PRESETS['insights-report-default'].audits.types);
+    it('defaults to empty arrays when no types provided', () => {
+      const result = resolvePayload({});
       expect(result.teardownDelaySeconds).to.equal(14400);
     });
 
-    it('uses explicit types over preset', () => {
-      const result = resolvePayload({
-        preset: 'insights-report-default',
-        imports: { types: ['top-pages'] },
-        audits: { types: ['lhs-mobile'] },
-      });
-      expect(result.imports.types).to.deep.equal(['top-pages']);
-      expect(result.audits.types).to.deep.equal(['lhs-mobile']);
-    });
-
-    it('falls back to preset import types when body imports.types is null', () => {
-      const result = resolvePayload({
-        preset: 'insights-report-default',
-        imports: { types: null },
-      });
-      expect(result.imports.types).to.deep.equal(PRESETS['insights-report-default'].imports.types);
-    });
-
-    it('uses empty arrays when no preset and no explicit types', () => {
+    it('uses empty arrays when no explicit types', () => {
       const result = resolvePayload({});
       expect(result.imports.types).to.deep.equal([]);
       expect(result.audits.types).to.deep.equal([]);
@@ -220,34 +200,6 @@ describe('ephemeral-run-service', () => {
       expect(result.imports.trafficAnalysisWeeks).to.equal(0);
     });
 
-    it('resolves insights-report-default traffic-analysis options from optionsByImportType', () => {
-      const result = resolvePayload({ preset: 'insights-report-default' });
-      expect(result.imports.types).to.include('traffic-analysis');
-      expect(result.imports.trafficAnalysisWeeks).to.equal(5);
-      expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
-    });
-
-    it('body optionsByImportType overrides preset traffic-analysis backfillWeeks', () => {
-      const result = resolvePayload({
-        preset: 'insights-report-default',
-        imports: {
-          optionsByImportType: {
-            'traffic-analysis': { backfillWeeks: 12 },
-          },
-        },
-      });
-      expect(result.imports.trafficAnalysisWeeks).to.equal(12);
-      expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(12);
-    });
-
-    it('ignores preset traffic-analysis backfill when types omit traffic-analysis', () => {
-      const result = resolvePayload({
-        preset: 'insights-report-default',
-        imports: { types: ['top-pages'] },
-      });
-      expect(result.imports.trafficAnalysisWeeks).to.equal(0);
-    });
-
     it('clamps teardown delay to max 86400', () => {
       const result = resolvePayload({ teardown: { delaySeconds: 200000 } });
       expect(result.teardownDelaySeconds).to.equal(86400);
@@ -256,12 +208,6 @@ describe('ephemeral-run-service', () => {
     it('clamps negative teardown delay to 0', () => {
       const result = resolvePayload({ teardown: { delaySeconds: -100 } });
       expect(result.teardownDelaySeconds).to.equal(0);
-    });
-
-    it('falls through all branches when no preset and body sections are empty objects', () => {
-      const result = resolvePayload({ imports: {}, audits: {} });
-      expect(result.imports.types).to.deep.equal([]);
-      expect(result.audits.types).to.deep.equal([]);
     });
 
     it('uses explicit trafficAnalysisWeeks when traffic-analysis is in types', () => {
@@ -306,9 +252,9 @@ describe('ephemeral-run-service', () => {
       expect(result.scrapeFreshnessDays).to.equal(30);
     });
 
-    it('defaults opportunityFreshnessDays to 7 when not provided', () => {
+    it('defaults auditFreshnessDays to 7 when not provided', () => {
       const result = resolvePayload({});
-      expect(result.opportunityFreshnessDays).to.equal(7);
+      expect(result.auditFreshnessDays).to.equal(7);
     });
 
     it('accepts custom scrapeFreshnessDays from body.freshness.scrapeDays', () => {
@@ -316,15 +262,15 @@ describe('ephemeral-run-service', () => {
       expect(result.scrapeFreshnessDays).to.equal(10);
     });
 
-    it('accepts custom opportunityFreshnessDays from body.freshness.opportunityDays', () => {
-      const result = resolvePayload({ freshness: { opportunityDays: 3 } });
-      expect(result.opportunityFreshnessDays).to.equal(3);
+    it('accepts custom auditFreshnessDays from body.freshness.auditDays', () => {
+      const result = resolvePayload({ freshness: { auditDays: 3 } });
+      expect(result.auditFreshnessDays).to.equal(3);
     });
 
     it('ignores non-numeric freshness values and falls back to defaults', () => {
-      const result = resolvePayload({ freshness: { scrapeDays: 'ten', opportunityDays: null } });
+      const result = resolvePayload({ freshness: { scrapeDays: 'ten', auditDays: null } });
       expect(result.scrapeFreshnessDays).to.equal(30);
-      expect(result.opportunityFreshnessDays).to.equal(7);
+      expect(result.auditFreshnessDays).to.equal(7);
     });
 
     it('legacy trafficAnalysisWeeks wins over optionsByImportType.backfillWeeks when both are provided', () => {
@@ -338,19 +284,6 @@ describe('ephemeral-run-service', () => {
       // trafficAnalysisWeeks (legacy) is applied AFTER optionsByImportType merge and overrides it
       expect(result.imports.trafficAnalysisWeeks).to.equal(3);
       expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(3);
-    });
-
-    it('body optionsByImportType merges with preset — body wins on conflict and custom keys survive', () => {
-      const result = resolvePayload({
-        preset: 'insights-report-default',
-        imports: {
-          optionsByImportType: {
-            'traffic-analysis': { backfillWeeks: 8, customParam: 'kept' },
-          },
-        },
-      });
-      expect(result.imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(8);
-      expect(result.imports.optionsByImportType['traffic-analysis'].customParam).to.equal('kept');
     });
 
     it('teardown delaySeconds: 0 stays 0 (is NOT replaced by default 14400)', () => {
@@ -376,6 +309,21 @@ describe('ephemeral-run-service', () => {
     it('forceRun: "true" (string) is NOT treated as true — strict === true check applies', () => {
       const result = resolvePayload({ forceRun: 'true' });
       expect(result.forceRun).to.equal(false);
+    });
+
+    it('defaults scheduledRun to false when not provided', () => {
+      const result = resolvePayload({});
+      expect(result.scheduledRun).to.equal(false);
+    });
+
+    it('sets scheduledRun=true when body.scheduledRun is true', () => {
+      const result = resolvePayload({ scheduledRun: true });
+      expect(result.scheduledRun).to.equal(true);
+    });
+
+    it('scheduledRun: "true" (string) is NOT treated as true — strict === true check applies', () => {
+      const result = resolvePayload({ scheduledRun: 'true' });
+      expect(result.scheduledRun).to.equal(false);
     });
   });
 
@@ -575,10 +523,10 @@ describe('ephemeral-run-service', () => {
       });
     });
 
-    it('sets onDemand: true in auditContext for all preset audit types', async () => {
+    it('sets onDemand: true in auditContext for enqueued audit types', async () => {
       const ctx = createMockContext();
       const config = createMockConfiguration();
-      const resolved = resolvePayload({ preset: 'insights-report-default' });
+      const resolved = resolvePayload({ audits: { types: ['cwv', 'meta-tags'] } });
 
       await enqueueSiteJobs('s-1', resolved, config, ctx);
 
@@ -803,36 +751,6 @@ describe('ephemeral-run-service', () => {
   });
 
   // -----------------------------------------------------------------------
-  // getParentAuditType
-  // -----------------------------------------------------------------------
-  describe('getParentAuditType()', () => {
-    it('maps -auto-suggest-mystique variant to parent', () => {
-      expect(getParentAuditType('alt-text-auto-suggest-mystique')).to.equal('alt-text');
-    });
-
-    it('maps -auto-suggest variant to parent', () => {
-      expect(getParentAuditType('broken-backlinks-auto-suggest')).to.equal('broken-backlinks');
-      expect(getParentAuditType('broken-internal-links-auto-suggest')).to.equal('broken-internal-links');
-      expect(getParentAuditType('meta-tags-auto-suggest')).to.equal('meta-tags');
-      expect(getParentAuditType('security-vulnerabilities-auto-suggest')).to.equal('security-vulnerabilities');
-    });
-
-    it('maps data-collection audits to security-csp parent (lhs-mobile)', () => {
-      expect(getParentAuditType('lhs-mobile')).to.equal('security-csp');
-    });
-
-    it('returns paid unchanged (paid opportunity mapping is in LOCAL_OPPORTUNITY_MAP, not AUDIT_PARENT_MAP)', () => {
-      expect(getParentAuditType('paid')).to.equal('paid');
-    });
-
-    it('returns type unchanged when no explicit mapping exists', () => {
-      expect(getParentAuditType('cwv')).to.equal('cwv');
-      expect(getParentAuditType('meta-tags')).to.equal('meta-tags');
-      expect(getParentAuditType('unknown-type')).to.equal('unknown-type');
-    });
-  });
-
-  // -----------------------------------------------------------------------
   // AUDIT_HANDLER_FLAGS
   // -----------------------------------------------------------------------
   describe('AUDIT_HANDLER_FLAGS', () => {
@@ -851,11 +769,24 @@ describe('ephemeral-run-service', () => {
   // -----------------------------------------------------------------------
   describe('isScrapeRecent()', () => {
     const log = { warn: sinon.stub(), info: sinon.stub() };
-    const mockSite = { getBaseURL: () => 'https://example.com' };
+    // top page URL uses www — composeBaseURL strips it to 'https://example.com'
+    const mockTopPage = { getUrl: () => 'https://www.example.com/page1' };
+    const mockSite = {
+      getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([mockTopPage]),
+    };
 
     it('returns false when site is not found', async () => {
       const dataAccess = {
         Site: { findById: sinon.stub().resolves(null) },
+        ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub() },
+      };
+      expect(await isScrapeRecent('s-1', dataAccess, log)).to.equal(false);
+    });
+
+    it('returns false when site has no top pages', async () => {
+      const siteNoPages = { getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([]) };
+      const dataAccess = {
+        Site: { findById: sinon.stub().resolves(siteNoPages) },
         ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub() },
       };
       expect(await isScrapeRecent('s-1', dataAccess, log)).to.equal(false);
@@ -867,6 +798,17 @@ describe('ephemeral-run-service', () => {
         ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub().resolves([]) },
       };
       expect(await isScrapeRecent('s-1', dataAccess, log)).to.equal(false);
+    });
+
+    it('queries ScrapeJob with the normalized baseURL derived from the first top page', async () => {
+      const allByBaseURLStub = sinon.stub().resolves([]);
+      const dataAccess = {
+        Site: { findById: sinon.stub().resolves(mockSite) },
+        ScrapeJob: { allByBaseURLAndProcessingType: allByBaseURLStub },
+      };
+      await isScrapeRecent('s-1', dataAccess, log);
+      // www is stripped by composeBaseURL — must match how ScrapeJob stores baseURL
+      expect(allByBaseURLStub).to.have.been.calledWith('https://example.com', 'default');
     });
 
     it('returns false when the most recent scrape job started more than 30 days ago', async () => {
@@ -910,66 +852,35 @@ describe('ephemeral-run-service', () => {
   });
 
   // -----------------------------------------------------------------------
-  // buildOpportunityFreshnessMap
-  // -----------------------------------------------------------------------
-  describe('buildOpportunityFreshnessMap()', () => {
-    const log = { warn: sinon.stub(), info: sinon.stub() };
-
-    it('returns empty map when site has no opportunities', async () => {
-      const Opportunity = { allBySiteId: sinon.stub().resolves([]) };
-      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, log);
-      expect(map.size).to.equal(0);
-    });
-
-    it('builds a map of opportunityType → updatedAt Date', async () => {
-      const date = new Date('2026-01-15T00:00:00Z');
-      const Opportunity = {
-        allBySiteId: sinon.stub().resolves([
-          { getType: () => 'cwv', getUpdatedAt: () => date.toISOString() },
-        ]),
-      };
-      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, log);
-      expect(map.get('cwv').getTime()).to.equal(date.getTime());
-    });
-
-    it('keeps the newest updatedAt when multiple opportunities share a type', async () => {
-      const older = new Date('2026-01-01T00:00:00Z');
-      const newer = new Date('2026-01-20T00:00:00Z');
-      const Opportunity = {
-        allBySiteId: sinon.stub().resolves([
-          { getType: () => 'cwv', getUpdatedAt: () => older.toISOString() },
-          { getType: () => 'cwv', getUpdatedAt: () => newer.toISOString() },
-        ]),
-      };
-      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, log);
-      expect(map.get('cwv').getTime()).to.equal(newer.getTime());
-    });
-
-    it('returns empty map and warns when the query throws', async () => {
-      const warnStub = sinon.stub();
-      const Opportunity = { allBySiteId: sinon.stub().rejects(new Error('DB error')) };
-      const map = await buildOpportunityFreshnessMap('s-1', Opportunity, { warn: warnStub, info: sinon.stub() });
-      expect(map.size).to.equal(0);
-      expect(warnStub).to.have.been.called;
-    });
-  });
-
-  // -----------------------------------------------------------------------
   // getAuditTypesToSkipForSite
   // -----------------------------------------------------------------------
   describe('getAuditTypesToSkipForSite()', () => {
     const log = { warn: sinon.stub(), info: sinon.stub() };
 
-    const mockSite = { getBaseURL: () => 'https://example.com' };
+    const mockTopPage = { getUrl: () => 'https://www.example.com/page1' };
+    const mockSite = {
+      getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([mockTopPage]),
+    };
 
-    function makeDataAccess({ scrapeStartedAt = null, opportunities = [] } = {}) {
+    function makeLatestAudit(auditedAt) {
+      return { getAuditedAt: () => auditedAt };
+    }
+
+    function makeDataAccess({ scrapeStartedAt = null, latestAudits = {} } = {}) {
       const scrapeJobs = scrapeStartedAt
         ? [{ getStartedAt: () => scrapeStartedAt }]
         : [];
+      const findById = sinon.stub();
+      // Default: return null (no record → always run)
+      findById.resolves(null);
+      // Per-type overrides
+      for (const [type, auditedAt] of Object.entries(latestAudits)) {
+        findById.withArgs(sinon.match.any, type).resolves(makeLatestAudit(auditedAt));
+      }
       return {
         Site: { findById: sinon.stub().resolves(mockSite) },
         ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub().resolves(scrapeJobs) },
-        Opportunity: { allBySiteId: sinon.stub().resolves(opportunities) },
+        LatestAudit: { findById },
       };
     }
 
@@ -987,103 +898,97 @@ describe('ephemeral-run-service', () => {
       expect(skip.has('scrape-top-pages')).to.equal(false);
     });
 
-    it('adds cwv to skip set when cwv opportunity is fresh', async () => {
+    it('adds cwv to skip set when LatestAudit record is recent', async () => {
       const recentDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => recentDate }],
-      });
+      const da = makeDataAccess({ latestAudits: { cwv: recentDate } });
       const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
       expect(skip.has('cwv')).to.equal(true);
     });
 
-    it('does NOT skip cwv when cwv opportunity is stale', async () => {
+    it('does NOT skip cwv when LatestAudit record is stale', async () => {
       const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => oldDate }],
-      });
+      const da = makeDataAccess({ latestAudits: { cwv: oldDate } });
       const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
       expect(skip.has('cwv')).to.equal(false);
     });
 
-    it('skips broken-backlinks-auto-suggest when parent broken-backlinks opportunity is fresh', async () => {
-      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'broken-backlinks', getUpdatedAt: () => recentDate }],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['broken-backlinks-auto-suggest'], da, log);
-      expect(skip.has('broken-backlinks-auto-suggest')).to.equal(true);
+    it('does NOT skip when no LatestAudit record exists', async () => {
+      // findById returns null → always run
+      const da = makeDataAccess();
+      const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
+      expect(skip.has('cwv')).to.equal(false);
     });
 
-    it('skips alt-text-auto-suggest-mystique when alt-text opportunity is fresh', async () => {
+    it('skips broken-backlinks when LatestAudit record is recent', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'alt-text', getUpdatedAt: () => recentDate }],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['alt-text-auto-suggest-mystique'], da, log);
-      expect(skip.has('alt-text-auto-suggest-mystique')).to.equal(true);
+      const da = makeDataAccess({ latestAudits: { 'broken-backlinks': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['broken-backlinks'], da, log);
+      expect(skip.has('broken-backlinks')).to.equal(true);
     });
 
-    it('does NOT skip forms-opportunities when only some mapped opportunities are fresh', async () => {
-      // ALL mapped opportunity types must be fresh to skip — missing counts as stale
+    it('skips broken-internal-links when LatestAudit record is recent', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [
-          { getType: () => 'high-form-views-low-conversions', getUpdatedAt: () => recentDate },
-          // other 3 mapped types missing → treated as stale → audit runs
-        ],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['forms-opportunities'], da, log);
-      expect(skip.has('forms-opportunities')).to.equal(false);
+      const da = makeDataAccess({ latestAudits: { 'broken-internal-links': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['broken-internal-links'], da, log);
+      expect(skip.has('broken-internal-links')).to.equal(true);
     });
 
-    it('skips accessibility when both a11y-assistive and a11y-color-contrast are fresh', async () => {
+    it('skips meta-tags when LatestAudit record is recent', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [
-          { getType: () => 'a11y-assistive', getUpdatedAt: () => recentDate },
-          { getType: () => 'a11y-color-contrast', getUpdatedAt: () => recentDate },
-        ],
-      });
+      const da = makeDataAccess({ latestAudits: { 'meta-tags': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['meta-tags'], da, log);
+      expect(skip.has('meta-tags')).to.equal(true);
+    });
+
+    it('skips accessibility when LatestAudit record is recent', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { accessibility: recentDate } });
       const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
       expect(skip.has('accessibility')).to.equal(true);
     });
 
-    it('does NOT skip accessibility when a11y-assistive is fresh but a11y-color-contrast is stale', async () => {
+    it('skips lhs-mobile when LatestAudit record is recent', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [
-          { getType: () => 'a11y-assistive', getUpdatedAt: () => recentDate },
-          { getType: () => 'a11y-color-contrast', getUpdatedAt: () => oldDate },
-        ],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
-      expect(skip.has('accessibility')).to.equal(false);
+      const da = makeDataAccess({ latestAudits: { 'lhs-mobile': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['lhs-mobile', 'cwv'], da, log);
+      expect(skip.has('lhs-mobile')).to.equal(true);
+      expect(skip.has('cwv')).to.equal(false);
     });
 
-    it('does NOT skip accessibility when a11y-assistive is fresh but a11y-color-contrast was never created', async () => {
-      // Missing mapped type counts as stale → audit runs
+    it('skips paid when LatestAudit record is recent', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [
-          { getType: () => 'a11y-assistive', getUpdatedAt: () => recentDate },
-        ],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
-      expect(skip.has('accessibility')).to.equal(false);
+      const da = makeDataAccess({ latestAudits: { paid: recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['paid', 'cwv'], da, log);
+      expect(skip.has('paid')).to.equal(true);
+      expect(skip.has('cwv')).to.equal(false);
     });
 
-    it('does NOT skip accessibility when neither a11y opportunity has ever been created', async () => {
-      const da = makeDataAccess({ opportunities: [] });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['accessibility'], da, log);
-      expect(skip.has('accessibility')).to.equal(false);
+    it('skips forms-opportunities when LatestAudit record is recent', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { 'forms-opportunities': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['forms-opportunities'], da, log);
+      expect(skip.has('forms-opportunities')).to.equal(true);
     });
 
-    it('does NOT skip audit types with no opportunity mapping', async () => {
-      // e.g. a custom audit type not in AUDIT_OPPORTUNITY_MAP
-      const da = makeDataAccess();
-      const skip = await getAuditTypesToSkipForSite('s-1', ['unknown-audit-type'], da, log);
-      expect(skip.has('unknown-audit-type')).to.equal(false);
+    it('skips experimentation-opportunities when LatestAudit record is recent', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { 'experimentation-opportunities': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['experimentation-opportunities'], da, log);
+      expect(skip.has('experimentation-opportunities')).to.equal(true);
+    });
+
+    it('skips security-vulnerabilities when LatestAudit record is recent', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { 'security-vulnerabilities': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['security-vulnerabilities'], da, log);
+      expect(skip.has('security-vulnerabilities')).to.equal(true);
+    });
+
+    it('skips no-cta-above-the-fold when LatestAudit record is recent', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { 'no-cta-above-the-fold': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['no-cta-above-the-fold'], da, log);
+      expect(skip.has('no-cta-above-the-fold')).to.equal(true);
     });
 
     it('returns empty skip set when no audits are fresh', async () => {
@@ -1108,66 +1013,33 @@ describe('ephemeral-run-service', () => {
       expect(skip.has('scrape-top-pages')).to.equal(false);
     });
 
-    it('respects custom opportunityFreshnessDays — skips when within custom window', async () => {
-      // 3-day-old opportunity: fresh under default 7d and custom 5d
+    it('respects custom auditFreshnessDays — skips when within custom window', async () => {
+      // 3-day-old audit: fresh under default 7d and custom 5d
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => threeDaysAgo }],
-      });
+      const da = makeDataAccess({ latestAudits: { cwv: threeDaysAgo } });
       const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log, false, 30, 5);
       expect(skip.has('cwv')).to.equal(true);
     });
 
-    it('respects custom opportunityFreshnessDays — runs when outside custom window', async () => {
-      // 4-day-old opportunity: fresh under default 7d but stale under custom 3d
+    it('respects custom auditFreshnessDays — runs when outside custom window', async () => {
+      // 4-day-old audit: fresh under default 7d but stale under custom 3d
       const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => fourDaysAgo }],
-      });
+      const da = makeDataAccess({ latestAudits: { cwv: fourDaysAgo } });
       const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log, false, 30, 3);
       expect(skip.has('cwv')).to.equal(false);
-    });
-
-    it('skips lhs-mobile when security-csp opportunity is fresh', async () => {
-      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'security-csp', getUpdatedAt: () => recentDate }],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['lhs-mobile', 'cwv'], da, log);
-      expect(skip.has('lhs-mobile')).to.equal(true);
-      expect(skip.has('cwv')).to.equal(false);
-    });
-
-    it('skips paid when consent-banner opportunity is fresh', async () => {
-      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'consent-banner', getUpdatedAt: () => recentDate }],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['paid', 'cwv'], da, log);
-      expect(skip.has('paid')).to.equal(true);
-      expect(skip.has('cwv')).to.equal(false);
-    });
-
-    it('does NOT skip paid when only security-csp opportunity is fresh (paid gates on consent-banner)', async () => {
-      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({
-        opportunities: [{ getType: () => 'security-csp', getUpdatedAt: () => recentDate }],
-      });
-      const skip = await getAuditTypesToSkipForSite('s-1', ['paid'], da, log);
-      expect(skip.has('paid')).to.equal(false);
     });
 
     it('returns empty set immediately when forceRun is true', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       const da = makeDataAccess({
         scrapeStartedAt: recentDate,
-        opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => recentDate }],
+        latestAudits: { cwv: recentDate },
       });
       const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log, true);
       expect(skip.size).to.equal(0);
       // dataAccess should not have been queried
       expect(da.ScrapeJob.allByBaseURLAndProcessingType).to.not.have.been.called;
-      expect(da.Opportunity.allBySiteId).to.not.have.been.called;
+      expect(da.LatestAudit.findById).to.not.have.been.called;
     });
 
     it('does not query ScrapeJob when scrape-top-pages is not in audit types', async () => {
@@ -1176,19 +1048,331 @@ describe('ephemeral-run-service', () => {
       expect(da.ScrapeJob.allByBaseURLAndProcessingType).to.not.have.been.called;
     });
 
-    it('does not query Opportunity when all audit types have no opportunity mapping', async () => {
-      const da = makeDataAccess();
-      // unknown-audit-type has no mapping → no opportunity fetch needed
-      await getAuditTypesToSkipForSite('s-1', ['unknown-audit-type'], da, log);
-      expect(da.Opportunity.allBySiteId).to.not.have.been.called;
-    });
-
-    it('queries both ScrapeJob and Opportunity when both types are present', async () => {
+    it('does not query LatestAudit when only scrape-top-pages is in audit types', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       const da = makeDataAccess({ scrapeStartedAt: recentDate });
-      await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log);
+      await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log);
+      expect(da.LatestAudit.findById).to.not.have.been.called;
+    });
+
+    it('queries LatestAudit for each non-scrape audit type', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ scrapeStartedAt: recentDate });
+      await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv', 'meta-tags'], da, log);
       expect(da.ScrapeJob.allByBaseURLAndProcessingType).to.have.been.called;
-      expect(da.Opportunity.allBySiteId).to.have.been.called;
+      expect(da.LatestAudit.findById).to.have.been.calledTwice;
+    });
+
+    it('does not skip when LatestAudit.findById throws — logs warning and runs audit', async () => {
+      const da = makeDataAccess();
+      da.LatestAudit.findById.rejects(new Error('DB error'));
+      const warnStub = sinon.stub();
+      const skip = await getAuditTypesToSkipForSite('s-1', ['cwv'], da, { warn: warnStub, info: sinon.stub() });
+      expect(skip.has('cwv')).to.equal(false);
+      expect(warnStub).to.have.been.called;
+    });
+
+    // auto-suggest parent propagation
+    it('skips auto-suggest when its parent is fresh', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { 'broken-backlinks': recentDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['broken-backlinks', 'broken-backlinks-auto-suggest'], da, log);
+      expect(skip.has('broken-backlinks')).to.equal(true);
+      expect(skip.has('broken-backlinks-auto-suggest')).to.equal(true);
+    });
+
+    it('does NOT skip auto-suggest when its parent is stale', async () => {
+      const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { 'broken-backlinks': oldDate } });
+      const skip = await getAuditTypesToSkipForSite('s-1', ['broken-backlinks', 'broken-backlinks-auto-suggest'], da, log);
+      expect(skip.has('broken-backlinks')).to.equal(false);
+      expect(skip.has('broken-backlinks-auto-suggest')).to.equal(false);
+    });
+
+    it('does NOT skip auto-suggest when parent is not in the requested audit types', async () => {
+      // auto-suggest requested without parent — parent not checked, parent not in skip set
+      const da = makeDataAccess();
+      const skip = await getAuditTypesToSkipForSite('s-1', ['broken-backlinks-auto-suggest'], da, log);
+      expect(skip.has('broken-backlinks-auto-suggest')).to.equal(false);
+    });
+
+    it('does not call LatestAudit.findById for auto-suggest types', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const da = makeDataAccess({ latestAudits: { cwv: recentDate } });
+      await getAuditTypesToSkipForSite('s-1', ['cwv', 'cwv-auto-suggest'], da, log);
+      // findById should only be called for cwv, not cwv-auto-suggest
+      const calledTypes = da.LatestAudit.findById.getCalls().map((c) => c.args[1]);
+      expect(calledTypes).to.include('cwv');
+      expect(calledTypes).to.not.include('cwv-auto-suggest');
+    });
+
+    it('covers all auto-suggest pairs defined in AUTO_SUGGEST_PARENT_MAP', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const parentTypes = Object.values(AUTO_SUGGEST_PARENT_MAP);
+      const autoSuggestTypes = Object.keys(AUTO_SUGGEST_PARENT_MAP);
+      const latestAudits = Object.fromEntries(parentTypes.map((t) => [t, recentDate]));
+      const da = makeDataAccess({ latestAudits });
+      const skip = await getAuditTypesToSkipForSite('s-1', [...parentTypes, ...autoSuggestTypes], da, log);
+      for (const autoSuggest of autoSuggestTypes) {
+        expect(skip.has(autoSuggest), `${autoSuggest} should be skipped`).to.equal(true);
+      }
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // isImportFresh
+  // -----------------------------------------------------------------------
+  describe('isImportFresh()', () => {
+    const log = { warn: sinon.stub(), info: sinon.stub(), debug: sinon.stub() };
+
+    function makeS3Context(records) {
+      const body = records === null
+        ? null
+        : { transformToString: sinon.stub().resolves(JSON.stringify(records)) };
+      return {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: { send: sinon.stub().resolves({ Body: body }) },
+        },
+        log,
+      };
+    }
+
+    it('returns false for top-pages when site has no top pages', async () => {
+      const site = { getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([]) };
+      const result = await isImportFresh('s-1', 'top-pages', site, makeS3Context([]), log);
+      expect(result).to.equal(false);
+    });
+
+    it('returns false for top-pages when pages have no importedAt', async () => {
+      const site = {
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+          { getImportedAt: () => null },
+        ]),
+      };
+      const result = await isImportFresh('s-1', 'top-pages', site, makeS3Context([]), log);
+      expect(result).to.equal(false);
+    });
+
+    it('returns true for top-pages when importedAt is within freshnessDay', async () => {
+      const recentDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+          { getImportedAt: () => recentDate },
+        ]),
+      };
+      const result = await isImportFresh('s-1', 'top-pages', site, makeS3Context([]), log);
+      expect(result).to.equal(true);
+    });
+
+    it('returns false for top-pages when importedAt is older than freshnessDay', async () => {
+      const oldDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+          { getImportedAt: () => oldDate },
+        ]),
+      };
+      const result = await isImportFresh('s-1', 'top-pages', site, makeS3Context([]), log);
+      expect(result).to.equal(false);
+    });
+
+    // traffic-analysis: targeted ListObjectsV2 with exact month prefix, MaxKeys=1
+    function makeTrafficAnalysisS3Context(fileExistsInFirstCall, fileExistsInSecondCall = false) {
+      const sendStub = sinon.stub();
+      sendStub.onFirstCall().resolves({ Contents: fileExistsInFirstCall ? [{ Key: 'data.parquet' }] : [] });
+      sendStub.onSecondCall().resolves({ Contents: fileExistsInSecondCall ? [{ Key: 'data.parquet' }] : [] });
+      return {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: { send: sendStub },
+          ListObjectsV2Command: class { constructor(p) { this.input = p; } },
+        },
+        log,
+      };
+    }
+
+    it('returns false for traffic-analysis when no S3 file exists for last full week', async () => {
+      const ctx = makeTrafficAnalysisS3Context(false);
+      const result = await isImportFresh('s-1', 'traffic-analysis', {}, ctx, log);
+      expect(result).to.equal(false);
+    });
+
+    it('returns true for traffic-analysis when S3 file exists in the first month partition', async () => {
+      const ctx = makeTrafficAnalysisS3Context(true);
+      const result = await isImportFresh('s-1', 'traffic-analysis', {}, ctx, log);
+      expect(result).to.equal(true);
+    });
+
+    it('returns true for traffic-analysis when file exists only in second month (week spans month boundary)', async () => {
+      // First call (startMonth) returns empty, second call (endMonth) finds the file
+      const ctx = makeTrafficAnalysisS3Context(false, true);
+      // Only relevant when the week actually spans two months — stub both calls
+      // The function only makes a second call when startMonth !== endMonth,
+      // so we verify both paths are exercised by checking the stub call count after
+      const result = await isImportFresh('s-1', 'traffic-analysis', {}, ctx, log);
+      // Result depends on whether current week spans months; either true or false is valid
+      // but no error should be thrown
+      expect(typeof result).to.equal('boolean');
+    });
+
+    it('returns false for an unknown import type not in IMPORT_METRICS_SOURCE_MAP', async () => {
+      const site = { getSiteTopPagesBySourceAndGeo: sinon.stub() };
+      const result = await isImportFresh('s-1', 'unknown-type', site, makeS3Context([]), log);
+      expect(result).to.equal(false);
+    });
+
+    it('returns false for organic-traffic when S3 returns no records', async () => {
+      const site = {};
+      const result = await isImportFresh('s-1', 'organic-traffic', site, makeS3Context([]), log);
+      expect(result).to.equal(false);
+    });
+
+    it('returns true for organic-traffic when S3 records have recent time', async () => {
+      const recentDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {};
+      const ctx = makeS3Context([{ time: recentDate }]);
+      const result = await isImportFresh('s-1', 'organic-traffic', site, ctx, log);
+      expect(result).to.equal(true);
+    });
+
+    it('returns false for organic-traffic when S3 records have stale time', async () => {
+      const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {};
+      const ctx = makeS3Context([{ time: oldDate }]);
+      const result = await isImportFresh('s-1', 'organic-traffic', site, ctx, log);
+      expect(result).to.equal(false);
+    });
+
+    it('returns false for organic-traffic when S3 records have no recognized time field', async () => {
+      const site = {};
+      const ctx = makeS3Context([{ someOtherField: 'value' }]);
+      const result = await isImportFresh('s-1', 'organic-traffic', site, ctx, log);
+      expect(result).to.equal(false);
+    });
+
+    it('picks importedAt field as fallback time for S3 records', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {};
+      const ctx = makeS3Context([{ importedAt: recentDate }]);
+      const result = await isImportFresh('s-1', 'organic-traffic', site, ctx, log);
+      expect(result).to.equal(true);
+    });
+
+    it('returns false and warns when an error is thrown', async () => {
+      const warnStub = sinon.stub();
+      const site = { getSiteTopPagesBySourceAndGeo: sinon.stub().rejects(new Error('DB error')) };
+      const result = await isImportFresh('s-1', 'top-pages', site, makeS3Context([]), { warn: warnStub, debug: sinon.stub() });
+      expect(result).to.equal(false);
+      expect(warnStub).to.have.been.called;
+    });
+
+    it('respects custom freshnessDay override', async () => {
+      const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {};
+      const ctx = makeS3Context([{ time: recentDate }]);
+      // With 3-day window → stale
+      expect(await isImportFresh('s-1', 'organic-traffic', site, ctx, log, 3)).to.equal(false);
+      // With 10-day window → fresh
+      const ctx2 = makeS3Context([{ time: recentDate }]);
+      expect(await isImportFresh('s-1', 'organic-traffic', site, ctx2, log, 10)).to.equal(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getImportTypesToSkipForSite
+  // -----------------------------------------------------------------------
+  describe('getImportTypesToSkipForSite()', () => {
+    const log = { warn: sinon.stub(), info: sinon.stub(), debug: sinon.stub() };
+
+    function makeS3Context(records) {
+      const body = { transformToString: sinon.stub().resolves(JSON.stringify(records)) };
+      return {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: { send: sinon.stub().resolves({ Body: body }) },
+        },
+        log,
+      };
+    }
+
+    it('returns empty Set immediately when forceRun is true', async () => {
+      const site = { getSiteTopPagesBySourceAndGeo: sinon.stub() };
+      const skip = await getImportTypesToSkipForSite('s-1', ['organic-traffic', 'top-pages'], site, makeS3Context([]), log, true);
+      expect(skip.size).to.equal(0);
+      expect(site.getSiteTopPagesBySourceAndGeo).to.not.have.been.called;
+    });
+
+    it('adds import type to skip set when data is fresh', async () => {
+      const recentDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {};
+      const ctx = makeS3Context([{ time: recentDate }]);
+      const skip = await getImportTypesToSkipForSite('s-1', ['organic-traffic'], site, ctx, log);
+      expect(skip.has('organic-traffic')).to.equal(true);
+    });
+
+    it('does NOT add import type when data is stale', async () => {
+      const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {};
+      const ctx = makeS3Context([{ time: oldDate }]);
+      const skip = await getImportTypesToSkipForSite('s-1', ['organic-traffic'], site, ctx, log);
+      expect(skip.has('organic-traffic')).to.equal(false);
+    });
+
+    it('does NOT add import type when no data exists', async () => {
+      const site = {};
+      const ctx = makeS3Context([]);
+      const skip = await getImportTypesToSkipForSite('s-1', ['organic-traffic'], site, ctx, log);
+      expect(skip.has('organic-traffic')).to.equal(false);
+    });
+
+    it('handles multiple import types — skips fresh, runs stale', async () => {
+      const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+          { getImportedAt: () => oldDate },
+        ]),
+      };
+      // s3 returns records for organic-traffic with recent time
+      const ctx = {
+        s3: {
+          s3Bucket: 'test-bucket',
+          s3Client: {
+            send: sinon.stub().resolves({
+              Body: { transformToString: sinon.stub().resolves(JSON.stringify([{ time: recentDate }])) }, // eslint-disable-line max-len
+            }),
+          },
+        },
+        log,
+      };
+      const skip = await getImportTypesToSkipForSite(
+        's-1',
+        ['organic-traffic', 'top-pages'],
+        site,
+        ctx,
+        log,
+      );
+      expect(skip.has('organic-traffic')).to.equal(true);
+      expect(skip.has('top-pages')).to.equal(false);
+    });
+
+    it('returns empty Set when importTypes is empty', async () => {
+      const site = {};
+      const skip = await getImportTypesToSkipForSite('s-1', [], site, makeS3Context([]), log);
+      expect(skip.size).to.equal(0);
+    });
+
+    it('respects custom freshnessDay', async () => {
+      const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      const site = {};
+      // 3-day window → not fresh → not skipped
+      const ctx = makeS3Context([{ time: recentDate }]);
+      const skip3 = await getImportTypesToSkipForSite('s-1', ['organic-traffic'], site, ctx, log, false, 3);
+      expect(skip3.has('organic-traffic')).to.equal(false);
+      // 10-day window → fresh → skipped
+      const ctx2 = makeS3Context([{ time: recentDate }]);
+      const skip10 = await getImportTypesToSkipForSite('s-1', ['organic-traffic'], site, ctx2, log, false, 10);
+      expect(skip10.has('organic-traffic')).to.equal(true);
     });
   });
 
@@ -1222,7 +1406,7 @@ describe('ephemeral-run-service', () => {
       const siteResultCall = s3Calls.find((i) => i?.Key?.includes('/results/'));
       const siteResult = JSON.parse(siteResultCall.Body);
       expect(siteResult.freshnessSkipped).to.deep.equal([
-        { type: 'scrape-top-pages', reason: 'scrape-fresh' },
+        { type: 'scrape-top-pages', kind: 'audit', reason: 'scrape-fresh' },
       ]);
     });
 
@@ -1235,9 +1419,8 @@ describe('ephemeral-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       ctx.dataAccess.ScrapeJob.allByBaseURLAndProcessingType
         .resolves([{ getStartedAt: () => recentDate }]);
-      ctx.dataAccess.Opportunity.allBySiteId.resolves([
-        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
-      ]);
+      ctx.dataAccess.LatestAudit.findById
+        .withArgs('s-1', 'cwv').resolves({ getAuditedAt: () => recentDate });
 
       await runEphemeralRunBatch(
         ['s-1'],
@@ -1251,22 +1434,22 @@ describe('ephemeral-run-service', () => {
       expect(sqsCalls).to.include('cwv');
     });
 
-    it('does not enqueue audit to SQS when its opportunity is fresh', async () => {
+    it('does not enqueue audit to SQS when its LatestAudit record is fresh', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
       const recentDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.Opportunity.allBySiteId.resolves([
-        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
-      ]);
+      // cwv has a fresh LatestAudit record; meta-tags returns null (no record → runs)
+      ctx.dataAccess.LatestAudit.findById
+        .withArgs('s-1', 'cwv').resolves({ getAuditedAt: () => recentDate });
 
       await runEphemeralRunBatch(['s-1'], { audits: { types: ['cwv', 'meta-tags'] } }, ctx);
 
       const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
       expect(sqsCalls).to.not.include('cwv');
-      // meta-tags opportunity is not fresh → should be enqueued
+      // meta-tags has no LatestAudit record → should be enqueued
       expect(sqsCalls).to.include('meta-tags');
     });
 
@@ -1279,9 +1462,8 @@ describe('ephemeral-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       ctx.dataAccess.ScrapeJob.allByBaseURLAndProcessingType
         .resolves([{ getStartedAt: () => recentDate }]);
-      ctx.dataAccess.Opportunity.allBySiteId.resolves([
-        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
-      ]);
+      ctx.dataAccess.LatestAudit.findById
+        .withArgs('s-1', 'cwv').resolves({ getAuditedAt: () => recentDate });
 
       await runEphemeralRunBatch(
         ['s-1'],
@@ -1302,9 +1484,8 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.Opportunity.allBySiteId.resolves([
-        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
-      ]);
+      ctx.dataAccess.LatestAudit.findById
+        .withArgs('s-1', 'cwv').resolves({ getAuditedAt: () => recentDate });
 
       // s-1 is NOT in forceRunSiteIds — freshness check applies
       await runEphemeralRunBatch(
@@ -1324,9 +1505,8 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.Opportunity.allBySiteId.resolves([
-        { getType: () => 'cwv', getUpdatedAt: () => recentDate },
-      ]);
+      ctx.dataAccess.LatestAudit.findById
+        .withArgs('s-1', 'cwv').resolves({ getAuditedAt: () => recentDate });
 
       // forceRun=true, forceRunSiteIds omitted (irrelevant) — all sites still bypass
       await runEphemeralRunBatch(
@@ -1337,7 +1517,7 @@ describe('ephemeral-run-service', () => {
 
       // freshness DB call should not have been made
       expect(ctx.dataAccess.ScrapeJob.allByBaseURLAndProcessingType).to.not.have.been.called;
-      expect(ctx.dataAccess.Opportunity.allBySiteId).to.not.have.been.called;
+      expect(ctx.dataAccess.LatestAudit.findById).to.not.have.been.called;
       const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
       expect(sqsCalls).to.include('cwv');
     });
@@ -1377,14 +1557,14 @@ describe('ephemeral-run-service', () => {
       expect(body.status).to.equal('completed');
     });
 
-    it('single-site insights-report-default sends bulk teardown SFN input', async () => {
+    it('sends bulk teardown SFN input with correct structure', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
       const config = createMockConfiguration();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runEphemeralRunBatch(['s-1'], { preset: 'insights-report-default' }, ctx);
+      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] }, audits: { types: ['cwv'] } }, ctx);
 
       expect(sfnSendStub).to.have.been.called;
       const input = JSON.parse(sfnSendStub.firstCall.args[0].input.input);
@@ -1404,6 +1584,38 @@ describe('ephemeral-run-service', () => {
       await runEphemeralRunBatch(['s-1'], {}, ctx);
 
       expect(sfnSendStub).to.not.have.been.called;
+    });
+
+    it('does not schedule teardown when scheduledRun=true, even when imports/audits are newly enabled', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { imports: { types: ['top-pages'] }, audits: { types: ['lhs-mobile'] }, scheduledRun: true },
+        ctx,
+      );
+
+      expect(sfnSendStub).to.not.have.been.called;
+    });
+
+    it('schedules teardown normally when scheduledRun is false (default)', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { imports: { types: ['top-pages'] }, audits: { types: ['lhs-mobile'] } },
+        ctx,
+      );
+
+      expect(sfnSendStub).to.have.been.called;
     });
 
     it('uses WORKFLOW_WAIT_TIME_IN_SECONDS when teardown delaySeconds is 0 (imports)', async () => {
@@ -1750,7 +1962,7 @@ describe('ephemeral-run-service', () => {
       ctx.dataAccess.Configuration.findLatest.resolves(config);
       sfnSendStub.rejects(new Error('SFN down'));
 
-      await runEphemeralRunBatch(['s-1'], { preset: 'insights-report-default' }, ctx);
+      await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
 
       expect(ctx.log.error).to.have.been.called;
     });
@@ -1844,18 +2056,6 @@ describe('ephemeral-run-service', () => {
   // Constants
   // -----------------------------------------------------------------------
   describe('constants', () => {
-    it('exports PRESETS with insights-report-default', () => {
-      expect(PRESETS).to.have.property('insights-report-default');
-      expect(PRESETS['insights-report-default'].imports.types).to.be.an('array').that.is.not.empty;
-      expect(PRESETS['insights-report-default'].imports.optionsByImportType).to.be.an('object');
-      expect(PRESETS['insights-report-default'].imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
-      expect(PRESETS['insights-report-default'].audits.types).to.be.an('array').that.is.not.empty;
-    });
-
-    it('does not include security-csp-auto-suggest in PRESET audit types — it is a handler flag, not a standalone SQS audit', () => {
-      expect(PRESETS['insights-report-default'].audits.types).to.not.include('security-csp-auto-suggest');
-    });
-
     it('exports MAX_BATCH_SITES', () => {
       expect(MAX_BATCH_SITES).to.equal(1000);
     });

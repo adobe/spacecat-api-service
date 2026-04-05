@@ -28,7 +28,6 @@ import AccessControlUtil from '../support/access-control-util.js';
 import {
   runEphemeralRunBatch,
   MAX_BATCH_SITES,
-  PRESETS,
 } from '../support/ephemeral-run-service.js';
 import { readBatchStatus } from '../support/ephemeral-run-batch-store.js';
 
@@ -67,10 +66,6 @@ function EphemeralRunController(ctx) {
     const invalidIds = siteIds.filter((id) => !isValidUUID(id));
     if (invalidIds.length > 0) {
       return badRequest(`Invalid siteIds: ${invalidIds.join(', ')}`);
-    }
-
-    if (body.preset && !PRESETS[body.preset]) {
-      return badRequest(`Unknown preset: ${body.preset}. Available: ${Object.keys(PRESETS).join(', ')}`);
     }
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
