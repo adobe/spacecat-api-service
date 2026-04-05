@@ -122,6 +122,7 @@ function createMockContext(overrides = {}) {
       Configuration: { findLatest: sinon.stub() },
       Organization: { findById: sinon.stub().resolves(createMockOrganization()) },
       LatestAudit: { findById: sinon.stub().resolves(null) },
+      ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub().resolves([]) },
       Opportunity: { allBySiteId: sinon.stub().resolves([]) },
       ...(dataAccessOverrides || {}),
     },
@@ -850,34 +851,59 @@ describe('ephemeral-run-service', () => {
   // -----------------------------------------------------------------------
   describe('isScrapeRecent()', () => {
     const log = { warn: sinon.stub(), info: sinon.stub() };
+    const mockSite = { getBaseURL: () => 'https://example.com' };
 
-    it('returns false when no scrape audit record exists', async () => {
-      const LatestAudit = { findById: sinon.stub().resolves(null) };
-      expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(false);
+    it('returns false when site is not found', async () => {
+      const dataAccess = {
+        Site: { findById: sinon.stub().resolves(null) },
+        ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub() },
+      };
+      expect(await isScrapeRecent('s-1', dataAccess, log)).to.equal(false);
     });
 
-    it('returns false when the scrape record is older than 30 days', async () => {
+    it('returns false when no scrape jobs exist for the site', async () => {
+      const dataAccess = {
+        Site: { findById: sinon.stub().resolves(mockSite) },
+        ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub().resolves([]) },
+      };
+      expect(await isScrapeRecent('s-1', dataAccess, log)).to.equal(false);
+    });
+
+    it('returns false when the most recent scrape job started more than 30 days ago', async () => {
       const oldDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
-      const LatestAudit = {
-        findById: sinon.stub().resolves({ getAuditedAt: () => oldDate }),
+      const dataAccess = {
+        Site: { findById: sinon.stub().resolves(mockSite) },
+        ScrapeJob: {
+          allByBaseURLAndProcessingType: sinon.stub().resolves([
+            { getStartedAt: () => oldDate },
+          ]),
+        },
       };
-      expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(false);
+      expect(await isScrapeRecent('s-1', dataAccess, log)).to.equal(false);
     });
 
-    it('returns true when the scrape record is within 30 days', async () => {
+    it('returns true when the most recent scrape job started within 30 days', async () => {
       const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
-      const LatestAudit = {
-        findById: sinon.stub().resolves({ getAuditedAt: () => recentDate }),
+      const dataAccess = {
+        Site: { findById: sinon.stub().resolves(mockSite) },
+        ScrapeJob: {
+          allByBaseURLAndProcessingType: sinon.stub().resolves([
+            { getStartedAt: () => recentDate },
+          ]),
+        },
       };
-      expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(true);
+      expect(await isScrapeRecent('s-1', dataAccess, log)).to.equal(true);
     });
 
     it('returns false and warns when the query throws', async () => {
       const warnStub = sinon.stub();
-      const LatestAudit = {
-        findById: sinon.stub().rejects(new Error('DB error')),
+      const dataAccess = {
+        Site: { findById: sinon.stub().resolves(mockSite) },
+        ScrapeJob: {
+          allByBaseURLAndProcessingType: sinon.stub().rejects(new Error('DB error')),
+        },
       };
-      const result = await isScrapeRecent('s-1', LatestAudit, { warn: warnStub, info: sinon.stub() });
+      const result = await isScrapeRecent('s-1', dataAccess, { warn: warnStub, info: sinon.stub() });
       expect(result).to.equal(false);
       expect(warnStub).to.have.been.called;
     });
@@ -934,26 +960,29 @@ describe('ephemeral-run-service', () => {
   describe('getAuditTypesToSkipForSite()', () => {
     const log = { warn: sinon.stub(), info: sinon.stub() };
 
-    function makeDataAccess({ scrapeAuditedAt = null, opportunities = [] } = {}) {
-      const scrapeRecord = scrapeAuditedAt
-        ? { getAuditedAt: () => scrapeAuditedAt }
-        : null;
+    const mockSite = { getBaseURL: () => 'https://example.com' };
+
+    function makeDataAccess({ scrapeStartedAt = null, opportunities = [] } = {}) {
+      const scrapeJobs = scrapeStartedAt
+        ? [{ getStartedAt: () => scrapeStartedAt }]
+        : [];
       return {
-        LatestAudit: { findById: sinon.stub().resolves(scrapeRecord) },
+        Site: { findById: sinon.stub().resolves(mockSite) },
+        ScrapeJob: { allByBaseURLAndProcessingType: sinon.stub().resolves(scrapeJobs) },
         Opportunity: { allBySiteId: sinon.stub().resolves(opportunities) },
       };
     }
 
     it('adds scrape-top-pages to skip set when scrape is recent', async () => {
       const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({ scrapeAuditedAt: recentDate });
+      const da = makeDataAccess({ scrapeStartedAt: recentDate });
       const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log);
       expect(skip.has('scrape-top-pages')).to.equal(true);
     });
 
     it('does NOT skip scrape-top-pages when scrape is stale', async () => {
       const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({ scrapeAuditedAt: oldDate });
+      const da = makeDataAccess({ scrapeStartedAt: oldDate });
       const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log);
       expect(skip.has('scrape-top-pages')).to.equal(false);
     });
@@ -1066,7 +1095,7 @@ describe('ephemeral-run-service', () => {
     it('respects custom scrapeFreshnessDays — skips scrape when within custom window', async () => {
       // 10-day-old scrape: stale under default 30d, but inside custom 15d window
       const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({ scrapeAuditedAt: tenDaysAgo });
+      const da = makeDataAccess({ scrapeStartedAt: tenDaysAgo });
       const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log, false, 15);
       expect(skip.has('scrape-top-pages')).to.equal(true);
     });
@@ -1074,7 +1103,7 @@ describe('ephemeral-run-service', () => {
     it('respects custom scrapeFreshnessDays — runs scrape when outside custom window', async () => {
       // 20-day-old scrape: fresh under default 30d, but outside custom 15d window
       const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({ scrapeAuditedAt: twentyDaysAgo });
+      const da = makeDataAccess({ scrapeStartedAt: twentyDaysAgo });
       const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages'], da, log, false, 15);
       expect(skip.has('scrape-top-pages')).to.equal(false);
     });
@@ -1131,20 +1160,20 @@ describe('ephemeral-run-service', () => {
     it('returns empty set immediately when forceRun is true', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       const da = makeDataAccess({
-        scrapeAuditedAt: recentDate,
+        scrapeStartedAt: recentDate,
         opportunities: [{ getType: () => 'cwv', getUpdatedAt: () => recentDate }],
       });
       const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log, true);
       expect(skip.size).to.equal(0);
       // dataAccess should not have been queried
-      expect(da.LatestAudit.findById).to.not.have.been.called;
+      expect(da.ScrapeJob.allByBaseURLAndProcessingType).to.not.have.been.called;
       expect(da.Opportunity.allBySiteId).to.not.have.been.called;
     });
 
-    it('does not query LatestAudit when scrape-top-pages is not in audit types', async () => {
+    it('does not query ScrapeJob when scrape-top-pages is not in audit types', async () => {
       const da = makeDataAccess();
       await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
-      expect(da.LatestAudit.findById).to.not.have.been.called;
+      expect(da.ScrapeJob.allByBaseURLAndProcessingType).to.not.have.been.called;
     });
 
     it('does not query Opportunity when all audit types have no opportunity mapping', async () => {
@@ -1154,11 +1183,11 @@ describe('ephemeral-run-service', () => {
       expect(da.Opportunity.allBySiteId).to.not.have.been.called;
     });
 
-    it('queries both LatestAudit and Opportunity when both types are present', async () => {
+    it('queries both ScrapeJob and Opportunity when both types are present', async () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
-      const da = makeDataAccess({ scrapeAuditedAt: recentDate });
+      const da = makeDataAccess({ scrapeStartedAt: recentDate });
       await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log);
-      expect(da.LatestAudit.findById).to.have.been.called;
+      expect(da.ScrapeJob.allByBaseURLAndProcessingType).to.have.been.called;
       expect(da.Opportunity.allBySiteId).to.have.been.called;
     });
   });
@@ -1174,7 +1203,8 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.LatestAudit.findById.resolves({ getAuditedAt: () => recentDate });
+      ctx.dataAccess.ScrapeJob.allByBaseURLAndProcessingType
+        .resolves([{ getStartedAt: () => recentDate }]);
 
       await runEphemeralRunBatch(['s-1'], { audits: { types: ['scrape-top-pages', 'cwv'] } }, ctx);
 
@@ -1203,7 +1233,8 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.LatestAudit.findById.resolves({ getAuditedAt: () => recentDate });
+      ctx.dataAccess.ScrapeJob.allByBaseURLAndProcessingType
+        .resolves([{ getStartedAt: () => recentDate }]);
       ctx.dataAccess.Opportunity.allBySiteId.resolves([
         { getType: () => 'cwv', getUpdatedAt: () => recentDate },
       ]);
@@ -1246,7 +1277,8 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.LatestAudit.findById.resolves({ getAuditedAt: () => recentDate });
+      ctx.dataAccess.ScrapeJob.allByBaseURLAndProcessingType
+        .resolves([{ getStartedAt: () => recentDate }]);
       ctx.dataAccess.Opportunity.allBySiteId.resolves([
         { getType: () => 'cwv', getUpdatedAt: () => recentDate },
       ]);
@@ -1304,7 +1336,7 @@ describe('ephemeral-run-service', () => {
       );
 
       // freshness DB call should not have been made
-      expect(ctx.dataAccess.LatestAudit.findById).to.not.have.been.called;
+      expect(ctx.dataAccess.ScrapeJob.allByBaseURLAndProcessingType).to.not.have.been.called;
       expect(ctx.dataAccess.Opportunity.allBySiteId).to.not.have.been.called;
       const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
       expect(sqsCalls).to.include('cwv');

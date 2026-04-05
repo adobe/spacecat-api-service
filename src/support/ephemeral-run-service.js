@@ -264,20 +264,27 @@ function getParentAuditType(auditType) {
 }
 
 /**
- * Returns true if the site has a scrape-top-pages audit result that is
- * younger than SCRAPE_FRESHNESS_DAYS days.
+ * Returns true if the site has a completed scrape job (processingType 'default') that started
+ * within the last SCRAPE_FRESHNESS_DAYS days.
+ *
+ * scrape-top-pages goes to ScrapeClient → spacecat-content-scraper, not the audit pipeline,
+ * so LatestAudit never has a scrape-top-pages record. The correct freshness signal is the
+ * most recent ScrapeJob for the site's baseURL with processingType 'default'.
  */
 async function isScrapeRecent(
   siteId,
-  LatestAudit,
+  dataAccess,
   log,
   scrapeFreshnessDays = SCRAPE_FRESHNESS_DAYS,
 ) {
   try {
-    const audit = await LatestAudit.findById(siteId, SCRAPE_AUDIT_TYPE);
-    if (!audit) return false;
-    const auditedAt = new Date(audit.getAuditedAt()).getTime();
-    const ageInDays = (Date.now() - auditedAt) / (1000 * 60 * 60 * 24);
+    const { Site, ScrapeJob } = dataAccess;
+    const site = await Site.findById(siteId);
+    if (!site) return false;
+    const jobs = await ScrapeJob.allByBaseURLAndProcessingType(site.getBaseURL(), 'default');
+    if (!jobs || jobs.length === 0) return false;
+    const latestStartedAt = Math.max(...jobs.map((j) => new Date(j.getStartedAt()).getTime()));
+    const ageInDays = (Date.now() - latestStartedAt) / (1000 * 60 * 60 * 24);
     return ageInDays < scrapeFreshnessDays;
   } catch (err) {
     log.warn(`Failed to check scrape freshness for site ${siteId}:`, err);
@@ -334,7 +341,7 @@ async function getAuditTypesToSkipForSite(
     return new Set();
   }
 
-  const { LatestAudit, Opportunity } = dataAccess;
+  const { Opportunity } = dataAccess;
 
   const hasScrapeAudit = auditTypes.includes(SCRAPE_AUDIT_TYPE);
   const nonScrapeTypes = auditTypes.filter((t) => t !== SCRAPE_AUDIT_TYPE);
@@ -344,7 +351,7 @@ async function getAuditTypesToSkipForSite(
 
   const [scrapeRecent, opportunityMap] = await Promise.all([
     hasScrapeAudit
-      ? isScrapeRecent(siteId, LatestAudit, log, scrapeFreshnessDays)
+      ? isScrapeRecent(siteId, dataAccess, log, scrapeFreshnessDays)
       : Promise.resolve(false),
     hasOpportunityAudits
       ? buildOpportunityFreshnessMap(siteId, Opportunity, log)
@@ -682,7 +689,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
     dataAccess, s3, env, log,
   } = context;
   const {
-    Site, Configuration, Opportunity, LatestAudit,
+    Site, Configuration, Opportunity, ScrapeJob,
   } = dataAccess;
   const batchId = randomUUID();
   const uniqueSiteIds = [...new Set(siteIds)];
@@ -814,7 +821,9 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
       const auditTypesToSkip = await getAuditTypesToSkipForSite(
         siteId,
         auditTypes,
-        { LatestAudit, Opportunity },
+        {
+          Site, ScrapeJob, Opportunity,
+        },
         log,
         siteForceRun,
         scrapeFreshnessDays,
