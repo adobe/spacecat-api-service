@@ -1,3 +1,10 @@
+## [1.413.6](https://github.com/adobe/spacecat-api-service/compare/v1.413.5...v1.413.6) (2026-04-05)
+
+
+### Bug Fixes
+
+* downgrade non-actionable API errors and operational logs ([#2126](https://github.com/adobe/spacecat-api-service/issues/2126)) ([3ed606a](https://github.com/adobe/spacecat-api-service/commit/3ed606ac543ca8a66c1c1c33e69f6d5353098757))
+
 ## [1.413.5](https://github.com/adobe/spacecat-api-service/compare/v1.413.4...v1.413.5) (2026-04-05)
 
 
