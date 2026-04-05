@@ -113,6 +113,10 @@ export const INTERNAL_ROUTES = [
   'POST /consumers/register',
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
+
+  // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
+  'POST /ephemeral-run/batch',
+  'GET /ephemeral-run/batch/:batchId/status',
 ];
 
 /**

@@ -77,7 +77,7 @@ function EphemeralRunController(ctx) {
     const createdBy = authInfo?.getProfile()?.email || 'unknown';
 
     try {
-      const result = await runEphemeralRunBatch(siteIds, body, ctx, createdBy);
+      const result = await runEphemeralRunBatch(siteIds, body, context, createdBy);
       return accepted(result);
     } catch (error) {
       log.error('Ephemeral run batch failed', error);
