@@ -1,3 +1,10 @@
+## [1.413.7](https://github.com/adobe/spacecat-api-service/compare/v1.413.6...v1.413.7) (2026-04-05)
+
+
+### Bug Fixes
+
+* update pre phase expiry for geo experiment ([#2128](https://github.com/adobe/spacecat-api-service/issues/2128)) ([56f25e9](https://github.com/adobe/spacecat-api-service/commit/56f25e9367c0ef3cb77b2cf76fd191f359502102))
+
 ## [1.413.6](https://github.com/adobe/spacecat-api-service/compare/v1.413.5...v1.413.6) (2026-04-05)
 
 
