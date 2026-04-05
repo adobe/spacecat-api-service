@@ -17,6 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
+  isNonEmptyArray,
   isObject,
   isValidUUID,
   isValidUrl, isNonEmptyObject,
@@ -156,9 +157,9 @@ function AuditsController(ctx) {
       return forbidden('User does not have access to this site');
     }
 
-    const audit = await LatestAudit.findById(siteId, auditType);
-    if (audit) {
-      return ok(AuditDto.toJSON(audit));
+    const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
+    if (isNonEmptyArray(audits)) {
+      return ok(AuditDto.toJSON(audits[0]));
     }
 
     return notFound('Audit not found');

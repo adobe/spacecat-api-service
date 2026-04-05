@@ -246,7 +246,6 @@ describe('Audits Controller', () => {
         allByAuditType: sandbox.stub(),
         allBySiteId: sandbox.stub(),
         allBySiteIdAndAuditType: sandbox.stub(),
-        findById: sandbox.stub(),
       },
       Site: {
         findById: sandbox.stub(),
@@ -461,7 +460,7 @@ describe('Audits Controller', () => {
       const auditType = 'security';
       const expectedAudit = AuditDto.toJSON(mockLatestAudits[0]);
 
-      mockDataAccess.LatestAudit.findById.resolves(mockLatestAudits[0]);
+      mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([mockLatestAudits[0]]);
       mockDataAccess.Site.findById.resolves({
         getOrganization: () => ({}),
       });
@@ -469,7 +468,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.getLatestForSite({ params: { siteId, auditType } });
       const audit = await result.json();
 
-      expect(mockDataAccess.LatestAudit.findById)
+      expect(mockDataAccess.LatestAudit.allBySiteIdAndAuditType)
         .to.have.been.calledOnceWith(siteId, auditType);
       expect(audit).to.deep.equal(expectedAudit);
     });
@@ -641,7 +640,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -682,7 +680,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -724,7 +721,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -769,7 +765,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -854,7 +849,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -900,7 +894,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -944,7 +937,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -987,7 +979,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -1029,7 +1020,6 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
-        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -1097,7 +1087,6 @@ describe('Audits Controller', () => {
           getLlmoConfig: () => ({}),
           getTokowakaConfig: () => ({}),
           getEdgeOptimizeConfig: () => undefined,
-          getOnboardConfig: () => undefined,
           getBrandProfile: () => ({}),
         };
 
