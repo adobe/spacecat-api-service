@@ -31,9 +31,9 @@ import crypto from 'crypto';
 import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
-import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
@@ -1097,6 +1097,21 @@ function LlmoController(ctx) {
   const getDemoBrandPresence = createDemoFixtureHandler(handleDemoBrandPresence, 'brand-presence');
   const getDemoRecommendations = createDemoFixtureHandler(handleDemoRecommendations, 'recommendations');
 
+  // Returns the hostname from a URL: lowercase with leading www. stripped.
+  function getHostnameWithoutWww(url, log) {
+    try {
+      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+      let hostname = urlObj.hostname.toLowerCase();
+      if (hostname.startsWith('www.')) {
+        hostname = hostname.slice(4);
+      }
+      return hostname;
+    } catch (error) {
+      log.error(`Error getting hostname from URL ${url}: ${error.message}`);
+      throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
+    }
+  }
+
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-config
    * Creates or updates Tokowaka edge optimization configuration
@@ -1111,12 +1126,8 @@ function LlmoController(ctx) {
     const { authInfo: { profile } } = context.attributes;
     const { Site } = dataAccess;
     const {
-      enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
+      enhancements, tokowakaEnabled, forceFail, patches = {}, prerender, cdnType, enabled,
     } = context.data || {};
-
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can update the edge optimize config');
-    }
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
@@ -1140,6 +1151,20 @@ function LlmoController(ctx) {
       return badRequest('prerender field must be an object with allowList property that is an array');
     }
 
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      return badRequest('enabled field must be a boolean');
+    }
+
+    // Validate and normalise cdnType when provided
+    let cdnTypeNormalized = null;
+    if (hasText(cdnType)) {
+      const cdnTypeTrimmed = cdnType.toLowerCase().trim();
+      cdnTypeNormalized = EDGE_OPTIMIZE_CDN_TYPES.includes(cdnTypeTrimmed) ? cdnTypeTrimmed : null;
+      if (!cdnTypeNormalized) {
+        return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
+      }
+    }
+
     try {
       // Get site
       const site = await Site.findById(siteId);
@@ -1154,6 +1179,33 @@ function LlmoController(ctx) {
 
       if (!await accessControlUtil.isOwnerOfSite(site)) {
         return forbidden('User does not own this site');
+      }
+
+      // Authorization: LLMO Administrator (paid) OR member of LLMO Admin IMS group (trial)
+      const isPaidAdmin = accessControlUtil.isLLMOAdministrator();
+      if (!isPaidAdmin) {
+        const llmoAdminGroupId = env.LLMO_ADMIN_IMS_GROUP_ID;
+        if (!hasText(llmoAdminGroupId)) {
+          return forbidden('Only LLMO administrators can update the edge optimize config');
+        }
+        const org = await site.getOrganization();
+        const imsOrgId = org.getImsOrgId();
+        const userEmail = profile?.email;
+        let isTrialAdmin = false;
+        if (hasText(userEmail) && hasText(imsOrgId)) {
+          try {
+            isTrialAdmin = await context.imsClient.isUserInImsGroup(
+              imsOrgId,
+              llmoAdminGroupId,
+              userEmail,
+            );
+          } catch (groupCheckError) {
+            log.warn(`[edge-optimize-config] IMS group check failed for site ${siteId}: ${groupCheckError.message}`);
+          }
+        }
+        if (!isTrialAdmin) {
+          return forbidden('Only LLMO administrators or LLMO Admin group members can update the edge optimize config');
+        }
       }
 
       const baseURL = site.getBaseURL();
@@ -1222,6 +1274,143 @@ function LlmoController(ctx) {
         } catch (slackError) {
           // Log error but don't fail the request
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
+        }
+      }
+
+      // CDN routing — only when cdnType is provided
+      if (cdnTypeNormalized) {
+        // Restrict to production environment
+        if (env?.ENV && env.ENV !== 'prod') {
+          return createResponse({ message: `CDN routing is not available in ${env.ENV} environment` }, 400);
+        }
+
+        let routingConfig;
+        try {
+          routingConfig = JSON.parse(env?.EDGE_OPTIMIZE_ROUTING_CONFIG);
+        } catch (parseError) {
+          log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
+          return internalServerError('Failed to parse routing config.');
+        }
+
+        const cdnConfig = routingConfig[cdnTypeNormalized];
+        if (!isObject(cdnConfig) || !isValidUrl(cdnConfig.cdnRoutingUrl)) {
+          log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnTypeNormalized}`);
+          return createResponse({ message: 'API is missing mandatory environment variable' }, 503);
+        }
+
+        const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
+        const routingEnabled = enabled ?? true;
+
+        // Obtain the customer IMS org ID for the SP token request
+        const org = await site.getOrganization();
+        const imsOrgId = org.getImsOrgId();
+        if (!hasText(imsOrgId)) {
+          log.error(`[edge-optimize-config] IMS org ID not found for site ${siteId}`);
+          return internalServerError('IMS org ID not found for site');
+        }
+
+        // Probe the live site to resolve the canonical domain for the CDN API call
+        const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+        const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
+        const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+        let probeResponse;
+        try {
+          log.info(`[edge-optimize-config] Probing site ${probeUrl}`);
+          probeResponse = await fetch(probeUrl, {
+            method: 'GET',
+            headers: { 'User-Agent': 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0' },
+            signal: AbortSignal.timeout(5000),
+          });
+        } catch (probeError) {
+          log.error(`[edge-optimize-config] Error probing site ${siteId}: ${probeError.message}`);
+          return badRequest(`Error probing site: ${probeError.message}`);
+        }
+
+        let domain;
+        if (probeResponse.ok) {
+          domain = calculateForwardedHost(probeUrl, log);
+        } else if (probeResponse.status === 301) {
+          const locationValue = probeResponse.headers.get('location');
+          let probeHostname;
+          let locationHostname;
+          try {
+            probeHostname = getHostnameWithoutWww(probeUrl, log);
+            locationHostname = getHostnameWithoutWww(locationValue, log);
+          } catch (hostError) {
+            log.error(`[edge-optimize-config] Invalid URL for 301 domain check: ${hostError.message}`);
+            return badRequest(hostError.message);
+          }
+          if (probeHostname !== locationHostname) {
+            const msg = `Site ${probeUrl} returned 301 to ${locationValue}; domain `
+              + `(${locationHostname}) does not match probe domain (${probeHostname})`;
+            log.error(`[edge-optimize-config] CDN routing update failed: ${msg}`);
+            return badRequest(msg);
+          }
+          domain = calculateForwardedHost(locationValue, log);
+          log.info(`[edge-optimize-config] Probe returned 301; using Location domain ${domain}`);
+        } else {
+          const msg = `Site ${probeUrl} did not return 2xx or 301 for`
+            + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+          log.error(`[edge-optimize-config] CDN routing update failed: ${msg}`);
+          return badRequest(msg);
+        }
+
+        // Obtain the Service Principal access token scoped to the customer IMS org
+        let spToken;
+        try {
+          log.debug(`[edge-optimize-config] Obtaining SP token for site ${siteId}, org ${imsOrgId}`);
+          const edgeImsClient = ImsClient.createServiceClient(context);
+          const tokenData = await edgeImsClient.getServicePrincipalToken(imsOrgId);
+          spToken = tokenData.access_token;
+          log.info(`[edge-optimize-config] SP token obtained for site ${siteId}`);
+        } catch (tokenError) {
+          log.warn(`[edge-optimize-config] Failed to obtain SP token for site ${siteId}: ${tokenError.message}`);
+          return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
+        }
+
+        // Call CDN API with the SP token
+        try {
+          const cdnUrl = strategy.buildUrl(cdnConfig, domain);
+          const cdnBody = strategy.buildBody(routingEnabled);
+          log.info(`[edge-optimize-config] Calling CDN API for domain ${domain} at ${cdnUrl} with enabled: ${routingEnabled}`);
+          const cdnResponse = await fetch(cdnUrl, {
+            method: strategy.method,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${spToken}`,
+            },
+            body: JSON.stringify(cdnBody),
+            signal: AbortSignal.timeout(5000),
+          });
+
+          if (!cdnResponse.ok) {
+            const body = await cdnResponse.text();
+            log.error(`[edge-optimize-config] CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
+            if (cdnResponse.status === 401 || cdnResponse.status === 403) {
+              return createResponse({ message: 'User is not authorized to update CDN routing' }, cdnResponse.status);
+            }
+            return createResponse({ message: `Upstream call failed with status ${cdnResponse.status}` }, 500);
+          }
+
+          // Persist the routing enabled state
+          currentConfig.updateEdgeOptimizeConfig({
+            ...currentConfig.getEdgeOptimizeConfig(),
+            enabled: routingEnabled,
+          });
+          await saveSiteConfig(site, currentConfig, log, 'updating edge optimize routing state');
+          log.info(`[edge-optimize-config] CDN routing updated for site ${siteId}, domain ${domain}`);
+          return ok({
+            ...metaconfig,
+            enabled: routingEnabled,
+            domain,
+            cdnType: cdnTypeNormalized,
+          });
+        } catch (cdnError) {
+          log.error(`[edge-optimize-config] CDN routing update failed for site ${siteId}: ${cdnError.message}`);
+          if (cdnError.status) {
+            return createResponse({ message: cdnError.message }, cdnError.status);
+          }
+          return internalServerError(cdnError.message);
         }
       }
 
@@ -1428,190 +1617,6 @@ function LlmoController(ctx) {
     }
   };
 
-  // Returns the hostname from a URL: lowercase with leading www. stripped.
-  function getHostnameWithoutWww(url, log) {
-    try {
-      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
-      let hostname = urlObj.hostname.toLowerCase();
-      if (hostname.startsWith('www.')) {
-        hostname = hostname.slice(4);
-      }
-      return hostname;
-    } catch (error) {
-      log.error(`Error getting hostname from URL ${url}: ${error.message}`);
-      throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
-    }
-  }
-
-  /**
-   * POST /sites/{siteId}/llmo/edge-optimize-routing
-   * Updates edge optimize routing for the site via the internal CDN API.
-   * - Requires x-promise-token header and request body cdnType.
-   * - Probes the site with custom User-Agent (2xx continues; 301: if Location domain
-   *   normalizes to same as probe URL domain, use Location domain for CDN API; otherwise break).
-   * - Exchanges promise token for IMS user token, then calls internal CDN API.
-   * @param {object} context - Request context (context.request for headers)
-   * @returns {Promise<Response>}
-   */
-  const updateEdgeOptimizeCDNRouting = async (context) => {
-    const { log, dataAccess, env } = context;
-    const { siteId } = context.params;
-    const { Site } = dataAccess;
-    const { cdnType, enabled = true } = context.data || {};
-    const promiseToken = context.request?.headers?.get?.('x-promise-token');
-    log.info(`Edge optimize routing update request received for site ${siteId}`);
-
-    if (env?.ENV && env.ENV !== 'prod') {
-      return createResponse(
-        { message: `API is not available in ${env?.ENV} environment` },
-        400,
-      );
-    }
-
-    if (!hasText(promiseToken)) {
-      return badRequest('x-promise-token header is required and must be a non-empty string');
-    }
-
-    if (!hasText(cdnType)) {
-      return badRequest('cdnType is required and must be a non-empty string');
-    }
-    const cdnTypeTrimmed = cdnType.toLowerCase().trim();
-    const cdnTypeNormalized = EDGE_OPTIMIZE_CDN_TYPES.includes(cdnTypeTrimmed)
-      ? cdnTypeTrimmed
-      : null;
-
-    if (!cdnTypeNormalized) {
-      return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
-    }
-
-    let routingConfig;
-    try {
-      routingConfig = JSON.parse(env?.EDGE_OPTIMIZE_ROUTING_CONFIG);
-    } catch (parseError) {
-      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
-      return internalServerError('Failed to parse routing config.');
-    }
-
-    const cdnConfig = routingConfig[cdnTypeNormalized];
-    if (!isObject(cdnConfig) || !isValidUrl(cdnConfig.cdnRoutingUrl)) {
-      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnTypeNormalized}`);
-      return createResponse(
-        { message: 'API is missing mandatory environment variable' },
-        503,
-      );
-    }
-
-    const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
-
-    if (enabled !== undefined && typeof enabled !== 'boolean') {
-      return badRequest('enabled field must be a boolean');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('User does not have access to this site');
-    }
-
-    const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
-    const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
-    log.info(`Effective base URL for site ${siteId}: ${effectiveBaseUrl}`);
-
-    const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
-    let probeResponse;
-    try {
-      log.info(`Probing site ${probeUrl}`);
-      probeResponse = await fetch(probeUrl, {
-        method: 'GET',
-        headers: { 'User-Agent': 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0' },
-        signal: AbortSignal.timeout(5000),
-      });
-    } catch (probeError) {
-      log.error(`Error probing site ${siteId}: ${probeError.message}`);
-      return badRequest(`Error probing site: ${probeError.message}`);
-    }
-    let domain;
-    if (probeResponse.ok) {
-      domain = calculateForwardedHost(probeUrl, log);
-    } else if (probeResponse.status === 301) {
-      const locationValue = probeResponse.headers.get('location');
-      let probeHostname;
-      let locationHostname;
-      try {
-        probeHostname = getHostnameWithoutWww(probeUrl, log);
-        locationHostname = getHostnameWithoutWww(locationValue, log);
-      } catch (hostError) {
-        log.error(`Invalid URL for 301 domain check: ${hostError.message}`);
-        return badRequest(hostError.message);
-      }
-      if (probeHostname !== locationHostname) {
-        const msg = `Site ${probeUrl} returned 301 to ${locationValue}; domain `
-          + `(${locationHostname}) does not match probe domain (${probeHostname})`;
-        log.error(`CDN routing update failed: ${msg}`);
-        return badRequest(msg);
-      }
-      domain = calculateForwardedHost(locationValue, log);
-      log.info(`Probe returned 301; using Location domain ${domain} for CDN API`);
-    } else {
-      const msg = `Site ${probeUrl} did not return 2xx or 301 for`
-        + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
-      log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
-      return badRequest(msg);
-    }
-
-    let imsUserToken;
-    try {
-      log.debug(`Getting IMS user token for site ${siteId}`);
-      imsUserToken = await exchangePromiseToken(context, promiseToken);
-      log.info('IMS user token obtained successfully');
-    } catch (tokenError) {
-      log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
-      return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
-    }
-
-    try {
-      const cdnUrl = strategy.buildUrl(cdnConfig, domain);
-      const cdnBody = strategy.buildBody(enabled);
-      log.info(`Calling CDN API for domain ${domain} at ${cdnUrl} with enabled: ${enabled}`);
-      const cdnResponse = await fetch(cdnUrl, {
-        method: strategy.method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${imsUserToken}`,
-        },
-        body: JSON.stringify(cdnBody),
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (!cdnResponse.ok) {
-        const body = await cdnResponse.text();
-        log.error(`CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
-        if (cdnResponse.status === 401 || cdnResponse.status === 403) {
-          return createResponse(
-            { message: 'User is not authorized to update CDN routing' },
-            cdnResponse.status,
-          );
-        }
-        return createResponse(
-          { message: `Upstream call failed with status ${cdnResponse.status}` },
-          500,
-        );
-      }
-
-      log.info(`Edge optimize routing updated for site ${siteId}, domain ${domain}`);
-      return ok({ enabled, domain, cdnType: cdnTypeNormalized });
-    } catch (error) {
-      log.error(`Edge optimize routing update failed for site ${siteId}: ${error.message}`);
-      if (error.status) {
-        return createResponse({ message: error.message }, error.status);
-      }
-      return internalServerError(error.message);
-    }
-  };
-
   const markOpportunitiesReviewed = async (context) => {
     const { log } = context;
 
@@ -1792,7 +1797,6 @@ function LlmoController(ctx) {
     getStrategy,
     saveStrategy,
     checkEdgeOptimizeStatus,
-    updateEdgeOptimizeCDNRouting,
     markOpportunitiesReviewed,
   };
 }
