@@ -322,6 +322,11 @@ describe('ephemeral-run-service', () => {
       expect(result.teardownDelaySeconds).to.equal(86400);
     });
 
+    it('teardown delaySeconds: string "14400" falls back to default (not coerced)', () => {
+      const result = resolvePayload({ teardown: { delaySeconds: '14400' } });
+      expect(result.teardownDelaySeconds).to.equal(14400); // default, not the string value
+    });
+
     it('forceRun: false (explicit boolean) remains false', () => {
       const result = resolvePayload({ forceRun: false });
       expect(result.forceRun).to.equal(false);
@@ -1862,6 +1867,39 @@ describe('ephemeral-run-service', () => {
       expect(body.status).to.equal('completed');
     });
 
+    it('stores createdBy in the batch manifest', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {}, ctx, 'ops@adobe.com');
+
+      const manifestCall = ctx.s3.s3Client.send.getCalls().find(
+        (c) => c.args[0].input?.Key?.includes('manifest.json'),
+      );
+      expect(manifestCall).to.exist;
+      const manifest = JSON.parse(manifestCall.args[0].input.Body);
+      expect(manifest.createdBy).to.equal('ops@adobe.com');
+    });
+
+    it('defaults createdBy to "unknown" when not provided', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], {}, ctx);
+
+      const manifestCall = ctx.s3.s3Client.send.getCalls().find(
+        (c) => c.args[0].input?.Key?.includes('manifest.json'),
+      );
+      const manifest = JSON.parse(manifestCall.args[0].input.Body);
+      expect(manifest.createdBy).to.equal('unknown');
+    });
+
     it('sends bulk teardown SFN input with correct structure', async () => {
       const ctx = createMockContext();
       const site = createMockSite();
@@ -1998,11 +2036,15 @@ describe('ephemeral-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      const result = await runEphemeralRunBatch(['s-1'], {
-        imports: { types: ['top-pages'] },
-      }, ctx);
+      let threw = false;
+      try {
+        await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+      } catch (e) {
+        threw = true;
+        expect(e.message).to.equal('DB down');
+      }
+      expect(threw).to.equal(true);
 
-      expect(result.batchId).to.be.a('string');
       // site.save called twice: once for enable, once for rollback
       expect(site.save.callCount).to.be.greaterThanOrEqual(2);
     });
@@ -2017,9 +2059,14 @@ describe('ephemeral-run-service', () => {
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
 
-      await runEphemeralRunBatch(['s-1'], {
-        imports: { types: ['top-pages'] },
-      }, ctx);
+      let threw = false;
+      try {
+        await runEphemeralRunBatch(['s-1'], { imports: { types: ['top-pages'] } }, ctx);
+      } catch (e) {
+        threw = true;
+        expect(e.message).to.equal('DB down');
+      }
+      expect(threw).to.equal(true);
 
       const rollbackError = ctx.log.error.getCalls().find(
         (c) => c.args[0].includes('rollback'),

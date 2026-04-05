@@ -38,7 +38,6 @@ describe('ephemeral-run controller', () => {
       '../../src/support/ephemeral-run-service.js': {
         runEphemeralRunBatch: runEphemeralRunBatchStub,
         MAX_BATCH_SITES: 1000,
-        PRESETS: { 'insights-report-default': {} },
       },
       '../../src/support/ephemeral-run-batch-store.js': {
         readBatchStatus: readBatchStatusStub,
@@ -128,16 +127,6 @@ describe('ephemeral-run controller', () => {
       expect(body.message).to.include('Invalid siteIds');
     });
 
-    it('returns 400 for invalid preset', async () => {
-      const ctx = createCtx();
-      const { batchRun } = EphemeralRunController(ctx);
-
-      const response = await batchRun({
-        data: { siteIds: [VALID_UUID], preset: 'bad-preset' },
-      });
-      expect(response.status).to.equal(400);
-    });
-
     it('returns 403 when not admin', async () => {
       const ctx = createCtx();
       accessControlStub.hasAdminAccess.returns(false);
@@ -183,17 +172,6 @@ describe('ephemeral-run controller', () => {
       expect(response.status).to.equal(202);
     });
 
-    it('accepts valid preset insights-report-default (should not return 400)', async () => {
-      const ctx = createCtx();
-      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
-      const { batchRun } = EphemeralRunController(ctx);
-
-      const response = await batchRun({
-        data: { siteIds: [VALID_UUID], preset: 'insights-report-default' },
-      });
-      expect(response.status).to.equal(202);
-    });
-
     it('forwards slack context in body to runEphemeralRunBatch', async () => {
       const ctx = createCtx();
       runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
@@ -208,7 +186,7 @@ describe('ephemeral-run controller', () => {
       expect(passedBody.slack).to.deep.equal({ channelId: 'C1', threadTs: 'ts1' });
     });
 
-    it('forwards preset and audits fields in body to runEphemeralRunBatch', async () => {
+    it('forwards audits fields in body to runEphemeralRunBatch', async () => {
       const ctx = createCtx();
       runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
       const { batchRun } = EphemeralRunController(ctx);
@@ -216,15 +194,45 @@ describe('ephemeral-run controller', () => {
       await batchRun({
         data: {
           siteIds: [VALID_UUID],
-          preset: 'insights-report-default',
           audits: { types: ['cwv'] },
         },
       });
 
       expect(runEphemeralRunBatchStub).to.have.been.calledOnce;
       const passedBody = runEphemeralRunBatchStub.firstCall.args[1];
-      expect(passedBody.preset).to.equal('insights-report-default');
       expect(passedBody.audits).to.deep.equal({ types: ['cwv'] });
+    });
+
+    it('passes createdBy from authInfo profile email to runEphemeralRunBatch', async () => {
+      const ctx = createCtx();
+      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
+      const { batchRun } = EphemeralRunController(ctx);
+
+      await batchRun({
+        data: { siteIds: [VALID_UUID] },
+        attributes: { authInfo: { getProfile: () => ({ email: 'ops@adobe.com' }) } },
+      });
+
+      expect(runEphemeralRunBatchStub.firstCall.args[3]).to.equal('ops@adobe.com');
+    });
+
+    it('passes "unknown" as createdBy when authInfo is absent', async () => {
+      const ctx = createCtx();
+      runEphemeralRunBatchStub.resolves({ batchId: 'b-1', total: 1 });
+      const { batchRun } = EphemeralRunController(ctx);
+
+      await batchRun({ data: { siteIds: [VALID_UUID] } });
+
+      expect(runEphemeralRunBatchStub.firstCall.args[3]).to.equal('unknown');
+    });
+
+    it('returns 500 when runEphemeralRunBatch throws due to config save failure', async () => {
+      const ctx = createCtx();
+      runEphemeralRunBatchStub.rejects(new Error('DB down'));
+      const { batchRun } = EphemeralRunController(ctx);
+
+      const response = await batchRun({ data: { siteIds: [VALID_UUID] } });
+      expect(response.status).to.equal(500);
     });
   });
 

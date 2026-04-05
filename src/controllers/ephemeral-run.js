@@ -73,8 +73,11 @@ function EphemeralRunController(ctx) {
       return forbidden('Ephemeral run batch requires admin access');
     }
 
+    const authInfo = context.attributes?.authInfo;
+    const createdBy = authInfo?.getProfile()?.email || 'unknown';
+
     try {
-      const result = await runEphemeralRunBatch(siteIds, body, ctx);
+      const result = await runEphemeralRunBatch(siteIds, body, ctx, createdBy);
       return accepted(result);
     } catch (error) {
       log.error('Ephemeral run batch failed', error);

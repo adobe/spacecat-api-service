@@ -121,7 +121,9 @@ function resolvePayload(body) {
     types: body.audits?.types ?? [],
   };
 
-  const rawDelay = body.teardown?.delaySeconds ?? DEFAULT_TEARDOWN_DELAY_SECONDS;
+  const rawDelay = typeof body.teardown?.delaySeconds === 'number'
+    ? body.teardown.delaySeconds
+    : DEFAULT_TEARDOWN_DELAY_SECONDS;
   const teardownDelaySeconds = Math.min(
     Math.max(0, rawDelay),
     MAX_TEARDOWN_DELAY_SECONDS,
@@ -743,7 +745,7 @@ async function enqueueSiteJobs(
 // Batch endpoint (POST handler)
 // ---------------------------------------------------------------------------
 
-export async function runEphemeralRunBatch(siteIds, body, context) {
+export async function runEphemeralRunBatch(siteIds, body, context, createdBy = 'unknown') {
   const {
     dataAccess, s3, env, log,
   } = context;
@@ -776,6 +778,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
   await writeBatchManifest(s3, batchId, {
     batchId,
     createdAt: now.toISOString(),
+    createdBy,
     expiresAt: expiresAt.toISOString(),
     totalSites: effectiveSiteIds.length,
     enqueuedSiteIds: effectiveSiteIds,
@@ -870,7 +873,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
         error: { code: 'CONFIG_SAVE_FAILURE', message: 'Failed to save configuration' },
       }).catch((e) => log.error(`Failed to write config failure for ${siteId}`, e));
     }
-    return { batchId, total: effectiveSiteIds.length };
+    throw error;
   }
 
   // Phase 3: Enqueue jobs for each site directly
