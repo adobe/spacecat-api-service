@@ -32,6 +32,7 @@ import {
   runEphemeralRunBatch,
   PRESETS,
   MAX_BATCH_SITES,
+  AUDIT_HANDLER_FLAGS,
 } from '../../src/support/ephemeral-run-service.js';
 
 use(sinonChai);
@@ -120,7 +121,7 @@ function createMockContext(overrides = {}) {
       Site: { findById: sinon.stub() },
       Configuration: { findLatest: sinon.stub() },
       Organization: { findById: sinon.stub().resolves(createMockOrganization()) },
-      LatestAudit: { allBySiteIdAndAuditType: sinon.stub().resolves([]) },
+      LatestAudit: { findById: sinon.stub().resolves(null) },
       Opportunity: { allBySiteId: sinon.stub().resolves([]) },
       ...(dataAccessOverrides || {}),
     },
@@ -813,7 +814,6 @@ describe('ephemeral-run-service', () => {
       expect(getParentAuditType('broken-internal-links-auto-suggest')).to.equal('broken-internal-links');
       expect(getParentAuditType('meta-tags-auto-suggest')).to.equal('meta-tags');
       expect(getParentAuditType('security-vulnerabilities-auto-suggest')).to.equal('security-vulnerabilities');
-      expect(getParentAuditType('security-csp-auto-suggest')).to.equal('security-csp');
     });
 
     it('maps data-collection audits to security-csp parent (lhs-mobile)', () => {
@@ -832,20 +832,34 @@ describe('ephemeral-run-service', () => {
   });
 
   // -----------------------------------------------------------------------
+  // AUDIT_HANDLER_FLAGS
+  // -----------------------------------------------------------------------
+  describe('AUDIT_HANDLER_FLAGS', () => {
+    it('maps lhs-mobile to security-csp and security-csp-auto-suggest', () => {
+      expect(AUDIT_HANDLER_FLAGS['lhs-mobile']).to.deep.equal(['security-csp', 'security-csp-auto-suggest']);
+    });
+
+    it('returns undefined for audit types with no required handler flags', () => {
+      expect(AUDIT_HANDLER_FLAGS['broken-backlinks']).to.be.undefined;
+      expect(AUDIT_HANDLER_FLAGS.cwv).to.be.undefined;
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // isScrapeRecent
   // -----------------------------------------------------------------------
   describe('isScrapeRecent()', () => {
     const log = { warn: sinon.stub(), info: sinon.stub() };
 
     it('returns false when no scrape audit record exists', async () => {
-      const LatestAudit = { allBySiteIdAndAuditType: sinon.stub().resolves([]) };
+      const LatestAudit = { findById: sinon.stub().resolves(null) };
       expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(false);
     });
 
     it('returns false when the scrape record is older than 30 days', async () => {
       const oldDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
       const LatestAudit = {
-        allBySiteIdAndAuditType: sinon.stub().resolves([{ getAuditedAt: () => oldDate }]),
+        findById: sinon.stub().resolves({ getAuditedAt: () => oldDate }),
       };
       expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(false);
     });
@@ -853,7 +867,7 @@ describe('ephemeral-run-service', () => {
     it('returns true when the scrape record is within 30 days', async () => {
       const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
       const LatestAudit = {
-        allBySiteIdAndAuditType: sinon.stub().resolves([{ getAuditedAt: () => recentDate }]),
+        findById: sinon.stub().resolves({ getAuditedAt: () => recentDate }),
       };
       expect(await isScrapeRecent('s-1', LatestAudit, log)).to.equal(true);
     });
@@ -861,7 +875,7 @@ describe('ephemeral-run-service', () => {
     it('returns false and warns when the query throws', async () => {
       const warnStub = sinon.stub();
       const LatestAudit = {
-        allBySiteIdAndAuditType: sinon.stub().rejects(new Error('DB error')),
+        findById: sinon.stub().rejects(new Error('DB error')),
       };
       const result = await isScrapeRecent('s-1', LatestAudit, { warn: warnStub, info: sinon.stub() });
       expect(result).to.equal(false);
@@ -922,10 +936,10 @@ describe('ephemeral-run-service', () => {
 
     function makeDataAccess({ scrapeAuditedAt = null, opportunities = [] } = {}) {
       const scrapeRecord = scrapeAuditedAt
-        ? [{ getAuditedAt: () => scrapeAuditedAt }]
-        : [];
+        ? { getAuditedAt: () => scrapeAuditedAt }
+        : null;
       return {
-        LatestAudit: { allBySiteIdAndAuditType: sinon.stub().resolves(scrapeRecord) },
+        LatestAudit: { findById: sinon.stub().resolves(scrapeRecord) },
         Opportunity: { allBySiteId: sinon.stub().resolves(opportunities) },
       };
     }
@@ -1123,14 +1137,14 @@ describe('ephemeral-run-service', () => {
       const skip = await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log, true);
       expect(skip.size).to.equal(0);
       // dataAccess should not have been queried
-      expect(da.LatestAudit.allBySiteIdAndAuditType).to.not.have.been.called;
+      expect(da.LatestAudit.findById).to.not.have.been.called;
       expect(da.Opportunity.allBySiteId).to.not.have.been.called;
     });
 
     it('does not query LatestAudit when scrape-top-pages is not in audit types', async () => {
       const da = makeDataAccess();
       await getAuditTypesToSkipForSite('s-1', ['cwv'], da, log);
-      expect(da.LatestAudit.allBySiteIdAndAuditType).to.not.have.been.called;
+      expect(da.LatestAudit.findById).to.not.have.been.called;
     });
 
     it('does not query Opportunity when all audit types have no opportunity mapping', async () => {
@@ -1144,7 +1158,7 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       const da = makeDataAccess({ scrapeAuditedAt: recentDate });
       await getAuditTypesToSkipForSite('s-1', ['scrape-top-pages', 'cwv'], da, log);
-      expect(da.LatestAudit.allBySiteIdAndAuditType).to.have.been.called;
+      expect(da.LatestAudit.findById).to.have.been.called;
       expect(da.Opportunity.allBySiteId).to.have.been.called;
     });
   });
@@ -1160,9 +1174,7 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([
-        { getAuditedAt: () => recentDate },
-      ]);
+      ctx.dataAccess.LatestAudit.findById.resolves({ getAuditedAt: () => recentDate });
 
       await runEphemeralRunBatch(['s-1'], { audits: { types: ['scrape-top-pages', 'cwv'] } }, ctx);
 
@@ -1191,9 +1203,7 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([
-        { getAuditedAt: () => recentDate },
-      ]);
+      ctx.dataAccess.LatestAudit.findById.resolves({ getAuditedAt: () => recentDate });
       ctx.dataAccess.Opportunity.allBySiteId.resolves([
         { getType: () => 'cwv', getUpdatedAt: () => recentDate },
       ]);
@@ -1236,9 +1246,7 @@ describe('ephemeral-run-service', () => {
       const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
       ctx.dataAccess.Site.findById.resolves(site);
       ctx.dataAccess.Configuration.findLatest.resolves(config);
-      ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([
-        { getAuditedAt: () => recentDate },
-      ]);
+      ctx.dataAccess.LatestAudit.findById.resolves({ getAuditedAt: () => recentDate });
       ctx.dataAccess.Opportunity.allBySiteId.resolves([
         { getType: () => 'cwv', getUpdatedAt: () => recentDate },
       ]);
@@ -1296,7 +1304,7 @@ describe('ephemeral-run-service', () => {
       );
 
       // freshness DB call should not have been made
-      expect(ctx.dataAccess.LatestAudit.allBySiteIdAndAuditType).to.not.have.been.called;
+      expect(ctx.dataAccess.LatestAudit.findById).to.not.have.been.called;
       expect(ctx.dataAccess.Opportunity.allBySiteId).to.not.have.been.called;
       const sqsCalls = ctx.sqs.sendMessage.getCalls().map((c) => c.args[1]?.type);
       expect(sqsCalls).to.include('cwv');
@@ -1747,6 +1755,35 @@ describe('ephemeral-run-service', () => {
       expect(ctx.log.error).to.have.been.calledWithMatch(/failed to schedule teardown/);
     });
 
+    it('enables security-csp and security-csp-auto-suggest handler flags when lhs-mobile is in audit types', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
+
+      expect(config.isHandlerEnabledForSite('security-csp', site)).to.equal(true);
+      expect(config.isHandlerEnabledForSite('security-csp-auto-suggest', site)).to.equal(true);
+    });
+
+    it('does not send security-csp-auto-suggest as an SQS audit message', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      await runEphemeralRunBatch(['s-1'], { audits: { types: ['lhs-mobile'] } }, ctx);
+
+      const sqsAuditTypes = ctx.sqs.sendMessage.getCalls()
+        .filter((c) => c.args[0] === ctx.env.AUDIT_JOBS_QUEUE_URL)
+        .map((c) => c.args[1]?.type);
+      expect(sqsAuditTypes).to.not.include('security-csp-auto-suggest');
+      expect(sqsAuditTypes).to.include('lhs-mobile');
+    });
+
     it('teardown sites list includes only newly-enabled sites — already-enabled sites excluded', async () => {
       const ctx = createMockContext();
       // site1 has top-pages already enabled → deltaEnableImports returns importsEnabled=[]
@@ -1781,6 +1818,10 @@ describe('ephemeral-run-service', () => {
       expect(PRESETS['insights-report-default'].imports.optionsByImportType).to.be.an('object');
       expect(PRESETS['insights-report-default'].imports.optionsByImportType['traffic-analysis'].backfillWeeks).to.equal(5);
       expect(PRESETS['insights-report-default'].audits.types).to.be.an('array').that.is.not.empty;
+    });
+
+    it('does not include security-csp-auto-suggest in PRESET audit types — it is a handler flag, not a standalone SQS audit', () => {
+      expect(PRESETS['insights-report-default'].audits.types).to.not.include('security-csp-auto-suggest');
     });
 
     it('exports MAX_BATCH_SITES', () => {

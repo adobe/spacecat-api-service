@@ -82,7 +82,6 @@ const PRESETS = {
         'security-vulnerabilities-auto-suggest',
         'security-permissions',
         'security-permissions-redundant',
-        'security-csp-auto-suggest',
         'lhs-mobile',
       ],
     },
@@ -212,11 +211,19 @@ function isImportEnabled(importType, imports) {
 }
 
 /**
+ * Maps audit types to configuration handler flags that must be enabled for the audit
+ * to function fully. These are feature flags checked at runtime inside the audit handler
+ * — not standalone SQS audit types and not enqueued as separate messages.
+ */
+const AUDIT_HANDLER_FLAGS = {
+  'lhs-mobile': ['security-csp', 'security-csp-auto-suggest'],
+};
+
+/**
  * Maps audit types to the parent audit type used for opportunity-freshness lookups.
  * Covers -auto-suggest/-auto-suggest-mystique variants and data-collection audits
  * that share freshness with a parent audit's opportunities.
- * lhs-mobile and security-csp-auto-suggest are only enabled/run when security-csp
- * opportunities are not fresh.
+ * lhs-mobile is only run when security-csp opportunities are not fresh.
  */
 const AUDIT_PARENT_MAP = {
   // -auto-suggest variants
@@ -225,7 +232,6 @@ const AUDIT_PARENT_MAP = {
   'meta-tags-auto-suggest': 'meta-tags',
   'alt-text-auto-suggest-mystique': 'alt-text',
   'security-vulnerabilities-auto-suggest': 'security-vulnerabilities',
-  'security-csp-auto-suggest': 'security-csp',
   // data-collection audits gated on security-csp opportunity freshness
   'lhs-mobile': 'security-csp',
 };
@@ -268,9 +274,9 @@ async function isScrapeRecent(
   scrapeFreshnessDays = SCRAPE_FRESHNESS_DAYS,
 ) {
   try {
-    const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, SCRAPE_AUDIT_TYPE);
-    if (!audits || audits.length === 0) return false;
-    const auditedAt = new Date(audits[0].getAuditedAt()).getTime();
+    const audit = await LatestAudit.findById(siteId, SCRAPE_AUDIT_TYPE);
+    if (!audit) return false;
+    const auditedAt = new Date(audit.getAuditedAt()).getTime();
     const ageInDays = (Date.now() - auditedAt) / (1000 * 60 * 60 * 24);
     return ageInDays < scrapeFreshnessDays;
   } catch (err) {
@@ -744,6 +750,15 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
 
         const { auditsEnabled } = deltaEnableAudits(configuration, site, auditTypes);
 
+        for (const auditType of auditTypes) {
+          for (const flag of (AUDIT_HANDLER_FLAGS[auditType] || [])) {
+            if (!configuration.isHandlerEnabledForSite(flag, site)) {
+              configuration.enableHandlerForSite(flag, site);
+              log.info(`Site ${siteId}: enabling handler flag '${flag}' required by '${auditType}'`);
+            }
+          }
+        }
+
         perSiteSetup[siteId] = {
           importsEnabled,
           auditsEnabled,
@@ -893,4 +908,5 @@ export {
   getAuditTypesToSkipForSite,
   PRESETS,
   MAX_BATCH_SITES,
+  AUDIT_HANDLER_FLAGS,
 };
