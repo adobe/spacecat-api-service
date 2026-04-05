@@ -86,6 +86,7 @@ describe('LlmoController', () => {
   let postSlackMessageStub;
   let getServicePrincipalTokenStub;
   let isUserInImsGroupStub;
+  let getOrgGroupsStub;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -198,8 +199,8 @@ describe('LlmoController', () => {
         fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
-        ImsClient: {
-          createServiceClient: () => ({
+        ImsServiceClient: {
+          createFrom: () => ({
             getServicePrincipalToken: (...args) => getServicePrincipalTokenStub(...args),
           }),
         },
@@ -477,6 +478,7 @@ describe('LlmoController', () => {
     mockEnv = {
       LLMO_HLX_API_KEY: TEST_API_KEY,
       AUDIT_JOBS_QUEUE_URL: TEST_QUEUE_URL,
+      IMPORT_WORKER_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789/spacecat-import-jobs',
       SLACK_LLMO_ALERTS_CHANNEL_ID: 'C123456789',
       SLACK_BOT_TOKEN: 'xoxb-test-token',
       SLACK_LLMO_EDGE_OPTIMIZE_TEAM: 'U123456789,U234567890,U345678901,U456789012,U567890123,U678901234,U789012345,U890123456,U901234567',
@@ -516,11 +518,15 @@ describe('LlmoController', () => {
         },
       },
       pathInfo: { method: 'GET', suffix: '/llmo/sheet-data', headers: {} },
-      imsClient: { isUserInImsGroup: (...args) => isUserInImsGroupStub(...args) },
+      imsClient: {
+        isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+        getOrgGroups: (...args) => getOrgGroupsStub(...args),
+      },
     };
 
     getServicePrincipalTokenStub = sinon.stub().resolves({ access_token: 'sp-access-token' });
     isUserInImsGroupStub = sinon.stub().resolves(false);
+    getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
     tracingFetchStub = sinon.stub();
     fetchWithTimeoutStub = sinon.stub();
     readConfigStub = sinon.stub();
@@ -4689,7 +4695,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
+      expect(responseBody.message).to.include('LLMO Admin group members');
     });
 
     // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
@@ -4987,42 +4993,15 @@ describe('LlmoController', () => {
 
     // ── Trial admin authorization ───────────────────────────────────────────────
 
-    it('returns 403 when user is not LLMO admin and LLMO_ADMIN_IMS_GROUP_ID is not configured', async () => {
-      // controlled via the noAdmin controller (isLLMOAdministrator → false)
-      // edgeConfigContext.env has no LLMO_ADMIN_IMS_GROUP_ID
-      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
-        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
-        '@adobe/spacecat-shared-tokowaka-client': {
-          default: { createFrom: () => mockTokowakaClient },
-          calculateForwardedHost: (url) => new URL(url).hostname,
-        },
-        '../../../src/controllers/llmo/llmo-onboarding.js': {
-          validateSiteNotOnboarded: sinon.stub().resolves({}),
-          generateDataFolder: sinon.stub().returns('test-folder'),
-          performLlmoOnboarding: sinon.stub().resolves({}),
-          performLlmoOffboarding: sinon.stub().resolves({}),
-          postLlmoAlert: sinon.stub().resolves(),
-        },
-        '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
-        '@adobe/spacecat-shared-ims-client': {
-          ImsClient: {
-            createServiceClient: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
-          },
-        },
-      });
-      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(edgeConfigContext);
-      expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.equal('Only LLMO administrators can update the edge optimize config');
-    });
-
-    it('returns 403 when user is not LLMO admin and IMS group check returns false', async () => {
-      isUserInImsGroupStub.resolves(false);
+    it('returns 403 when user is not LLMO admin and LLMO Admin IMS group is not found in org', async () => {
+      // getOrgGroups returns groups but none named 'LLMO Admin'
+      getOrgGroupsStub.resolves([{ groupName: 'Administrators', ident: 11111 }]);
       const ctx = {
         ...edgeConfigContext,
-        env: { ...edgeConfigContext.env, LLMO_ADMIN_IMS_GROUP_ID: 'llmo-admin-group-id' },
-        imsClient: { isUserInImsGroup: (...args) => isUserInImsGroupStub(...args) },
+        imsClient: {
+          isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+          getOrgGroups: (...args) => getOrgGroupsStub(...args),
+        },
       };
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
@@ -5040,8 +5019,44 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '@adobe/spacecat-shared-ims-client': {
-          ImsClient: {
-            createServiceClient: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
+          ImsServiceClient: {
+            createFrom: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
+          },
+        },
+      });
+      const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
+      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.include('LLMO Admin group members');
+    });
+
+    it('returns 403 when user is not LLMO admin and IMS group check returns false', async () => {
+      isUserInImsGroupStub.resolves(false);
+      const ctx = {
+        ...edgeConfigContext,
+        imsClient: {
+          isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+          getOrgGroups: (...args) => getOrgGroupsStub(...args),
+        },
+      };
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: { createFrom: () => mockTokowakaClient },
+          calculateForwardedHost: (url) => new URL(url).hostname,
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({}),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: sinon.stub().resolves(),
+        },
+        '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
+        '@adobe/spacecat-shared-ims-client': {
+          ImsServiceClient: {
+            createFrom: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
           },
         },
       });
@@ -5052,11 +5067,13 @@ describe('LlmoController', () => {
     });
 
     it('returns 403 when IMS group check throws (trial admin path)', async () => {
-      isUserInImsGroupStub.rejects(new Error('IMS API error'));
+      getOrgGroupsStub.rejects(new Error('IMS API error'));
       const ctx = {
         ...edgeConfigContext,
-        env: { ...edgeConfigContext.env, LLMO_ADMIN_IMS_GROUP_ID: 'llmo-admin-group-id' },
-        imsClient: { isUserInImsGroup: (...args) => isUserInImsGroupStub(...args) },
+        imsClient: {
+          isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+          getOrgGroups: (...args) => getOrgGroupsStub(...args),
+        },
       };
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
@@ -5074,8 +5091,8 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '@adobe/spacecat-shared-ims-client': {
-          ImsClient: {
-            createServiceClient: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
+          ImsServiceClient: {
+            createFrom: () => ({ getServicePrincipalToken: getServicePrincipalTokenStub }),
           },
         },
       });
@@ -5227,14 +5244,18 @@ describe('LlmoController', () => {
         expect(result.status).to.equal(200);
         const body = await result.json();
         expect(body).to.include.keys('domain', 'cdnType');
-        expect(body.enabled).to.equal(true);
+        expect(body).to.not.have.key('enabled');
         expect(body.cdnType).to.equal(LOG_SOURCES.AEM_CS_FASTLY);
-        expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
-          sinon.match({ enabled: true }),
+        expect(mockConfig.updateEdgeOptimizeConfig).to.not.have.been.called;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockEnv.IMPORT_WORKER_QUEUE_URL,
+          { type: 'optimize-at-edge-enabled-marking' },
+          undefined,
+          { delaySeconds: 300 },
         );
       });
 
-      it('returns 200 and sets enabled:false when routing with enabled=false', async () => {
+      it('returns 200 with routing data when CDN routing disabled (enabled=false)', async () => {
         tracingFetchStub.onFirstCall().resolves({ ok: true });
         tracingFetchStub.onSecondCall().resolves({ ok: true });
         const routingData = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: false };
@@ -5243,9 +5264,13 @@ describe('LlmoController', () => {
         );
         expect(result.status).to.equal(200);
         const body = await result.json();
-        expect(body.enabled).to.equal(false);
-        expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
-          sinon.match({ enabled: false }),
+        expect(body).to.not.have.key('enabled');
+        expect(mockConfig.updateEdgeOptimizeConfig).to.not.have.been.called;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockEnv.IMPORT_WORKER_QUEUE_URL,
+          { type: 'optimize-at-edge-enabled-marking' },
+          undefined,
+          { delaySeconds: 300 },
         );
       });
 

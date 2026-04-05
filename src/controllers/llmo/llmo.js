@@ -31,7 +31,7 @@ import crypto from 'crypto';
 import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
-import { ImsClient } from '@adobe/spacecat-shared-ims-client';
+import { ImsServiceClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -44,6 +44,9 @@ import {
   LLMO_SHEETDATA_SOURCE_URL,
   EDGE_OPTIMIZE_CDN_STRATEGIES,
   EDGE_OPTIMIZE_CDN_TYPES,
+  LLMO_ADMIN_GROUP_NAME,
+  OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
+  EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -1184,21 +1187,23 @@ function LlmoController(ctx) {
       // Authorization: LLMO Administrator (paid) OR member of LLMO Admin IMS group (trial)
       const isPaidAdmin = accessControlUtil.isLLMOAdministrator();
       if (!isPaidAdmin) {
-        const llmoAdminGroupId = env.LLMO_ADMIN_IMS_GROUP_ID;
-        if (!hasText(llmoAdminGroupId)) {
-          return forbidden('Only LLMO administrators can update the edge optimize config');
-        }
         const org = await site.getOrganization();
         const imsOrgId = org.getImsOrgId();
         const userEmail = profile?.email;
         let isTrialAdmin = false;
         if (hasText(userEmail) && hasText(imsOrgId)) {
           try {
-            isTrialAdmin = await context.imsClient.isUserInImsGroup(
-              imsOrgId,
-              llmoAdminGroupId,
-              userEmail,
+            const groups = await context.imsClient.getOrgGroups(imsOrgId);
+            const llmoAdminGroup = groups.find(
+              (g) => g.groupName === LLMO_ADMIN_GROUP_NAME,
             );
+            if (llmoAdminGroup) {
+              isTrialAdmin = await context.imsClient.isUserInImsGroup(
+                imsOrgId,
+                String(llmoAdminGroup.ident),
+                userEmail,
+              );
+            }
           } catch (groupCheckError) {
             log.warn(`[edge-optimize-config] IMS group check failed for site ${siteId}: ${groupCheckError.message}`);
           }
@@ -1359,7 +1364,7 @@ function LlmoController(ctx) {
         let spToken;
         try {
           log.debug(`[edge-optimize-config] Obtaining SP token for site ${siteId}, org ${imsOrgId}`);
-          const edgeImsClient = ImsClient.createServiceClient(context);
+          const edgeImsClient = ImsServiceClient.createFrom(context);
           const tokenData = await edgeImsClient.getServicePrincipalToken(imsOrgId);
           spToken = tokenData.access_token;
           log.info(`[edge-optimize-config] SP token obtained for site ${siteId}`);
@@ -1392,16 +1397,22 @@ function LlmoController(ctx) {
             return createResponse({ message: `Upstream call failed with status ${cdnResponse.status}` }, 500);
           }
 
-          // Persist the routing enabled state
-          currentConfig.updateEdgeOptimizeConfig({
-            ...currentConfig.getEdgeOptimizeConfig(),
-            enabled: routingEnabled,
-          });
-          await saveSiteConfig(site, currentConfig, log, 'updating edge optimize routing state');
           log.info(`[edge-optimize-config] CDN routing updated for site ${siteId}, domain ${domain}`);
+          // Trigger the import worker job to detect when edge-optimize goes live and stamp
+          // edgeOptimizeConfig.enabled. Delayed by 5 minutes to allow CDN propagation.
+          try {
+            await context.sqs.sendMessage(
+              env.IMPORT_WORKER_QUEUE_URL,
+              { type: OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE },
+              undefined,
+              { delaySeconds: EDGE_OPTIMIZE_MARKING_DELAY_SECONDS },
+            );
+            log.info(`[edge-optimize-config] Queued edge-optimize enabled marking for site ${siteId} (delay: ${EDGE_OPTIMIZE_MARKING_DELAY_SECONDS}s)`);
+          } catch (sqsError) {
+            log.warn(`[edge-optimize-config] Failed to queue edge-optimize enabled marking for site ${siteId}: ${sqsError.message}`);
+          }
           return ok({
             ...metaconfig,
-            enabled: routingEnabled,
             domain,
             cdnType: cdnTypeNormalized,
           });

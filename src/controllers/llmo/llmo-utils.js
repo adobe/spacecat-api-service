@@ -41,6 +41,17 @@ export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
 
 export const EDGE_OPTIMIZE_CDN_TYPES = Object.keys(EDGE_OPTIMIZE_CDN_STRATEGIES);
 
+export const LLMO_ADMIN_GROUP_NAME = 'LLMO Admin';
+
+// Import worker job type for edge optimize enabled detection.
+// The import worker handler iterates all opted-in sites and stamps edgeOptimizeConfig.enabled
+// when Tokowaka confirms the site is serving edge-optimized content.
+export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-marking';
+
+// Delay (seconds) before triggering the edge-optimize enabled marking job after CDN routing update.
+// Gives the CDN API time to propagate before Tokowaka detects the change.
+export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
+
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
   const data = { ...rawData };
