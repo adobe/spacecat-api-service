@@ -132,6 +132,7 @@ function resolvePayload(body) {
     Array.isArray(body.forceRunSiteIds) ? body.forceRunSiteIds : [],
   );
   const scheduledRun = body.scheduledRun === true;
+  const onDemand = body.onDemand === true;
 
   const scrapeFreshnessDays = typeof body.freshness?.scrapeDays === 'number'
     ? body.freshness.scrapeDays
@@ -150,6 +151,7 @@ function resolvePayload(body) {
     forceRun,
     forceRunSiteIds,
     scheduledRun,
+    onDemand,
     scrapeFreshnessDays,
     auditFreshnessDays,
     importFreshnessDays,
@@ -600,6 +602,7 @@ async function enqueueSiteJobs(
   configuration,
   context,
   slackContext = { channelId: '', threadTs: '' },
+  onDemand = false,
 ) {
   const { log, env } = context;
   const { imports, audits } = resolvedPayload;
@@ -705,7 +708,7 @@ async function enqueueSiteJobs(
   const nonScrapeTypes = audits.types.filter((t) => t !== SCRAPE_AUDIT_TYPE);
   const auditQueueUrl = env.AUDIT_JOBS_QUEUE_URL;
   const auditContext = {
-    onDemand: true,
+    onDemand,
     slackContext: {
       channelId: slackContext.channelId ?? '',
       threadTs: slackContext.threadTs ?? '',
@@ -758,6 +761,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
     forceRun,
     forceRunSiteIds,
     scheduledRun,
+    onDemand,
     scrapeFreshnessDays,
     auditFreshnessDays,
     importFreshnessDays,
@@ -952,6 +956,7 @@ export async function runEphemeralRunBatch(siteIds, body, context) {
         configuration,
         context,
         workflowSlackContext,
+        onDemand,
       );
       result = {
         siteId,

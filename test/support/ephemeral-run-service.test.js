@@ -221,6 +221,21 @@ describe('ephemeral-run-service', () => {
       expect(result.imports.trafficAnalysisWeeks).to.equal(0);
     });
 
+    it('sets onDemand=false by default', () => {
+      const result = resolvePayload({});
+      expect(result.onDemand).to.equal(false);
+    });
+
+    it('sets onDemand=true when body.onDemand is true', () => {
+      const result = resolvePayload({ onDemand: true });
+      expect(result.onDemand).to.equal(true);
+    });
+
+    it('ignores non-boolean truthy values for onDemand', () => {
+      const result = resolvePayload({ onDemand: 'yes' });
+      expect(result.onDemand).to.equal(false);
+    });
+
     it('sets forceRun=false by default', () => {
       const result = resolvePayload({});
       expect(result.forceRun).to.equal(false);
@@ -415,7 +430,7 @@ describe('ephemeral-run-service', () => {
       const auditCall = ctx.sqs.sendMessage.getCalls().find((c) => c.args[0] === 'audit-queue-url');
       expect(auditCall).to.exist;
       expect(auditCall.args[1].auditContext).to.deep.equal({
-        onDemand: true,
+        onDemand: false,
         slackContext: { channelId: '', threadTs: '' },
       });
     });
@@ -529,12 +544,26 @@ describe('ephemeral-run-service', () => {
       });
     });
 
-    it('sets onDemand: true in auditContext for enqueued audit types', async () => {
+    it('defaults onDemand: false in auditContext when not passed', async () => {
       const ctx = createMockContext();
       const config = createMockConfiguration();
       const resolved = resolvePayload({ audits: { types: ['cwv', 'meta-tags'] } });
 
       await enqueueSiteJobs('s-1', resolved, config, ctx);
+
+      const auditCalls = ctx.sqs.sendMessage.getCalls().filter((c) => c.args[0] === 'audit-queue-url');
+      expect(auditCalls.length).to.be.greaterThan(0);
+      auditCalls.forEach((call) => {
+        expect(call.args[1].auditContext.onDemand).to.equal(false);
+      });
+    });
+
+    it('sets onDemand: true in auditContext when explicitly passed', async () => {
+      const ctx = createMockContext();
+      const config = createMockConfiguration();
+      const resolved = resolvePayload({ audits: { types: ['cwv', 'meta-tags'] } });
+
+      await enqueueSiteJobs('s-1', resolved, config, ctx, {}, true);
 
       const auditCalls = ctx.sqs.sendMessage.getCalls().filter((c) => c.args[0] === 'audit-queue-url');
       expect(auditCalls.length).to.be.greaterThan(0);
