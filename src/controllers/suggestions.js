@@ -50,7 +50,7 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 const GEO_EXPERIMENT_SCHEDULE = Object.freeze({
   PRE_CRON_EXPRESSION: '0 * * * *', // hourly (fires immediately via triggerImmediately: true)
   // 5 minutes — only needs to live long enough for the immediate trigger
-  PRE_EXPIRY_MS: 5 * 60 * 1000,
+  PRE_EXPIRY_MS: 14 * 60 * 60 * 1000, // 14 hours
   PLATFORMS: ['chatgpt_free', 'perplexity'],
   PROVIDER_IDS: ['brightdata', 'openai_web_search'],
 });
