@@ -443,7 +443,7 @@ function LlmoController(ctx) {
         return badRequest('LLMO config storage is not configured for this environment');
       }
 
-      log.info(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
+      log.debug(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
       const { config, exists, version: configVersion } = await readConfig(siteId, s3.s3Client, {
         s3Bucket: s3.s3Bucket,
         version,
