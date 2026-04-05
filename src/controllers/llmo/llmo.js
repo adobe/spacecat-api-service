@@ -187,7 +187,7 @@ function LlmoController(ctx) {
       });
 
       if (!response.ok) {
-        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -199,7 +199,7 @@ function LlmoController(ctx) {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -285,7 +285,7 @@ function LlmoController(ctx) {
       });
 
       if (!response.ok) {
-        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -368,7 +368,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       const errorTime = Date.now();
-      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
       return badRequest(error.message);
     }
   };
@@ -411,7 +411,7 @@ function LlmoController(ctx) {
       });
 
       if (!response.ok) {
-        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -1040,7 +1040,7 @@ function LlmoController(ctx) {
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
-      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      log.debug(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
       return badRequest(error.message);
     }
   };
