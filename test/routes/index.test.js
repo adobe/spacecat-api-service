@@ -408,7 +408,6 @@ describe('getRouteHandlers', () => {
   };
 
   const mockEphemeralRunController = {
-    run: () => null,
     batchRun: () => null,
     batchStatus: () => null,
   };
@@ -835,7 +834,6 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/contact-sales-leads',
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
-      'POST /sites/:siteId/insights/run',
       'GET /ephemeral-run/batch/:batchId/status',
     );
 

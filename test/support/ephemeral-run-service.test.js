@@ -2089,12 +2089,13 @@ describe('ephemeral-run-service', () => {
       const body = JSON.parse(putCall.args[0].input.Body);
       expect(body.status).to.equal('failed');
       expect(body.error.code).to.equal('SETUP_FAILURE');
-      expect(body.error.details).to.equal('DB error');
+      expect(body.error.message).to.equal('Failed to enable site');
+      expect(body.error).not.to.have.property('details');
     });
 
-    it('writes SETUP_FAILURE details when thrown value is not an Error', async () => {
+    it('does not expose raw error details in SETUP_FAILURE result', async () => {
       const ctx = createMockContext();
-      ctx.dataAccess.Site.findById.rejects('lookup failed');
+      ctx.dataAccess.Site.findById.rejects(new Error('internal DB secret'));
       ctx.dataAccess.Configuration.findLatest.resolves(createMockConfiguration());
 
       await runEphemeralRunBatch(['s-1'], {}, ctx);
@@ -2103,7 +2104,7 @@ describe('ephemeral-run-service', () => {
         (c) => c.args[0].input?.Key?.includes('results/s-1.json'),
       );
       const body = JSON.parse(putCall.args[0].input.Body);
-      expect(body.error.details).to.equal('lookup failed');
+      expect(body.error).not.to.have.property('details');
     });
 
     it('handles enqueue failure gracefully and writes failed result', async () => {

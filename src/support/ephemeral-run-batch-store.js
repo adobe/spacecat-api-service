@@ -12,7 +12,6 @@
 
 const BATCH_PREFIX = 'ephemeral-runs';
 const BATCH_TTL_DAYS = 7;
-const S3_GET_CONCURRENCY = 50;
 const TERMINAL_STATUSES = ['failed', 'not_found', 'enqueue_failed'];
 
 function batchKey(batchId) {
@@ -81,31 +80,25 @@ async function listAllKeys(s3, prefix) {
 }
 
 /**
- * Fetch S3 objects in parallel with controlled concurrency.
+ * Fetch all S3 site-result objects in parallel.
  * Gracefully handles individual read failures — returns null for failed reads.
  */
 async function fetchResults(s3, keys) {
   const results = new Map();
-
-  for (let i = 0; i < keys.length; i += S3_GET_CONCURRENCY) {
-    const chunk = keys.slice(i, i + S3_GET_CONCURRENCY);
-    // eslint-disable-next-line no-await-in-loop
-    const chunkResults = await Promise.all(
-      chunk.map(async (key) => {
-        try {
-          return await getObject(s3, key);
-        } catch {
-          return null;
-        }
-      }),
-    );
-    for (const result of chunkResults) {
-      if (result?.siteId) {
-        results.set(result.siteId, result);
+  const fetched = await Promise.all(
+    keys.map(async (key) => {
+      try {
+        return await getObject(s3, key);
+      } catch {
+        return null;
       }
+    }),
+  );
+  for (const result of fetched) {
+    if (result?.siteId) {
+      results.set(result.siteId, result);
     }
   }
-
   return results;
 }
 

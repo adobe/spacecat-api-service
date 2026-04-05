@@ -37,6 +37,9 @@ const SCRAPE_FRESHNESS_DAYS = 30;
 const AUDIT_FRESHNESS_DAYS = 7;
 const IMPORT_FRESHNESS_DAYS = 7;
 
+/** Max concurrent site-enable DB calls in Phase 1 (avoids overwhelming the DB). */
+const PHASE1_CONCURRENCY = 10;
+
 /**
  * Maps import type → S3 metrics config { source, metric }.
  * top-pages freshness is checked via SiteTopPage.importedAt instead of S3.
@@ -800,60 +803,56 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
     },
   });
 
-  // Phase 1: Sequential delta-enable for all sites
+  // Phase 1: Parallel delta-enable in chunks to avoid DB overload
+  // configuration.enableHandlerForSite() is synchronous — safe to call concurrently in JS.
   const perSiteSetup = {};
-  for (const siteId of effectiveSiteIds) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const site = await Site.findById(siteId);
-      if (!site) {
-        // eslint-disable-next-line no-await-in-loop
-        await writeSiteResult(s3, batchId, siteId, {
-          siteId, batchId, status: 'not_found', completedAt: new Date().toISOString(),
-        });
-      } else {
-        const { importsEnabled } = deltaEnableImports(site, imports.types);
-        if (importsEnabled.length > 0) {
-          site.setConfig(Config.toDynamoItem(site.getConfig()));
-          // eslint-disable-next-line no-await-in-loop
-          await site.save();
-        }
+  for (let i = 0; i < effectiveSiteIds.length; i += PHASE1_CONCURRENCY) {
+    const chunk = effectiveSiteIds.slice(i, i + PHASE1_CONCURRENCY);
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.allSettled(chunk.map(async (siteId) => {
+      try {
+        const site = await Site.findById(siteId);
+        if (!site) {
+          await writeSiteResult(s3, batchId, siteId, {
+            siteId, batchId, status: 'not_found', completedAt: new Date().toISOString(),
+          });
+        } else {
+          const { importsEnabled } = deltaEnableImports(site, imports.types);
+          if (importsEnabled.length > 0) {
+            site.setConfig(Config.toDynamoItem(site.getConfig()));
+            await site.save();
+          }
 
-        const { auditsEnabled } = deltaEnableAudits(configuration, site, auditTypes);
+          const { auditsEnabled } = deltaEnableAudits(configuration, site, auditTypes);
 
-        for (const auditType of auditTypes) {
-          for (const flag of (AUDIT_HANDLER_FLAGS[auditType] || [])) {
-            if (!configuration.isHandlerEnabledForSite(flag, site)) {
-              configuration.enableHandlerForSite(flag, site);
-              auditsEnabled.push(flag);
-              log.info(`Site ${siteId}: enabling handler flag '${flag}' required by '${auditType}'`);
+          for (const auditType of auditTypes) {
+            for (const flag of (AUDIT_HANDLER_FLAGS[auditType] || [])) {
+              if (!configuration.isHandlerEnabledForSite(flag, site)) {
+                configuration.enableHandlerForSite(flag, site);
+                auditsEnabled.push(flag);
+                log.info(`Site ${siteId}: enabling handler flag '${flag}' required by '${auditType}'`);
+              }
             }
           }
-        }
 
-        perSiteSetup[siteId] = {
-          importsEnabled,
-          auditsEnabled,
-          baseURL: site.getBaseURL(),
-          organizationId: site.getOrganizationId(),
-        };
+          perSiteSetup[siteId] = {
+            importsEnabled,
+            auditsEnabled,
+            baseURL: site.getBaseURL(),
+            organizationId: site.getOrganizationId(),
+          };
+        }
+      } catch (error) {
+        log.error(`Setup: failed to enable for site ${siteId}`, error);
+        await writeSiteResult(s3, batchId, siteId, {
+          siteId,
+          batchId,
+          status: 'failed',
+          completedAt: new Date().toISOString(),
+          error: { code: 'SETUP_FAILURE', message: 'Failed to enable site' },
+        }).catch((e) => log.error(`Failed to write setup failure for ${siteId}`, e));
       }
-    } catch (error) {
-      log.error(`Setup: failed to enable for site ${siteId}`, error);
-      const detail = error?.message || String(error);
-      // eslint-disable-next-line no-await-in-loop
-      await writeSiteResult(s3, batchId, siteId, {
-        siteId,
-        batchId,
-        status: 'failed',
-        completedAt: new Date().toISOString(),
-        error: {
-          code: 'SETUP_FAILURE',
-          message: 'Failed to enable site',
-          details: detail.slice(0, 2000),
-        },
-      }).catch((e) => log.error(`Failed to write setup failure for ${siteId}`, e));
-    }
+    }));
   }
 
   // Phase 2: Persist global configuration (one save for all audit changes)
