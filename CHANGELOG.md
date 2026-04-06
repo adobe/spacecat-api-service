@@ -1,3 +1,10 @@
+# [1.416.0](https://github.com/adobe/spacecat-api-service/compare/v1.415.3...v1.416.0) (2026-04-06)
+
+
+### Features
+
+* revoke isLLMOAdministrator for delegated access ([#2064](https://github.com/adobe/spacecat-api-service/issues/2064)) ([9f404cf](https://github.com/adobe/spacecat-api-service/commit/9f404cf409771358224b990135e74ca70907f491))
+
 ## [1.415.3](https://github.com/adobe/spacecat-api-service/compare/v1.415.2...v1.415.3) (2026-04-06)
 
 
