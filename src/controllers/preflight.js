@@ -322,6 +322,21 @@ function PreflightController(ctx, log, env) {
     const step = data.step.toLowerCase();
     const { url } = data;
 
+    const isDev = env.AWS_ENV === 'dev';
+
+    if (hasText(data.mystiqueUrl)) {
+      if (!isDev) {
+        return badRequest('mystiqueUrl override is only allowed in dev');
+      }
+      if (!isValidUrl(data.mystiqueUrl)) {
+        return badRequest('Invalid request: mystiqueUrl must be a valid URL');
+      }
+    }
+
+    const mysticatBaseUrl = (isDev && hasText(data.mystiqueUrl))
+      ? data.mystiqueUrl
+      : env.MYSTIQUE_API_BASE_URL;
+
     try {
       const previewBaseURL = `${new URL(url).protocol}//${new URL(url).hostname}`;
       let site;
@@ -354,8 +369,6 @@ function PreflightController(ctx, log, env) {
         }
       }
 
-      const isDev = env.AWS_ENV === 'dev';
-
       const job = await dataAccess.AsyncJob.create({
         status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
@@ -367,7 +380,7 @@ function PreflightController(ctx, log, env) {
 
       try {
         await callMysticatAnalyze(
-          env.MYSTIQUE_API_BASE_URL,
+          mysticatBaseUrl,
           job.getId(),
           site.getId(),
           url,

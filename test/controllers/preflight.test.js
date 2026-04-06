@@ -959,6 +959,76 @@ describe('Preflight Controller', () => {
       );
     });
 
+    it('uses mystiqueUrl override in dev environment', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'https://my-ephemeral-env.stage.cloud.adobe.io',
+        },
+      });
+      expect(response.status).to.equal(202);
+
+      const [calledUrl] = fetchStub.firstCall.args;
+      expect(calledUrl).to.equal('https://my-ephemeral-env.stage.cloud.adobe.io/v1/preflight/analyze');
+    });
+
+    it('returns 400 when mystiqueUrl override is used in prod', async () => {
+      const prodCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await prodCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'https://evil.example.com',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('mystiqueUrl override is only allowed in dev');
+    });
+
+    it('returns 400 when mystiqueUrl is not a valid URL', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'not-a-url',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid URL');
+    });
+
     it('sets job to FAILED and saves when Mysticat returns non-ok status', async () => {
       fetchStub.resolves({
         ok: false,
