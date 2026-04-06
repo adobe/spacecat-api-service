@@ -935,18 +935,20 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
         ...[...auditTypesToSkip].map((type) => ({
           type,
           kind: 'audit',
-          reason: type === SCRAPE_AUDIT_TYPE ? 'scrape-fresh' : 'audit-fresh',
+          reason: type === SCRAPE_AUDIT_TYPE
+            ? 'recent scrape exists'
+            : 'recent audit exists',
         })),
         ...[...importTypesToSkip].map((type) => ({
           type,
           kind: 'import',
-          reason: 'import-fresh',
+          reason: 'recent import exists',
         })),
       ];
       // traffic-analysis is per-week: skipped only when every requested week is already present
       if (isTrafficAnalysisBackfillMode && trafficAnalysisWeekYearPairs?.length === 0) {
         // eslint-disable-next-line max-len
-        freshnessSkipped.push({ type: TRAFFIC_ANALYSIS_IMPORT_TYPE, kind: 'import', reason: 'import-fresh' });
+        freshnessSkipped.push({ type: TRAFFIC_ANALYSIS_IMPORT_TYPE, kind: 'import', reason: 'recent import exists' });
       }
       // eslint-disable-next-line no-await-in-loop
       const jobResult = await enqueueSiteJobs(
@@ -960,12 +962,14 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
         workflowSlackContext,
         onDemand,
       );
+      const hasEnqueued = jobResult.enqueued?.audits?.length > 0
+        || jobResult.enqueued?.imports?.length > 0;
       result = {
         siteId,
         batchId,
-        status: 'completed',
+        status: hasEnqueued ? 'dispatched' : 'skipped',
         completedAt: new Date().toISOString(),
-        enqueued: jobResult.enqueued,
+        ...(hasEnqueued ? { enqueued: jobResult.enqueued } : {}),
         skipped: jobResult.skipped,
         freshnessSkipped,
       };

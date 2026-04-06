@@ -1586,7 +1586,7 @@ describe('ephemeral-run-service', () => {
       const siteResultCall = s3Calls.find((i) => i?.Key?.includes('/results/'));
       const siteResult = JSON.parse(siteResultCall.Body);
       expect(siteResult.freshnessSkipped).to.deep.equal([
-        { type: 'scrape-top-pages', kind: 'audit', reason: 'scrape-fresh' },
+        { type: 'scrape-top-pages', kind: 'audit', reason: 'recent scrape exists' },
       ]);
     });
 
@@ -1732,7 +1732,7 @@ describe('ephemeral-run-service', () => {
       const siteResultCall = s3Calls.find((i) => i?.Key?.includes('/results/'));
       const siteResult = JSON.parse(siteResultCall.Body);
       expect(siteResult.freshnessSkipped).to.deep.include(
-        { type: 'organic-traffic', kind: 'import', reason: 'import-fresh' },
+        { type: 'organic-traffic', kind: 'import', reason: 'recent import exists' },
       );
     });
 
@@ -1801,7 +1801,7 @@ describe('ephemeral-run-service', () => {
       const siteResultCall = s3Calls.find((i) => i?.Key?.includes('/results/'));
       const siteResult = JSON.parse(siteResultCall.Body);
       expect(siteResult.freshnessSkipped).to.deep.include(
-        { type: 'traffic-analysis', kind: 'import', reason: 'import-fresh' },
+        { type: 'traffic-analysis', kind: 'import', reason: 'recent import exists' },
       );
     });
 
@@ -1864,7 +1864,7 @@ describe('ephemeral-run-service', () => {
       );
       expect(putCalls).to.have.length.greaterThan(0);
       const body = JSON.parse(putCalls[0].args[0].input.Body);
-      expect(body.status).to.equal('completed');
+      expect(body.status).to.equal('dispatched');
     });
 
     it('stores createdBy in the batch manifest', async () => {

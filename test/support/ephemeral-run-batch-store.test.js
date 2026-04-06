@@ -87,7 +87,7 @@ describe('ephemeral-run-batch-store', () => {
   describe('writeSiteResult()', () => {
     it('writes result to the correct S3 key', async () => {
       s3.sendStub.resolves();
-      const result = { siteId: 's-1', status: 'completed' };
+      const result = { siteId: 's-1', status: 'dispatched' };
 
       await writeSiteResult(s3, 'b-1', 's-1', result);
 
@@ -157,7 +157,7 @@ describe('ephemeral-run-batch-store', () => {
         totalSites: 2,
         failedToEnqueue: [],
       };
-      const siteResult = { siteId: 's-1', status: 'completed', completedAt: new Date().toISOString() };
+      const siteResult = { siteId: 's-1', status: 'skipped', completedAt: new Date().toISOString() };
 
       let callCount = 0;
       s3.sendStub.callsFake(() => {
@@ -177,7 +177,7 @@ describe('ephemeral-run-batch-store', () => {
       expect(result.progress.total).to.equal(2);
       expect(result.progress.completed).to.equal(1);
       expect(result.progress.pending).to.equal(1);
-      expect(result.sites['s-1'].status).to.equal('completed');
+      expect(result.sites['s-1'].status).to.equal('skipped');
       expect(result.sites['s-2'].status).to.equal('pending');
     });
 
@@ -197,7 +197,7 @@ describe('ephemeral-run-batch-store', () => {
       };
       const siteResult = {
         siteId: 's-1',
-        status: 'completed',
+        status: 'dispatched',
         completedAt: new Date().toISOString(),
         enqueued: {
           imports: [{ type: 'top-pages', status: 'queued' }],
@@ -237,13 +237,13 @@ describe('ephemeral-run-batch-store', () => {
       };
       const siteResult = {
         siteId: 's-1',
-        status: 'completed',
+        status: 'dispatched',
         completedAt: new Date().toISOString(),
         enqueued: { imports: [], audits: [{ type: 'meta-tags', status: 'queued' }] },
         skipped: [],
         freshnessSkipped: [
-          { type: 'scrape-top-pages', reason: 'scrape-fresh' },
-          { type: 'cwv', reason: 'opportunity-fresh' },
+          { type: 'scrape-top-pages', reason: 'recent scrape exists' },
+          { type: 'cwv', reason: 'recent audit exists' },
         ],
       };
 
@@ -275,9 +275,8 @@ describe('ephemeral-run-batch-store', () => {
       };
       const siteResult = {
         siteId: 's-1',
-        status: 'completed',
+        status: 'skipped',
         completedAt: new Date().toISOString(),
-        enqueued: { imports: [], audits: [] },
         skipped: [],
         freshnessSkipped: [],
       };
@@ -308,7 +307,7 @@ describe('ephemeral-run-batch-store', () => {
         totalSites: 2,
         failedToEnqueue: [],
       };
-      const result1 = { siteId: 's-1', status: 'completed', completedAt: new Date().toISOString() };
+      const result1 = { siteId: 's-1', status: 'dispatched', completedAt: new Date().toISOString() };
       const result2 = {
         siteId: 's-2', status: 'failed', completedAt: new Date().toISOString(), error: { code: 'ERR', message: 'fail' },
       };
@@ -348,7 +347,7 @@ describe('ephemeral-run-batch-store', () => {
         totalSites: 2,
         failedToEnqueue: [{ siteId: 's-2', reason: 'SQS throttle' }],
       };
-      const result1 = { siteId: 's-1', status: 'completed', completedAt: new Date().toISOString() };
+      const result1 = { siteId: 's-1', status: 'dispatched', completedAt: new Date().toISOString() };
 
       let callCount = 0;
       s3.sendStub.callsFake(() => {
@@ -408,8 +407,8 @@ describe('ephemeral-run-batch-store', () => {
         totalSites: 2,
         failedToEnqueue: [],
       };
-      const result1 = { siteId: 's-1', status: 'completed', completedAt: new Date().toISOString() };
-      const result2 = { siteId: 's-2', status: 'completed', completedAt: new Date().toISOString() };
+      const result1 = { siteId: 's-1', status: 'dispatched', completedAt: new Date().toISOString() };
+      const result2 = { siteId: 's-2', status: 'dispatched', completedAt: new Date().toISOString() };
 
       let callCount = 0;
       s3.sendStub.callsFake(() => {
@@ -496,7 +495,7 @@ describe('ephemeral-run-batch-store', () => {
         enqueuedSiteIds: ['s-1'],
         totalSites: 1,
       };
-      const result1 = { siteId: 's-1', status: 'completed', completedAt: new Date().toISOString() };
+      const result1 = { siteId: 's-1', status: 'dispatched', completedAt: new Date().toISOString() };
 
       let callCount = 0;
       s3.sendStub.callsFake(() => {
