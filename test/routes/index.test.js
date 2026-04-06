@@ -384,6 +384,7 @@ describe('getRouteHandlers', () => {
 
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
+    getAllOnboardings: sinon.stub(),
     getStatus: sinon.stub(),
   };
 
@@ -487,6 +488,7 @@ describe('getRouteHandlers', () => {
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
       'POST /plg/onboard',
+      'GET /plg/sites',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -514,6 +516,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
     expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
+    expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
