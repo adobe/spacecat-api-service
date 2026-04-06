@@ -1822,7 +1822,7 @@ describe('Access Control Util', () => {
 
       mockTierClient = {
         checkValidEntitlement: sinon.stub().resolves({
-          entitlement: { getTier: () => 'paid' },
+          entitlement: { getTier: () => 'PAID' },
           siteEnrollment: { getId: () => 'enrollment-1' },
         }),
       };
