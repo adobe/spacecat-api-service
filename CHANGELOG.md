@@ -1,3 +1,10 @@
+# [1.415.0](https://github.com/adobe/spacecat-api-service/compare/v1.414.0...v1.415.0) (2026-04-06)
+
+
+### Features
+
+* ephemeral run batch API for insights imports and audits ([#2076](https://github.com/adobe/spacecat-api-service/issues/2076)) ([9cd6ae9](https://github.com/adobe/spacecat-api-service/commit/9cd6ae9026e08589d9e714fe1a42dc4a6db8952c))
+
 # [1.414.0](https://github.com/adobe/spacecat-api-service/compare/v1.413.7...v1.414.0) (2026-04-06)
 
 
