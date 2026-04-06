@@ -42,7 +42,7 @@ The original PLG tier design (v1) introduced `PLG` as an **internal-only** tier.
 - **PLG-exclusive**: The `PLG` tier is only assigned to customers who entered through the PLG motion (transitioned from `PRE_ONBOARD`). It is never used for traditional sales-led or trial flows.
 - **Worker-transparent**: Background workers (audit, import) continue operating on PLG sites as they do for FREE_TRIAL/PAID — they check entitlement existence, not tier value.
 - **Summit PLG flag**: `getIsSummitPlgEnabled` returns `true` for `PLG` tier only. `FREE_TRIAL` is no longer part of the PLG motion.
-- **Upgradable**: PLG can transition to `PAID` via the existing `createEntitlement()` upgrade path.
+- **Upgradable**: PLG can transition to `FREE_TRIAL` or `PAID` via the existing `createEntitlement()` upgrade path.
 - **Non-breaking**: No changes to existing FREE_TRIAL or PAID behavior anywhere.
 
 > **Key principle**: The PLG tier is now a first-class customer-facing tier. The pre-provisioning internal state is handled by the separate `PRE_ONBOARD` tier (see [PRE_ONBOARD design doc](plg_preonboard_tier_requirement_and_design.md)).
@@ -59,7 +59,7 @@ The original PLG tier design (v1) introduced `PLG` as an **internal-only** tier.
 | FR-02 | PLG-tier sites shall be operable by all background workers (audit, import, etc.) without modification to those workers. |
 | FR-03 | PLG-tier sites shall be returned in `GET /sites-resolve` responses when a valid siteId, organizationId, or imsOrg is supplied (same as FREE_TRIAL/PAID). |
 | FR-04 | PLG-tier sites shall appear in `GET /organizations/:organizationId/sites` responses (both own sites and delegated sites), subject to enrollment. |
-| FR-05 | A PLG-tier entitlement shall be upgradable to `PAID` without data loss or re-enrollment. |
+| FR-05 | A PLG-tier entitlement shall be upgradable to `FREE_TRIAL` or `PAID` without data loss or re-enrollment. |
 | FR-06 | A PLG-tier entitlement shall be revocable (not protected like PAID). |
 | FR-07 | The PLG tier shall be enforced as a valid enum value in the database, TypeScript types, and JavaScript model constants (alongside `PRE_ONBOARD`). |
 | FR-08 | No existing FREE_TRIAL or PAID entitlement behavior shall be modified. |
@@ -101,6 +101,7 @@ The original PLG tier design (v1) introduced `PLG` as an **internal-only** tier.
   isSummitPlgEnabled │   NO     │   NO     │   YES    │      NO        │
   Revocable?         │   YES    │ via admin│   YES    │      YES       │
   Upgradable to PAID │   YES    │    —     │   YES    │      YES       │
+  Upgradable to F_T  │    —     │    NO    │   YES    │      YES       │
   Upgradable to PLG  │    —     │    NO    │    —     │      YES       │
                      └──────────┴──────────┴──────────┴────────────────┘
 ```
@@ -156,6 +157,11 @@ createEntitlement('PRE_ONBOARD')
                   │
                   ├──▶ API: LLMO endpoints — validateEntitlement()
                   │         → tier=PLG → allowed ✓
+                  │
+                  ├──▶ (Optional) Upgrade to FREE_TRIAL
+                  │         createEntitlement('FREE_TRIAL')
+                  │           → PLG is non-PAID, so tier overwritten
+                  │           → isSummitPlgEnabled = false (FREE_TRIAL tier)
                   │
                   └──▶ (Optional) Upgrade to PAID
                             createEntitlement('PAID')
@@ -270,7 +276,7 @@ This means:
 | `spacecat-import-worker` | Same as audit worker. |
 | `TierClient` core methods | Tier-agnostic by design. Filtering is the API layer's responsibility. |
 | `revokeEntitlement()` blocking logic | Already only blocks PAID. PLG is revocable. |
-| `createEntitlement()` upgrade logic | Already allows overwriting non-PAID tiers. PRE_ONBOARD → PLG and PLG → PAID work as-is. |
+| `createEntitlement()` upgrade logic | Already allows overwriting non-PAID tiers. PRE_ONBOARD → PLG, PLG → FREE_TRIAL, and PLG → PAID work as-is. |
 | `validateEntitlement` guard logic | Already uses `CUSTOMER_VISIBLE_TIERS.includes()`. Adding PLG to the allow-list is sufficient. |
 | `filterSitesForProductCode` guard logic | Same as above. |
 | `resolveSite` guard logic | Same as above. |
@@ -308,6 +314,7 @@ After all changes are deployed end-to-end:
 | Audit worker processes PLG site | Audit runs normally |
 | Audit worker processes PRE_ONBOARD site | Audit runs normally |
 | `createEntitlement('PRE_ONBOARD')` then `createEntitlement('PLG')` | Site transitions from invisible to visible |
+| `createEntitlement('PLG')` then `createEntitlement('FREE_TRIAL')` | Site remains visible; `isSummitPlgEnabled` becomes `false` |
 | `createEntitlement('PLG')` then `createEntitlement('PAID')` | Site remains visible; `isSummitPlgEnabled` becomes `false` |
 | `revokeEntitlement()` on PLG entitlement | Entitlement and enrollments deleted |
 | `getIsSummitPlgEnabled` for PLG-tier site | `true` |

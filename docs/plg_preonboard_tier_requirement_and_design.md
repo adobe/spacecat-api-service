@@ -97,6 +97,7 @@ Introduce `PRE_ONBOARD` as a **first-class but internally scoped** entitlement t
   isSummitPlgEnabled │   NO     │   NO     │   YES    │      NO        │
   Revocable?         │   YES    │ via admin│   YES    │      YES       │
   Upgradable to PAID │   YES    │    —     │   YES    │      YES       │
+  Upgradable to F_T  │    —     │    NO    │   YES    │      YES       │
   Upgradable to PLG  │    —     │    NO    │    —     │      YES       │
                      └──────────┴──────────┴──────────┴────────────────┘
 ```
