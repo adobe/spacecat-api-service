@@ -12,8 +12,7 @@
 
 /**
  * API validation for audit target URLs: parseable absolute URL, HTTPS only, and hostname
- * must match the site base URL hostname when that can be derived (same idea as ASO UI
- * siteDomain + https check, without the stricter paste/whitespace rules).
+ * must match the site base URL hostname when that can be derived.
  */
 
 /**
