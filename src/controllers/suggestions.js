@@ -32,6 +32,10 @@ import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } fr
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
+import {
+  getScheduleParams,
+  buildExperimentMetadata,
+} from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
@@ -46,14 +50,6 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
-
-const GEO_EXPERIMENT_SCHEDULE = Object.freeze({
-  PRE_CRON_EXPRESSION: '0 * * * *', // hourly (fires immediately via triggerImmediately: true)
-  // 5 minutes — only needs to live long enough for the immediate trigger
-  PRE_EXPIRY_MS: 14 * 60 * 60 * 1000, // 14 hours
-  PLATFORMS: ['chatgpt_free', 'perplexity'],
-  PROVIDER_IDS: ['brightdata', 'openai_web_search'],
-});
 
 /**
  * Suggestions controller.
@@ -187,7 +183,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, AsyncJob, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -1658,9 +1654,11 @@ function SuggestionsController(ctx, sqs, env) {
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
           suggestionIds: validSuggestionIds,
-          metadata: {
-            urls,
-          },
+          metadata: buildExperimentMetadata(
+            context.env,
+            { urls },
+            GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+          ),
           updatedBy: profile?.email || 'geo-experiment',
         });
 
@@ -1670,6 +1668,12 @@ function SuggestionsController(ctx, sqs, env) {
 
         context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_SUBMITTED`);
 
+        const preScheduleParams = getScheduleParams(
+          context.env,
+          GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+          'pre',
+        );
+
         let preScheduleId;
         try {
           const drsClient = DrsClient.createFrom(context);
@@ -1677,10 +1681,10 @@ function SuggestionsController(ctx, sqs, env) {
             siteId,
             experimentId: geoExperimentId,
             experimentPhase: EXPERIMENT_PHASES.PRE,
-            cronExpression: GEO_EXPERIMENT_SCHEDULE.PRE_CRON_EXPRESSION,
-            expiresAt: new Date(Date.now() + GEO_EXPERIMENT_SCHEDULE.PRE_EXPIRY_MS).toISOString(),
-            platforms: GEO_EXPERIMENT_SCHEDULE.PLATFORMS,
-            providerIds: GEO_EXPERIMENT_SCHEDULE.PROVIDER_IDS,
+            cronExpression: preScheduleParams.cronExpression,
+            expiresAt: new Date(Date.now() + preScheduleParams.expiryMs).toISOString(),
+            platforms: preScheduleParams.platforms,
+            providerIds: preScheduleParams.providerIds,
             triggerImmediately: true,
             enableBrandPresence: true,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
@@ -1701,20 +1705,6 @@ function SuggestionsController(ctx, sqs, env) {
         } catch (updateError) {
           context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
           throw updateError;
-        }
-        let job;
-        try {
-          job = await AsyncJob.create({
-            status: 'IN_PROGRESS',
-            metadata: {
-              jobType: 'geo-experiment',
-              siteId,
-              geoExperimentId,
-            },
-          });
-        } catch (jobError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, AsyncJob creation failed: ${jobError.message}`, jobError);
-          throw jobError;
         }
         const validSuggestionEntities = [
           ...validSuggestions,
@@ -1756,7 +1746,6 @@ function SuggestionsController(ctx, sqs, env) {
             success: validSuggestionIds.length,
             failed: failedSuggestions.length,
           },
-          jobId: job.getId(),
           geoExperimentId,
           geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
@@ -1773,8 +1762,26 @@ function SuggestionsController(ctx, sqs, env) {
           } catch (removeError) {
             context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
-          /* c8 ignore stop */
         }
+        const allSuggestionEntities = [
+          ...validSuggestions,
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+        ];
+        await Promise.allSettled(
+          allSuggestionEntities
+            .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
+            .map(async (s) => {
+              try {
+                const { edgeOptimizeStatus: _, ...rest } = s.getData();
+                s.setData(rest);
+                s.setUpdatedBy(profile?.email || 'geo-experiment');
+                await s.save();
+              } catch (unblockError) {
+                context.log.error(`[edge-geo-exp-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
+              }
+            }),
+        );
+        /* c8 ignore stop */
         const errorResponse = {
           suggestions: suggestionIds.map((id, index) => ({
             uuid: id,

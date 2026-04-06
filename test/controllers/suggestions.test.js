@@ -5659,7 +5659,6 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.jobId).to.equal(JOB_ID);
       expect(body.geoExperimentStatus).to.equal('GENERATING_BASELINE');
       expect(body.geoExperimentPhase).to.equal('pre_analysis_submitted');
       expect(body.prePhaseScheduleId).to.equal('sched-pre-001');
@@ -5683,7 +5682,7 @@ describe('Suggestions Controller', () => {
       expect(callArgs.experimentPhase).to.equal('pre');
     });
 
-    it('creates AsyncJob with correct metadata', async () => {
+    it('creates GeoExperiment with correct metadata', async () => {
       await suggestionsController.deploySuggestionToEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -5691,14 +5690,7 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(mockSuggestionDataAccess.AsyncJob.create).to.have.been.calledOnce;
-      const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
-      expect(createArg.status).to.equal('IN_PROGRESS');
-      expect(createArg.metadata.jobType).to.equal('geo-experiment');
-      expect(createArg.metadata.siteId).to.equal(SITE_ID);
-      expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
-      expect(createArg.metadata.opportunityId).to.be.undefined;
-      expect(createArg.metadata.suggestionIds).to.be.undefined;
+      expect(mockSuggestionDataAccess.AsyncJob.create).to.not.have.been.called;
       expect(mockSuggestionDataAccess.GeoExperiment.create).to.have.been.calledOnce;
 
       const depExpCreateArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
@@ -5711,33 +5703,6 @@ describe('Suggestions Controller', () => {
       expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
     });
 
-    it('returns 207 with failure and removes GeoExperiment when AsyncJob creation fails', async () => {
-      const removeStubFn = sandbox.stub().resolves();
-      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
-        const id = payload.geoExperimentId;
-        return {
-          getId: () => id,
-          setPreScheduleId: sandbox.stub(),
-          setStatus: sandbox.stub(),
-          setUpdatedBy: sandbox.stub(),
-          save: sandbox.stub().resolves(),
-          remove: removeStubFn,
-        };
-      });
-      mockSuggestionDataAccess.AsyncJob.create.rejects(new Error('job create failed'));
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.suggestions[0].message).to.include('job create failed');
-      expect(removeStubFn).to.have.been.calledOnce;
-    });
 
     it('returns 500 when GeoExperiment save fails after DRS schedule is created', async () => {
       const removeStubFn = sandbox.stub().resolves();
@@ -5855,9 +5820,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.prePhaseScheduleId).to.equal('sched-pre-flat-001');
-
-      const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
-      expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
+      expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
     });
 
     it('updates valid suggestions with deploy metadata', async () => {
