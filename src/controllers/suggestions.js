@@ -1475,13 +1475,6 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      context.log.warn(
-        `[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`,
-      );
-      return forbidden('Only LLMO administrators can deploy suggestions to edge');
-    }
-
     if (!isValidUUID(opportunityId)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
       return badRequest('Opportunity ID required');
@@ -1498,11 +1491,18 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const suggestionIds = [...new Set(rawSuggestionIds)];
 
+    // No productCode is passed to hasAccess(); the delegation block is not entered.
+    // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(
         `[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`,
       );
       return forbidden('User does not belong to the organization');
+    }
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`);
+      return forbidden('Only LLMO administrators can deploy suggestions to edge');
     }
 
     if (!await accessControlUtil.isOwnerOfSite(site)) {
@@ -1951,19 +1951,22 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn('[edge-rollback-failed] site: n/a, no request body data provided');
       return badRequest('No data provided');
     }
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      context.log.warn('[edge-rollback-failed] site: n/a, user is not an LLMO administrator');
-      return forbidden('Only LLMO administrators can rollback suggestions');
-    }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       context.log.warn('[edge-rollback-failed] site: n/a, suggestionIds is not a non-empty array');
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
+    // No productCode is passed to hasAccess(); the delegation block is not entered.
+    // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(`[edge-rollback-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
       return forbidden('User does not belong to the organization');
+    }
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn('[edge-rollback-failed] site: n/a, user is not an LLMO administrator');
+      return forbidden('Only LLMO administrators can rollback suggestions');
     }
 
     if (!await accessControlUtil.isOwnerOfSite(site)) {
