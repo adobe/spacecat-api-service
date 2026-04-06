@@ -203,13 +203,13 @@ describe('ToggleSiteImportCommand', () => {
     const existingImports = [
       {
         type: 'organic-traffic',
-        sources: ['ahrefs'],
+        sources: ['seo'],
         enabled: true,
         destinations: ['default'],
       },
       {
         type: 'top-pages',
-        sources: ['ahrefs', 'rum'],
+        sources: ['seo', 'rum'],
         enabled: true,
         destinations: ['default'],
         geo: 'global',
@@ -228,7 +228,7 @@ describe('ToggleSiteImportCommand', () => {
         // Simulate the real behavior: add new import to the array
         fullSiteConfig.imports.push({
           type: importType,
-          sources: ['ahrefs'],
+          sources: ['seo'],
           enabled: true,
           destinations: ['default'],
         });
@@ -263,7 +263,7 @@ describe('ToggleSiteImportCommand', () => {
       'Expected first existing import to remain unchanged',
     ).to.deep.equal({
       type: 'organic-traffic',
-      sources: ['ahrefs'],
+      sources: ['seo'],
       enabled: true,
       destinations: ['default'],
     });
@@ -272,7 +272,7 @@ describe('ToggleSiteImportCommand', () => {
       'Expected second existing import with multiple sources and geo to remain unchanged',
     ).to.deep.equal({
       type: 'top-pages',
-      sources: ['ahrefs', 'rum'],
+      sources: ['seo', 'rum'],
       enabled: true,
       destinations: ['default'],
       geo: 'global',
@@ -284,7 +284,7 @@ describe('ToggleSiteImportCommand', () => {
       'Expected new "ahref-paid-pages" import to be added',
     ).to.deep.equal({
       type: 'ahref-paid-pages',
-      sources: ['ahrefs'],
+      sources: ['seo'],
       enabled: true,
       destinations: ['default'],
     });

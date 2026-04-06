@@ -157,6 +157,9 @@ describe('Opportunities Controller', () => {
     getUpdatedAt() {
       return opptys[0].updatedAt;
     },
+    getLastAuditedAt() {
+      return opptys[0].lastAuditedAt;
+    },
     setCreatedAt(value) {
       opptys[0].createdAt = value;
     },

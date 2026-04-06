@@ -69,6 +69,7 @@ const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
+const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -186,7 +187,7 @@ function LlmoController(ctx) {
       });
 
       if (!response.ok) {
-        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -198,7 +199,7 @@ function LlmoController(ctx) {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -284,7 +285,7 @@ function LlmoController(ctx) {
       });
 
       if (!response.ok) {
-        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -367,7 +368,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       const errorTime = Date.now();
-      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
       return badRequest(error.message);
     }
   };
@@ -410,7 +411,7 @@ function LlmoController(ctx) {
       });
 
       if (!response.ok) {
-        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -442,7 +443,7 @@ function LlmoController(ctx) {
         return badRequest('LLMO config storage is not configured for this environment');
       }
 
-      log.info(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
+      log.debug(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
       const { config, exists, version: configVersion } = await readConfig(siteId, s3.s3Client, {
         s3Bucket: s3.s3Bucket,
         version,
@@ -871,6 +872,8 @@ function LlmoController(ctx) {
    * @param {string} [context.data.imsOrgId] - Optional IMS org ID override
    *   (must match `/^[a-z0-9]{24}@AdobeOrg$/i`). When omitted the org ID
    *   is read from the authenticated user's JWT token.
+   * @param {boolean} [context.data['temp-onboarding']] - When true, skips updating
+   *   helix-query.yaml in project-elmo-ui-data during onboarding.
    * @returns {Promise<Response>} The onboarding response.
    */
   const onboardCustomer = async (context) => {
@@ -887,10 +890,17 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
 
-      const { domain, brandName, imsOrgId: payloadImsOrgId } = data;
+      const {
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence,
+      } = data;
+      const tempOnboarding = data['temp-onboarding'] === true;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
+      }
+
+      if (cadence && !VALID_CADENCES.includes(cadence)) {
+        return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
       }
 
       let imsOrgId;
@@ -937,7 +947,13 @@ function LlmoController(ctx) {
 
       // Perform the complete onboarding process
       const result = await performLlmoOnboarding(
-        { domain, brandName, imsOrgId },
+        {
+          domain,
+          brandName,
+          imsOrgId,
+          cadence,
+          tempOnboarding,
+        },
         context,
       );
 
@@ -1024,7 +1040,7 @@ function LlmoController(ctx) {
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
-      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      log.debug(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
       return badRequest(error.message);
     }
   };

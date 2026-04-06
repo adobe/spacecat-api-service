@@ -17,6 +17,9 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import nock from 'nock';
 
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import { AUTHORING_TYPES, DELIVERY_TYPES } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import {
   createProject,
   deriveProjectName,
@@ -24,8 +27,10 @@ import {
   updateCodeConfig,
   getIsSummitPlgEnabled,
   getCookieValue,
+  filterSitesForProductCode,
   queueDetectCdnAudit,
   queueDeliveryConfigWriter,
+  validateSiteForRedirects,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -668,6 +673,194 @@ describe('utils', () => {
     });
   });
 
+  // Merge conflict resolved: retain both describe blocks in sequence.
+
+  describe('filterSitesForProductCode', () => {
+    let mockTierClient;
+    let mockContext;
+    let mockOrg;
+    let mockSites;
+    let sandbox2;
+
+    beforeEach(() => {
+      sandbox2 = sinon.createSandbox();
+
+      mockSites = [
+        { getId: () => 'site-1' },
+        { getId: () => 'site-2' },
+      ];
+
+      mockOrg = { getId: () => 'org-1' };
+
+      mockTierClient = {
+        checkValidEntitlement: sandbox2.stub(),
+      };
+      sandbox2.stub(TierClient, 'createForOrg').returns(mockTierClient);
+
+      mockContext = {
+        dataAccess: {
+          SiteEnrollment: {
+            allByEntitlementId: sandbox2.stub(),
+          },
+        },
+        log: { error: sinon.stub() },
+      };
+    });
+
+    afterEach(() => {
+      sandbox2.restore();
+    });
+
+    it('returns empty array when no entitlement exists', async () => {
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: null });
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns empty array for PLG-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PLG,
+        },
+      });
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.deep.equal([]);
+      expect(mockContext.dataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
+    });
+
+    it('returns enrolled sites for FREE_TRIAL-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].getId()).to.equal('site-1');
+    });
+
+    it('returns enrolled sites for PAID-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PAID,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+        { getSiteId: () => 'site-2' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.have.lengthOf(2);
+    });
+
+    it('returns empty array for any unrecognized future tier (allow-list pattern)', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => 'FUTURE_TIER',
+        },
+      });
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.deep.equal([]);
+    });
+  });
+
+  describe('validateSiteForRedirects', () => {
+    function makeSite({
+      id = 'site-1',
+      baseURL = 'https://example.com',
+      authoringType = AUTHORING_TYPES.CS,
+      deliveryType = DELIVERY_TYPES.AEM_CS,
+      deliveryConfig = { programId: 'p1', environmentId: 'e1' },
+    } = {}) {
+      return {
+        getId: () => id,
+        getBaseURL: () => baseURL,
+        getAuthoringType: () => authoringType,
+        getDeliveryType: () => deliveryType,
+        getDeliveryConfig: () => deliveryConfig,
+      };
+    }
+
+    // happy path
+    it('return validForRedirects: true, programID: string, environmentID: string when site is valid for redirects', async () => {
+      const result = validateSiteForRedirects(makeSite());
+      expect(result).to.deep.equal({
+        validForRedirects: true,
+        skipMessage: '',
+        programId: 'p1',
+        environmentId: 'e1',
+      });
+    });
+
+    it('returns valid when authoring is cs/crosswalk with delivery ids', () => {
+      const result = validateSiteForRedirects(makeSite({ authoringType: AUTHORING_TYPES.CS_CW }));
+      expect(result.validForRedirects).to.be.true;
+      expect(result.programId).to.equal('p1');
+      expect(result.environmentId).to.equal('e1');
+    });
+
+    it('returns valid when delivery is aem_cs even if authoring is not CS', () => {
+      const result = validateSiteForRedirects(
+        makeSite({ authoringType: AUTHORING_TYPES.AMS, deliveryType: DELIVERY_TYPES.AEM_CS }),
+      );
+      expect(result.validForRedirects).to.be.true;
+    });
+
+    it('returns invalid when authoring and delivery are not valid for update-redirects', () => {
+      const site = makeSite({
+        authoringType: AUTHORING_TYPES.AMS,
+        deliveryType: DELIVERY_TYPES.AEM_EDGE,
+        deliveryConfig: { programId: 'p1', environmentId: 'e1' },
+      });
+      const result = validateSiteForRedirects(site);
+      expect(result.validForRedirects).to.be.false;
+      expect(result.skipMessage).to.match(
+        /not valid for redirects because authoringType is `ams` and deliveryType is `aem_edge`/,
+      );
+      expect(result.programId).to.equal('p1');
+      expect(result.environmentId).to.equal('e1');
+    });
+
+    it('returns invalid and clears ids when programId or environmentId is missing', () => {
+      const site = makeSite({ deliveryConfig: { programId: 'p1', environmentId: '' } });
+      const result = validateSiteForRedirects(site);
+      expect(result.validForRedirects).to.be.false;
+      expect(result.programId).to.be.undefined;
+      expect(result.environmentId).to.be.undefined;
+      expect(result.skipMessage).to.include('environmentID and/or programID is missing');
+    });
+
+    it('uses empty deliveryConfig when getDeliveryConfig is absent', () => {
+      const site = {
+        getId: () => 's1',
+        getBaseURL: () => 'https://x.com',
+        getAuthoringType: () => AUTHORING_TYPES.CS,
+        getDeliveryType: () => DELIVERY_TYPES.AEM_CS,
+      };
+      const result = validateSiteForRedirects(site);
+      expect(result.validForRedirects).to.be.false;
+      expect(result.programId).to.be.undefined;
+      expect(result.environmentId).to.be.undefined;
+    });
+  });
+
   describe('queueDetectCdnAudit', () => {
     let sandbox;
     let context;
@@ -914,7 +1107,9 @@ describe('utils', () => {
       );
       expect(result).to.deep.equal({ ok: true });
       expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
-      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        'environmentID and/or programID is missing',
+      );
     });
 
     it('skips redirect params and logs info when environmentId is missing', async () => {
@@ -925,7 +1120,9 @@ describe('utils', () => {
       );
       expect(result).to.deep.equal({ ok: true });
       expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
-      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        'environmentID and/or programID is missing',
+      );
     });
 
     it('skips redirect params and logs info when getDeliveryConfig is absent', async () => {
@@ -942,7 +1139,9 @@ describe('utils', () => {
       );
       expect(result).to.deep.equal({ ok: true });
       expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
-      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        'environmentID and/or programID is missing',
+      );
     });
 
     it('includes slackContext in payload when channelId and threadTs are present', async () => {

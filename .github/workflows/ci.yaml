@@ -19,4 +19,5 @@ jobs:
       validate-pr-title: true
       docs-lint: true
       it-postgres: true
+      skip-upload-artifacts: true
     secrets: inherit

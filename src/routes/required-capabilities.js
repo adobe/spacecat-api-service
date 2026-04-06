@@ -29,6 +29,8 @@ export const INTERNAL_ROUTES = [
   // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
   'POST /preflight/jobs',
   'GET /preflight/jobs/:jobId',
+  'POST /preflight/beta/jobs',
+  'GET /preflight/beta/jobs/:jobId',
 
   // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
   // TODO: Add these back in when we have a S2S consumer that needs them
@@ -37,6 +39,10 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
+
+  // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
+  'GET /sites/:siteId/geo-experiments',
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -69,6 +75,7 @@ export const INTERNAL_ROUTES = [
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
+  'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
@@ -94,6 +101,12 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/ims-org-access/:accessId',
   'DELETE /sites/:siteId/ims-org-access/:accessId',
 
+  // Contact sales leads - IMS-authenticated, end-user UI only; not for S2S consumers
+  'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+  'GET /organizations/:organizationId/contact-sales-leads',
+  'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+  'PATCH /contact-sales-leads/:contactSalesLeadId',
+
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
   'GET /consumers/by-client-id/:clientId',
@@ -101,6 +114,10 @@ export const INTERNAL_ROUTES = [
   'POST /consumers/register',
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
+
+  // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
+  'POST /ephemeral-run/batch',
+  'GET /ephemeral-run/batch/:batchId/status',
 ];
 
 /**
@@ -148,6 +165,10 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/categories': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/topics': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/topics': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'organization:write',
+  'DELETE /v2/orgs/:spaceCatId/topics/:topicId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId': 'organization:write',
@@ -412,6 +433,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /llmo/agentic-traffic/global': 'report:read',
+  'POST /llmo/agentic-traffic/global': 'report:write',
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',

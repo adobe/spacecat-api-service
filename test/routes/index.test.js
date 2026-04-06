@@ -270,6 +270,8 @@ describe('getRouteHandlers', () => {
 
   const mockLlmoMysticatController = {
     getFilterDimensions: () => null,
+    getAgenticTrafficGlobal: () => null,
+    postAgenticTrafficGlobal: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -382,6 +384,7 @@ describe('getRouteHandlers', () => {
 
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
+    getAllOnboardings: sinon.stub(),
     getStatus: sinon.stub(),
   };
 
@@ -392,10 +395,22 @@ describe('getRouteHandlers', () => {
     revokeGrant: sinon.stub(),
   };
 
+  const mockContactSalesLeadsController = {
+    create: sinon.stub(),
+    getByOrganizationId: sinon.stub(),
+    checkBySite: sinon.stub(),
+    update: sinon.stub(),
+  };
+
   const mockFeatureFlagsController = {
     listByOrganization: () => null,
     putByOrganizationProductAndName: () => null,
     deleteByOrganizationProductAndName: () => null,
+  };
+
+  const mockEphemeralRunController = {
+    batchRun: () => null,
+    batchStatus: () => null,
   };
 
   it('segregates static and dynamic routes', () => {
@@ -444,7 +459,9 @@ describe('getRouteHandlers', () => {
       mockTokensController,
       mockPlgOnboardingController,
       mockImsOrgAccessController,
+      mockContactSalesLeadsController,
       mockFeatureFlagsController,
+      mockEphemeralRunController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -458,6 +475,7 @@ describe('getRouteHandlers', () => {
       'GET /projects',
       'POST /projects',
       'POST /preflight/jobs',
+      'POST /preflight/beta/jobs',
       'GET /sites',
       'POST /sites',
       'GET /sites.csv',
@@ -473,12 +491,16 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
+      'GET /llmo/agentic-traffic/global',
+      'POST /llmo/agentic-traffic/global',
       'POST /plg/onboard',
+      'GET /plg/sites',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
       'GET /consumers',
       'POST /consumers/register',
+      'POST /ephemeral-run/batch',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -498,7 +520,10 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
+    expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
+    expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
+    expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
@@ -520,6 +545,10 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/categories',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId',
       'DELETE /v2/orgs/:spaceCatId/categories/:categoryId',
+      'GET /v2/orgs/:spaceCatId/topics',
+      'POST /v2/orgs/:spaceCatId/topics',
+      'PATCH /v2/orgs/:spaceCatId/topics/:topicId',
+      'DELETE /v2/orgs/:spaceCatId/topics/:topicId',
       'POST /v2/orgs/:spaceCatId/brands',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId',
@@ -575,6 +604,7 @@ describe('getRouteHandlers', () => {
       'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
       'DELETE /organizations/:organizationId',
       'GET /preflight/jobs/:jobId',
+      'GET /preflight/beta/jobs/:jobId',
       'GET /projects/:projectId',
       'PATCH /projects/:projectId',
       'DELETE /projects/:projectId',
@@ -643,6 +673,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/top-pages/:source',
       'GET /sites/:siteId/top-pages/:source/:geo',
       'GET /sites/:siteId/files',
+      'GET /sites/:siteId/geo-experiments',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId',
       'POST /sites/:siteId/graph',
       'POST /event/fulfillment/:eventType',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
@@ -801,6 +833,11 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access/:accessId',
       'DELETE /sites/:siteId/ims-org-access/:accessId',
+      'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+      'GET /organizations/:organizationId/contact-sales-leads',
+      'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
+      'PATCH /contact-sales-leads/:contactSalesLeadId',
+      'GET /ephemeral-run/batch/:batchId/status',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

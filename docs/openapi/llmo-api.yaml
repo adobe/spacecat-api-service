@@ -653,6 +653,104 @@ llmo-global-sheet-data:
     security:
       - api_key: [ ]
 
+llmo-agentic-traffic-global:
+  get:
+    tags:
+      - llmo
+    summary: List global weekly agentic traffic totals
+    description: |
+      Returns weekly aggregate global agentic traffic rows from mysticat `agentic_traffic_global`,
+      ordered by newest `(year, week)` first.
+
+      Query parameters:
+      - `year`: optional 4-digit year filter
+      - `week`: optional ISO week filter (`1-53`)
+      - `limit`: optional max rows to return (`1-520`, defaults to `52`)
+
+      Human access is admin-only. S2S consumers may call this endpoint when granted the mapped route capability.
+    operationId: getLlmoAgenticTrafficGlobal
+    parameters:
+      - name: year
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 2000
+          maximum: 9999
+      - name: week
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 53
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 520
+    responses:
+      '200':
+        description: Weekly global agentic traffic rows
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficGlobalWeekList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Create or update a weekly global agentic traffic row
+    description: |
+      Idempotently upserts a weekly aggregate row in mysticat `agentic_traffic_global`
+      using the unique `(year, week)` key.
+
+      If the week already exists, `hits` and `updatedBy` are updated in place.
+      Human access is admin-only. S2S consumers may call this endpoint when granted the mapped route capability.
+    operationId: postLlmoAgenticTrafficGlobal
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/AgenticTrafficGlobalWeekUpsert'
+    responses:
+      '200':
+        description: Upserted weekly global agentic traffic row
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficGlobalWeek'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
 llmo-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -770,6 +868,11 @@ llmo-onboard:
                 type: string
                 description: The brand name for the site
                 example: "Example Brand"
+              temp-onboarding:
+                type: boolean
+                description: |
+                  When true, skips updating helix-query.yaml in the project-elmo-ui-data GitHub repo
+                  (temporary onboarding; default is false).
             required:
               - domain
               - brandName

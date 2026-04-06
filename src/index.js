@@ -83,6 +83,7 @@ import TrialUsersController from './controllers/trial-users.js';
 import UserDetailsController from './controllers/user-details.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
+import EphemeralRunController from './controllers/ephemeral-run.js';
 import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
@@ -93,6 +94,7 @@ import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
+import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -215,6 +217,7 @@ async function run(request, context) {
     const userDetailsController = UserDetailsController(context);
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
+    const ephemeralRunController = EphemeralRunController(context);
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
@@ -224,6 +227,7 @@ async function run(request, context) {
     const tokensController = TokensController(context);
     const plgOnboardingController = PlgOnboardingController(context);
     const imsOrgAccessController = ImsOrgAccessController(context);
+    const contactSalesLeadsController = ContactSalesLeadsController(context);
     const featureFlagsController = FeatureFlagsController(context);
 
     const routeHandlers = getRouteHandlers(
@@ -271,7 +275,9 @@ async function run(request, context) {
       tokensController,
       plgOnboardingController,
       imsOrgAccessController,
+      contactSalesLeadsController,
       featureFlagsController,
+      ephemeralRunController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
