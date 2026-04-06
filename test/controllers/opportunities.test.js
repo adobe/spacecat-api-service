@@ -1205,6 +1205,7 @@ describe('Opportunities Controller', () => {
       getCreatedAt: () => Date.now(),
       getUpdatedAt: () => Date.now(),
       getUpdatedBy: () => 'system',
+      getLastAuditedAt: () => Date.now(),
     });
 
     const allTypes = ['broken-backlinks', 'cwv', 'alt-text', 'forms', 'consent-banner', 'rss'];
