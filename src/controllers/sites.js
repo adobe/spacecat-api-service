@@ -828,7 +828,7 @@ function SitesController(ctx, log, env) {
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
+      log.debug(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
     // Return object wrapper if objectResponseDataKey was used, otherwise return plain array

@@ -2802,6 +2802,9 @@ Opportunity:
     updatedAt:
       description: UTC timestamp of when the opportunity was last updated
       $ref: '#/DateTime'
+    lastAuditedAt:
+      description: UTC timestamp of when the opportunity was last audited
+      $ref: '#/DateTime'
   required:
     - id
     - siteId

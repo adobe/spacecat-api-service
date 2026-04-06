@@ -92,6 +92,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
+ * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -141,6 +142,7 @@ export default function getRouteHandlers(
   imsOrgAccessController,
   contactSalesLeadsController,
   featureFlagsController,
+  ephemeralRunController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -203,6 +205,8 @@ export default function getRouteHandlers(
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
+    'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
+    'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
@@ -451,6 +455,7 @@ export default function getRouteHandlers(
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
+    'GET /plg/sites': plgOnboardingController.getAllOnboardings,
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
 
     // Tier Specific Routes
@@ -476,6 +481,10 @@ export default function getRouteHandlers(
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
+
+    // Insights orchestration routes
+    'POST /ephemeral-run/batch': ephemeralRunController.batchRun,
+    'GET /ephemeral-run/batch/:batchId/status': ephemeralRunController.batchStatus,
 
     // Reports
     'POST /sites/:siteId/reports': reportsController.createReport,

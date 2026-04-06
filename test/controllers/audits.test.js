@@ -663,6 +663,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -703,6 +704,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -744,6 +746,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -788,6 +791,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -872,6 +876,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -917,6 +922,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -960,6 +966,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -1002,6 +1009,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -1043,6 +1051,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -1110,6 +1119,7 @@ describe('Audits Controller', () => {
           getLlmoConfig: () => ({}),
           getTokowakaConfig: () => ({}),
           getEdgeOptimizeConfig: () => undefined,
+          getOnboardConfig: () => undefined,
           getBrandProfile: () => ({}),
         };
 

@@ -29,6 +29,8 @@ export const INTERNAL_ROUTES = [
   // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
   'POST /preflight/jobs',
   'GET /preflight/jobs/:jobId',
+  'POST /preflight/beta/jobs',
+  'GET /preflight/beta/jobs/:jobId',
 
   // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
   // TODO: Add these back in when we have a S2S consumer that needs them
@@ -73,6 +75,7 @@ export const INTERNAL_ROUTES = [
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
+  'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
@@ -116,6 +119,9 @@ export const INTERNAL_ROUTES = [
   'POST /tools/api-keys',
   'DELETE /tools/api-keys/:id',
   'GET /tools/api-keys',
+  // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
+  'POST /ephemeral-run/batch',
+  'GET /ephemeral-run/batch/:batchId/status',
 ];
 
 /**
