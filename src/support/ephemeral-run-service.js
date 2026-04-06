@@ -138,6 +138,7 @@ function resolvePayload(body) {
   );
   const scheduledRun = body.scheduledRun === true;
   const onDemand = body.onDemand === true;
+  const enqueueAutoAudits = body.enqueueAutoAudits === true;
 
   const scrapeFreshnessDays = typeof body.freshness?.scrapeDays === 'number'
     ? body.freshness.scrapeDays
@@ -157,6 +158,7 @@ function resolvePayload(body) {
     forceRunSiteIds,
     scheduledRun,
     onDemand,
+    enqueueAutoAudits,
     scrapeFreshnessDays,
     auditFreshnessDays,
     importFreshnessDays,
@@ -767,6 +769,7 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
     forceRunSiteIds,
     scheduledRun,
     onDemand,
+    enqueueAutoAudits,
     scrapeFreshnessDays,
     auditFreshnessDays,
     importFreshnessDays,
@@ -924,7 +927,10 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
           : missingTrafficAnalysisWeeks;
       }
 
-      const filteredAuditTypes = audits.types.filter((t) => !auditTypesToSkip.has(t));
+      const filteredAuditTypes = audits.types.filter(
+        (t) => !auditTypesToSkip.has(t)
+          && (enqueueAutoAudits || !AUTO_SUGGEST_PARENT_MAP[t]),
+      );
       // Exclude traffic-analysis from single-message path when in backfill mode (handled via pairs)
       const filteredImportTypes = imports.types.filter((t) => {
         if (importTypesToSkip.has(t)) return false;

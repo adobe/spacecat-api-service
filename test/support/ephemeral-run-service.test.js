@@ -2397,6 +2397,77 @@ describe('ephemeral-run-service', () => {
       expect(sqsAuditTypes).to.include('lhs-mobile');
     });
 
+    it('does not enqueue AUTO_SUGGEST_PARENT_MAP types to SQS by default (enqueueAutoAudits=false)', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      const flagTypes = Object.keys(AUTO_SUGGEST_PARENT_MAP);
+      const parentTypes = Object.values(AUTO_SUGGEST_PARENT_MAP);
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { audits: { types: [...parentTypes, ...flagTypes] } },
+        ctx,
+      );
+
+      const sqsAuditTypes = ctx.sqs.sendMessage.getCalls()
+        .filter((c) => c.args[0] === ctx.env.AUDIT_JOBS_QUEUE_URL)
+        .map((c) => c.args[1]?.type);
+      for (const flagType of flagTypes) {
+        expect(sqsAuditTypes, `${flagType} should not be enqueued by default`).to.not.include(flagType);
+      }
+      for (const parentType of parentTypes) {
+        expect(sqsAuditTypes, `${parentType} should still be enqueued`).to.include(parentType);
+      }
+    });
+
+    it('enqueues AUTO_SUGGEST_PARENT_MAP types to SQS when enqueueAutoAudits=true', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      const flagTypes = Object.keys(AUTO_SUGGEST_PARENT_MAP);
+      const parentTypes = Object.values(AUTO_SUGGEST_PARENT_MAP);
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { audits: { types: [...parentTypes, ...flagTypes] }, enqueueAutoAudits: true },
+        ctx,
+      );
+
+      const sqsAuditTypes = ctx.sqs.sendMessage.getCalls()
+        .filter((c) => c.args[0] === ctx.env.AUDIT_JOBS_QUEUE_URL)
+        .map((c) => c.args[1]?.type);
+      for (const flagType of flagTypes) {
+        expect(sqsAuditTypes, `${flagType} should be enqueued when enqueueAutoAudits=true`).to.include(flagType);
+      }
+    });
+
+    it('enables AUTO_SUGGEST_PARENT_MAP types in Configuration even when not enqueued to SQS', async () => {
+      const ctx = createMockContext();
+      const site = createMockSite();
+      const config = createMockConfiguration();
+      ctx.dataAccess.Site.findById.resolves(site);
+      ctx.dataAccess.Configuration.findLatest.resolves(config);
+
+      const flagTypes = Object.keys(AUTO_SUGGEST_PARENT_MAP);
+      await runEphemeralRunBatch(
+        ['s-1'],
+        { audits: { types: flagTypes } },
+        ctx,
+      );
+
+      for (const flagType of flagTypes) {
+        expect(
+          config.isHandlerEnabledForSite(flagType, site),
+          `${flagType} should be enabled in Configuration`,
+        ).to.equal(true);
+      }
+    });
+
     it('teardown sites list includes only newly-enabled sites — already-enabled sites excluded', async () => {
       const ctx = createMockContext();
       // site1 has top-pages already enabled → deltaEnableImports returns importsEnabled=[]
