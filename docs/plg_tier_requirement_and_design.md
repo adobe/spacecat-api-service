@@ -463,10 +463,7 @@ After all changes are deployed end-to-end:
 | Metric | Target | Owner |
 |---|---|---|
 | PRE_ONBOARD → PLG conversion rate | TBD by product | PLG onboarding team |
-| Median time-in-PRE_ONBOARD before conversion | TBD — threshold for "stuck" site alert | Platform/ops |
 | PLG → PAID upgrade rate | TBD by product | Product |
-| PRE_ONBOARD site abandoned rate (no conversion, no revocation) | TBD | Product |
-| PRE_ONBOARD sites stuck > 30 days (monitoring query) | Alert threshold for ops | Platform/ops |
 
 ---
 
@@ -521,7 +518,7 @@ After all changes are deployed end-to-end:
 | PRE_ONBOARD site accidentally exposed via an uncovered API path | Low | High | Allow-list pattern means new tiers (PRE_ONBOARD) are denied by default |
 | Enum rollback difficulty | Low | Low | PostgreSQL does not support removing enum values; acceptable for a low-risk addition |
 | Dependency version mismatch (shared not updated before API service) | Medium | High | Phase 2 must be merged and published before Phase 3 PR is merged |
-| Stuck PRE_ONBOARD sites consuming worker resources indefinitely | Medium | Medium | Define TTL (OQ-2) and add age-based monitoring alert before launch |
+| Stuck PRE_ONBOARD sites consuming worker resources indefinitely | Low | Low | No TTL — sites remain in PRE_ONBOARD until the customer completes the PLG onboarding flow. Worker resource impact is negligible since audits are lightweight. |
 
 ---
 
@@ -530,8 +527,6 @@ After all changes are deployed end-to-end:
 | # | Question | Owner |
 |---|---|---|
 | OQ-1 | `createEntitlement()` currently hardcodes `llmo_trial_prompts: 200` for all new entitlements. Should PLG and PRE_ONBOARD entitlements receive different quotas, or should PRE_ONBOARD be created with null quotas (since the site is not yet customer-visible)? | Product |
-| OQ-2 | What is the defined TTL for a site in `PRE_ONBOARD` before it is considered stuck (no conversion to PLG, no revocation)? A 30-day threshold is proposed. This threshold drives the ops monitoring query and alert. | PLG onboarding team |
-| OQ-3 | Should `GET /organizations/:id` (the org detail endpoint, not sites) expose the entitlement tier to callers? If so, should PRE_ONBOARD be filtered or visible? | API/product |
-| OQ-4 | Is a monitoring/alerting signal for sites stuck in PRE_ONBOARD tier longer than the TTL (OQ-2) required before launch, or is it a post-launch follow-up? | Platform/ops |
-| OQ-5 | Should activity records (`createActivityForSite`) be suppressed for PRE_ONBOARD-tier sites, or is recording activity for internal/pre-provisioning sites acceptable? PLG-tier activity records are now expected since sites are customer-visible. | Product |
-| OQ-6 | Should `validateEntitlement` create `TrialUser` records for PLG-tier sites (as it does for FREE_TRIAL), or is the PLG user model different? Current implementation: PLG does NOT create TrialUser (per FR-PLG-11). | Product |
+| OQ-2 | Should `GET /organizations/:id` (the org detail endpoint, not sites) expose the entitlement tier to callers? If so, should PRE_ONBOARD be filtered or visible? | API/product |
+| OQ-3 | Should activity records (`createActivityForSite`) be suppressed for PRE_ONBOARD-tier sites, or is recording activity for internal/pre-provisioning sites acceptable? PLG-tier activity records are now expected since sites are customer-visible. | Product |
+| OQ-4 | Should `validateEntitlement` create `TrialUser` records for PLG-tier sites (as it does for FREE_TRIAL), or is the PLG user model different? Current implementation: PLG does NOT create TrialUser (per FR-PLG-11). | Product |
