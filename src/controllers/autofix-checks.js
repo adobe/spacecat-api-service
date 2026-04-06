@@ -18,7 +18,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import checkHandlerRegistry from '../support/autofix-checks/registry.js';
 
 /**
- * Preflight Checks Controller — runs server-side permission and capability
+ * Autofix Checks Controller — runs server-side permission and capability
  * checks for a site before autofix deploy.
  *
  * POST /sites/:siteId/autofix-checks
@@ -32,7 +32,7 @@ import checkHandlerRegistry from '../support/autofix-checks/registry.js';
  * @param {Object} ctx - Application context (dataAccess, log, etc.)
  * @returns {Object} Controller with runChecks method
  */
-function PreflightChecksController(ctx) {
+function AutofixChecksController(ctx) {
   if (!isNonEmptyObject(ctx?.dataAccess)) {
     throw new Error('Valid data access configuration required');
   }
@@ -42,7 +42,7 @@ function PreflightChecksController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Runs the requested preflight checks for a site.
+   * Runs the requested autofix checks for a site.
    * @param {Object} context - Request context with params.siteId and data.checks
    * @returns {Promise<Object>} HTTP response
    */
@@ -80,7 +80,7 @@ function PreflightChecksController(ctx) {
           try {
             return await handler(site, context, log);
           } catch (error) {
-            log.error(`Preflight check "${check.type}" threw unexpectedly: ${error.message}`);
+            log.error(`Autofix check "${check.type}" threw unexpectedly: ${error.message}`);
             return {
               type: check.type,
               status: 'ERROR',
@@ -92,7 +92,7 @@ function PreflightChecksController(ctx) {
 
       return ok({ siteId, checks: results });
     } catch (error) {
-      log.error(`Preflight checks failed for site ${siteId}: ${error.message}`);
+      log.error(`Autofix checks failed for site ${siteId}: ${error.message}`);
       return internalServerError('Failed to run preflight checks');
     }
   };
@@ -100,4 +100,4 @@ function PreflightChecksController(ctx) {
   return { runChecks };
 }
 
-export default PreflightChecksController;
+export default AutofixChecksController;
