@@ -153,8 +153,6 @@ describe('getRouteHandlers', () => {
   const mockBrandsController = {
     getBrandsForOrganization: sinon.stub(),
     getBrandGuidelinesForSite: sinon.stub(),
-    getCustomerConfig: sinon.stub(),
-    saveCustomerConfig: sinon.stub(),
     listBrandsForOrg: sinon.stub(),
     listCategoriesForOrg: sinon.stub(),
     createCategoryForOrg: sinon.stub(),

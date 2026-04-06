@@ -119,14 +119,6 @@ paths:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
     $ref: './brands-api.yaml#/brands-for-organization'
-  /v2/orgs/{spaceCatId}/llmo-customer-config:
-    $ref: './customer-config-api.yaml#/llmo-customer-config-by-space-cat-id-v2'
-  /v2/orgs/{spaceCatId}/llmo-customer-config-lean:
-    $ref: './customer-config-api.yaml#/llmo-customer-config-lean-by-space-cat-id-v2'
-  /v2/orgs/{spaceCatId}/llmo-topics:
-    $ref: './customer-config-api.yaml#/llmo-topics-by-space-cat-id-v2'
-  /v2/orgs/{spaceCatId}/llmo-prompts:
-    $ref: './customer-config-api.yaml#/llmo-prompts-by-space-cat-id-v2'
   /v2/orgs/{spaceCatId}/brands:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
@@ -136,11 +128,11 @@ paths:
   /v2/orgs/{spaceCatId}/topics/{topicId}:
     $ref: './topics-v2-api.yaml#/v2-topic-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts:
-    $ref: './customer-config-api.yaml#/v2-prompts-by-brand'
+    $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/{promptId}:
-    $ref: './customer-config-api.yaml#/v2-prompts-by-brand-and-id'
+    $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
-    $ref: './customer-config-api.yaml#/v2-prompts-by-brand-bulk-delete'
+    $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
