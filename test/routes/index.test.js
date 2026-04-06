@@ -413,7 +413,7 @@ describe('getRouteHandlers', () => {
     batchStatus: () => null,
   };
 
-  const mockPreflightChecksController = {
+  const mockAutofixChecksController = {
     runChecks: sinon.stub(),
   };
 
@@ -466,7 +466,7 @@ describe('getRouteHandlers', () => {
       mockContactSalesLeadsController,
       mockFeatureFlagsController,
       mockEphemeralRunController,
-      mockPreflightChecksController,
+      mockAutofixChecksController,
     );
 
     expect(staticRoutes).to.have.all.keys(
