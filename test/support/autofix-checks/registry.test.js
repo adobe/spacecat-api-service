@@ -13,11 +13,15 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
-import checkHandlerRegistry from '../../../src/support/preflight-checks/registry.js';
+import checkHandlerRegistry from '../../../src/support/autofix-checks/registry.js';
 
-describe('Preflight Check Handler Registry', () => {
+describe('Autofix Check Handler Registry', () => {
   it('has content-api-access handler registered', () => {
     expect(checkHandlerRegistry['content-api-access']).to.be.a('function');
+  });
+
+  it('has code-repo-access handler registered', () => {
+    expect(checkHandlerRegistry['code-repo-access']).to.be.a('function');
   });
 
   it('does not have unknown handler types', () => {

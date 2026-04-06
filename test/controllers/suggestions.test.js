@@ -6839,6 +6839,23 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(context.log.error.calledWithMatch('Error deploying to edge')).to.equal(true);
     });
+
+    it('enforces hasAccess → isLLMOAdministrator → isOwnerOfSite call order', async () => {
+      const isLLMOAdminStub = AccessControlUtil.prototype.isLLMOAdministrator;
+      const isOwnerStub = AccessControlUtil.prototype.isOwnerOfSite;
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      isOwnerStub.resolves(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+    });
   });
 
   describe('listGeoExperiments', () => {
@@ -7617,6 +7634,23 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body.message).to.equal('User does not have access to rollback edge optimize fixes for this site');
+    });
+
+    it('enforces hasAccess → isLLMOAdministrator → isOwnerOfSite call order', async () => {
+      const isLLMOAdminStub = AccessControlUtil.prototype.isLLMOAdministrator;
+      const isOwnerStub = AccessControlUtil.prototype.isOwnerOfSite;
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      isOwnerStub.resolves(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
     });
   });
 

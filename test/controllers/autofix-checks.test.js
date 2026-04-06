@@ -61,13 +61,13 @@ describe('PreflightChecks Controller', () => {
   before(async () => {
     contentApiHandlerStub = sandbox.stub();
 
-    PreflightChecksController = await esmock('../../src/controllers/preflight-checks.js', {
+    PreflightChecksController = await esmock('../../src/controllers/autofix-checks.js', {
       '../../src/support/access-control-util.js': {
         default: {
           fromContext: () => mockAccessControlUtil,
         },
       },
-      '../../src/support/preflight-checks/registry.js': {
+      '../../src/support/autofix-checks/registry.js': {
         default: {
           'content-api-access': contentApiHandlerStub,
         },
@@ -217,7 +217,7 @@ describe('PreflightChecks Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.checks[0].status).to.equal('ERROR');
-      expect(body.checks[0].message).to.equal('Check failed unexpectedly');
+      expect(body.checks[0].message).to.equal('Unexpected failure');
     });
 
     it('returns 500 when site lookup throws', async () => {

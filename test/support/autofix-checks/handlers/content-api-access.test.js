@@ -50,10 +50,13 @@ describe('content-api-access handler', () => {
     fetchStub = sandbox.stub();
 
     const mod = await esmock(
-      '../../../../src/support/preflight-checks/handlers/content-api-access.js',
+      '../../../../src/support/autofix-checks/handlers/content-api-access.js',
       {
         '@adobe/spacecat-shared-utils': {
           tracingFetch: fetchStub,
+        },
+        '@adobe/spacecat-shared-data-access': {
+          Site: { DELIVERY_TYPES: { AEM_CS: 'aem_cs' } },
         },
       },
     );
@@ -65,13 +68,12 @@ describe('content-api-access handler', () => {
     fetchStub.reset();
   });
 
-  it('returns PASSED for Edge Delivery sites', async () => {
+  it('returns SKIPPED for non-AEM CS sites (Edge Delivery)', async () => {
     const site = { getDeliveryType: () => 'aem_edge', getDeliveryConfig: () => ({}) };
     const result = await contentApiAccessHandler(site, mockContext, loggerStub);
 
     expect(result.type).to.equal('content-api-access');
-    expect(result.status).to.equal('PASSED');
-    expect(result.message).to.include('Edge Delivery');
+    expect(result.status).to.equal('SKIPPED');
     expect(fetchStub).to.not.have.been.called;
   });
 
@@ -92,8 +94,8 @@ describe('content-api-access handler', () => {
     expect(result.message).to.include('authorization header');
   });
 
-  it('returns PASSED when Content API responds 200', async () => {
-    fetchStub.resolves({ ok: true, status: 200 });
+  it('returns PASSED when experimental ASPM path responds 200', async () => {
+    fetchStub.resolves({ status: 200 });
 
     const result = await contentApiAccessHandler(mockSite, mockContext, loggerStub);
 
@@ -102,44 +104,62 @@ describe('content-api-access handler', () => {
     expect(fetchStub).to.have.been.calledOnce;
 
     const [url, opts] = fetchStub.firstCall.args;
-    expect(url).to.equal(`${authorURL}/adobe/experimental/expires-20251231/pages?limit=1`);
+    expect(url).to.equal(`${authorURL}/adobe/experimental/aspm-expires-20251231/pages?limit=1`);
     expect(opts.headers.Authorization).to.equal('Bearer test-ims-token');
   });
 
-  it('returns FAILED with "not available" for 404', async () => {
-    fetchStub.resolves({ ok: false, status: 404 });
+  it('falls back to stable path when experimental path returns 404 and stable returns 200', async () => {
+    fetchStub.onFirstCall().resolves({ status: 404 });
+    fetchStub.onSecondCall().resolves({ status: 200 });
+
+    const result = await contentApiAccessHandler(mockSite, mockContext, loggerStub);
+
+    expect(result.status).to.equal('PASSED');
+    expect(result.message).to.equal('Content API is accessible');
+    expect(fetchStub).to.have.been.calledTwice;
+
+    const [secondUrl] = fetchStub.secondCall.args;
+    expect(secondUrl).to.equal(`${authorURL}/adobe/pages?limit=1`);
+  });
+
+  it('returns FAILED when both probe paths return 404 (Content API not deployed)', async () => {
+    fetchStub.resolves({ status: 404 });
 
     const result = await contentApiAccessHandler(mockSite, mockContext, loggerStub);
 
     expect(result.status).to.equal('FAILED');
     expect(result.message).to.include('not available');
+    expect(fetchStub).to.have.been.calledTwice;
   });
 
-  it('returns FAILED with "permissions" for 401', async () => {
-    fetchStub.resolves({ ok: false, status: 401 });
+  it('returns FAILED with "permissions" for 401 on first probe', async () => {
+    fetchStub.resolves({ status: 401 });
 
     const result = await contentApiAccessHandler(mockSite, mockContext, loggerStub);
 
     expect(result.status).to.equal('FAILED');
     expect(result.message).to.include('permissions');
+    expect(fetchStub).to.have.been.calledOnce;
   });
 
-  it('returns FAILED with "permissions" for 403', async () => {
-    fetchStub.resolves({ ok: false, status: 403 });
+  it('returns FAILED with "permissions" for 403 on first probe', async () => {
+    fetchStub.resolves({ status: 403 });
 
     const result = await contentApiAccessHandler(mockSite, mockContext, loggerStub);
 
     expect(result.status).to.equal('FAILED');
     expect(result.message).to.include('permissions');
+    expect(fetchStub).to.have.been.calledOnce;
   });
 
-  it('returns FAILED with unexpected status for other codes', async () => {
-    fetchStub.resolves({ ok: false, status: 500 });
+  it('returns FAILED with unexpected status for other error codes', async () => {
+    fetchStub.resolves({ status: 500 });
 
     const result = await contentApiAccessHandler(mockSite, mockContext, loggerStub);
 
     expect(result.status).to.equal('FAILED');
     expect(result.message).to.include('unexpected status 500');
+    expect(fetchStub).to.have.been.calledOnce;
   });
 
   it('returns FAILED with "not reachable" on network error', async () => {

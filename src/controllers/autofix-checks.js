@@ -15,13 +15,13 @@ import {
   badRequest, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../support/access-control-util.js';
-import checkHandlerRegistry from '../support/preflight-checks/registry.js';
+import checkHandlerRegistry from '../support/autofix-checks/registry.js';
 
 /**
  * Preflight Checks Controller — runs server-side permission and capability
  * checks for a site before autofix deploy.
  *
- * POST /sites/:siteId/preflight-checks
+ * POST /sites/:siteId/autofix-checks
  *
  * Request body:
  *   { "checks": [{ "type": "content-api-access" }] }
@@ -84,7 +84,7 @@ function PreflightChecksController(ctx) {
             return {
               type: check.type,
               status: 'ERROR',
-              message: 'Check failed unexpectedly',
+              message: error.message,
             };
           }
         }),

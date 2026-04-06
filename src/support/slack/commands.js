@@ -28,6 +28,7 @@ import getGoogleLink from './commands/create-google-link.js';
 import help from './commands/help.js';
 import toggleSiteAudit from './commands/toggle-site-audit.js';
 import onboard from './commands/onboard.js';
+import onboardStatus from './commands/onboard-status.js';
 import llmoOnboard from './commands/llmo-onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
@@ -80,6 +81,7 @@ export default (context) => [
   help(context),
   toggleSiteAudit(context),
   onboard(context),
+  onboardStatus(context),
   llmoOnboard(context),
   setSiteOrganizationCommand(context),
   toggleSiteImport(context),

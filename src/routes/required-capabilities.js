@@ -75,6 +75,7 @@ export const INTERNAL_ROUTES = [
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
+  'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
@@ -107,7 +108,7 @@ export const INTERNAL_ROUTES = [
   'PATCH /contact-sales-leads/:contactSalesLeadId',
 
   // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
-  'POST /sites/:siteId/preflight-checks',
+  'POST /sites/:siteId/autofix-checks',
 
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
@@ -116,6 +117,10 @@ export const INTERNAL_ROUTES = [
   'POST /consumers/register',
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
+
+  // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
+  'POST /ephemeral-run/batch',
+  'GET /ephemeral-run/batch/:batchId/status',
 ];
 
 /**

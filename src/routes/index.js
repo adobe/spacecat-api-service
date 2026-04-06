@@ -92,6 +92,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
+ * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} preflightChecksController - Preflight checks controller for autofix deploy.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -142,6 +143,7 @@ export default function getRouteHandlers(
   imsOrgAccessController,
   contactSalesLeadsController,
   featureFlagsController,
+  ephemeralRunController,
   preflightChecksController,
 ) {
   const staticRoutes = {};
@@ -455,6 +457,7 @@ export default function getRouteHandlers(
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
+    'GET /plg/sites': plgOnboardingController.getAllOnboardings,
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
 
     // Tier Specific Routes
@@ -480,6 +483,10 @@ export default function getRouteHandlers(
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
+
+    // Insights orchestration routes
+    'POST /ephemeral-run/batch': ephemeralRunController.batchRun,
+    'GET /ephemeral-run/batch/:batchId/status': ephemeralRunController.batchStatus,
 
     // Reports
     'POST /sites/:siteId/reports': reportsController.createReport,
@@ -531,8 +538,8 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
     'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
 
-    // Preflight checks (autofix deploy permission/capability validation)
-    'POST /sites/:siteId/preflight-checks': preflightChecksController.runChecks,
+    // Autofix checks (permission/capability validation before autofix deploy)
+    'POST /sites/:siteId/autofix-checks': preflightChecksController.runChecks,
   };
 
   // Initialization of static and dynamic routes

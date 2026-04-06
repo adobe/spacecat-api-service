@@ -11,21 +11,29 @@
  */
 
 import contentApiAccessHandler from './handlers/content-api-access.js';
+import codeRepoAccessHandler from './handlers/code-repo-access.js';
 
 /**
- * Registry of preflight check handlers.
+ * Registry of autofix check handlers.
  *
- * Each handler is an async function with the signature:
- *   (site, context, log) => Promise<{ type: string, status: string, message: string }>
+ * Each handler is a (sync or async) function with the signature:
+ *   (site, context, log) => { type: string, status: string, message: string }
+ *
+ * Statuses:
+ *   PASSED  — check passed, deployment can proceed
+ *   FAILED  — check failed, deployment should be blocked
+ *   SKIPPED — check not applicable for this site/delivery type
+ *   ERROR   — handler threw unexpectedly (controller catches and wraps)
  *
  * To add a new handler:
- *   1. Create a file in ./handlers/ following the content-api-access.js pattern
+ *   1. Create a file in ./handlers/ following the existing patterns
  *   2. Import it here and add an entry to the registry map
  *
  * The key is the check type string that callers pass in the request body.
  */
 const checkHandlerRegistry = {
   'content-api-access': contentApiAccessHandler,
+  'code-repo-access': codeRepoAccessHandler,
 };
 
 export default checkHandlerRegistry;

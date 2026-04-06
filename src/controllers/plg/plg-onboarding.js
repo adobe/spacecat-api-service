@@ -37,7 +37,11 @@ import {
   ASO_DEMO_ORG,
 } from '../llmo/llmo-onboarding.js';
 import {
-  autoResolveAuthorUrl, findDeliveryType, deriveProjectName, updateCodeConfig,
+  autoResolveAuthorUrl,
+  findDeliveryType,
+  deriveProjectName,
+  updateCodeConfig,
+  queueDeliveryConfigWriter,
 } from '../../support/utils.js';
 import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -419,12 +423,32 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     await site.save();
     steps.configUpdated = true;
 
-    // Step 7: Enable audits from PLG profile
+    // Step 7: update redirects source and mode for AEM CS/CW site.
+    // Skip for non-CS/CW sites, or if programID and environmentID are missing
+    const deliveryConfigResult = await queueDeliveryConfigWriter(
+      {
+        site,
+        baseURL,
+        minutes: 2000, // 33 hours, same as default. Lower values may miss redirects.
+        updateRedirects: true,
+        slackContext: {},
+      },
+      context,
+    );
+
+    if (deliveryConfigResult.ok) {
+      steps.deliveryConfigQueued = true;
+    } else {
+      steps.deliveryConfigQueued = false;
+      log.warn(`Failed to queue delivery config writer for site ${site.getId()}: ${deliveryConfigResult.error}`);
+    }
+
+    // Step 8: Enable audits from PLG profile
     const auditTypes = Object.keys(profile.audits || {});
     await enableAudits(site, context, auditTypes);
     steps.auditsEnabled = true;
 
-    // Step 7b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
+    // Step 8b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
     try {
       const { Configuration } = dataAccess;
       const configuration = await Configuration.findLatest();
@@ -448,14 +472,14 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
-    // Step 8: Add ASO entitlement
+    // Step 9: Add ASO entitlement
     await ensureAsoEntitlement(site, context);
     steps.entitlementCreated = true;
 
-    // Step 9: Trigger audit runs
+    // Step 10: Trigger audit runs
     await triggerAudits(auditTypes, context, site);
 
-    // Step 10: Trigger brand profile (non-blocking)
+    // Step 11: Trigger brand profile (non-blocking)
     try {
       await triggerBrandProfileAgent({
         context, site, reason: 'plg-onboarding',
@@ -491,7 +515,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 /**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
- * @returns {object} Controller with onboard and getStatus methods.
+  * @returns {object} Controller with onboard, getStatus, and getAllOnboardings methods.
  */
 function PlgOnboardingController(ctx) {
   const { log } = ctx;
@@ -592,7 +616,79 @@ function PlgOnboardingController(ctx) {
     return ok(records.map(PlgOnboardingDto.toJSON));
   };
 
-  return { onboard, getStatus };
+  /**
+   * Handler for `GET /plg/sites`. Lists rows in the PLG onboardings store (`plg_onboardings`
+   * via PostgREST; schema in `@adobe/spacecat-shared-data-access` plg-onboarding.schema.js).
+   * Each record is one PLG site onboarding (domain, baseURL, optional SpaceCat siteId).
+   * Cross-tenant; restricted to SpaceCat admins.
+   *
+   * Query `limit` (optional): caps how many rows are returned. When omitted, all pages are
+   * loaded until exhaustion (unbounded client-side cap; payload can be very large).
+   * @param {object} context - Request context.
+   * @returns {Promise<Response>} Array of onboarding DTOs.
+   */
+  const getAllOnboardings = async (context) => {
+    try {
+      const accessControlUtil = AccessControlUtil.fromContext(context);
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only admins can list all PLG onboarding records');
+      }
+
+      const rawLimit = context.data?.limit;
+      let listOptions;
+      if (rawLimit === undefined || rawLimit === null || rawLimit === '') {
+        // TODO: implement proper pagination or filtering to stay under AWS Lambda
+        // response size limits (6MB). Without `limit`, all pages are loaded into memory before
+        // responding (OOM / timeout risk as the table grows).
+        listOptions = { fetchAllPages: true };
+      } else {
+        const limitStr = String(rawLimit).trim();
+        if (!/^\d+$/.test(limitStr)) {
+          return badRequest('limit must be a positive integer');
+        }
+        const n = Number.parseInt(limitStr, 10);
+        if (n < 1) {
+          return badRequest('limit must be a positive integer');
+        }
+        listOptions = { limit: n };
+      }
+
+      const { PlgOnboarding } = context.dataAccess;
+      const raw = await PlgOnboarding.all({}, listOptions);
+      // Data access returns a single instance when limit === 1, not an array (BaseCollection).
+      let records;
+      if (Array.isArray(raw)) {
+        records = raw;
+      } else if (raw === null || raw === undefined) {
+        records = [];
+      } else if (typeof raw === 'object' && typeof raw.getId === 'function') {
+        records = [raw];
+      } else {
+        log.error(
+          `Unexpected PLG onboarding list result shape from data access: ${Object.prototype.toString.call(raw)}`,
+        );
+        return internalServerError('Failed to list PLG onboarding records');
+      }
+
+      let payload;
+      try {
+        payload = records.map(PlgOnboardingDto.toJSON);
+      } catch (serializationError) {
+        const serMsg = serializationError instanceof Error
+          ? serializationError.message
+          : String(serializationError);
+        log.error(`Failed to serialize PLG onboarding records: ${serMsg}`, serializationError);
+        return internalServerError('Failed to serialize PLG onboarding records');
+      }
+      return ok(payload);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log.error(`Failed to list PLG onboardings: ${errMsg}`, error);
+      return internalServerError('Failed to list PLG onboarding records');
+    }
+  };
+
+  return { onboard, getStatus, getAllOnboardings };
 }
 
 export default PlgOnboardingController;

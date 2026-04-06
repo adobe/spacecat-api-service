@@ -83,6 +83,7 @@ import TrialUsersController from './controllers/trial-users.js';
 import UserDetailsController from './controllers/user-details.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
+import EphemeralRunController from './controllers/ephemeral-run.js';
 import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
@@ -92,7 +93,7 @@ import ConsumersController from './controllers/consumers.js';
 import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
-import PreflightChecksController from './controllers/preflight-checks.js';
+import PreflightChecksController from './controllers/autofix-checks.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 
@@ -217,6 +218,7 @@ async function run(request, context) {
     const userDetailsController = UserDetailsController(context);
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
+    const ephemeralRunController = EphemeralRunController(context);
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
@@ -277,6 +279,7 @@ async function run(request, context) {
       imsOrgAccessController,
       contactSalesLeadsController,
       featureFlagsController,
+      ephemeralRunController,
       preflightChecksController,
     );
 

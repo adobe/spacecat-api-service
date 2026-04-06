@@ -384,6 +384,7 @@ describe('getRouteHandlers', () => {
 
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
+    getAllOnboardings: sinon.stub(),
     getStatus: sinon.stub(),
   };
 
@@ -405,6 +406,11 @@ describe('getRouteHandlers', () => {
     listByOrganization: () => null,
     putByOrganizationProductAndName: () => null,
     deleteByOrganizationProductAndName: () => null,
+  };
+
+  const mockEphemeralRunController = {
+    batchRun: () => null,
+    batchStatus: () => null,
   };
 
   const mockPreflightChecksController = {
@@ -459,6 +465,7 @@ describe('getRouteHandlers', () => {
       mockImsOrgAccessController,
       mockContactSalesLeadsController,
       mockFeatureFlagsController,
+      mockEphemeralRunController,
       mockPreflightChecksController,
     );
 
@@ -492,11 +499,13 @@ describe('getRouteHandlers', () => {
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
       'POST /plg/onboard',
+      'GET /plg/sites',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
       'GET /consumers',
       'POST /consumers/register',
+      'POST /ephemeral-run/batch',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -519,6 +528,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
     expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
+    expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
@@ -832,7 +842,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/contact-sales-leads',
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
-      'POST /sites/:siteId/preflight-checks',
+      'GET /ephemeral-run/batch/:batchId/status',
+      'POST /sites/:siteId/autofix-checks',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
