@@ -75,6 +75,7 @@ export const INTERNAL_ROUTES = [
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
+  'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only

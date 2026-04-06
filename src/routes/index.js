@@ -455,6 +455,7 @@ export default function getRouteHandlers(
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
+    'GET /plg/sites': plgOnboardingController.getAllOnboardings,
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
 
     // Tier Specific Routes

@@ -1,3 +1,10 @@
+# [1.414.0](https://github.com/adobe/spacecat-api-service/compare/v1.413.7...v1.414.0) (2026-04-06)
+
+
+### Features
+
+* added an api to fetch all plg sites ([#2110](https://github.com/adobe/spacecat-api-service/issues/2110)) ([57a1d13](https://github.com/adobe/spacecat-api-service/commit/57a1d13c82f0f9c0dfd3b3a9f26f3ae17915575d))
+
 ## [1.413.7](https://github.com/adobe/spacecat-api-service/compare/v1.413.6...v1.413.7) (2026-04-05)
 
 

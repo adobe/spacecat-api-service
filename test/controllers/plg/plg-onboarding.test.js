@@ -241,6 +241,7 @@ describe('PlgOnboardingController', () => {
         findByImsOrgIdAndDomain: sandbox.stub().resolves(null),
         create: sandbox.stub().resolves(mockOnboarding),
         allByImsOrgId: sandbox.stub().resolves([]),
+        all: sandbox.stub().resolves([]),
       },
     };
 
@@ -1960,6 +1961,247 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Authentication information is required');
+    });
+
+    describe('getAllOnboardings', () => {
+      beforeEach(() => {
+        mockDataAccess.PlgOnboarding.all.reset();
+        mockDataAccess.PlgOnboarding.all.resolves([]);
+      });
+
+      it('returns 403 when caller is not admin', async () => {
+        const nonAdminController = PlgOnboardingController({ log: mockLog });
+        const res = await nonAdminController.getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(403);
+        expect(res.value).to.equal('Only admins can list all PLG onboarding records');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 200 with all records when admin', async () => {
+        const record = createMockOnboarding({
+          id: 'all-rec-1',
+          domain: 'plg-all.example.com',
+          status: 'ONBOARDED',
+        });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').with.length(1);
+        expect(res.value[0].id).to.equal('all-rec-1');
+        expect(res.value[0].domain).to.equal('plg-all.example.com');
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { fetchAllPages: true },
+        );
+      });
+
+      it('returns 200 and passes limit when admin sends limit', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves([]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '50' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { limit: 50 },
+        );
+      });
+
+      it('returns 200 with one-item array when limit is 1 (data access returns single instance)', async () => {
+        const record = createMockOnboarding({
+          id: 'limit-1-rec',
+          domain: 'one.example.com',
+          status: 'ONBOARDED',
+        });
+        mockDataAccess.PlgOnboarding.all.resolves(record);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').with.length(1);
+        expect(res.value[0].id).to.equal('limit-1-rec');
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { limit: 1 },
+        );
+      });
+
+      it('returns 200 with empty array when limit is 1 and data access returns null', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves(null);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').that.is.empty;
+      });
+
+      it('returns 200 with empty array when limit is 1 and data access returns undefined', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves(undefined);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').that.is.empty;
+      });
+
+      it('returns 500 when data access returns a non-model value', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves(0);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to list PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Unexpected PLG onboarding list result shape/),
+        );
+      });
+
+      it('returns 500 when DTO serialization throws an Error', async () => {
+        const record = createMockOnboarding({ id: 'bad-ser' });
+        record.getId.throws(new Error('broken model'));
+
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to serialize PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to serialize PLG onboarding records: broken model/),
+        );
+      });
+
+      it('returns 500 when DTO serialization throws a non-Error', async () => {
+        const record = createMockOnboarding();
+        record.getId.callsFake(() => {
+          // eslint-disable-next-line no-throw-literal -- non-Error catch branch in controller
+          throw 'not an Error object';
+        });
+
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to serialize PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to serialize PLG onboarding records: not an Error object/),
+        );
+      });
+
+      it('returns 400 when limit is not a positive integer', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '0' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 400 when limit is a decimal string (not an integer token)', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1.5' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 400 when limit has trailing non-digits', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '50abc' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 400 when limit is negative', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '-1' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 500 when data access fails', async () => {
+        mockDataAccess.PlgOnboarding.all.rejects(new Error('db unavailable'));
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to list PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to list PLG onboardings: db unavailable/),
+        );
+      });
+
+      it('returns 500 when data access rejects with a non-Error', async () => {
+        /* eslint-disable-next-line prefer-promise-reject-errors -- non-Error catch in controller */
+        mockDataAccess.PlgOnboarding.all.returns(Promise.reject('connection reset'));
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to list PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to list PLG onboardings: connection reset/),
+        );
+      });
     });
   });
 });
