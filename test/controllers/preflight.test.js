@@ -974,13 +974,13 @@ describe('Preflight Controller', () => {
         data: {
           url: 'https://main--example-site.aem.page/test.html',
           step: 'identify',
-          mystiqueUrl: 'https://my-ephemeral-env.stage.cloud.adobe.io',
+          mystiqueUrl: 'https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io',
         },
       });
       expect(response.status).to.equal(202);
 
       const [calledUrl] = fetchStub.firstCall.args;
-      expect(calledUrl).to.equal('https://my-ephemeral-env.stage.cloud.adobe.io/v1/preflight/analyze');
+      expect(calledUrl).to.equal('https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io/v1/preflight/analyze');
     });
 
     it('returns 400 when mystiqueUrl override is used in prod', async () => {
@@ -998,7 +998,7 @@ describe('Preflight Controller', () => {
         data: {
           url: 'https://main--example-site.aem.page/test.html',
           step: 'identify',
-          mystiqueUrl: 'https://evil.example.com',
+          mystiqueUrl: 'https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io',
         },
       });
       expect(response.status).to.equal(400);
@@ -1027,6 +1027,29 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid URL');
+    });
+
+    it('returns 400 when mystiqueUrl is not an allowed Mystique ephemeral host', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'https://evil.example.com',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid Mystique ephemeral host');
     });
 
     it('sets job to FAILED and saves when Mysticat returns non-ok status', async () => {

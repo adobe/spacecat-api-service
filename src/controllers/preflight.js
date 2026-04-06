@@ -331,6 +331,9 @@ function PreflightController(ctx, log, env) {
       if (!isValidUrl(data.mystiqueUrl)) {
         return badRequest('Invalid request: mystiqueUrl must be a valid URL');
       }
+      if (!(/\.stage\.cloud\.adobe\.io$/).test(new URL(data.mystiqueUrl).hostname)) {
+        return badRequest('Invalid request: mystiqueUrl must be a valid Mystique ephemeral host');
+      }
     }
 
     const mysticatBaseUrl = (isDev && hasText(data.mystiqueUrl))
