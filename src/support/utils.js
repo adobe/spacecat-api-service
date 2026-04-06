@@ -37,6 +37,13 @@ import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 
+// Two signals indicate a previous paid onboarding:
+// 1. ahref-paid-pages import — unique to the paid profile's import set.
+// 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
+//    after onboardConfig tracking was introduced.
+const PAID_PROFILE_IMPORT = 'ahref-paid-pages';
+const MAX_ONBOARD_HISTORY = 10;
+
 /**
  * Step Functions execution names must be 1–80 chars and may only contain
  * letters, numbers, hyphens, or underscores
@@ -971,6 +978,7 @@ const createSiteAndOrganization = async (
   reportLine,
   context,
   deliveryConfig,
+  prefetchedSite = null,
 ) => {
   const { imsClient, dataAccess, log } = context;
   const { Site, Organization } = dataAccess;
@@ -978,7 +986,7 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
-  let site = await Site.findByBaseURL(baseURL);
+  let site = prefetchedSite ?? await Site.findByBaseURL(baseURL);
   let organizationId;
 
   if (site) {
@@ -1170,16 +1178,17 @@ export async function queueIdentifyRedirectsAudit(
       return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
     }
 
+    // check site to see either authoringType or deliveryType is CS/CW
+    // return an error if the site fails the check here
+    // done for direct identify/update-redirects call, as onboarding will perform its own pre-check
     const authoringType = site.getAuthoringType();
     const deliveryType = site.getDeliveryType();
-    // check either authoringType or deliveryType is CS/CW
     if (![
       SiteModel.AUTHORING_TYPES.CS, // cs
       SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
     ].includes(authoringType)
-    && ![
-      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
-    ].includes(deliveryType)) {
+    && deliveryType !== SiteModel.DELIVERY_TYPES.AEM_CS
+    ) {
       return {
         ok: false,
         error: ':warning: identify-redirects currently supports AEM CS/CW only. '
@@ -1189,6 +1198,7 @@ export async function queueIdentifyRedirectsAudit(
 
     const deliveryConfig = site.getDeliveryConfig?.() || {};
     const { programId, environmentId } = deliveryConfig;
+    // Hard failure if programId or environmentId is missing here.
     if (!hasText(programId) || !hasText(environmentId)) {
       return { ok: false, error: ':x: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for Splunk queries.' };
     }
@@ -1218,6 +1228,41 @@ export async function queueIdentifyRedirectsAudit(
     log.error(error);
     throw error;
   }
+}
+
+/**
+ * Checks if a site is valid for redirects.
+ * @param {Site} site - The site to check.
+ * @returns {Object} - An object with validForRedirects and skipMessage properties.
+ */
+export function validateSiteForRedirects(site) {
+  const authoringType = site.getAuthoringType();
+  const deliveryType = site.getDeliveryType();
+  const deliveryConfig = site.getDeliveryConfig?.() || {};
+  const baseURL = site.getBaseURL();
+  let { programId, environmentId } = deliveryConfig;
+  const siteId = site.getId();
+  let validForRedirects = true;
+  let skipMessage = '';
+
+  if (![
+    SiteModel.AUTHORING_TYPES.CS, // cs
+    SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
+  ].includes(authoringType)
+  && deliveryType !== SiteModel.DELIVERY_TYPES.AEM_CS // aem_cs
+  ) {
+    validForRedirects = false;
+    skipMessage = `the site ${baseURL}/${siteId} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`;
+  } else if (!hasText(programId) || !hasText(environmentId)) {
+    validForRedirects = false;
+    programId = undefined;
+    environmentId = undefined;
+    skipMessage = `the site ${baseURL}/${siteId} is not valid for redirects because environmentID and/or programID is missing.`;
+  }
+
+  return {
+    validForRedirects, skipMessage, programId, environmentId,
+  };
 }
 
 /*
@@ -1322,39 +1367,28 @@ export async function queueDeliveryConfigWriter(
     }
 
     const siteId = site.getId();
-    const authoringType = site.getAuthoringType();
-    const deliveryType = site.getDeliveryType();
-
-    const validForRedirects = [
-      SiteModel.AUTHORING_TYPES.CS,
-      SiteModel.AUTHORING_TYPES.CS_CW,
-    ].includes(authoringType) || [
-      SiteModel.DELIVERY_TYPES.AEM_CS,
-    ].includes(deliveryType);
-
     let redirectParams = {};
+
+    // update-redirects is optional for onboarding, skip if the site is not eligible
+    const {
+      validForRedirects, skipMessage, programId, environmentId,
+    } = validateSiteForRedirects(site);
     if (validForRedirects) {
-      const deliveryConfig = site.getDeliveryConfig?.() || {};
-      const { programId, environmentId } = deliveryConfig;
-      if (!hasText(programId) || !hasText(environmentId)) {
-        log.info(`[delivery-config-writer] Site ${siteId} missing programId/environmentId; skipping redirect identification.`);
-      } else {
-        redirectParams = {
-          programId: String(programId),
-          environmentId: String(environmentId),
-          minutes,
-          updateRedirects,
-        };
-      }
+      redirectParams = {
+        programId: String(programId),
+        environmentId: String(environmentId),
+        minutes,
+        updateRedirects,
+      };
     } else {
       log.info(
-        `[delivery-config-writer] Site ${siteId} not valid for redirect identification`
-        + ` (authoringType=${authoringType}, deliveryType=${deliveryType}); CDN detection only.`,
+        `[delivery-config-writer] ${skipMessage}; CDN detection only.`,
       );
     }
 
     const hasRedirectParams = Object.keys(redirectParams).length > 0;
 
+    // CDN detection is always run for onboarding
     const payload = {
       type: 'delivery-config-writer',
       siteId,
@@ -1398,6 +1432,7 @@ export async function queueDeliveryConfigWriter(
  * @param {string} options.profileName - The profile name for logging and reporting
  * @returns {Promise<Object>} Report line object
  */
+
 export const onboardSingleSite = async (
   baseURLInput,
   imsOrganizationID,
@@ -1421,9 +1456,6 @@ export const onboardSingleSite = async (
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
-
-  await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
-  await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
     site: baseURL,
@@ -1457,6 +1489,47 @@ export const onboardSingleSite = async (
       await say(`:x: Invalid IMS Org ID: ${imsOrgID}`);
       return reportLine;
     }
+
+    // Single site lookup shared between the guard and createSiteAndOrganization.
+    // Fail-open on DB error: guard is skipped, onboarding proceeds normally.
+    const { Site: SiteLookup } = dataAccess;
+    let prefetchedSite = null;
+    try {
+      prefetchedSite = await SiteLookup.findByBaseURL(baseURL);
+    } catch (lookupError) {
+      log.warn(`Site lookup failed for ${baseURL}, skipping paid profile guard:`, lookupError);
+    }
+
+    // Prevent downgrading a site that was previously onboarded with the paid profile.
+    // A non-protected incoming profile cannot override a paid onboarding unless force=true.
+    if (!profile.protected) {
+      const siteConfig = prefetchedSite?.getConfig();
+      const onboardConfig = siteConfig?.getOnboardConfig();
+      // If onboardConfig.lastProfile is set, trust it as the authoritative signal.
+      // Fall back to the import check only for legacy sites that predate onboardConfig tracking.
+      // Note: guard against empty onboardConfig ({}) from a partial write — check
+      // lastProfile != null rather than onboardConfig truthiness, so the import fallback fires.
+      // Note: '=== paid' relies on the profile name matching the key in profiles.json.
+      // If a new protected profile (e.g. paid-enterprise) is added in the future,
+      // this check must be updated to cover it alongside the incoming profile.protected flag.
+      const isPaidSite = onboardConfig?.lastProfile != null
+        ? onboardConfig.lastProfile === 'paid'
+        : isImportEnabled(PAID_PROFILE_IMPORT, siteConfig?.getImports());
+      if (isPaidSite) {
+        if (additionalParams.force) {
+          log.warn(`Force re-onboarding ${baseURL}: overriding paid profile with "${profileName}"`);
+          await say(`:warning: Force re-onboarding \`${baseURL}\` - overriding paid profile with *${profileName}*.`);
+        } else {
+          reportLine.errors = 'Blocked: site already onboarded with paid profile';
+          reportLine.status = 'Failed';
+          await say(`:warning: Site \`${baseURL}\` was last onboarded with the *paid* profile. To override with non-paid profile, re-run the onboard site command and select *Force Onboard* in the Onboard Site modal window.`);
+          return reportLine;
+        }
+      }
+    }
+
+    await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
+    await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
     let language = additionalParams.language?.toLowerCase();
     let region = additionalParams.region?.toUpperCase();
@@ -1496,6 +1569,7 @@ export const onboardSingleSite = async (
       reportLine,
       context,
       additionalParams.deliveryConfig,
+      prefetchedSite,
     );
 
     // Validate tier
@@ -1607,6 +1681,15 @@ export const onboardSingleSite = async (
       });
     }
 
+    // Persist onboard start time so onboard-status can detect stale audit records.
+    // Computed once and reused in the task context below.
+    const onboardStartTime = Date.now();
+    siteConfig.updateOnboardConfig({
+      lastProfile: profileName.toLowerCase(),
+      lastStartTime: onboardStartTime,
+      ...(additionalParams.force ? { forcedOverride: true } : {}),
+    }, { maxHistory: MAX_ONBOARD_HISTORY });
+
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
@@ -1628,6 +1711,7 @@ export const onboardSingleSite = async (
       },
       context,
     );
+
     if (!deliveryConfigResult.ok) {
       reportLine.errors = deliveryConfigResult.error;
       reportLine.status = 'Failed';
@@ -1716,7 +1800,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
-        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
+        onboardStartTime, // Same timestamp persisted to site config as lastStartTime
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
@@ -1789,7 +1873,7 @@ export const onboardSingleSite = async (
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
-    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`);
+    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${onboardStartTime}`);
 
     const startCommand = new StartExecutionCommand({
       stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,

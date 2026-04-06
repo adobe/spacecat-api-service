@@ -27,10 +27,13 @@ import {
   isValidUUID,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
-import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
+
+import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
+import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
   sendAutofixMessage,
   getCookieValue,
@@ -43,6 +46,14 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+const GEO_EXPERIMENT_SCHEDULE = Object.freeze({
+  PRE_CRON_EXPRESSION: '0 * * * *', // hourly (fires immediately via triggerImmediately: true)
+  // 5 minutes — only needs to live long enough for the immediate trigger
+  PRE_EXPIRY_MS: 14 * 60 * 60 * 1000, // 14 hours
+  PLATFORMS: ['chatgpt_free', 'perplexity'],
+  PROVIDER_IDS: ['brightdata', 'openai_web_search'],
+});
 
 /**
  * Suggestions controller.
@@ -176,7 +187,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration,
+    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, AsyncJob, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -1464,34 +1475,40 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`);
-      return forbidden('Only LLMO administrators can deploy suggestions to edge');
-    }
-
     if (!isValidUUID(opportunityId)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
       return badRequest('Opportunity ID required');
     }
 
-    // validate request body
     if (!isNonEmptyObject(context.data)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no request body data provided`);
       return badRequest('No data provided');
     }
-    const { suggestionIds } = context.data;
-    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+    const { suggestionIds: rawSuggestionIds } = context.data;
+    if (!isArray(rawSuggestionIds) || rawSuggestionIds.length === 0) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestionIds is not a non-empty array`);
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
+    const suggestionIds = [...new Set(rawSuggestionIds)];
 
+    // No productCode is passed to hasAccess(); the delegation block is not entered.
+    // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
+      context.log.warn(
+        `[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`,
+      );
       return forbidden('User does not belong to the organization');
     }
 
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`);
+      return forbidden('Only LLMO administrators can deploy suggestions to edge');
+    }
+
     if (!await accessControlUtil.isOwnerOfSite(site)) {
-      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not the owner of the site`);
+      context.log.warn(
+        `[edge-deploy-failed] site: ${apexBaseUrl}, user is not the owner of the site`,
+      );
       return forbidden('User does not have access to deploy edge optimize fixes for this site');
     }
 
@@ -1501,9 +1518,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
-    // Fetch all suggestions for this opportunity
     const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
-
     context.log.info(`[edge-deploy] allSuggestions count: ${allSuggestions.length}`);
 
     const isEdgeDeployableStatus = (status) => status === SuggestionModel.STATUSES.NEW
@@ -1514,7 +1529,6 @@ function SuggestionsController(ctx, sqs, env) {
     const domainWideSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
-
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
@@ -1558,317 +1572,267 @@ function SuggestionsController(ctx, sqs, env) {
     context.log.info(`[edge-deploy] validSuggestions count: ${validSuggestions.length}
       , Failed suggestions count: ${failedSuggestions.length}`);
 
-    // Filter out validSuggestions that are covered by domain-wide suggestions
-    // in the same deployment
-    if (isNonEmptyArray(domainWideSuggestions) && isNonEmptyArray(validSuggestions)) {
-      // Build all regex patterns from domain-wide suggestions
-      const allDomainWidePatterns = [];
-      domainWideSuggestions.forEach(({ allowedRegexPatterns }) => {
-        if (isNonEmptyArray(allowedRegexPatterns)) {
-          allowedRegexPatterns.forEach((pattern) => {
-            try {
-              allDomainWidePatterns.push(new RegExp(pattern));
-            } catch (error) {
-              context.log.warn(`Invalid regex pattern: ${pattern}`, error);
-            }
-          });
-        }
-      });
+    const validSuggestionIds = [
+      ...validSuggestions.map((s) => s.getId()),
+      ...domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
+    ];
 
-      // Filter validSuggestions to exclude those covered by domain-wide patterns
-      const filteredValidSuggestions = [];
-      const skippedSuggestions = [];
-
-      validSuggestions.forEach((suggestion) => {
-        const url = suggestion.getData()?.url;
-        if (!url) {
-          // No URL, can't check coverage - keep it
-          filteredValidSuggestions.push(suggestion);
-          return;
-        }
-
-        // Check if this URL is covered by any domain-wide pattern
-        const isCovered = allDomainWidePatterns.some((regex) => regex.test(url));
-
-        if (isCovered) {
-          // Skip this suggestion - it's covered by domain-wide
-          skippedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Skipped: URL is covered by domain-wide suggestion in this deployment',
-            statusCode: 200,
-            suggestion: SuggestionDto.toJSON(suggestion),
-          });
-          context.log.info(`Skipping suggestion ${suggestion.getId()} - covered by domain-wide pattern`);
-        } else {
-          // Not covered, include in deployment
-          filteredValidSuggestions.push(suggestion);
-        }
-      });
-
-      // Update validSuggestions to the filtered list
-      validSuggestions.length = 0;
-      validSuggestions.push(...filteredValidSuggestions);
-
-      // Add skipped suggestions to a tracking array (we'll mark them later)
-      if (isNonEmptyArray(skippedSuggestions)) {
-        // Store for later processing after domain-wide deployment
-        context.skippedDueToSameBatchDomainWide = skippedSuggestions;
-        context.log.info(`Filtered out ${skippedSuggestions.length} suggestions covered by domain-wide in same deployment`);
-      }
+    if (validSuggestionIds.length === 0) {
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no valid suggestions to deploy`);
+      const response = {
+        suggestions: [...failedSuggestions],
+        metadata: {
+          total: suggestionIds.length,
+          success: 0,
+          failed: failedSuggestions.length,
+        },
+      };
+      response.suggestions.sort((a, b) => a.index - b.index);
+      return createResponse(response, 207);
     }
+    const { pathInfo } = context;
+    const preferHeaderValue = pathInfo?.headers?.prefer
+      || pathInfo?.headers?.Prefer;
+    const isAsyncExperimentRequested = hasText(preferHeaderValue)
+      && preferHeaderValue.toLowerCase() === 'respond-async';
 
-    let succeededSuggestions = [];
+    if (isAsyncExperimentRequested) {
+      context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
+      let urls;
+      const geoExperimentId = crypto.randomUUID();
 
-    // Only attempt deployment if we have valid suggestions
-    if (isNonEmptyArray(validSuggestions)) {
+      context.log.info('[edge-geo-exp] Initiating experiment', {
+        geoExperimentId,
+        opportunityId,
+        opportunityType: opportunity.getType(),
+        siteId,
+      });
+
+      let geoExperiment = null;
       try {
-        const tokowakaClient = TokowakaClient.createFrom(context);
-        const deploymentResult = await tokowakaClient.deploySuggestions(
-          site,
-          opportunity,
-          validSuggestions,
+        const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
+        let promptSources;
+        if (domainWideSuggestions.length > 0) {
+          const newStatus = SuggestionModel.STATUSES.NEW;
+          const allNew = await Suggestion.allByOpportunityIdAndStatus(opportunityId, newStatus);
+          const top15ByContentGainRatio = [...allNew]
+            .filter((s) => s.getData()?.isDomainWide !== true)
+            .sort((a, b) => (b.getData()?.contentGainRatio || 0)
+              - (a.getData()?.contentGainRatio || 0))
+            .slice(0, 15);
+          promptSources = top15ByContentGainRatio
+            .sort((a, b) => (b.getData()?.agenticTraffic || 0) - (a.getData()?.agenticTraffic || 0))
+            .slice(0, 10);
+        } else {
+          promptSources = validSuggestions;
+        }
+        const domainWideSuggestionIds = new Set(
+          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
         );
+        urls = promptSources
+          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
+          .map((s) => s.getData()?.url)
+          .filter(Boolean);
+        const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
+        if (prompts.length === 0) {
+          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
+          throw new Error('No prompts found in selected suggestions');
+        }
+        const promptsS3Key = `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
+        await s3Client.send(new PutObjectCommand({
+          Bucket: s3Bucket,
+          Key: promptsS3Key,
+          Body: JSON.stringify(prompts),
+          ContentType: 'application/json',
+        }));
+        context.log.info(`[edge-geo-exp] Uploaded ${prompts.length} prompts to S3: ${promptsS3Key}`);
 
-        // Process deployment results
-        const {
-          succeededSuggestions: deployedSuggestions,
-          failedSuggestions: ineligibleSuggestions,
-        } = deploymentResult;
+        geoExperiment = await GeoExperiment.create({
+          geoExperimentId,
+          siteId,
+          opportunityId,
+          type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+          name: context.data?.name || opportunity.getType(),
+          promptsCount: prompts.length,
+          promptsLocation: promptsS3Key,
+          status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
+          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          suggestionIds: validSuggestionIds,
+          metadata: {
+            urls,
+          },
+          updatedBy: profile?.email || 'geo-experiment',
+        });
 
-        // Update successfully deployed suggestions with deployment timestamp
-        const deploymentTimestamp = Date.now();
-        succeededSuggestions = await Promise.all(
-          deployedSuggestions.map(async (suggestion) => {
+        if (!geoExperiment?.getId?.()) {
+          throw new Error('GeoExperiment was not created');
+        }
+
+        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_SUBMITTED`);
+
+        let preScheduleId;
+        try {
+          const drsClient = DrsClient.createFrom(context);
+          const drsResult = await drsClient.createExperimentSchedule({
+            siteId,
+            experimentId: geoExperimentId,
+            experimentPhase: EXPERIMENT_PHASES.PRE,
+            cronExpression: GEO_EXPERIMENT_SCHEDULE.PRE_CRON_EXPRESSION,
+            expiresAt: new Date(Date.now() + GEO_EXPERIMENT_SCHEDULE.PRE_EXPIRY_MS).toISOString(),
+            platforms: GEO_EXPERIMENT_SCHEDULE.PLATFORMS,
+            providerIds: GEO_EXPERIMENT_SCHEDULE.PROVIDER_IDS,
+            triggerImmediately: true,
+            enableBrandPresence: true,
+            metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
+          });
+          preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
+          if (!preScheduleId) {
+            throw new Error('DRS schedule created but returned no schedule ID');
+          }
+          context.log.info(`[edge-geo-exp] DRS pre-analysis schedule created: ${preScheduleId}`);
+        } catch (drsError) {
+          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, DRS schedule creation failed: ${drsError.message}`, drsError);
+          throw drsError;
+        }
+        try {
+          geoExperiment.setPreScheduleId(preScheduleId);
+          geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
+          await geoExperiment.save();
+        } catch (updateError) {
+          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
+          throw updateError;
+        }
+        let job;
+        try {
+          job = await AsyncJob.create({
+            status: 'IN_PROGRESS',
+            metadata: {
+              jobType: 'geo-experiment',
+              siteId,
+              geoExperimentId,
+            },
+          });
+        } catch (jobError) {
+          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, AsyncJob creation failed: ${jobError.message}`, jobError);
+          throw jobError;
+        }
+        const validSuggestionEntities = [
+          ...validSuggestions,
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+        ];
+
+        const markResults = await Promise.allSettled(
+          validSuggestionEntities.map(async (suggestion) => {
             const currentData = suggestion.getData();
-            const updatedData = {
+            suggestion.setData({
               ...currentData,
-              edgeDeployed: deploymentTimestamp,
-            };
-            // Remove edgeOptimizeStatus if it's STALE
-            if (updatedData.edgeOptimizeStatus === 'STALE') {
-              delete updatedData.edgeOptimizeStatus;
-            }
-            suggestion.setData(updatedData);
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-deployment');
+              edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
+            });
+            suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
             return suggestion.save();
           }),
         );
 
-        // Add ineligible suggestions to failed list
-        ineligibleSuggestions.forEach((item) => {
-          context.log.info(`[edge-deploy-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
-          + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
-          failedSuggestions.push({
-            uuid: item.suggestion.getId(),
-            index: suggestionIds.indexOf(item.suggestion.getId()),
-            message: item.reason,
-            statusCode: 400,
+        const markFailures = markResults.filter((r) => r.status === 'rejected');
+        if (markFailures.length > 0) {
+          context.log.warn(`[edge-geo-exp-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+            geoExperimentId,
+            errors: markFailures.map((r) => r.reason?.message),
           });
-        });
+        }
 
-        context.log.info(`[edge-deploy] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
-      } catch (error) {
-        context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying to Tokowaka: ${error.message}`, error);
-        // If deployment fails, mark all valid suggestions as failed
-        validSuggestions.forEach((suggestion) => {
-          failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Deployment failed: Internal server error',
-            statusCode: 500,
-          });
-        });
-      }
-    }
-
-    // Handle domain-wide suggestions separately
-    if (isNonEmptyArray(domainWideSuggestions)) {
-      context.log.info(`[edge-deploy] domainWideSuggestions count: ${domainWideSuggestions.length}`);
-      try {
-        const tokowakaClient = TokowakaClient.createFrom(context);
-        const baseURL = site.getBaseURL();
-
-        // Deploy each domain-wide suggestion
-        // eslint-disable-next-line no-await-in-loop
-        for (const { suggestion, allowedRegexPatterns } of domainWideSuggestions) {
-          try {
-            // Fetch existing metaconfig or create new one
-            // eslint-disable-next-line no-await-in-loop
-            let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-
-            if (!metaconfig) {
-              metaconfig = {
-                siteId: site.getId(),
-              };
-            }
-
-            // Update ONLY the prerender property, preserving all other properties
-            // Expected structure: { prerender: { allowList: ["/*", "/path/*"] } }
-            metaconfig.prerender = {
-              allowList: allowedRegexPatterns,
-            };
-
-            const suggestionId = suggestion.getId();
-            context.log.info(
-              `Updating metaconfig for domain-wide prerender suggestion ${suggestionId}`,
-            );
-
-            // Upload updated metaconfig
-            // eslint-disable-next-line no-await-in-loop
-            await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
-
-            // Update suggestion with deployment timestamp
-            const deploymentTimestamp = Date.now();
-            const currentData = suggestion.getData();
-            suggestion.setData({
-              ...currentData,
-              edgeDeployed: deploymentTimestamp,
-            });
-            suggestion.setUpdatedBy(profile?.email || 'tokowaka-deployment');
-            // eslint-disable-next-line no-await-in-loop
-            await suggestion.save();
-
-            succeededSuggestions.push(suggestion);
-            context.log.info(`[edge-deploy] Successfully deployed domain-wide suggestion ${suggestionId} by ${profile?.email || 'tokowaka-deployment'}`);
-
-            // Mark all other NEW / PENDING_VALIDATION suggestions that match allowedRegexPatterns
-            try {
-              // Get IDs of suggestions skipped in this batch
-              const skippedInBatchIds = new Set(
-                (context.skippedDueToSameBatchDomainWide || []).map((s) => s.uuid),
-              );
-
-              const regexPatterns = allowedRegexPatterns.map(
-                (pattern) => new RegExp(pattern),
-              );
-              const coveredSuggestions = allSuggestions.filter((s) => {
-                // Skip the domain-wide suggestion itself
-                if (s.getId() === suggestion.getId()) {
-                  return false;
-                }
-
-                // Skip suggestions that were already filtered out in this batch
-                if (skippedInBatchIds.has(s.getId())) {
-                  return false;
-                }
-
-                if (!isEdgeDeployableStatus(s.getStatus())) {
-                  return false;
-                }
-
-                // Skip other domain-wide suggestions
-                if (isDomainWideSuggestion(s)) {
-                  return false;
-                }
-
-                // Check if URL matches any of the allowed regex patterns
-                const url = s.getData()?.url;
-                if (!url) {
-                  return false;
-                }
-
-                return regexPatterns.some((regex) => regex.test(url));
-              });
-
-              // Mark covered suggestions as deployed
-              if (isNonEmptyArray(coveredSuggestions)) {
-                const coverMsg = `Marking ${coveredSuggestions.length} suggestions `
-                  + 'as covered by domain-wide deployment';
-                context.log.info(coverMsg);
-
-                // eslint-disable-next-line no-await-in-loop
-                await Promise.all(
-                  coveredSuggestions.map(async (coveredSuggestion) => {
-                    const coveredData = coveredSuggestion.getData();
-                    coveredSuggestion.setData({
-                      ...coveredData,
-                      edgeDeployed: deploymentTimestamp,
-                      coveredByDomainWide: suggestion.getId(),
-                    });
-                    coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-deployment');
-                    return coveredSuggestion.save();
-                  }),
-                );
-
-                coveredSuggestionsCount += coveredSuggestions.length;
-                const successMsg = `Successfully marked ${coveredSuggestions.length} `
-                  + 'suggestions as covered';
-                context.log.info(successMsg);
-              }
-            } catch (coverError) {
-              context.log.error(`Error marking covered suggestions: ${coverError.message}`, coverError);
-              // Don't fail the deployment if marking covered suggestions fails
-            }
-          } catch (error) {
-            context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
-            failedSuggestions.push({
+        const experimentResponse = {
+          suggestions: [
+            ...validSuggestionEntities.map((suggestion) => ({
               uuid: suggestion.getId(),
               index: suggestionIds.indexOf(suggestion.getId()),
-              message: `Deployment failed: ${error.message}`,
-              statusCode: 500,
-            });
-          }
-        }
+              statusCode: 202,
+              suggestion: SuggestionDto.toJSON(suggestion),
+            })),
+            ...failedSuggestions,
+          ],
+          metadata: {
+            total: suggestionIds.length,
+            success: validSuggestionIds.length,
+            failed: failedSuggestions.length,
+          },
+          jobId: job.getId(),
+          geoExperimentId,
+          geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
+          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          prePhaseScheduleId: preScheduleId,
+        };
+        experimentResponse.suggestions.sort((a, b) => a.index - b.index);
+        return createResponse(experimentResponse, 207);
       } catch (error) {
-        context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying domain-wide suggestions: ${error.message}`, error);
-        // Mark all domain-wide suggestions as failed
-        domainWideSuggestions.forEach(({ suggestion }) => {
-          failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Deployment failed: Internal server error',
+        context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
+        if (geoExperiment?.getId?.()) {
+          /* c8 ignore start */
+          try {
+            await geoExperiment.remove();
+          } catch (removeError) {
+            context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
+          }
+          /* c8 ignore stop */
+        }
+        const errorResponse = {
+          suggestions: suggestionIds.map((id, index) => ({
+            uuid: id,
+            index,
             statusCode: 500,
-          });
-        });
+            message: `Failed to initiate experiment: ${error.message}`,
+          })),
+          metadata: {
+            total: suggestionIds.length,
+            success: 0,
+            failed: suggestionIds.length,
+          },
+        };
+        return createResponse(errorResponse, 207);
       }
     }
 
-    // Mark suggestions skipped due to domain-wide coverage in same deployment
-    const skippedDomainWide = context.skippedDueToSameBatchDomainWide;
-    if (skippedDomainWide && isNonEmptyArray(skippedDomainWide)) {
-      try {
-        const deploymentTimestamp = Date.now();
-        const skippedUUIDs = skippedDomainWide.map((s) => s.uuid);
+    // Deploy all suggestions (regular + domain-wide) via tokowaka client
+    let succeededSuggestions = [];
+    const allTargetSuggestions = [
+      ...validSuggestions,
+      ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+    ];
 
-        // Fetch and update all skipped suggestions
-        const skippedSuggestionEntities = allSuggestions.filter(
-          (s) => skippedUUIDs.includes(s.getId()),
-        );
+    try {
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const deployResult = await tokowakaClient.deployToEdge({
+        site,
+        opportunity,
+        targetSuggestions: allTargetSuggestions,
+        allSuggestions,
+        updatedBy: profile?.email || 'tokowaka-deployment',
+      });
 
-        await Promise.all(
-          skippedSuggestionEntities.map(async (skippedSuggestion) => {
-            const currentData = skippedSuggestion.getData();
-            skippedSuggestion.setData({
-              ...currentData,
-              edgeDeployed: deploymentTimestamp,
-              coveredByDomainWide: 'same-batch-deployment',
-              skippedInDeployment: true,
-            });
-            skippedSuggestion.setUpdatedBy(profile?.email || 'domain-wide-deployment');
-            return skippedSuggestion.save();
-          }),
-        );
+      succeededSuggestions = deployResult.succeededSuggestions;
+      coveredSuggestionsCount = deployResult.coveredSuggestions.length;
 
-        coveredSuggestionsCount += skippedSuggestionEntities.length;
-        const skipMsg = `Marked ${skippedSuggestionEntities.length} `
-          + 'skipped suggestions as covered';
-        context.log.info(skipMsg);
-
-        // Add to succeeded suggestions list for response
-        succeededSuggestions.push(...skippedSuggestionEntities);
-      } catch (error) {
-        context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error marking skipped suggestions: ${error.message}`, error);
-        // Add to failed if we couldn't mark them
-        context.skippedDueToSameBatchDomainWide.forEach((skipped) => {
-          failedSuggestions.push({
-            uuid: skipped.uuid,
-            index: skipped.index,
-            message: 'Failed to mark as covered by domain-wide',
-            statusCode: 500,
-          });
+      // Map failed suggestions to the API response format.
+      deployResult.failedSuggestions.forEach((item) => {
+        failedSuggestions.push({
+          uuid: item.suggestion.getId(),
+          index: suggestionIds.indexOf(item.suggestion.getId()),
+          message: item.statusCode === 500 ? `Deployment failed: ${item.reason}` : item.reason,
+          statusCode: item.statusCode ?? 400,
         });
-      }
+      });
+
+      context.log.info(`[edge-deploy] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
+    } catch (error) {
+      context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error deploying to edge: ${error.message}`, error);
+      allTargetSuggestions.forEach((suggestion) => {
+        failedSuggestions.push({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          message: 'Deployment failed: Internal server error',
+          statusCode: 500,
+        });
+      });
     }
 
     const response = {
@@ -1896,6 +1860,73 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(response, 207);
   };
 
+  /**
+   * Lists all geo experiments for a site (no prompts included).
+   */
+  const listGeoExperiments = async (context) => {
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const { data: experiments } = await GeoExperiment.allBySiteId(siteId);
+
+    return ok(experiments.map((exp) => GeoExperimentDto.toJSON(exp)));
+  };
+
+  /**
+   * Returns the full details of a geo experiment, including jobs summary and prompts.
+   */
+  const getGeoExperiment = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) return badRequest('Site ID required');
+    if (!isValidUUID(geoExperimentId)) return badRequest('GeoExperiment ID required');
+
+    const site = await Site.findById(siteId);
+    if (!site) return notFound('Site not found');
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    // Fetch prompts from S3
+    let prompts = null;
+    try {
+      const { s3Client, s3Bucket, GetObjectCommand } = context.s3;
+      const promptsS3Key = geoExperiment.getPromptsLocation()
+        || `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
+      const response = await s3Client.send(
+        new GetObjectCommand({ Bucket: s3Bucket, Key: promptsS3Key }),
+      );
+      const body = await response.Body.transformToString();
+      prompts = JSON.parse(body);
+    } catch (s3Error) {
+      // Prompts may not exist yet (e.g. experiment not yet started)
+      context.log.info(`[geo-experiment] Could not fetch prompts for ${geoExperimentId}: ${s3Error.message}`);
+    }
+
+    return ok({
+      ...GeoExperimentDto.toJSON(geoExperiment),
+      prompts,
+    });
+  };
+
   const rollbackSuggestionFromEdge = async (context) => {
     const { siteId, opportunityId } = context.params;
     const { authInfo: { profile } } = context.attributes;
@@ -1920,19 +1951,22 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn('[edge-rollback-failed] site: n/a, no request body data provided');
       return badRequest('No data provided');
     }
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      context.log.warn('[edge-rollback-failed] site: n/a, user is not an LLMO administrator');
-      return forbidden('Only LLMO administrators can rollback suggestions');
-    }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       context.log.warn('[edge-rollback-failed] site: n/a, suggestionIds is not a non-empty array');
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
+    // No productCode is passed to hasAccess(); the delegation block is not entered.
+    // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(`[edge-rollback-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
       return forbidden('User does not belong to the organization');
+    }
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn('[edge-rollback-failed] site: n/a, user is not an LLMO administrator');
+      return forbidden('Only LLMO administrators can rollback suggestions');
     }
 
     if (!await accessControlUtil.isOwnerOfSite(site)) {
@@ -2268,6 +2302,8 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    listGeoExperiments,
+    getGeoExperiment,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,

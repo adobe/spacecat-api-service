@@ -2848,6 +2848,9 @@ Opportunity:
     updatedAt:
       description: UTC timestamp of when the opportunity was last updated
       $ref: '#/DateTime'
+    lastAuditedAt:
+      description: UTC timestamp of when the opportunity was last audited
+      $ref: '#/DateTime'
   required:
     - id
     - siteId
@@ -5186,6 +5189,63 @@ FeatureFlagList:
   type: array
   items:
     $ref: '#/FeatureFlag'
+
+AgenticTrafficGlobalWeek:
+  type: object
+  description: Weekly aggregate global agentic traffic row from mysticat `agentic_traffic_global`
+  properties:
+    id:
+      $ref: '#/Id'
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      oneOf:
+        - type: string
+        - type: 'null'
+  required:
+    - id
+    - year
+    - week
+    - hits
+    - createdAt
+    - updatedAt
+
+AgenticTrafficGlobalWeekList:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficGlobalWeek'
+
+AgenticTrafficGlobalWeekUpsert:
+  type: object
+  properties:
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+  required:
+    - year
+    - week
+    - hits
 
 SiteEnrollment:
   type: object
