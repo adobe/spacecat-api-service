@@ -1496,3 +1496,54 @@ export async function performLlmoOffboarding(site, config, context) {
     message: 'LLMO offboarding completed successfully',
   };
 }
+
+export async function appendRowsToQueryIndex(dataFolder, fileNames, env, log) {
+  const sharepointClient = await createSharePointClient(env);
+  const redirects = sharepointClient.getRedirects();
+
+  const now = Math.floor(Date.now() / 1000);
+  const rows = fileNames.map((fileName) => {
+    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
+    return [
+      `/${dataFolder}/${name}`,
+      now,
+      now,
+    ];
+  });
+
+  log.info(`Appending ${rows.length} rows to query-index.xlsx in ${dataFolder}`);
+  await redirects.appendRowsToSheet(`/${dataFolder}/query-index.xlsx`, rows);
+  log.info(`Successfully appended rows to query-index.xlsx in ${dataFolder}`);
+}
+
+export async function previewAndPublishQueryIndex(dataFolder, env, log) {
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const baseUrl = 'https://admin.hlx.page';
+  const filePath = `${dataFolder}/query-index.xlsx`;
+
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    throw new Error('HLX_ONBOARDING_TOKEN is not set');
+  }
+
+  const headers = {
+    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
+  };
+
+  const previewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${filePath}`;
+  log.info(`Previewing query-index.xlsx at ${previewUrl}`);
+  const previewResponse = await fetch(previewUrl, { method: 'POST', headers });
+  if (!previewResponse.ok) {
+    throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
+  }
+  log.info('Preview of query-index.xlsx succeeded');
+
+  const publishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${filePath}`;
+  log.info(`Publishing query-index.xlsx at ${publishUrl}`);
+  const publishResponse = await fetch(publishUrl, { method: 'POST', headers });
+  if (!publishResponse.ok) {
+    throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
+  }
+  log.info('Publish of query-index.xlsx succeeded');
+}

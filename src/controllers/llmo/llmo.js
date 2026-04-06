@@ -52,6 +52,8 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
   postLlmoAlert,
+  appendRowsToQueryIndex,
+  previewAndPublishQueryIndex,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
@@ -1763,6 +1765,68 @@ function LlmoController(ctx) {
     }
   };
 
+  const updateQueryIndex = async (context) => {
+    const { log, env } = context;
+    const { data } = context;
+
+    try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the query index');
+      }
+
+      if (!data || typeof data !== 'object') {
+        return badRequest('Request body is required');
+      }
+
+      const { domain, fileNames } = data;
+
+      if (!domain) {
+        return badRequest('domain is required');
+      }
+
+      if (!Array.isArray(fileNames) || fileNames.length === 0) {
+        return badRequest('fileNames must be a non-empty array of strings');
+      }
+
+      if (fileNames.some((f) => typeof f !== 'string' || !f.trim())) {
+        return badRequest('Each fileName must be a non-empty string');
+      }
+
+      const { dataAccess } = context;
+      const { Site } = dataAccess;
+
+      const baseURL = composeBaseURL(domain);
+      const site = await Site.findByBaseURL(baseURL);
+      if (!site) {
+        return notFound(`Site not found for domain: ${domain}`);
+      }
+
+      const config = site.getConfig();
+      const llmoConfig = config.getLlmoConfig();
+
+      if (!llmoConfig?.dataFolder) {
+        return badRequest('LLMO is not onboarded for this site, dataFolder is missing');
+      }
+
+      const { dataFolder } = llmoConfig;
+
+      await appendRowsToQueryIndex(dataFolder, fileNames, env, log);
+      await previewAndPublishQueryIndex(dataFolder, env, log);
+
+      log.info(`Successfully updated query-index.xlsx for domain ${domain} with ${fileNames.length} entries`);
+
+      return ok({
+        message: 'query-index.xlsx updated, previewed, and published successfully',
+        domain,
+        dataFolder,
+        entriesAdded: fileNames.length,
+      });
+    } catch (error) {
+      log.error(`Failed to update query-index for domain ${data?.domain}: ${error.message}`);
+      return internalServerError(`Failed to update query-index: ${error.message}`);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1794,6 +1858,7 @@ function LlmoController(ctx) {
     checkEdgeOptimizeStatus,
     updateEdgeOptimizeCDNRouting,
     markOpportunitiesReviewed,
+    updateQueryIndex,
   };
 }
 
