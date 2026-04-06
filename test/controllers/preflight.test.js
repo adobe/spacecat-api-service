@@ -959,7 +959,7 @@ describe('Preflight Controller', () => {
       );
     });
 
-    it('uses mystiqueUrl override in dev environment', async () => {
+    it('uses mystiqueUrl override in dev environment (full URL)', async () => {
       const devCtrl = PreflightController(
         { dataAccess: mockDataAccess, sqs: mockSqs },
         loggerStub,
@@ -975,6 +975,30 @@ describe('Preflight Controller', () => {
           url: 'https://main--example-site.aem.page/test.html',
           step: 'identify',
           mystiqueUrl: 'https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io',
+        },
+      });
+      expect(response.status).to.equal(202);
+
+      const [calledUrl] = fetchStub.firstCall.args;
+      expect(calledUrl).to.equal('https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io/v1/preflight/analyze');
+    });
+
+    it('prepends https:// to mystiqueUrl when no scheme is provided', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io',
         },
       });
       expect(response.status).to.equal(202);

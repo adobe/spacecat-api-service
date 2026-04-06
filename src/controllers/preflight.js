@@ -324,20 +324,24 @@ function PreflightController(ctx, log, env) {
 
     const isDev = env.AWS_ENV === 'dev';
 
-    if (hasText(data.mystiqueUrl)) {
+    const normalizedMystiqueUrl = hasText(data.mystiqueUrl) && !data.mystiqueUrl.includes('://')
+      ? `https://${data.mystiqueUrl}`
+      : data.mystiqueUrl;
+
+    if (hasText(normalizedMystiqueUrl)) {
       if (!isDev) {
         return badRequest('mystiqueUrl override is only allowed in dev');
       }
-      if (!isValidUrl(data.mystiqueUrl)) {
+      if (!isValidUrl(normalizedMystiqueUrl)) {
         return badRequest('Invalid request: mystiqueUrl must be a valid URL');
       }
-      if (!(/\.stage\.cloud\.adobe\.io$/).test(new URL(data.mystiqueUrl).hostname)) {
+      if (!(/\.stage\.cloud\.adobe\.io$/).test(new URL(normalizedMystiqueUrl).hostname)) {
         return badRequest('Invalid request: mystiqueUrl must be a valid Mystique ephemeral host');
       }
     }
 
-    const mysticatBaseUrl = (isDev && hasText(data.mystiqueUrl))
-      ? data.mystiqueUrl
+    const mysticatBaseUrl = (isDev && hasText(normalizedMystiqueUrl))
+      ? normalizedMystiqueUrl
       : env.MYSTIQUE_API_BASE_URL;
 
     try {
