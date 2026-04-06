@@ -1155,7 +1155,7 @@ describe('LlmoController', () => {
       const result = await controller.queryLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(400);
-      expect(mockLog.error).to.have.been.calledWith(
+      expect(mockLog.debug).to.have.been.calledWith(
         sinon.match(/Failed to fetch data from external endpoint: 500/),
       );
     });
@@ -3280,7 +3280,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Cache query failed');
-      expect(mockLog.error).to.have.been.calledWith(
+      expect(mockLog.debug).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
     });

@@ -1,3 +1,59 @@
+## [1.413.7](https://github.com/adobe/spacecat-api-service/compare/v1.413.6...v1.413.7) (2026-04-05)
+
+
+### Bug Fixes
+
+* update pre phase expiry for geo experiment ([#2128](https://github.com/adobe/spacecat-api-service/issues/2128)) ([56f25e9](https://github.com/adobe/spacecat-api-service/commit/56f25e9367c0ef3cb77b2cf76fd191f359502102))
+
+## [1.413.6](https://github.com/adobe/spacecat-api-service/compare/v1.413.5...v1.413.6) (2026-04-05)
+
+
+### Bug Fixes
+
+* downgrade non-actionable API errors and operational logs ([#2126](https://github.com/adobe/spacecat-api-service/issues/2126)) ([3ed606a](https://github.com/adobe/spacecat-api-service/commit/3ed606ac543ca8a66c1c1c33e69f6d5353098757))
+
+## [1.413.5](https://github.com/adobe/spacecat-api-service/compare/v1.413.4...v1.413.5) (2026-04-05)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2124](https://github.com/adobe/spacecat-api-service/issues/2124)) ([eb72b36](https://github.com/adobe/spacecat-api-service/commit/eb72b364447e4bf3d6011e5e94aa9621d9649976))
+
+## [1.413.4](https://github.com/adobe/spacecat-api-service/compare/v1.413.3...v1.413.4) (2026-04-05)
+
+
+### Bug Fixes
+
+* downgrade non-actionable API errors to appropriate log levels ([#2125](https://github.com/adobe/spacecat-api-service/issues/2125)) ([e977dd9](https://github.com/adobe/spacecat-api-service/commit/e977dd930015495e5ae90d981c52e511686a4b44))
+
+## [1.413.3](https://github.com/adobe/spacecat-api-service/compare/v1.413.2...v1.413.3) (2026-04-05)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2123](https://github.com/adobe/spacecat-api-service/issues/2123)) ([6da2159](https://github.com/adobe/spacecat-api-service/commit/6da2159cb4a6084ce0e13308164a6eae0040a18f))
+
+## [1.413.2](https://github.com/adobe/spacecat-api-service/compare/v1.413.1...v1.413.2) (2026-04-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2106](https://github.com/adobe/spacecat-api-service/issues/2106)) ([fbed7b4](https://github.com/adobe/spacecat-api-service/commit/fbed7b4b54a99ade8fab338faf8ac36c3a2b8224))
+
+## [1.413.1](https://github.com/adobe/spacecat-api-service/compare/v1.413.0...v1.413.1) (2026-04-04)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2122](https://github.com/adobe/spacecat-api-service/issues/2122)) ([a3ce213](https://github.com/adobe/spacecat-api-service/commit/a3ce21341b3d996721b4d7fff3571784a6cdc966))
+
+# [1.413.0](https://github.com/adobe/spacecat-api-service/compare/v1.412.0...v1.413.0) (2026-04-03)
+
+
+### Features
+
+* integrate update redirect with self onboarding ([#2027](https://github.com/adobe/spacecat-api-service/issues/2027)) ([2a72a95](https://github.com/adobe/spacecat-api-service/commit/2a72a957320a78fe7e81105e20b5f25dff88c3ce))
+
 # [1.412.0](https://github.com/adobe/spacecat-api-service/compare/v1.411.0...v1.412.0) (2026-04-03)
 
 

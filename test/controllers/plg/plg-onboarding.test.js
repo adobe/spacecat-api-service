@@ -11,6 +11,7 @@
  */
 
 /* eslint-env mocha */
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -48,6 +49,7 @@ describe('PlgOnboardingController', () => {
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
   let loadProfileConfigStub;
+  let queueDeliveryConfigWriterStub;
   let triggerBrandProfileAgentStub;
   let tierClientCreateForSiteStub;
   let tierClientCreateEntitlementStub;
@@ -97,6 +99,8 @@ describe('PlgOnboardingController', () => {
       setHlxConfig: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
+      getAuthoringType: sandbox.stub().returns(overrides.authoringType ?? null),
+      getDeliveryType: sandbox.stub().returns(overrides.deliveryType ?? null),
       save: sandbox.stub().resolves(),
     };
   }
@@ -172,6 +176,7 @@ describe('PlgOnboardingController', () => {
     updateCodeConfigStub = sandbox.stub().resolves();
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
+    queueDeliveryConfigWriterStub = sandbox.stub().resolves({ ok: true });
 
     // Profile config
     loadProfileConfigStub = sandbox.stub().returns(PLG_PROFILE);
@@ -313,6 +318,7 @@ describe('PlgOnboardingController', () => {
           updateCodeConfig: updateCodeConfigStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
+          queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
         },
         '../../../src/utils/slack/base.js': {
           loadProfileConfig: loadProfileConfigStub,
@@ -1427,6 +1433,110 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setError).to.have.been.calledWith({
         message: 'An internal error occurred',
       });
+    });
+  });
+
+  // --- Delivery config writer (CDN + optional redirect params) ---
+
+  describe('onboard - delivery config writer', () => {
+    const redirectReadyDeliveryConfig = {
+      programId: 'test-program-id',
+      environmentId: 'test-environment-id',
+    };
+
+    /** Built at assertion time so `site` is the mock created in each test. */
+    function expectedRedirectQueuePayload() {
+      return {
+        site: mockSite,
+        baseURL: TEST_BASE_URL,
+        minutes: 2000,
+        updateRedirects: true,
+        slackContext: {},
+      };
+    }
+
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    // happy path for AEM CS/CW site
+    it('queues delivery config writer for CS site with program and environment', async () => {
+      queueDeliveryConfigWriterStub.resolves({ ok: true });
+      mockSite = createMockSite({
+        authoringType: SiteModel.AUTHORING_TYPES.CS,
+        deliveryConfig: redirectReadyDeliveryConfig,
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledOnce;
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledWith(
+        expectedRedirectQueuePayload(),
+        context,
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match.hasNested('deliveryConfigQueued', true),
+      );
+      expect(mockLog.warn).to.not.have.been.calledWithMatch(
+        /Failed to queue delivery config writer/,
+      );
+    });
+
+    it('continues onboarding when delivery config writer returns ok: false with error', async () => {
+      queueDeliveryConfigWriterStub.resolves({ ok: false, error: 'mock error' });
+      mockSite = createMockSite({
+        authoringType: SiteModel.AUTHORING_TYPES.CS,
+        deliveryConfig: redirectReadyDeliveryConfig,
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledOnce;
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledWith(
+        expectedRedirectQueuePayload(),
+        context,
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match.hasNested('deliveryConfigQueued', false),
+      );
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /Failed to queue delivery config writer for site .*mock error/,
+      );
+    });
+
+    it('continues onboarding when delivery config writer returns ok: false without error string', async () => {
+      queueDeliveryConfigWriterStub.resolves({ ok: false });
+      mockSite = createMockSite({
+        authoringType: SiteModel.AUTHORING_TYPES.CS,
+        deliveryConfig: redirectReadyDeliveryConfig,
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledOnce;
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledWith(
+        expectedRedirectQueuePayload(),
+        context,
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match.hasNested('deliveryConfigQueued', false),
+      );
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /Failed to queue delivery config writer/,
+      );
     });
   });
 
