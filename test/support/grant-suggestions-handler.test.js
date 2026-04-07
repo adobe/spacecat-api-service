@@ -201,10 +201,43 @@ describe('grant-suggestions-handler', () => {
       expect(groups).to.have.lengthOf(2);
     });
 
-    it('sorts cwv suggestions by confidence score (rank) descending', () => {
-      const s1 = { getId: () => 'id-1', getRank: () => 500 };
-      const s2 = { getId: () => 'id-2', getRank: () => 9000 };
-      const s3 = { getId: () => 'id-3', getRank: () => 200 };
+    it('cwv: limits to top 3 pages by pageviews before sorting by confidence', () => {
+      const mk = (id, pageviews, rank) => ({
+        getId: () => id, getRank: () => rank, getData: () => ({ pageviews }),
+      });
+      // 5 pages — top 3 by pageviews are s1(5000), s3(4000), s4(3000)
+      const s1 = mk('id-1', 5000, 200);
+      const s2 = mk('id-2', 1000, 9000); // high confidence but low pageviews → excluded
+      const s3 = mk('id-3', 4000, 500);
+      const s4 = mk('id-4', 3000, 100);
+      const s5 = mk('id-5', 2000, 300); // excluded (4th by pageviews)
+      const groups = getTopSuggestions([s1, s2, s3, s4, s5], 'cwv');
+      // only top 3 by pageviews included
+      expect(groups).to.have.lengthOf(3);
+      const ids = groups.flatMap((g) => g.items.map((s) => s.getId()));
+      expect(ids).to.include.members(['id-1', 'id-3', 'id-4']);
+      expect(ids).to.not.include('id-2');
+      expect(ids).to.not.include('id-5');
+      // sorted by confidence descending: s3(500) > s1(200) > s4(100)
+      expect(groups[0].items[0]).to.equal(s3);
+      expect(groups[1].items[0]).to.equal(s1);
+      expect(groups[2].items[0]).to.equal(s4);
+    });
+
+    it('cwv: returns fewer than 3 when fewer pages available', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 500, getData: () => ({ pageviews: 3000 }) };
+      const s2 = { getId: () => 'id-2', getRank: () => 9000, getData: () => ({ pageviews: 1000 }) };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups).to.have.lengthOf(2);
+    });
+
+    it('cwv: sorts top 3 pages by confidence score descending', () => {
+      const mk = (id, pageviews, rank) => ({
+        getId: () => id, getRank: () => rank, getData: () => ({ pageviews }),
+      });
+      const s1 = mk('id-1', 5000, 500);
+      const s2 = mk('id-2', 4000, 9000);
+      const s3 = mk('id-3', 3000, 200);
       const groups = getTopSuggestions([s1, s2, s3], 'cwv');
       expect(groups).to.have.lengthOf(3);
       expect(groups[0].items[0]).to.equal(s2); // 9000 first
@@ -212,44 +245,60 @@ describe('grant-suggestions-handler', () => {
       expect(groups[2].items[0]).to.equal(s3); // 200 last
     });
 
-    it('sorts cwv suggestions by confidence score descending using plain objects', () => {
-      const s1 = { id: 'id-1', rank: 500 };
-      const s2 = { id: 'id-2', rank: 9000 };
+    it('cwv: sorts top 3 pages by confidence score descending using plain objects', () => {
+      const s1 = { id: 'id-1', rank: 500, data: { pageviews: 5000 } };
+      const s2 = { id: 'id-2', rank: 9000, data: { pageviews: 4000 } };
       const groups = getTopSuggestions([s1, s2], 'cwv');
       expect(groups).to.have.lengthOf(2);
       expect(groups[0].items[0]).to.equal(s2); // 9000 first
       expect(groups[1].items[0]).to.equal(s1); // 500 second
     });
 
-    it('sorts cwv suggestions with zero confidence score to the end', () => {
-      const s1 = { getId: () => 'id-1', getRank: () => 1000 };
-      const s2 = { getId: () => 'id-2', getRank: () => 0 };
+    it('cwv: sorts zero confidence score to the end among top 3 pages', () => {
+      const mk = (id, pageviews, rank) => ({
+        getId: () => id, getRank: () => rank, getData: () => ({ pageviews }),
+      });
+      const s1 = mk('id-1', 5000, 1000);
+      const s2 = mk('id-2', 4000, 0);
       const groups = getTopSuggestions([s2, s1], 'cwv');
       expect(groups[0].items[0]).to.equal(s1); // 1000 first
       expect(groups[1].items[0]).to.equal(s2); // 0 last
     });
 
-    it('breaks cwv confidence score ties by id ascending', () => {
-      const s1 = { getId: () => 'id-b', getRank: () => 500 };
-      const s2 = { getId: () => 'id-a', getRank: () => 500 };
+    it('cwv: breaks confidence score ties by id ascending', () => {
+      const mk = (id, pageviews, rank) => ({
+        getId: () => id, getRank: () => rank, getData: () => ({ pageviews }),
+      });
+      const s1 = mk('id-b', 5000, 500);
+      const s2 = mk('id-a', 4000, 500);
       const groups = getTopSuggestions([s1, s2], 'cwv');
       expect(groups[0].items[0]).to.equal(s2); // id-a before id-b
       expect(groups[1].items[0]).to.equal(s1);
     });
 
-    it('breaks cwv confidence score ties by id ascending using plain object id', () => {
-      const s1 = { id: 'id-b', rank: 500 };
-      const s2 = { id: 'id-a', rank: 500 };
+    it('cwv: breaks confidence score ties by id ascending using plain object id', () => {
+      const s1 = { id: 'id-b', rank: 500, data: { pageviews: 5000 } };
+      const s2 = { id: 'id-a', rank: 500, data: { pageviews: 4000 } };
       const groups = getTopSuggestions([s1, s2], 'cwv');
       expect(groups[0].items[0]).to.equal(s2); // id-a before id-b
       expect(groups[1].items[0]).to.equal(s1);
     });
 
-    it('breaks cwv confidence score ties stably when items have no id', () => {
-      const s1 = { rank: 500 };
-      const s2 = { rank: 500 };
+    it('cwv: breaks confidence score ties stably when items have no id', () => {
+      const s1 = { rank: 500, data: { pageviews: 5000 } };
+      const s2 = { rank: 500, data: { pageviews: 4000 } };
       const groups = getTopSuggestions([s1, s2], 'cwv');
       expect(groups).to.have.lengthOf(2); // both empty-string ids → stable, no throw
+    });
+
+    it('cwv: treats missing pageviews as zero for pageviews sort', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 500, getData: () => ({}) };
+      const s2 = { getId: () => 'id-2', getRank: () => 200, getData: () => ({ pageviews: 1000 }) };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups).to.have.lengthOf(2);
+      // s2 has higher pageviews so it's included; s1 pageviews=0 still included (only 2 total)
+      const ids = groups.flatMap((g) => g.items.map((s) => s.getId()));
+      expect(ids).to.include.members(['id-1', 'id-2']);
     });
   });
 
