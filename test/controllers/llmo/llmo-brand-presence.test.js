@@ -32,6 +32,7 @@ import {
   createPromptDetailHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
+  createCompetitorSummaryHandler,
   reshapeMarketTrackingRows,
   createTopicDetailHandler,
   createTopicsHandler,
@@ -2660,6 +2661,77 @@ describe('llmo-brand-presence', () => {
       const result = reshapeMarketTrackingRows(rows);
       expect(result[0].week).to.equal('2026-W10');
       expect(result[1].week).to.equal('2026-W12');
+    });
+  });
+
+  describe('createCompetitorSummaryHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns ok with empty competitors when no data', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
+      );
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.competitors).to.deep.equal([]);
+    });
+
+    it('returns competitors with correct shape', async () => {
+      const rpcRows = [
+        { competitor_name: 'CompA', total_mentions: 10, total_citations: 5 },
+        { competitor_name: 'CompB', total_mentions: 3, total_citations: 1 },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: rpcRows, error: null } },
+      );
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.competitors).to.have.lengthOf(2);
+      expect(body.competitors[0]).to.deep.equal({ name: 'CompA', mentions: 10, citations: 5 });
+      expect(body.competitors[1]).to.deep.equal({ name: 'CompB', mentions: 3, citations: 1 });
+    });
+
+    it('returns badRequest when RPC returns error', async () => {
+      const rpcError = { message: 'function rpc_market_tracking_competitor_summary does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: null, error: rpcError } },
+      );
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
     });
   });
 
