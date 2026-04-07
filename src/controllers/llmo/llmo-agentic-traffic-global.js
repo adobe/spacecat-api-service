@@ -97,10 +97,12 @@ function resolveUpdatedBy(context) {
   return 'spacecat-api-service';
 }
 
-export function createAgenticTrafficGlobalGetHandler(accessControlUtil) {
+export function createAgenticTrafficGlobalGetHandler(validateReadAccess) {
   return async function getAgenticTrafficGlobal(context) {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can view global agentic traffic');
+    try {
+      await validateReadAccess(context);
+    } catch (e) {
+      return forbidden(e.message || 'Only admins or users with LLMO organization access can view global agentic traffic');
     }
 
     const unavailable = requirePostgrest(context);
@@ -145,8 +147,8 @@ export function createAgenticTrafficGlobalGetHandler(accessControlUtil) {
 
 export function createAgenticTrafficGlobalPostHandler(accessControlUtil) {
   return async function postAgenticTrafficGlobal(context) {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can update global agentic traffic');
+    if (!accessControlUtil.hasAdminAccess() && !context.s2sConsumer) {
+      return forbidden('Only admins or S2S consumers can update global agentic traffic');
     }
 
     const unavailable = requirePostgrest(context);

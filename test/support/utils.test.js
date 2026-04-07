@@ -497,7 +497,7 @@ describe('utils', () => {
       sandbox.restore();
     });
 
-    it('returns true when summit-plg is enabled and entitlement is FREE_TRIAL ASO', async () => {
+    it('returns true when summit-plg is enabled and entitlement is PLG ASO', async () => {
       const isHandlerEnabledForSite = sandbox.stub().withArgs('summit-plg', site).returns(true);
       context.dataAccess.Configuration = {
         findLatest: sandbox.stub().resolves({
@@ -507,7 +507,7 @@ describe('utils', () => {
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub()
           .withArgs('org-456', 'ASO')
-          .resolves({ getTier: () => 'FREE_TRIAL' }),
+          .resolves({ getTier: () => 'PLG' }),
       };
 
       const result = await getIsSummitPlgEnabled(site, context);
@@ -517,6 +517,38 @@ describe('utils', () => {
       expect(isHandlerEnabledForSite).to.have.been.calledWith('summit-plg', site);
       expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
         .to.have.been.calledWith('org-456', 'ASO');
+    });
+
+    it('returns false when summit-plg is enabled but entitlement is FREE_TRIAL', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .resolves({ getTier: () => 'FREE_TRIAL' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when summit-plg is enabled but entitlement is PRE_ONBOARD', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .resolves({ getTier: () => 'PRE_ONBOARD' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
     });
 
     it('returns false when summit-plg is enabled but entitlement is PAID', async () => {
@@ -719,11 +751,28 @@ describe('utils', () => {
       expect(result).to.deep.equal([]);
     });
 
-    it('returns empty array for PLG-tier entitlement', async () => {
+    it('returns enrolled sites for PLG-tier entitlement', async () => {
       mockTierClient.checkValidEntitlement.resolves({
         entitlement: {
           getId: () => 'ent-1',
           getTier: () => EntitlementModel.TIERS.PLG,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].getId()).to.equal('site-1');
+    });
+
+    it('returns empty array for PRE_ONBOARD-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PRE_ONBOARD,
         },
       });
 
