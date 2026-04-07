@@ -1,3 +1,15 @@
+# [1.419.0](https://github.com/adobe/spacecat-api-service/compare/v1.418.0...v1.419.0) (2026-04-07)
+
+
+### Bug Fixes
+
+* fix uncovered branch in mystiqueUrl invalid URL test ([#2152](https://github.com/adobe/spacecat-api-service/issues/2152)) ([923759d](https://github.com/adobe/spacecat-api-service/commit/923759d8cd06c0cd8e91302253a9b05848d51907))
+
+
+### Features
+
+* allow mystiqueUrl override on beta preflight endpoint for dev testing ([#2140](https://github.com/adobe/spacecat-api-service/issues/2140)) ([73eb432](https://github.com/adobe/spacecat-api-service/commit/73eb432a9dce0aa366838748d353f4aa09d31c2d))
+
 # [1.418.0](https://github.com/adobe/spacecat-api-service/compare/v1.417.1...v1.418.0) (2026-04-07)
 
 
