@@ -20,6 +20,11 @@ const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
  * Accepts an optional `endDate` query parameter (YYYY-MM-DD) to process
  * historical data up to a specific date instead of today.
  *
+ * Note: This controller intentionally extends the deprecated /trigger endpoint.
+ * Reason: cwv-trends-audit (Web Performance Trends) requires an `endDate` parameter
+ * for historical data processing that cannot be expressed via Slack commands today.
+ * Once the new triggering architecture supports this use case, this will be migrated.
+ *
  * @param {Object} context - The context object containing dataAccess, sqs, data, and env.
  * @returns {Response} The response object with the audit initiation message or an error message.
  */

@@ -90,6 +90,27 @@ describe('cwv-trends handler', () => {
     expect(payload.auditContext).to.deep.equal({ endDate: '2026-04-05' });
   });
 
+  it('returns "no site enabled" message when handler is disabled for the site', async () => {
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sandbox.stub().returns(false),
+    });
+
+    const response = await cwvTrends(context);
+    const result = await response.json();
+
+    expect(sqsMock.sendMessage.called).to.be.false;
+    expect(result.message[0]).to.equal('No site is enabled for cwv-trends-audit audit type');
+  });
+
+  it('returns 404 when site is not found', async () => {
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+
+    const response = await cwvTrends(context);
+
+    expect(response.status).to.equal(404);
+    expect(sqsMock.sendMessage.called).to.be.false;
+  });
+
   it('returns 400 when endDate has wrong format', async () => {
     context.data.endDate = 'not-a-date';
 
