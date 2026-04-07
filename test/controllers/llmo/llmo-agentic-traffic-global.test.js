@@ -26,11 +26,13 @@ use(sinonChai);
 describe('llmo-agentic-traffic-global', () => {
   const sandbox = sinon.createSandbox();
 
+  let validateReadAccess;
   let accessControlUtil;
   let postgrestClient;
   let context;
 
   beforeEach(() => {
+    validateReadAccess = sandbox.stub().resolves();
     accessControlUtil = {
       hasAdminAccess: sandbox.stub().returns(true),
     };
@@ -65,16 +67,47 @@ describe('llmo-agentic-traffic-global', () => {
 
   describe('GET handler', () => {
     it('returns forbidden for non-admin access', async () => {
-      accessControlUtil.hasAdminAccess.returns(false);
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      validateReadAccess.rejects(new Error('Only admins or users with LLMO organization access can view global agentic traffic'));
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
 
       const response = await handler(context);
 
       expect(response.status).to.equal(403);
+      expect(postgrestClient.from).not.to.have.been.called;
+    });
+
+    it('uses the default forbidden message when read access validation error has no message', async () => {
+      validateReadAccess.rejects({});
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
+
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+      expect((await response.json()).message)
+        .to.equal('Only admins or users with LLMO organization access can view global agentic traffic');
+    });
+
+    it('uses the provided read access validator before querying PostgREST', async () => {
+      const thenable = {
+        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      thenable.select = sandbox.stub().returns(thenable);
+      thenable.order = sandbox.stub().returns(thenable);
+      thenable.eq = sandbox.stub().returns(thenable);
+      thenable.limit = sandbox.stub().returns(thenable);
+      postgrestClient.from.returns(thenable);
+
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(validateReadAccess).to.have.been.calledWith(context);
+      expect(thenable.limit).to.have.been.calledWith(52);
+      expect(await response.json()).to.deep.equal([]);
     });
 
     it('returns 503 when PostgREST is unavailable', async () => {
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
 
       const response = await handler({
         ...context,
@@ -85,7 +118,7 @@ describe('llmo-agentic-traffic-global', () => {
     });
 
     it('returns bad request for invalid limit', async () => {
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
 
       const response = await handler({
         ...context,
@@ -97,7 +130,7 @@ describe('llmo-agentic-traffic-global', () => {
     });
 
     it('returns bad request for non-integer week query param', async () => {
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
 
       const response = await handler({
         ...context,
@@ -118,7 +151,7 @@ describe('llmo-agentic-traffic-global', () => {
       thenable.limit = sandbox.stub().returns(thenable);
       postgrestClient.from.returns(thenable);
 
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
       const response = await handler({
         ...context,
         invocation: { event: { rawQueryString: 'year' } },
@@ -151,7 +184,7 @@ describe('llmo-agentic-traffic-global', () => {
       thenable.limit = sandbox.stub().returns(thenable);
       postgrestClient.from.returns(thenable);
 
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
       const response = await handler({
         ...context,
         invocation: { event: { rawQueryString: 'year=2026&limit=10' } },
@@ -182,7 +215,7 @@ describe('llmo-agentic-traffic-global', () => {
       thenable.limit = sandbox.stub().returns(thenable);
       postgrestClient.from.returns(thenable);
 
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
       const response = await handler({
         ...context,
         invocation: { event: { rawQueryString: 'year=2026&week=14' } },
@@ -204,7 +237,7 @@ describe('llmo-agentic-traffic-global', () => {
       thenable.limit = sandbox.stub().returns(thenable);
       postgrestClient.from.returns(thenable);
 
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
       const response = await handler(context);
 
       expect(response.status).to.equal(200);
@@ -225,7 +258,7 @@ describe('llmo-agentic-traffic-global', () => {
       thenable.limit = sandbox.stub().returns(thenable);
       postgrestClient.from.returns(thenable);
 
-      const handler = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+      const handler = createAgenticTrafficGlobalGetHandler(validateReadAccess);
       const response = await handler(context);
 
       expect(response.status).to.equal(500);
@@ -242,6 +275,50 @@ describe('llmo-agentic-traffic-global', () => {
       const response = await handler(context);
 
       expect(response.status).to.equal(403);
+    });
+
+    it('allows S2S consumers that already passed route capability validation', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const upsertStub = sandbox.stub().returns({
+        select: sandbox.stub().returns({
+          single: sandbox.stub().resolves({
+            data: {
+              id: 'row-s2s',
+              year: 2026,
+              week: 18,
+              hits: 456,
+              created_at: '2026-04-01T00:00:00Z',
+              updated_at: '2026-04-02T00:00:00Z',
+              updated_by: 'spacecat-api-service',
+            },
+            error: null,
+          }),
+        }),
+      });
+      postgrestClient.from.returns({
+        upsert: upsertStub,
+      });
+
+      const handler = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+      const response = await handler({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_s2s_consumer: true, client_id: 'client-1' })
+            .withAuthenticated(true),
+        },
+        s2sConsumer: { getCapabilities: () => ['report:write'] },
+        data: { year: 2026, week: 18, hits: 456 },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(upsertStub).to.have.been.calledWith({
+        year: 2026,
+        week: 18,
+        hits: 456,
+        updated_by: 'spacecat-api-service',
+      }, { onConflict: 'year,week' });
     });
 
     it('returns 503 when PostgREST is unavailable', async () => {
