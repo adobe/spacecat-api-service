@@ -1656,7 +1656,7 @@ function SuggestionsController(ctx, sqs, env) {
           promptsCount: prompts.length,
           promptsLocation: promptsS3Key,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
           suggestionIds: validSuggestionIds,
           metadata: {
             urls,
@@ -1759,7 +1759,7 @@ function SuggestionsController(ctx, sqs, env) {
           jobId: job.getId(),
           geoExperimentId,
           geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
           prePhaseScheduleId: preScheduleId,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
