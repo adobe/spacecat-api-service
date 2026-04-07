@@ -4468,7 +4468,7 @@ describe('Sites Controller', () => {
       };
       mockDataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub().resolves({
-          getTier: () => 'FREE_TRIAL',
+          getTier: () => 'PLG',
         }),
       };
     });
@@ -4758,7 +4758,7 @@ describe('Sites Controller', () => {
       expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
     });
 
-    it('should return 404 for PLG-tier site via siteId path', async () => {
+    it('should return 404 for PRE_ONBOARD-tier site via siteId path', async () => {
       const validSiteId = SITE_IDS[1];
 
       context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
@@ -4766,12 +4766,12 @@ describe('Sites Controller', () => {
 
       mockTierClientStub.getAllEnrollment.resolves({
         entitlement: {
-          getId: () => 'entitlement-plg',
+          getId: () => 'entitlement-pre-onboard',
           getProductCode: () => 'ASO',
-          getTier: () => 'PLG',
+          getTier: () => 'PRE_ONBOARD',
         },
         enrollments: [{
-          getId: () => 'enrollment-plg',
+          getId: () => 'enrollment-pre-onboard',
           getSiteId: () => validSiteId,
         }],
       });
@@ -4786,16 +4786,16 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
     });
 
-    it('should return 404 for PLG-tier site via organizationId path', async () => {
+    it('should return 404 for PRE_ONBOARD-tier site via organizationId path', async () => {
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
       mockTierClientStub.getFirstEnrollment.resolves({
         entitlement: {
-          getId: () => 'entitlement-plg',
-          getTier: () => 'PLG',
+          getId: () => 'entitlement-pre-onboard',
+          getTier: () => 'PRE_ONBOARD',
         },
-        enrollment: { getId: () => 'enrollment-plg', getSiteId: () => SITE_IDS[0] },
+        enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
 
@@ -4806,17 +4806,17 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
     });
 
-    it('should return 404 for PLG-tier site via imsOrg path', async () => {
+    it('should return 404 for PRE_ONBOARD-tier site via imsOrg path', async () => {
       context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
 
       const mockTierClient = {
         getFirstEnrollment: sandbox.stub().resolves({
           entitlement: {
-            getId: () => 'entitlement-plg',
-            getTier: () => 'PLG',
+            getId: () => 'entitlement-pre-onboard',
+            getTier: () => 'PRE_ONBOARD',
           },
-          enrollment: { getId: () => 'enrollment-plg', getSiteId: () => SITE_IDS[0] },
+          enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
           site: testSites[0],
         }),
       };
