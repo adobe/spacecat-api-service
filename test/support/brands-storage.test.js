@@ -124,6 +124,43 @@ describe('brands-storage', () => {
       ]);
     });
 
+    it('includes type on base-URL entry when brand_sites has type', async () => {
+      const dbRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-1',
+          paths: ['/products'],
+          type: 'base',
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].urls).to.deep.equal([
+        { value: 'https://adobe.com', type: 'base' },
+        { value: 'https://adobe.com/products' },
+      ]);
+    });
+
+    it('omits type when brand_sites has no type', async () => {
+      const dbRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-1',
+          paths: [],
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].urls).to.deep.equal([{ value: 'https://adobe.com' }]);
+      expect(result[0].urls[0]).to.not.have.property('type');
+    });
+
     it('handles null arrays and defaults status in brand rows', async () => {
       const dbRow = makeBrandRow({
         status: null,
@@ -546,6 +583,41 @@ describe('brands-storage', () => {
       expect(result.urls).to.deep.equal([
         { value: 'https://adobe.com' },
         { value: 'https://adobe.com/products' },
+      ]);
+    });
+
+    it('persists type base through syncBrandSites', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-uuid-1',
+          paths: ['/'],
+          type: 'base',
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://adobe.com', type: 'base' },
+          ],
+        },
+        postgrestClient,
+      });
+
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com', type: 'base' },
       ]);
     });
 

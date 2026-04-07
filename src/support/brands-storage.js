@@ -21,7 +21,7 @@ const BRAND_SELECT = [
   'brand_social_accounts(url, regions)',
   'brand_earned_sources(name, url, regions)',
   'competitors(name, url, regions)',
-  'brand_sites(site_id, paths, sites(base_url))',
+  'brand_sites(site_id, paths, type, sites(base_url))',
 ].join(', ');
 
 /**
@@ -54,7 +54,11 @@ function mapDbBrandToV2(row) {
     if (!hasText(base)) return [];
     const paths = bs.paths || [];
     const effectivePaths = paths.length === 0 ? ['/'] : paths;
-    return effectivePaths.map((p) => ({ value: p === '/' ? base : `${base}${p}` }));
+    return effectivePaths.map((p) => {
+      const entry = { value: p === '/' ? base : `${base}${p}` };
+      if (p === '/' && hasText(bs.type)) entry.type = bs.type;
+      return entry;
+    });
   });
 
   return {
@@ -122,16 +126,18 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
 
   if (!urls || urls.length === 0) return;
 
-  // Group paths by base URL
+  // Group paths by base URL and track type
   const pathsByBase = new Map();
+  const typeByBase = new Map();
   urls
-    .map((u) => (typeof u === 'string' ? u : u?.value))
-    .filter(hasText)
-    .forEach((value) => {
+    .forEach((u) => {
+      const value = typeof u === 'string' ? u : u?.value;
+      if (!hasText(value)) return;
       const { base, path } = parseUrlParts(value);
       const normalizedBase = composeBaseURL(base);
       if (!pathsByBase.has(normalizedBase)) pathsByBase.set(normalizedBase, []);
       pathsByBase.get(normalizedBase).push(path || '/');
+      if (typeof u === 'object' && u?.type === 'base') typeByBase.set(normalizedBase, 'base');
     });
 
   if (pathsByBase.size === 0) return;
@@ -149,6 +155,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     brand_id: brandId,
     site_id: s.id,
     paths: pathsByBase.get(s.base_url) || [],
+    type: typeByBase.get(s.base_url) || null,
     updated_by: updatedBy,
   }));
 
