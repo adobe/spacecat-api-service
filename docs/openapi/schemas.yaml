@@ -154,7 +154,6 @@ AuditType:
     - 'related-urls'
     - 'summarization'
     - 'faqs'
-    - 'organic-traffic'
   example: 'cwv'
 URL:
   type: string

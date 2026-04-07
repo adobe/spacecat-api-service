@@ -25,13 +25,13 @@ trigger:
       The audit will be run asynchronously and the response will be returned immediately.
 
       The audit type is determined by the type parameter and must be one of the following:
+        - 404
         - apex
         - cwv
         - cwv-trends-audit (supports optional `endDate` query param)
-        - broken-backlinks
-        - canonical
-        - sitemap
-        - organic-traffic
+        - lhs
+        - lhs-desktop
+        - lhs-mobile
 
       The URL can be either a site ID or a base URL depending on the audit type.
     operationId: triggerAudit
