@@ -26,6 +26,7 @@ import {
   composeBaseURL,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 import { getDomain } from 'tldts';
@@ -201,8 +202,8 @@ function LlmoController(ctx) {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -370,8 +371,8 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       const errorTime = Date.now();
-      log.debug(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
-      return badRequest(error.message);
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -427,7 +428,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -461,14 +462,11 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
   async function updateLlmoConfig(context) {
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can update the LLMO config');
-    }
     const {
       log,
       s3,
@@ -479,9 +477,13 @@ function LlmoController(ctx) {
     const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
 
     try {
-      // Validate site and LLMO access
+      // hasAccess() must precede isLLMOAdministrator() for delegation-aware checks
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) return siteValidation;
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the LLMO config');
+      }
 
       // Support gzip-compressed request bodies (Content-Type: application/gzip)
       let { data } = context;
@@ -583,12 +585,13 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO questions endpoint, adds a new question
   // the body format is { Human: [question1, question2], AI: [question3, question4] }
   const addLlmoQuestion = async (context) => {
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can add questions');
-    }
     const { log } = context;
     const siteValidation = await getSiteAndValidateLlmo(context);
     if (siteValidation.status) return siteValidation;
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add questions');
+    }
     const { site, config } = siteValidation;
 
     // add the question to the llmoConfig
@@ -628,13 +631,14 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, removes a question
   const removeLlmoQuestion = async (context) => {
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can remove questions');
-    }
     const { log } = context;
     const { questionKey } = context.params;
     const siteValidation = await getSiteAndValidateLlmo(context);
     if (siteValidation.status) return siteValidation;
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can remove questions');
+    }
     const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
@@ -650,14 +654,15 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, updates a question
   const patchLlmoQuestion = async (context) => {
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can update questions');
-    }
     const { log } = context;
     const { questionKey } = context.params;
     const { data } = context;
     const siteValidation = await getSiteAndValidateLlmo(context);
     if (siteValidation.status) return siteValidation;
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update questions');
+    }
     const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
@@ -679,20 +684,21 @@ function LlmoController(ctx) {
       const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
   // Handles requests to the LLMO customer intent endpoint, adds new customer intent items
   const addLlmoCustomerIntent = async (context) => {
     const { log } = context;
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can add customer intent');
-    }
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) return siteValidation;
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can add customer intent');
+      }
       const { site, config } = siteValidation;
 
       const newCustomerIntent = context.data;
@@ -728,7 +734,7 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -752,7 +758,7 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -786,7 +792,7 @@ function LlmoController(ctx) {
       // return the updated llmoConfig customer intent
       return ok(config.getLlmoConfig().customerIntent || []);
     } catch (error) {
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -797,13 +803,13 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN logs filter');
-      }
-
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) return siteValidation;
       const { site, config } = siteValidation;
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN logs filter');
+      }
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -818,7 +824,7 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().cdnlogsFilter || []);
     } catch (error) {
       log.error(`Error updating CDN logs filter for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -829,13 +835,13 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN bucket config');
-      }
-
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) return siteValidation;
       const { site, config } = siteValidation;
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN bucket config');
+      }
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -850,7 +856,7 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().cdnBucketConfig || {});
     } catch (error) {
       log.error(`Error updating CDN bucket config for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -990,7 +996,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1028,7 +1034,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error during LLMO offboarding for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1042,8 +1048,8 @@ function LlmoController(ctx) {
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
-      log.debug(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1060,7 +1066,7 @@ function LlmoController(ctx) {
       return await handleLlmoRationale(context);
     } catch (error) {
       log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1077,7 +1083,7 @@ function LlmoController(ctx) {
       return await handleBrandClaims(context);
     } catch (error) {
       log.error(`Error getting brand claims for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1116,10 +1122,6 @@ function LlmoController(ctx) {
       enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can update the edge optimize config');
-    }
-
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
     if (tokowakaEnabled !== undefined && typeof tokowakaEnabled !== 'boolean') {
@@ -1150,8 +1152,14 @@ function LlmoController(ctx) {
         return notFound('Site not found');
       }
 
+      // No productCode is passed to hasAccess(); the delegation block is not entered.
+      // Org membership is the intended access gate for this endpoint.
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
+      }
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the edge optimize config');
       }
 
       if (!await accessControlUtil.isOwnerOfSite(site)) {
@@ -1232,7 +1240,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Failed to create/update edge config for site ${siteId}:`, error);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1276,7 +1284,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Failed to fetch edge config for site ${siteId}:`, error);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1311,7 +1319,7 @@ function LlmoController(ctx) {
       });
     } catch (error) {
       log.error(`Error getting llmo strategy for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1389,7 +1397,7 @@ function LlmoController(ctx) {
       return ok({ version, notifications: notificationSummary });
     } catch (error) {
       log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1426,7 +1434,7 @@ function LlmoController(ctx) {
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
-      return internalServerError(error.message);
+      return internalServerError(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1610,7 +1618,7 @@ function LlmoController(ctx) {
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
-      return internalServerError(error.message);
+      return internalServerError(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1639,7 +1647,7 @@ function LlmoController(ctx) {
       return ok(config.getLlmoConfig().tags || []);
     } catch (error) {
       log.error(`Error marking opportunities as reviewed: ${error.message}`);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
@@ -1670,10 +1678,6 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
     const { stagingDomains: rawStagingDomains } = context.data || {};
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can add staging domains');
-    }
-
     if (!Array.isArray(rawStagingDomains) || rawStagingDomains.length === 0) {
       return badRequest('stagingDomains must be a non-empty array');
     }
@@ -1690,8 +1694,14 @@ function LlmoController(ctx) {
       if (!site) {
         return notFound('Site not found');
       }
+      // No productCode is passed to hasAccess(); the delegation block is not entered.
+      // Org membership is the intended access gate for this endpoint.
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
+      }
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can add staging domains');
       }
 
       if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
@@ -1761,7 +1771,7 @@ function LlmoController(ctx) {
       return ok(stageConfigs);
     } catch (error) {
       log.error(`Failed to add staging domains for site ${siteId}:`, error);
-      return badRequest(error.message);
+      return badRequest(cleanupHeaderValue(error.message));
     }
   };
 
