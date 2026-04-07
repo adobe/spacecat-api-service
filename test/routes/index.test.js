@@ -386,6 +386,7 @@ describe('getRouteHandlers', () => {
     onboard: sinon.stub(),
     getAllOnboardings: sinon.stub(),
     getStatus: sinon.stub(),
+    update: sinon.stub(),
   };
 
   const mockImsOrgAccessController = {
@@ -829,6 +830,7 @@ describe('getRouteHandlers', () => {
       'POST /consumers/:consumerId/revoke',
       'GET /sites/:siteId/tokens/by-type/:tokenType',
       'GET /plg/onboard/status/:imsOrgId',
+      'PATCH /plg/onboard/:onboardingId',
       'POST /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access/:accessId',

@@ -48,16 +48,59 @@ import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 
-const { STATUSES } = PlgOnboardingModel;
+const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const PLG_PROFILE_KEY = 'aso_plg';
 
+const REVIEW_REASONS = {
+  DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
+  AEM_SITE_CHECK: 'AEM_SITE_CHECK',
+  DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
+};
+
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 
+/**
+ * Derives the review check key from the onboarding record's current state.
+ * @param {object} onboarding - The PlgOnboarding record.
+ * @returns {string|null} The check key enum value, or null if unknown.
+ */
+function deriveCheckKey(onboarding) {
+  /* c8 ignore next */
+  const waitlistReason = onboarding.getWaitlistReason() || '';
+  if (waitlistReason.includes(DOMAIN_ALREADY_ONBOARDED_IN_ORG)) {
+    return REVIEW_REASONS.DOMAIN_ALREADY_ONBOARDED_IN_ORG;
+  }
+  if (waitlistReason.includes('is not an AEM site')) {
+    return REVIEW_REASONS.AEM_SITE_CHECK;
+  }
+  if (waitlistReason.includes(DOMAIN_ALREADY_ASSIGNED)) {
+    return REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED;
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether a specific blocking reason has been bypassed in the reviews array.
+ * @param {Array} reviews - The reviews array from the onboarding record.
+ * @param {string} reasonSubstring - Substring to match against the review reason.
+ * @returns {boolean} True if the latest matching review is BYPASSED.
+ */
+function isBypassed(reviews, reasonSubstring) {
+  /* c8 ignore next 3 */
+  return (reviews || [])
+    .filter((r) => r.reason?.includes(reasonSubstring))
+    .at(-1)?.decision === REVIEW_DECISIONS.BYPASSED;
+}
+
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
+
+// AEM CS publish host pattern: publish-p{programId}-e{environmentId}.adobeaemcloud.(com|net)
+const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.(com|net)$/i;
 
 // RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
 const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
@@ -143,10 +186,11 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @param {object} params
  * @param {string} params.domain - The domain to onboard
  * @param {string} params.imsOrgId - The IMS Organization ID
+ * @param {string} [params.rumHost] - Optional pre-provided RUM host (for AEM_SITE_CHECK bypass)
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
-async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
+async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHost }, context) {
   const { dataAccess, log, env } = context;
   const { Site, PlgOnboarding } = dataAccess;
 
@@ -188,6 +232,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     }
   }
   // Guard: only one domain per IMS org can be onboarded
+  const reviews = onboarding.getReviews() || [];
   const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
   const alreadyOnboarded = existingRecords
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
@@ -240,7 +285,8 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       steps.rumVerified = false;
       log.info(`No RUM data for ${domain}, checking delivery type`);
       cachedDeliveryType = await findDeliveryType(baseURL);
-      if (cachedDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
+      if (!isBypassed(reviews, 'is not an AEM site')
+        && cachedDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
         log.info(`Domain ${domain} is not an AEM site, moving to waitlist`);
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
@@ -339,27 +385,50 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     }
 
     // Step 5c: Auto-resolve author URL and RUM host
-    let rumHost = null;
-    try {
-      const resolvedConfig = await autoResolveAuthorUrl(site, context);
-      rumHost = resolvedConfig?.host || null;
-
-      // Only update deliveryConfig if authorURL is not already set
+    let rumHost = presetRumHost || null;
+    if (presetRumHost) {
+      // Derive AEM CS delivery config directly from preset rumHost
+      /* c8 ignore next */
       const existingDeliveryConfig = site.getDeliveryConfig() || {};
-      if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
-        site.setDeliveryConfig({
-          ...existingDeliveryConfig,
-          authorURL: resolvedConfig.authorURL,
-          programId: resolvedConfig.programId,
-          environmentId: resolvedConfig.environmentId,
-          preferContentApi: true,
-          imsOrgId,
-        });
-        log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
-        steps.authorUrlResolved = true;
+      if (!existingDeliveryConfig.authorURL) {
+        const csMatch = presetRumHost.match(AEM_CS_PUBLISH_HOST_PATTERN);
+        if (csMatch) {
+          const [, programId, environmentId] = csMatch;
+          const authorURL = `https://author-p${programId}-e${environmentId}.adobeaemcloud.com`;
+          site.setDeliveryConfig({
+            ...existingDeliveryConfig,
+            authorURL,
+            programId,
+            environmentId,
+            preferContentApi: true,
+            imsOrgId,
+          });
+          log.info(`Derived author URL from preset rumHost: ${authorURL}`);
+          steps.authorUrlResolved = true;
+        }
       }
-    } catch (error) {
-      log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
+    } else {
+      try {
+        const resolvedConfig = await autoResolveAuthorUrl(site, context);
+        rumHost = resolvedConfig?.host || null;
+
+        // Only update deliveryConfig if authorURL is not already set
+        const existingDeliveryConfig = site.getDeliveryConfig() || {};
+        if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+          site.setDeliveryConfig({
+            ...existingDeliveryConfig,
+            authorURL: resolvedConfig.authorURL,
+            programId: resolvedConfig.programId,
+            environmentId: resolvedConfig.environmentId,
+            preferContentApi: true,
+            imsOrgId,
+          });
+          log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
+          steps.authorUrlResolved = true;
+        }
+      } catch (error) {
+        log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
+      }
     }
 
     // Step 5d: Resolve EDS code config and hlxConfig from RUM host
@@ -688,7 +757,208 @@ function PlgOnboardingController(ctx) {
     }
   };
 
-  return { onboard, getStatus, getAllOnboardings };
+  /**
+   * PATCH /plg/onboard/:onboardingId
+   * Admin-only: review a blocked onboarding (BYPASS or UPHOLD).
+   * On BYPASS, performs scenario-specific prep and re-runs the PLG flow.
+   */
+  const update = async (context) => {
+    const {
+      dataAccess: da, params, data, attributes,
+    } = context;
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can review onboarding records');
+    }
+
+    const { onboardingId } = params;
+    if (!hasText(onboardingId)) {
+      return badRequest('onboardingId is required');
+    }
+
+    if (!data || typeof data !== 'object') {
+      return badRequest('Request body is required');
+    }
+
+    const { decision, justification, siteConfig } = data;
+
+    if (!hasText(decision)
+      || !Object.values(REVIEW_DECISIONS).includes(decision)) {
+      return badRequest(`decision is required and must be one of: ${Object.values(REVIEW_DECISIONS).join(', ')}`);
+    }
+
+    if (!hasText(justification)) {
+      return badRequest('justification is required');
+    }
+
+    const { PlgOnboarding, Site } = da;
+    const onboarding = await PlgOnboarding.findById(onboardingId);
+
+    if (!onboarding) {
+      return notFound('Onboarding record not found');
+    }
+
+    const status = onboarding.getStatus();
+    if (status !== STATUSES.WAITLISTED) {
+      return badRequest('Onboarding record is not in a waitlisted state');
+    }
+
+    const checkKey = deriveCheckKey(onboarding);
+    if (!checkKey) {
+      return badRequest('Unable to determine the review reason from the onboarding record');
+    }
+
+    /* c8 ignore next */
+    const reason = onboarding.getWaitlistReason() || '';
+
+    // Get reviewer identity from auth
+    const { authInfo } = attributes;
+    /* c8 ignore next */
+    const reviewedBy = authInfo?.getProfile()?.email || 'admin';
+
+    // Build review entry
+    const reviewEntry = {
+      reason,
+      decision,
+      reviewedBy,
+      reviewedAt: new Date().toISOString(),
+      justification,
+    };
+
+    const existingReviews = onboarding.getReviews() || [];
+    const updatedReviews = [...existingReviews, reviewEntry];
+    onboarding.setReviews(updatedReviews);
+
+    // UPHOLD: just store the review and return
+    if (decision === REVIEW_DECISIONS.UPHELD) {
+      await onboarding.save();
+      return ok(PlgOnboardingDto.toJSON(onboarding));
+    }
+
+    // BYPASS: scenario-specific prep, then re-run the flow
+    try {
+      switch (checkKey) {
+        case REVIEW_REASONS.DOMAIN_ALREADY_ONBOARDED_IN_ORG: {
+          // Find and offboard the old onboarded domain
+          const imsOrgId = onboarding.getImsOrgId();
+          const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
+          const oldOnboarded = records.find(
+            (r) => r.getDomain() !== onboarding.getDomain()
+              && r.getStatus() === STATUSES.ONBOARDED,
+          );
+          if (oldOnboarded) {
+            oldOnboarded.setStatus(STATUSES.INACTIVE);
+            // Add offboard review to old record
+            const oldReviews = oldOnboarded.getReviews() || [];
+            oldOnboarded.setReviews([...oldReviews, {
+              reason: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
+              decision: REVIEW_DECISIONS.BYPASSED,
+              reviewedBy,
+              reviewedAt: reviewEntry.reviewedAt,
+              justification: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
+            }]);
+            await oldOnboarded.save();
+            log.info(`Offboarded old domain ${oldOnboarded.getDomain()} for IMS org ${imsOrgId}`);
+          }
+          // Re-run PLG flow for the current domain
+          await onboarding.save();
+          const result = await performAsoPlgOnboarding(
+            { domain: onboarding.getDomain(), imsOrgId },
+            context,
+          );
+          return ok(PlgOnboardingDto.toJSON(result));
+        }
+
+        case REVIEW_REASONS.AEM_SITE_CHECK: {
+          // Validate siteConfig — rumHost is always required
+          if (!siteConfig || !hasText(siteConfig.rumHost)) {
+            return badRequest('siteConfig with rumHost is required for AEM_SITE_CHECK bypass');
+          }
+
+          // Re-run PLG flow with pre-set rumHost
+          // Step 5c will derive CS delivery config (authorURL, programId, environmentId)
+          // from rumHost if it matches AEM_CS_PUBLISH_HOST_PATTERN
+          // Steps 5d/5e will derive EDS config (code config, hlxConfig)
+          // from rumHost if it matches EDS_HOST_PATTERN
+          await onboarding.save();
+          const result = await performAsoPlgOnboarding(
+            {
+              domain: onboarding.getDomain(),
+              imsOrgId: onboarding.getImsOrgId(),
+              rumHost: siteConfig.rumHost,
+            },
+            context,
+          );
+          return ok(PlgOnboardingDto.toJSON(result));
+        }
+
+        case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED: {
+          // Find the existing org that owns the site
+          const domain = onboarding.getDomain();
+          const baseURL = onboarding.getBaseURL();
+          const site = await Site.findByBaseURL(baseURL);
+
+          if (!site) {
+            return badRequest('Site no longer exists for this domain');
+          }
+
+          const existingOrgId = site.getOrganizationId();
+          // Derive the IMS org ID for the existing org
+          const { Organization } = da;
+          const existingOrg = await Organization.findById(existingOrgId);
+          if (!existingOrg || !existingOrg.getImsOrgId()) {
+            return badRequest('Cannot determine IMS org for the existing site owner');
+          }
+
+          const existingImsOrgId = existingOrg.getImsOrgId();
+
+          // Check if PLG onboarding already exists for (domain, existingOrg)
+          const existingPlgOnboarding = await PlgOnboarding
+            .findByImsOrgIdAndDomain(existingImsOrgId, domain);
+          if (existingPlgOnboarding) {
+            return createResponse(
+              { message: 'There is already an onboarding entry for this domain and org' },
+              409,
+            );
+          }
+
+          // Offboard the original record (OrgA's) since domain belongs to OrgB
+          onboarding.setStatus(STATUSES.INACTIVE);
+          await onboarding.save();
+          log.info(`Offboarded onboarding ${onboarding.getId()} for domain ${domain} (belongs to org ${existingImsOrgId})`);
+
+          // Run the flow under the existing org — it will create the PlgOnboarding record
+          const result = await performAsoPlgOnboarding(
+            { domain, imsOrgId: existingImsOrgId },
+            context,
+          );
+          return ok(PlgOnboardingDto.toJSON(result));
+        }
+
+        /* c8 ignore next 2 */
+        default:
+          return badRequest('Unknown review reason');
+      }
+    } catch (error) {
+      log.error(`PLG onboarding bypass failed for ${onboarding.getId()}: ${error.message}`);
+
+      if (error.conflict) {
+        return createResponse({ message: error.message }, 409);
+      }
+      if (error.clientError) {
+        return badRequest(error.message);
+      }
+      return internalServerError('Onboarding bypass failed. Please try again later.');
+    }
+  };
+
+  return {
+    onboard,
+    getStatus,
+    getAllOnboardings,
+    update,
+  };
 }
 
 export default PlgOnboardingController;

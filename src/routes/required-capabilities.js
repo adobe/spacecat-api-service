@@ -77,6 +77,7 @@ export const INTERNAL_ROUTES = [
   'POST /plg/onboard',
   'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
+  'PATCH /plg/onboard/:onboardingId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
