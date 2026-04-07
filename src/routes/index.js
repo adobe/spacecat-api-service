@@ -264,6 +264,8 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/geo-experiments': suggestionsController.listGeoExperiments,
     'GET /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.getGeoExperiment,
+    'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.patchGeoExperiment,
+    'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.deleteGeoExperiment,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
     'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,

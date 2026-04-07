@@ -1936,6 +1936,94 @@ function SuggestionsController(ctx, sqs, env) {
     });
   };
 
+  /**
+   * Patches a geo experiment. All fields are patchable except
+   * createdAt, updatedAt, and updatedBy (managed automatically).
+   */
+  const patchGeoExperiment = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) return badRequest('Site ID required');
+    if (!isValidUUID(geoExperimentId)) return badRequest('GeoExperiment ID required');
+
+    const requestBody = context.data;
+    if (!isObject(requestBody)) return badRequest('Request body required');
+
+    const site = await Site.findById(siteId);
+    if (!site) return notFound('Site not found');
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const PATCHABLE_FIELDS = [
+      { key: 'name', setter: 'setName' },
+      { key: 'status', setter: 'setStatus' },
+      { key: 'phase', setter: 'setPhase' },
+      { key: 'type', setter: 'setType' },
+      { key: 'preScheduleId', setter: 'setPreScheduleId' },
+      { key: 'postScheduleId', setter: 'setPostScheduleId' },
+      { key: 'suggestionIds', setter: 'setSuggestionIds' },
+      { key: 'promptsCount', setter: 'setPromptsCount' },
+      { key: 'promptsLocation', setter: 'setPromptsLocation' },
+      { key: 'startTime', setter: 'setStartTime' },
+      { key: 'endTime', setter: 'setEndTime' },
+      { key: 'metadata', setter: 'setMetadata' },
+      { key: 'error', setter: 'setError' },
+    ];
+
+    let updates = false;
+    for (const { key, setter } of PATCHABLE_FIELDS) {
+      if (requestBody[key] !== undefined) {
+        geoExperiment[setter](requestBody[key]);
+        updates = true;
+      }
+    }
+
+    if (!updates) {
+      return badRequest('No valid fields to update');
+    }
+
+    geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
+    const updated = await geoExperiment.save();
+    return ok(GeoExperimentDto.toJSON(updated));
+  };
+
+  /**
+   * Deletes a geo experiment.
+   */
+  const deleteGeoExperiment = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) return notFound('Site not found');
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    await geoExperiment.remove();
+    return noContent();
+  };
+
   const rollbackSuggestionFromEdge = async (context) => {
     const { siteId, opportunityId } = context.params;
     const { authInfo: { profile } } = context.attributes;
@@ -2313,6 +2401,8 @@ function SuggestionsController(ctx, sqs, env) {
     deploySuggestionToEdge,
     listGeoExperiments,
     getGeoExperiment,
+    patchGeoExperiment,
+    deleteGeoExperiment,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,
