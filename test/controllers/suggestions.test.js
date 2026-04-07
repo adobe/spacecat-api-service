@@ -800,8 +800,6 @@ describe('Suggestions Controller', () => {
     expect(mockLog.warn).to.have.been.calledWith('Grant suggestions handler failed', 'grant failure');
   });
 
-
-
   it('gets all suggestions for an opportunity and a site for non belonging to the organization', async () => {
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
