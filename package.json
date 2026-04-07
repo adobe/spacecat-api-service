@@ -73,7 +73,7 @@
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.28",
     "@adobe/spacecat-helix-content-sdk": "1.4.33",
-    "@adobe/spacecat-shared-data-access": "https://gist.github.com/dipratap/c893e5f937a62e34bee0a889b0b5287b/raw/69746e1babe52ba3c89b118287c0b60af9e744f2/adobe-spacecat-shared-data-access-3.46.0.tgz",
+    "@adobe/spacecat-shared-data-access": "3.47.0",
     "@adobe/spacecat-shared-ahrefs-client": "1.10.9",
     "@adobe/spacecat-shared-athena-client": "1.9.11",
     "@adobe/spacecat-shared-brand-client": "1.1.40",
