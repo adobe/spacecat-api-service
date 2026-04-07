@@ -624,7 +624,7 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
       EntitlementModel.PRODUCT_CODES.ASO,
     );
 
-    return entitlement?.getTier() === EntitlementModel.TIERS.FREE_TRIAL;
+    return entitlement?.getTier() === EntitlementModel.TIERS.PLG;
   } catch (err) {
     context.log?.error?.('Error checking audit summit-plg for site:', err);
     return false;
@@ -1902,13 +1902,14 @@ export const onboardSingleSite = async (
  */
 /**
  * Allow-list of entitlement tiers that are visible to customers via the API.
- * Any tier not in this list (e.g. PLG) is treated as internal-only.
+ * Any tier not in this list (e.g. PRE_ONBOARD) is treated as internal-only.
  * Adding a new tier here explicitly opts it into customer visibility.
  * @type {string[]}
  */
 export const CUSTOMER_VISIBLE_TIERS = [
   EntitlementModel.TIERS.FREE_TRIAL,
   EntitlementModel.TIERS.PAID,
+  EntitlementModel.TIERS.PLG,
 ];
 
 export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
