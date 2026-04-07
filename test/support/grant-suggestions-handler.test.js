@@ -200,6 +200,57 @@ describe('grant-suggestions-handler', () => {
       const groups = getTopSuggestions([s1, s2]);
       expect(groups).to.have.lengthOf(2);
     });
+
+    it('sorts cwv suggestions by pageviews descending using getData()', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 500, getData: () => ({ pageviews: 500 }) };
+      const s2 = { getId: () => 'id-2', getRank: () => 9000, getData: () => ({ pageviews: 9000 }) };
+      const s3 = { getId: () => 'id-3', getRank: () => 200, getData: () => ({ pageviews: 200 }) };
+      const groups = getTopSuggestions([s1, s2, s3], 'cwv');
+      expect(groups).to.have.lengthOf(3);
+      expect(groups[0].items[0]).to.equal(s2); // 9000 first
+      expect(groups[1].items[0]).to.equal(s1); // 500 second
+      expect(groups[2].items[0]).to.equal(s3); // 200 last
+    });
+
+    it('sorts cwv suggestions by pageviews descending using plain object data', () => {
+      const s1 = { id: 'id-1', rank: 500, data: { pageviews: 500 } };
+      const s2 = { id: 'id-2', rank: 9000, data: { pageviews: 9000 } };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups).to.have.lengthOf(2);
+      expect(groups[0].items[0]).to.equal(s2); // 9000 first
+      expect(groups[1].items[0]).to.equal(s1); // 500 second
+    });
+
+    it('sorts cwv suggestions with missing pageviews to the end', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 1000, getData: () => ({ pageviews: 1000 }) };
+      const s2 = { getId: () => 'id-2', getRank: () => 0, getData: () => ({}) };
+      const groups = getTopSuggestions([s2, s1], 'cwv');
+      expect(groups[0].items[0]).to.equal(s1); // 1000 first
+      expect(groups[1].items[0]).to.equal(s2); // no pageviews (0) last
+    });
+
+    it('breaks cwv pageview ties by id ascending', () => {
+      const s1 = { getId: () => 'id-b', getRank: () => 500, getData: () => ({ pageviews: 500 }) };
+      const s2 = { getId: () => 'id-a', getRank: () => 500, getData: () => ({ pageviews: 500 }) };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups[0].items[0]).to.equal(s2); // id-a before id-b
+      expect(groups[1].items[0]).to.equal(s1);
+    });
+
+    it('breaks cwv pageview ties by id ascending using plain object id', () => {
+      const s1 = { id: 'id-b', rank: 500, data: { pageviews: 500 } };
+      const s2 = { id: 'id-a', rank: 500, data: { pageviews: 500 } };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups[0].items[0]).to.equal(s2); // id-a before id-b
+      expect(groups[1].items[0]).to.equal(s1);
+    });
+
+    it('breaks cwv pageview ties stably when items have no id', () => {
+      const s1 = { rank: 500, data: { pageviews: 500 } };
+      const s2 = { rank: 500, data: { pageviews: 500 } };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups).to.have.lengthOf(2); // both empty-string ids → stable, no throw
+    });
   });
 
   describe('grantSuggestionsForOpportunity', () => {

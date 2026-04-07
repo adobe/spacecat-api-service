@@ -98,6 +98,25 @@ const OPPORTUNITY_STRATEGIES = {
       );
     },
   },
+  // Sorts CWV suggestions by pageviews descending so highest-traffic pages
+  // are granted first, giving users the most impactful fixes first.
+  // Tie-breaks by suggestion ID ascending for deterministic ordering.
+  cwv: {
+    sortFn: (groupA, groupB) => {
+      const getPageviews = (group) => {
+        const s = group.items[0];
+        const data = typeof s?.getData === 'function' ? s.getData() : s?.data;
+        return data?.pageviews ?? 0;
+      };
+      const pvDiff = getPageviews(groupB) - getPageviews(groupA);
+      if (pvDiff !== 0) return pvDiff;
+      const a = groupA.items[0];
+      const b = groupB.items[0];
+      const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
+      const idB = typeof b?.getId === 'function' ? b.getId() : (b?.id ?? '');
+      return idA.localeCompare(idB);
+    },
+  },
 };
 
 /**
