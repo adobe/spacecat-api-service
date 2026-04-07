@@ -33,6 +33,7 @@ import {
   LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
+import { detectCdnForDomain } from '../../support/cdn-detection.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1210,6 +1211,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
   const dataFolder = generateDataFolder(baseURL, env.ENV);
 
   let site;
+  let detectedCdn = null;
   try {
     log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}, brand ${brandName}`);
 
@@ -1272,6 +1274,15 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       }
     } else {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
+    }
+
+    detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname);
+    if (detectedCdn) {
+      site.setDetectedCdn?.(detectedCdn);
+      log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
+      say(`:mag: Detected CDN: ${detectedCdn}`);
+    } else {
+      log.info(`No CDN auto-detected for site ${site.getId()}`);
     }
 
     // update the site config object
@@ -1369,6 +1380,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       organizationId: organization.getId(),
       baseURL,
       dataFolder,
+      detectedCdn,
       message: 'LLMO onboarding completed successfully',
     };
   } catch (error) {
