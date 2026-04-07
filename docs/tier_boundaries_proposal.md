@@ -42,6 +42,9 @@ become two names for the same thing.
 
 2. **`utils.js` line 627**: `getIsSummitPlgEnabled` checks `FREE_TRIAL` today. This is the
    primary runtime differentiator between a PLG-onboarded customer and a PAID customer.
+   The function is a **transitional shim** — once `PLG` is the active tier for onboarded
+   customers, all callers should migrate to checking `entitlement.getTier() === Entitlement.TIERS.PLG`
+   directly and the function should be removed.
 
 3. **`plg-onboarding.js` line 53**: The PLG onboarding flow creates a `FREE_TRIAL` entitlement,
    not a `PLG` one. `PLG` tier exists in the model but is not yet assigned by any flow.
@@ -109,7 +112,9 @@ enrollment is preserved.
 - Customer-facing. Visible in all API responses.
 - JWT tenant included. Customer can log in.
 - **`isSummitPlgEnabled = true`**: The PLG-specific UI/UX experience is active. This is the
-  primary behavioral differentiator from FREE_TRIAL.
+  primary behavioral differentiator from FREE_TRIAL. The underlying check (`getIsSummitPlgEnabled`)
+  is a transitional shim — its result is equivalent to `entitlement.getTier() === PLG` and the
+  function will be removed once all callers migrate to a direct tier check.
 - **Sub-services**: `auto_suggest` and `auto_fix` (same as FREE_TRIAL) — PLG customers should
   have access to the core suggestion and fix capabilities.
 - **No TrialUser record**: PLG customers entered through the PLG motion, not through a
@@ -236,7 +241,7 @@ implementation PRs.
 | Location | Current behavior | Required change |
 |---|---|---|
 | `login.js` line 202 | Sub-services injected only for `FREE_TRIAL`, nothing for `PLG` | Also inject `auto_suggest`/`auto_fix` for `PLG` tier |
-| `utils.js` line 627 | `getIsSummitPlgEnabled` checks `FREE_TRIAL` | Change to check `PLG` |
+| `utils.js` line 627 | `getIsSummitPlgEnabled` checks `FREE_TRIAL` | Change to check `PLG` as a transitional fix; function itself is scheduled for removal — all callers to be migrated to `entitlement.getTier() === Entitlement.TIERS.PLG` directly |
 | `plg-onboarding.js` line 53 | Creates `FREE_TRIAL` entitlement | Change to create `PRE_ONBOARD`, then transition to `PLG` on completion |
 | `access-control-util.js` line 149 | `TrialUser` created for `FREE_TRIAL` | No change needed — `PLG` must not trigger this |
 | `tier-client.js` line 178 | `llmo_trial_prompts: 200` hardcoded for all tiers | Depends on OQ-1 resolution |
