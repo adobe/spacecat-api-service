@@ -322,6 +322,28 @@ function PreflightController(ctx, log, env) {
     const step = data.step.toLowerCase();
     const { url } = data;
 
+    const isDev = env.AWS_ENV === 'dev';
+
+    const normalizedMystiqueUrl = hasText(data.mystiqueUrl) && !data.mystiqueUrl.includes('://')
+      ? `https://${data.mystiqueUrl}`
+      : data.mystiqueUrl;
+
+    if (hasText(normalizedMystiqueUrl)) {
+      if (!isDev) {
+        return badRequest('mystiqueUrl override is only allowed in dev');
+      }
+      if (!isValidUrl(normalizedMystiqueUrl)) {
+        return badRequest('Invalid request: mystiqueUrl must be a valid URL');
+      }
+      if (!(/\.stage\.cloud\.adobe\.io$/).test(new URL(normalizedMystiqueUrl).hostname)) {
+        return badRequest('Invalid request: mystiqueUrl must be a valid Mystique ephemeral host');
+      }
+    }
+
+    const mysticatBaseUrl = (isDev && hasText(normalizedMystiqueUrl))
+      ? normalizedMystiqueUrl
+      : env.MYSTIQUE_API_BASE_URL;
+
     try {
       const previewBaseURL = `${new URL(url).protocol}//${new URL(url).hostname}`;
       let site;
@@ -354,8 +376,6 @@ function PreflightController(ctx, log, env) {
         }
       }
 
-      const isDev = env.AWS_ENV === 'dev';
-
       const job = await dataAccess.AsyncJob.create({
         status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
@@ -367,7 +387,7 @@ function PreflightController(ctx, log, env) {
 
       try {
         await callMysticatAnalyze(
-          env.MYSTIQUE_API_BASE_URL,
+          mysticatBaseUrl,
           job.getId(),
           site.getId(),
           url,
