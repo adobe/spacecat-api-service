@@ -128,7 +128,7 @@ describe('brands-storage', () => {
       const dbRow = makeBrandRow({
         brand_sites: [{
           site_id: 'site-1',
-          paths: ['/products'],
+          paths: ['/', '/products'],
           type: 'base',
           sites: { base_url: 'https://adobe.com' },
         }],
