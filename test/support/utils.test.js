@@ -18,6 +18,7 @@ import sinon from 'sinon';
 import nock from 'nock';
 
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import { AUTHORING_TYPES, DELIVERY_TYPES } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import {
   createProject,
@@ -29,6 +30,7 @@ import {
   filterSitesForProductCode,
   queueDetectCdnAudit,
   queueDeliveryConfigWriter,
+  validateSiteForRedirects,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -495,7 +497,7 @@ describe('utils', () => {
       sandbox.restore();
     });
 
-    it('returns true when summit-plg is enabled and entitlement is FREE_TRIAL ASO', async () => {
+    it('returns true when summit-plg is enabled and entitlement is PLG ASO', async () => {
       const isHandlerEnabledForSite = sandbox.stub().withArgs('summit-plg', site).returns(true);
       context.dataAccess.Configuration = {
         findLatest: sandbox.stub().resolves({
@@ -505,7 +507,7 @@ describe('utils', () => {
       context.dataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub()
           .withArgs('org-456', 'ASO')
-          .resolves({ getTier: () => 'FREE_TRIAL' }),
+          .resolves({ getTier: () => 'PLG' }),
       };
 
       const result = await getIsSummitPlgEnabled(site, context);
@@ -515,6 +517,38 @@ describe('utils', () => {
       expect(isHandlerEnabledForSite).to.have.been.calledWith('summit-plg', site);
       expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
         .to.have.been.calledWith('org-456', 'ASO');
+    });
+
+    it('returns false when summit-plg is enabled but entitlement is FREE_TRIAL', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .resolves({ getTier: () => 'FREE_TRIAL' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when summit-plg is enabled but entitlement is PRE_ONBOARD', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(true),
+        }),
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .resolves({ getTier: () => 'PRE_ONBOARD' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
     });
 
     it('returns false when summit-plg is enabled but entitlement is PAID', async () => {
@@ -717,11 +751,28 @@ describe('utils', () => {
       expect(result).to.deep.equal([]);
     });
 
-    it('returns empty array for PLG-tier entitlement', async () => {
+    it('returns enrolled sites for PLG-tier entitlement', async () => {
       mockTierClient.checkValidEntitlement.resolves({
         entitlement: {
           getId: () => 'ent-1',
           getTier: () => EntitlementModel.TIERS.PLG,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].getId()).to.equal('site-1');
+    });
+
+    it('returns empty array for PRE_ONBOARD-tier entitlement', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PRE_ONBOARD,
         },
       });
 
@@ -776,6 +827,86 @@ describe('utils', () => {
       const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
 
       expect(result).to.deep.equal([]);
+    });
+  });
+
+  describe('validateSiteForRedirects', () => {
+    function makeSite({
+      id = 'site-1',
+      baseURL = 'https://example.com',
+      authoringType = AUTHORING_TYPES.CS,
+      deliveryType = DELIVERY_TYPES.AEM_CS,
+      deliveryConfig = { programId: 'p1', environmentId: 'e1' },
+    } = {}) {
+      return {
+        getId: () => id,
+        getBaseURL: () => baseURL,
+        getAuthoringType: () => authoringType,
+        getDeliveryType: () => deliveryType,
+        getDeliveryConfig: () => deliveryConfig,
+      };
+    }
+
+    // happy path
+    it('return validForRedirects: true, programID: string, environmentID: string when site is valid for redirects', async () => {
+      const result = validateSiteForRedirects(makeSite());
+      expect(result).to.deep.equal({
+        validForRedirects: true,
+        skipMessage: '',
+        programId: 'p1',
+        environmentId: 'e1',
+      });
+    });
+
+    it('returns valid when authoring is cs/crosswalk with delivery ids', () => {
+      const result = validateSiteForRedirects(makeSite({ authoringType: AUTHORING_TYPES.CS_CW }));
+      expect(result.validForRedirects).to.be.true;
+      expect(result.programId).to.equal('p1');
+      expect(result.environmentId).to.equal('e1');
+    });
+
+    it('returns valid when delivery is aem_cs even if authoring is not CS', () => {
+      const result = validateSiteForRedirects(
+        makeSite({ authoringType: AUTHORING_TYPES.AMS, deliveryType: DELIVERY_TYPES.AEM_CS }),
+      );
+      expect(result.validForRedirects).to.be.true;
+    });
+
+    it('returns invalid when authoring and delivery are not valid for update-redirects', () => {
+      const site = makeSite({
+        authoringType: AUTHORING_TYPES.AMS,
+        deliveryType: DELIVERY_TYPES.AEM_EDGE,
+        deliveryConfig: { programId: 'p1', environmentId: 'e1' },
+      });
+      const result = validateSiteForRedirects(site);
+      expect(result.validForRedirects).to.be.false;
+      expect(result.skipMessage).to.match(
+        /not valid for redirects because authoringType is `ams` and deliveryType is `aem_edge`/,
+      );
+      expect(result.programId).to.equal('p1');
+      expect(result.environmentId).to.equal('e1');
+    });
+
+    it('returns invalid and clears ids when programId or environmentId is missing', () => {
+      const site = makeSite({ deliveryConfig: { programId: 'p1', environmentId: '' } });
+      const result = validateSiteForRedirects(site);
+      expect(result.validForRedirects).to.be.false;
+      expect(result.programId).to.be.undefined;
+      expect(result.environmentId).to.be.undefined;
+      expect(result.skipMessage).to.include('environmentID and/or programID is missing');
+    });
+
+    it('uses empty deliveryConfig when getDeliveryConfig is absent', () => {
+      const site = {
+        getId: () => 's1',
+        getBaseURL: () => 'https://x.com',
+        getAuthoringType: () => AUTHORING_TYPES.CS,
+        getDeliveryType: () => DELIVERY_TYPES.AEM_CS,
+      };
+      const result = validateSiteForRedirects(site);
+      expect(result.validForRedirects).to.be.false;
+      expect(result.programId).to.be.undefined;
+      expect(result.environmentId).to.be.undefined;
     });
   });
 
@@ -1025,7 +1156,9 @@ describe('utils', () => {
       );
       expect(result).to.deep.equal({ ok: true });
       expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
-      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        'environmentID and/or programID is missing',
+      );
     });
 
     it('skips redirect params and logs info when environmentId is missing', async () => {
@@ -1036,7 +1169,9 @@ describe('utils', () => {
       );
       expect(result).to.deep.equal({ ok: true });
       expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
-      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        'environmentID and/or programID is missing',
+      );
     });
 
     it('skips redirect params and logs info when getDeliveryConfig is absent', async () => {
@@ -1053,7 +1188,9 @@ describe('utils', () => {
       );
       expect(result).to.deep.equal({ ok: true });
       expect(sqsStub.sendMessage.firstCall.args[1]).to.not.have.property('programId');
-      expect(context.log.info).to.have.been.calledWithMatch('missing programId/environmentId');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        'environmentID and/or programID is missing',
+      );
     });
 
     it('includes slackContext in payload when channelId and threadTs are present', async () => {
