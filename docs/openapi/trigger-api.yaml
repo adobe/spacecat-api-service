@@ -2,6 +2,16 @@ trigger:
   parameters:
     - $ref: './parameters.yaml#/triggerUrl'
     - $ref: './parameters.yaml#/triggerType'
+    - name: endDate
+      in: query
+      required: false
+      description: |
+        Optional end date (YYYY-MM-DD) for audits that support historical data windows.
+        Currently supported by `cwv-trends-audit`. When omitted, defaults to today.
+      schema:
+        type: string
+        pattern: '^\d{4}-\d{2}-\d{2}$'
+        example: '2026-04-05'
   get:
     tags:
       - trigger
@@ -10,17 +20,18 @@ trigger:
     description: |
       **Warning:** This API is deprecated, will be removed in future versions and should no longer be used or enhanced.
       Please use the Slack commands to trigger audits on-demand.
-      
+
       This endpoint is useful for triggering an audit.
       The audit will be run asynchronously and the response will be returned immediately.
 
       The audit type is determined by the type parameter and must be one of the following:
-        - 404
         - apex
         - cwv
-        - lhs
-        - lhs-desktop
-        - lhs-mobile
+        - cwv-trends-audit (supports optional `endDate` query param)
+        - broken-backlinks
+        - canonical
+        - sitemap
+        - organic-traffic
 
       The URL can be either a site ID or a base URL depending on the audit type.
     operationId: triggerAudit

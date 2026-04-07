@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+import { badRequest } from '@adobe/spacecat-shared-http-utils';
 import { triggerFromData } from './common/trigger.js';
+
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Triggers cwv-trends-audit for websites based on the provided URL.
@@ -25,6 +28,9 @@ export default async function triggerAudit(context) {
 
   const auditContext = {};
   if (endDate) {
+    if (!DATE_REGEX.test(endDate) || Number.isNaN(new Date(endDate).getTime())) {
+      return badRequest('endDate must be a valid date in YYYY-MM-DD format');
+    }
     auditContext.endDate = endDate;
   }
 

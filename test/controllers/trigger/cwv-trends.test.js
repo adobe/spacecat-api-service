@@ -89,4 +89,22 @@ describe('cwv-trends handler', () => {
     const [, payload] = sqsMock.sendMessage.firstCall.args;
     expect(payload.auditContext).to.deep.equal({ endDate: '2026-04-05' });
   });
+
+  it('returns 400 when endDate has wrong format', async () => {
+    context.data.endDate = 'not-a-date';
+
+    const response = await cwvTrends(context);
+
+    expect(response.status).to.equal(400);
+    expect(sqsMock.sendMessage.called).to.be.false;
+  });
+
+  it('returns 400 when endDate is an invalid calendar date', async () => {
+    context.data.endDate = '2026-13-99';
+
+    const response = await cwvTrends(context);
+
+    expect(response.status).to.equal(400);
+    expect(sqsMock.sendMessage.called).to.be.false;
+  });
 });
