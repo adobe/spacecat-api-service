@@ -200,6 +200,63 @@ describe('grant-suggestions-handler', () => {
       const groups = getTopSuggestions([s1, s2]);
       expect(groups).to.have.lengthOf(2);
     });
+
+    it('sorts cwv suggestions by pageviews descending using getData()', () => {
+      const mk = (id, pageviews) => ({
+        getId: () => id,
+        getRank: () => 0,
+        getData: () => ({ url: `https://example.com/${id}`, pageviews }),
+      });
+      const s1 = mk('id-1', 5220);
+      const s2 = mk('id-2', 3800);
+      const s3 = mk('id-3', 900);
+      const s4 = mk('id-4', 2000);
+      const groups = getTopSuggestions([s1, s2, s3, s4], 'cwv');
+      expect(groups).to.have.lengthOf(4);
+      expect(groups[0].items[0]).to.equal(s1); // 5220 first
+      expect(groups[1].items[0]).to.equal(s2); // 3800
+      expect(groups[2].items[0]).to.equal(s4); // 2000
+      expect(groups[3].items[0]).to.equal(s3); // 900 last
+    });
+
+    it('sorts cwv suggestions by pageviews descending using plain objects', () => {
+      const s1 = { id: 'id-1', rank: 0, data: { pageviews: 5220 } };
+      const s2 = { id: 'id-2', rank: 0, data: { pageviews: 2000 } };
+      const groups = getTopSuggestions([s2, s1], 'cwv');
+      expect(groups[0].items[0]).to.equal(s1);
+      expect(groups[1].items[0]).to.equal(s2);
+    });
+
+    it('cwv tie-breaks by id ascending when pageviews are equal', () => {
+      const s1 = { getId: () => 'id-b', getRank: () => 0, getData: () => ({ pageviews: 1000 }) };
+      const s2 = { getId: () => 'id-a', getRank: () => 0, getData: () => ({ pageviews: 1000 }) };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups[0].items[0]).to.equal(s2); // id-a before id-b
+      expect(groups[1].items[0]).to.equal(s1);
+    });
+
+    it('cwv tie-breaks by id ascending using plain objects when pageviews are equal', () => {
+      const s1 = { id: 'id-b', rank: 0, data: { pageviews: 1000 } };
+      const s2 = { id: 'id-a', rank: 0, data: { pageviews: 1000 } };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups[0].items[0]).to.equal(s2); // id-a before id-b
+      expect(groups[1].items[0]).to.equal(s1);
+    });
+
+    it('cwv tie-breaks fall back to empty string when plain objects have no id', () => {
+      const s1 = { rank: 0, data: { pageviews: 1000 } };
+      const s2 = { rank: 0, data: { pageviews: 1000 } };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups).to.have.lengthOf(2);
+    });
+
+    it('cwv treats missing pageviews as 0', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 0, getData: () => ({}) };
+      const s2 = { getId: () => 'id-2', getRank: () => 0, getData: () => ({ pageviews: 500 }) };
+      const groups = getTopSuggestions([s1, s2], 'cwv');
+      expect(groups[0].items[0]).to.equal(s2); // 500 before 0
+      expect(groups[1].items[0]).to.equal(s1);
+    });
   });
 
   describe('grantSuggestionsForOpportunity', () => {
