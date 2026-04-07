@@ -22,6 +22,7 @@ import {
 
 const { TYPES, METADATA_KEYS, SCHEDULE_CONFIG_ENV_VAR } = GeoExperiment;
 const ONSITE = TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT;
+const OPP_TYPE = 'recover-content-visibility';
 
 describe('geo-experiment-helper', () => {
   // ─── parseScheduleConfig ─────────────────────────────────────────────────────
@@ -34,11 +35,16 @@ describe('geo-experiment-helper', () => {
     it('returns parsed config with a valid env var', () => {
       const config = {
         [ONSITE]: {
-          pre: {
-            cronExpression: '0 * * * *', expiryMs: 3600000, platforms: ['chatgpt_free'], providerIds: ['brightdata'],
+          default: {
+            pre: {
+              cronExpression: '0 * * * *', expiryMs: 3600000, platforms: ['chatgpt_free'], providerIds: ['brightdata'],
+            },
+            post: {
+              cronExpression: '0 0 * * *', expiryMs: 86400000, platforms: ['perplexity'], providerIds: ['openai_web_search'],
+            },
           },
-          post: {
-            cronExpression: '0 0 * * *', expiryMs: 86400000, platforms: ['perplexity'], providerIds: ['openai_web_search'],
+          [OPP_TYPE]: {
+            pre: { cronExpression: '*/15 * * * *' },
           },
         },
       };
@@ -58,56 +64,114 @@ describe('geo-experiment-helper', () => {
       expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: 'bad' }) })).to.throw(TypeError, ONSITE);
     });
 
+    it('throws TypeError when an opportunity type config is not an object', () => {
+      const config = { [ONSITE]: { [OPP_TYPE]: 'bad' } };
+      const env = { [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) };
+      expect(() => parseScheduleConfig(env)).to.throw(TypeError, OPP_TYPE);
+    });
+
     it('throws TypeError when cronExpression is not a string', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { pre: { cronExpression: 42 } } }) })).to.throw(TypeError, 'cronExpression');
+      const config = { [ONSITE]: { default: { pre: { cronExpression: 42 } } } };
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'cronExpression');
     });
 
     it('throws TypeError when expiryMs is not a positive integer', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { pre: { expiryMs: -1 } } }) })).to.throw(TypeError, 'expiryMs');
+      const config = { [ONSITE]: { default: { pre: { expiryMs: -1 } } } };
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'expiryMs');
     });
 
     it('throws TypeError when expiryMs is a float', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { pre: { expiryMs: 1.5 } } }) })).to.throw(TypeError, 'expiryMs');
+      const config = { [ONSITE]: { default: { pre: { expiryMs: 1.5 } } } };
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'expiryMs');
     });
 
     it('throws TypeError when platforms is not an array', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { post: { platforms: 'chatgpt_free' } } }) })).to.throw(TypeError, 'platforms');
+      const config = { [ONSITE]: { [OPP_TYPE]: { post: { platforms: 'chatgpt_free' } } } };
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'platforms');
     });
 
     it('throws TypeError when providerIds is not an array', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { post: { providerIds: 'brightdata' } } }) })).to.throw(TypeError, 'providerIds');
+      const config = { [ONSITE]: { [OPP_TYPE]: { post: { providerIds: 'brightdata' } } } };
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'providerIds');
     });
   });
 
   // ─── getScheduleParams ───────────────────────────────────────────────────────
 
   describe('getScheduleParams', () => {
-    it('returns built-in defaults when env var is absent', () => {
-      const params = getScheduleParams({}, ONSITE, 'pre');
-      expect(params).to.include.keys('cronExpression', 'expiryMs', 'platforms', 'providerIds');
-      expect(params.cronExpression).to.be.a('string');
-      expect(params.expiryMs).to.be.a('number');
-      expect(params.platforms).to.be.an('array').that.is.not.empty;
-      expect(params.providerIds).to.be.an('array').that.is.not.empty;
-    });
-
-    it('overrides only the fields present in the env var config', () => {
-      const env = { [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { pre: { cronExpression: '*/30 * * * *' } } }) };
-      const params = getScheduleParams(env, ONSITE, 'pre');
-      expect(params.cronExpression).to.equal('*/30 * * * *');
-      expect(params.platforms).to.be.an('array').that.is.not.empty;
-    });
-
-    it('fully overrides all fields when all are provided', () => {
-      const custom = {
-        cronExpression: '0 6 * * *', expiryMs: 7200000, platforms: ['perplexity'], providerIds: ['openai_web_search'],
-      };
-      const env = { [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { post: custom } }) };
-      expect(getScheduleParams(env, ONSITE, 'post')).to.deep.equal(custom);
+    it('returns empty object when env var is absent', () => {
+      expect(getScheduleParams({}, ONSITE, OPP_TYPE, 'pre')).to.deep.equal({});
     });
 
     it('returns empty object for unknown strategy type', () => {
-      expect(getScheduleParams({}, 'unknown_strategy', 'pre')).to.deep.equal({});
+      expect(getScheduleParams({}, 'unknown_strategy', OPP_TYPE, 'pre')).to.deep.equal({});
+    });
+
+    it('applies default key config (field-level)', () => {
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: { default: { pre: { cronExpression: '*/30 * * * *' } } },
+        }),
+      };
+      const params = getScheduleParams(env, ONSITE, OPP_TYPE, 'pre');
+      expect(params.cronExpression).to.equal('*/30 * * * *');
+      expect(params.platforms).to.be.undefined;
+    });
+
+    it('applies opportunity type overrides over default key (field-level)', () => {
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: {
+            default: { pre: { cronExpression: '*/30 * * * *', expiryMs: 1000 } },
+            [OPP_TYPE]: { pre: { cronExpression: '0 * * * *' } },
+          },
+        }),
+      };
+      const params = getScheduleParams(env, ONSITE, OPP_TYPE, 'pre');
+      expect(params.cronExpression).to.equal('0 * * * *'); // opp type wins
+      expect(params.expiryMs).to.equal(1000); // default key fills the gap
+    });
+
+    it('falls back to default key when opportunity type is not in config', () => {
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: { default: { pre: { cronExpression: '*/30 * * * *' } } },
+        }),
+      };
+      const params = getScheduleParams(env, ONSITE, 'unknown-opp-type', 'pre');
+      expect(params.cronExpression).to.equal('*/30 * * * *');
+    });
+
+    it('lowercases the opportunity type key before lookup', () => {
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: { [OPP_TYPE]: { pre: { cronExpression: '0 12 * * *' } } },
+        }),
+      };
+      const params = getScheduleParams(env, ONSITE, 'Recover-Content-Visibility', 'pre');
+      expect(params.cronExpression).to.equal('0 12 * * *');
+    });
+
+    it('handles null opportunityType gracefully, uses default key', () => {
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: { default: { pre: { cronExpression: '*/30 * * * *' } } },
+        }),
+      };
+      const params = getScheduleParams(env, ONSITE, null, 'pre');
+      expect(params.cronExpression).to.equal('*/30 * * * *');
+    });
+
+    it('fully overrides all fields when all are provided for an opportunity type', () => {
+      const custom = {
+        cronExpression: '0 6 * * *', expiryMs: 7200000, platforms: ['perplexity'], providerIds: ['openai_web_search'],
+      };
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: { [OPP_TYPE]: { post: custom } },
+        }),
+      };
+      expect(getScheduleParams(env, ONSITE, OPP_TYPE, 'post')).to.deep.equal(custom);
     });
   });
 
@@ -115,22 +179,46 @@ describe('geo-experiment-helper', () => {
 
   describe('buildExperimentMetadata', () => {
     it('merges base fields with scheduleConfig', () => {
-      const result = buildExperimentMetadata({}, { urls: ['https://example.com'] }, ONSITE);
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: {
+            [OPP_TYPE]: {
+              pre: { cronExpression: '0 * * * *', expiryMs: 3600000 },
+              post: { cronExpression: '0 0 * * *', expiryMs: 86400000 },
+            },
+          },
+        }),
+      };
+      const result = buildExperimentMetadata(env, { urls: ['https://example.com'] }, ONSITE, OPP_TYPE);
       expect(result.urls).to.deep.equal(['https://example.com']);
       expect(result[METADATA_KEYS.SCHEDULE_CONFIG]).to.be.an('object');
-      expect(result[METADATA_KEYS.SCHEDULE_CONFIG].pre).to.include.keys('cronExpression', 'expiryMs', 'platforms', 'providerIds');
-      expect(result[METADATA_KEYS.SCHEDULE_CONFIG].post).to.include.keys('cronExpression', 'expiryMs', 'platforms', 'providerIds');
+      expect(result[METADATA_KEYS.SCHEDULE_CONFIG].pre.cronExpression).to.equal('0 * * * *');
+      expect(result[METADATA_KEYS.SCHEDULE_CONFIG].post.cronExpression).to.equal('0 0 * * *');
     });
 
-    it('scheduleConfig in metadata reflects env-var overrides', () => {
-      const env = { [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: { post: { cronExpression: '0 6 * * *' } } }) };
-      const result = buildExperimentMetadata(env, {}, ONSITE);
+    it('scheduleConfig reflects opportunity-type overrides', () => {
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: { [OPP_TYPE]: { post: { cronExpression: '0 6 * * *' } } },
+        }),
+      };
+      const result = buildExperimentMetadata(env, {}, ONSITE, OPP_TYPE);
+      expect(result[METADATA_KEYS.SCHEDULE_CONFIG].post.cronExpression).to.equal('0 6 * * *');
+    });
+
+    it('scheduleConfig reflects default key overrides when opportunity type absent', () => {
+      const env = {
+        [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({
+          [ONSITE]: { default: { post: { cronExpression: '0 6 * * *' } } },
+        }),
+      };
+      const result = buildExperimentMetadata(env, {}, ONSITE, 'unknown-opp-type');
       expect(result[METADATA_KEYS.SCHEDULE_CONFIG].post.cronExpression).to.equal('0 6 * * *');
     });
 
     it('does not mutate the base object', () => {
       const base = { urls: ['https://example.com'] };
-      buildExperimentMetadata({}, base, ONSITE);
+      buildExperimentMetadata({}, base, ONSITE, OPP_TYPE);
       expect(base).to.not.have.key(METADATA_KEYS.SCHEDULE_CONFIG);
     });
   });

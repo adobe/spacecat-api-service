@@ -12,31 +12,6 @@
 
 import { GeoExperiment } from '@adobe/spacecat-shared-data-access';
 
-const {
-  CRON_EXPRESSION, EXPIRY_MS, PLATFORMS, PROVIDER_IDS,
-} = GeoExperiment.SCHEDULE_CONFIG_KEYS;
-
-/**
- * Per-strategy default schedule parameters used as fallback when
- * EXPERIMENT_SCHEDULE_CONFIG is not set or does not cover a phase.
- */
-const DEFAULT_SCHEDULE_PARAMS = {
-  [GeoExperiment.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT]: {
-    pre: {
-      [CRON_EXPRESSION]: '0 * * * *', // hourly
-      [EXPIRY_MS]: 14 * 60 * 60 * 1000, // 14 hours
-      [PLATFORMS]: ['chatgpt_free', 'perplexity'],
-      [PROVIDER_IDS]: ['brightdata', 'openai_web_search'],
-    },
-    post: {
-      [CRON_EXPRESSION]: '0 0 * * *', // daily
-      [EXPIRY_MS]: 14 * 24 * 60 * 60 * 1000, // 14 days
-      [PLATFORMS]: ['chatgpt_free', 'perplexity'],
-      [PROVIDER_IDS]: ['brightdata', 'openai_web_search'],
-    },
-  },
-};
-
 /**
  * Validates a single phase config block.
  * All fields are optional — only present fields are validated.
@@ -45,22 +20,21 @@ const DEFAULT_SCHEDULE_PARAMS = {
  * @param {string} path - e.g. "onsite_opportunity_deployment.pre" for error messages
  */
 function validatePhaseConfig(phaseConfig, path) {
-  const cronExpression = phaseConfig[CRON_EXPRESSION];
-  const expiryMs = phaseConfig[EXPIRY_MS];
-  const platforms = phaseConfig[PLATFORMS];
-  const providerIds = phaseConfig[PROVIDER_IDS];
+  const {
+    cronExpression, expiryMs, platforms, providerIds,
+  } = phaseConfig;
 
   if (cronExpression !== undefined && typeof cronExpression !== 'string') {
-    throw new TypeError(`${path}.${CRON_EXPRESSION} must be a string`);
+    throw new TypeError(`${path}.cronExpression must be a string`);
   }
   if (expiryMs !== undefined && (!Number.isInteger(expiryMs) || expiryMs <= 0)) {
-    throw new TypeError(`${path}.${EXPIRY_MS} must be a positive integer`);
+    throw new TypeError(`${path}.expiryMs must be a positive integer`);
   }
   if (platforms !== undefined && !Array.isArray(platforms)) {
-    throw new TypeError(`${path}.${PLATFORMS} must be an array`);
+    throw new TypeError(`${path}.platforms must be an array`);
   }
   if (providerIds !== undefined && !Array.isArray(providerIds)) {
-    throw new TypeError(`${path}.${PROVIDER_IDS} must be an array`);
+    throw new TypeError(`${path}.providerIds must be an array`);
   }
 }
 
@@ -68,6 +42,14 @@ function validatePhaseConfig(phaseConfig, path) {
  * Parses and validates the EXPERIMENT_SCHEDULE_CONFIG env var.
  * Returns null if the variable is absent (defaults will be used everywhere).
  * Throws on malformed JSON or invalid field types.
+ *
+ * Expected shape:
+ * {
+ *   "<strategyType>": {
+ *     "default": { "pre": { ... }, "post": { ... } },
+ *     "<opportunityType>": { "pre": { ... }, "post": { ... } }
+ *   }
+ * }
  *
  * @param {object} env
  * @returns {object|null}
@@ -97,9 +79,16 @@ export function parseScheduleConfig(env) {
         `${GeoExperiment.SCHEDULE_CONFIG_ENV_VAR}: ${strategyType} must be an object`,
       );
     }
-    for (const phase of ['pre', 'post']) {
-      if (strategyConfig[phase] !== undefined) {
-        validatePhaseConfig(strategyConfig[phase], `${strategyType}.${phase}`);
+    for (const [oppTypeKey, oppTypeConfig] of Object.entries(strategyConfig)) {
+      if (typeof oppTypeConfig !== 'object' || oppTypeConfig === null) {
+        throw new TypeError(
+          `${GeoExperiment.SCHEDULE_CONFIG_ENV_VAR}: ${strategyType}.${oppTypeKey} must be an object`,
+        );
+      }
+      for (const phase of ['pre', 'post']) {
+        if (oppTypeConfig[phase] !== undefined) {
+          validatePhaseConfig(oppTypeConfig[phase], `${strategyType}.${oppTypeKey}.${phase}`);
+        }
       }
     }
   }
@@ -108,38 +97,46 @@ export function parseScheduleConfig(env) {
 }
 
 /**
- * Returns the resolved schedule parameters for a strategy type and phase.
- * Fields from EXPERIMENT_SCHEDULE_CONFIG are merged over the per-strategy defaults.
+ * Returns the resolved schedule parameters for a strategy type, opportunity type, and phase.
+ *
+ * Merge order (lower wins):
+ *   1. "default" key in EXPERIMENT_SCHEDULE_CONFIG for the strategy (field-level)
+ *   2. Opportunity-type key in EXPERIMENT_SCHEDULE_CONFIG (field-level)
+ *
+ * The opportunity type key is lowercased before lookup.
  *
  * @param {object} env
  * @param {string} strategyType - e.g. GeoExperiment.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT
+ * @param {string} opportunityType - e.g. "recover-content-visibility"
  * @param {'pre'|'post'} phase
- * @returns {{ cronExpression: string, expiryMs: number, platforms: string[],
- *   providerIds: string[] }}
+ * @returns {object}
  */
-export function getScheduleParams(env, strategyType, phase) {
+export function getScheduleParams(env, strategyType, opportunityType, phase) {
   const scheduleConfig = parseScheduleConfig(env);
-  const defaults = DEFAULT_SCHEDULE_PARAMS[strategyType]?.[phase] ?? {};
-  const overrides = scheduleConfig?.[strategyType]?.[phase] ?? {};
-  return { ...defaults, ...overrides };
+  const strategyConfig = scheduleConfig?.[strategyType] ?? {};
+  const defaultOverrides = strategyConfig.default?.[phase] ?? {};
+  const oppTypeOverrides = strategyConfig[opportunityType?.toLowerCase()]?.[phase] ?? {};
+  return { ...defaultOverrides, ...oppTypeOverrides };
 }
 
 /**
  * Returns a metadata object for a new GeoExperiment.
- * Merges provided base fields with the full schedule config (pre + post) for
- * the given strategy type so the experimentation engine can read it later.
+ * Merges provided base fields with the fully resolved schedule config (pre + post)
+ * for the given strategy and opportunity types, so the experimentation engine can
+ * read them later without needing to re-resolve.
  *
  * @param {object} env
  * @param {object} base - Caller-supplied metadata fields (e.g. { urls })
  * @param {string} strategyType
+ * @param {string} opportunityType
  * @returns {object}
  */
-export function buildExperimentMetadata(env, base, strategyType) {
+export function buildExperimentMetadata(env, base, strategyType, opportunityType) {
   return {
     ...base,
     [GeoExperiment.METADATA_KEYS.SCHEDULE_CONFIG]: {
-      pre: getScheduleParams(env, strategyType, 'pre'),
-      post: getScheduleParams(env, strategyType, 'post'),
+      pre: getScheduleParams(env, strategyType, opportunityType, 'pre'),
+      post: getScheduleParams(env, strategyType, opportunityType, 'post'),
     },
   };
 }

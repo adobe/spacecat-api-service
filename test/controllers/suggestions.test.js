@@ -492,7 +492,7 @@ describe('Suggestions Controller', () => {
         create: sandbox.stub(),
         findById: sandbox.stub().resolves({
           getId: () => 'dep-exp-001',
-          getStatus: () => 'pre_analysis_submitted',
+          getStatus: () => 'pre_analysis_started',
           getPreScheduleId: () => 'batch-pre-001',
           getPostScheduleId: () => null,
           getError: () => null,
@@ -5145,7 +5145,7 @@ describe('Suggestions Controller', () => {
           jobType: 'geo-experiment',
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
-          deployStatus: 'pre_analysis_submitted',
+          deployStatus: 'pre_analysis_started',
           preExperimentBatchId: 'batch-pre-001',
         }),
       });
@@ -5660,7 +5660,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.geoExperimentStatus).to.equal('GENERATING_BASELINE');
-      expect(body.geoExperimentPhase).to.equal('pre_analysis_submitted');
+      expect(body.geoExperimentPhase).to.equal('pre_analysis_started');
       expect(body.prePhaseScheduleId).to.equal('sched-pre-001');
       expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       expect(body.metadata.success).to.equal(2);
@@ -5697,7 +5697,7 @@ describe('Suggestions Controller', () => {
       expect(depExpCreateArg.siteId).to.equal(SITE_ID);
       expect(depExpCreateArg.opportunityId).to.equal(OPPORTUNITY_ID);
       expect(depExpCreateArg.status).to.equal('GENERATING_BASELINE');
-      expect(depExpCreateArg.phase).to.equal('pre_analysis_submitted');
+      expect(depExpCreateArg.phase).to.equal('pre_analysis_started');
       expect(depExpCreateArg.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       const geoEntity = await mockSuggestionDataAccess.GeoExperiment.create.firstCall.returnValue;
       expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
@@ -6874,7 +6874,7 @@ describe('Suggestions Controller', () => {
         getCreatedAt: () => '2026-01-01T00:00:00.000Z',
         getUpdatedAt: () => '2026-01-01T00:00:00.000Z',
       });
-      const exp1 = makeExp('exp-id-1', 'Exp 1', 'GENERATING_BASELINE', 'pre_analysis_submitted');
+      const exp1 = makeExp('exp-id-1', 'Exp 1', 'GENERATING_BASELINE', 'pre_analysis_started');
       const exp2 = makeExp('exp-id-2', 'Exp 2', 'COMPLETED', 'post_analysis_done');
       mockSuggestionDataAccess.GeoExperiment.allBySiteId = sandbox.stub().resolves({
         data: [exp1, exp2],
@@ -6935,7 +6935,7 @@ describe('Suggestions Controller', () => {
         getType: () => 'onsite_opportunity_deployment',
         getName: () => 'Test Experiment',
         getStatus: () => 'GENERATING_BASELINE',
-        getPhase: () => 'pre_analysis_submitted',
+        getPhase: () => 'pre_analysis_started',
         getPreScheduleId: () => 'sched-pre-001',
         getPostScheduleId: () => undefined,
         getSuggestionIds: () => [SUGGESTION_IDS[0]],

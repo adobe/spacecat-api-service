@@ -1652,12 +1652,13 @@ function SuggestionsController(ctx, sqs, env) {
           promptsCount: prompts.length,
           promptsLocation: promptsS3Key,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
           suggestionIds: validSuggestionIds,
           metadata: buildExperimentMetadata(
             context.env,
             { urls },
             GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+            opportunity.getType(),
           ),
           updatedBy: profile?.email || 'geo-experiment',
         });
@@ -1666,11 +1667,12 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('GeoExperiment was not created');
         }
 
-        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_SUBMITTED`);
+        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
 
         const preScheduleParams = getScheduleParams(
           context.env,
           GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+          opportunity.getType(),
           'pre',
         );
 
@@ -1748,7 +1750,7 @@ function SuggestionsController(ctx, sqs, env) {
           },
           geoExperimentId,
           geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
           prePhaseScheduleId: preScheduleId,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
