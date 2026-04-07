@@ -1,3 +1,10 @@
+## [1.416.1](https://github.com/adobe/spacecat-api-service/compare/v1.416.0...v1.416.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* clean up renovate config, block langchain major bumps ([344f663](https://github.com/adobe/spacecat-api-service/commit/344f66398395d74e8b07b19b00cdd6d9e99e87f0))
+
 # [1.416.0](https://github.com/adobe/spacecat-api-service/compare/v1.415.3...v1.416.0) (2026-04-06)
 
 
