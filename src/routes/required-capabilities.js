@@ -75,6 +75,7 @@ export const INTERNAL_ROUTES = [
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
+  'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
@@ -113,6 +114,10 @@ export const INTERNAL_ROUTES = [
   'POST /consumers/register',
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
+
+  // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
+  'POST /ephemeral-run/batch',
+  'GET /ephemeral-run/batch/:batchId/status',
 ];
 
 /**
