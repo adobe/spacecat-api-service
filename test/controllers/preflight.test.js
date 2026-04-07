@@ -1045,7 +1045,7 @@ describe('Preflight Controller', () => {
         data: {
           url: 'https://main--example-site.aem.page/test.html',
           step: 'identify',
-          mystiqueUrl: 'not-a-url',
+          mystiqueUrl: 'https://not a valid url',
         },
       });
       expect(response.status).to.equal(400);
