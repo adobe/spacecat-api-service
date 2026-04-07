@@ -2535,6 +2535,76 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.weeklyTrends).to.deep.equal([]);
     });
+
+    it('parses competitorNames as array when passed as array', async () => {
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_filtered: { data: [], error: null } },
+      );
+      mockContext.data = { competitorNames: ['CompA', 'CompB'] };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_filtered',
+        sinon.match({ p_competitor_names: ['CompA', 'CompB'] }),
+      );
+    });
+
+    it('parses competitorNames as comma-separated string', async () => {
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_filtered: { data: [], error: null } },
+      );
+      mockContext.data = { competitorNames: 'CompA,CompB, CompC' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_filtered',
+        sinon.match({ p_competitor_names: ['CompA', 'CompB', 'CompC'] }),
+      );
+    });
+
+    it('accepts snake_case competitor_names param', async () => {
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_filtered: { data: [], error: null } },
+      );
+      mockContext.data = { competitor_names: ['CompX'] };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_filtered',
+        sinon.match({ p_competitor_names: ['CompX'] }),
+      );
+    });
+
+    it('routes to rpc_market_tracking_trends when competitorNames is absent', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = {};
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_trends',
+        sinon.match.object,
+      );
+    });
   });
 
   describe('reshapeMarketTrackingRows', () => {
@@ -2732,6 +2802,159 @@ describe('llmo-brand-presence', () => {
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(400);
+    });
+
+    it('returns 403 when siteId does not belong to the organization', async () => {
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        sites: { data: [], error: null },
+      });
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Site does not belong to the organization');
+    });
+
+    it('passes siteId as p_site_id when siteId belongs to org', async () => {
+      const siteId = 'cccdac43-1a22-4659-9086-b762f59b9928';
+      mockContext.data = { siteId };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        { sites: { data: [{ id: siteId }], error: null } },
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
+      );
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('passes p_category_id when categoryId is a valid UUID', async () => {
+      const categoryId = '0178a3f0-1234-7000-8000-000000000099';
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
+      );
+      mockContext.data = { categoryId };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_competitor_summary',
+        sinon.match({ p_category_id: categoryId, p_category_name: null }),
+      );
+    });
+
+    it('passes p_category_name when categoryId is not a UUID', async () => {
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
+      );
+      mockContext.data = { categoryId: 'Electric Vehicles' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_competitor_summary',
+        sinon.match({ p_category_id: null, p_category_name: 'Electric Vehicles' }),
+      );
+    });
+
+    it('passes p_region_code when region is provided', async () => {
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
+      );
+      mockContext.data = { region: 'DE' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_competitor_summary',
+        sinon.match({ p_region_code: 'DE' }),
+      );
+    });
+
+    it('passes brandId as p_brand_id when single brand route', async () => {
+      const brandId = '0178a3f0-1234-7000-8000-000000000001';
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
+      );
+      mockContext.params = { spaceCatId: mockContext.params.spaceCatId, brandId };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_competitor_summary',
+        sinon.match({ p_brand_id: brandId }),
+      );
+    });
+
+    it('passes null p_brand_id when brandId is "all"', async () => {
+      const client = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: [], error: null } },
+      );
+      mockContext.params = { spaceCatId: mockContext.params.spaceCatId, brandId: 'all' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.rpc).to.have.been.calledWith(
+        'rpc_market_tracking_competitor_summary',
+        sinon.match({ p_brand_id: null }),
+      );
+    });
+
+    it('handles null data from RPC (uses empty array fallback)', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: null, error: null } },
+      );
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.competitors).to.deep.equal([]);
+    });
+
+    it('defaults null mentions and citations to 0 in response', async () => {
+      const rpcRows = [
+        { competitor_name: 'CompA', total_mentions: null, total_citations: null },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock(
+        {},
+        { data: [], error: null },
+        { rpc_market_tracking_competitor_summary: { data: rpcRows, error: null } },
+      );
+
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.competitors[0]).to.deep.equal({ name: 'CompA', mentions: 0, citations: 0 });
     });
   });
 
