@@ -1,3 +1,10 @@
+# [1.417.0](https://github.com/adobe/spacecat-api-service/compare/v1.416.1...v1.417.0) (2026-04-07)
+
+
+### Features
+
+* Add design documentation for the two-phase PLG tier lifecycle: PRE_ONBOARD (internal) and PLG (customer-visible). ([#2137](https://github.com/adobe/spacecat-api-service/issues/2137)) ([4b204c9](https://github.com/adobe/spacecat-api-service/commit/4b204c91dec48c5c6a394c82d2870991db7d6f1e))
+
 ## [1.416.1](https://github.com/adobe/spacecat-api-service/compare/v1.416.0...v1.416.1) (2026-04-07)
 
 
