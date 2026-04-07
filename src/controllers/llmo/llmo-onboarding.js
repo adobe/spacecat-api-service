@@ -1521,7 +1521,7 @@ export async function previewAndPublishQueryIndex(dataFolder, env, log) {
   const site = 'project-elmo-ui-data';
   const ref = 'main';
   const baseUrl = 'https://admin.hlx.page';
-  const filePath = `${dataFolder}/query-index.xlsx`;
+  const filePath = `${dataFolder}/query-index.json`;
 
   if (!env.HLX_ONBOARDING_TOKEN) {
     throw new Error('HLX_ONBOARDING_TOKEN is not set');
@@ -1531,19 +1531,35 @@ export async function previewAndPublishQueryIndex(dataFolder, env, log) {
     Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
   };
 
+  const fetchOptions = { method: 'POST', headers, timeout: 30000 };
+
   const previewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${filePath}`;
-  log.info(`Previewing query-index.xlsx at ${previewUrl}`);
-  const previewResponse = await fetch(previewUrl, { method: 'POST', headers });
+  log.info(`Previewing query-index at ${previewUrl}`);
+  const previewResponse = await fetch(previewUrl, fetchOptions);
   if (!previewResponse.ok) {
+    const errorCode = previewResponse.headers?.get('x-error-code') || '';
+    const errorMsg = previewResponse.headers?.get('x-error') || '';
+    let bodyText = '';
+    try {
+      bodyText = await previewResponse.text();
+    } catch { /* noop */ }
+    log.error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
   }
-  log.info('Preview of query-index.xlsx succeeded');
+  log.info('Preview of query-index succeeded');
 
   const publishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${filePath}`;
-  log.info(`Publishing query-index.xlsx at ${publishUrl}`);
-  const publishResponse = await fetch(publishUrl, { method: 'POST', headers });
+  log.info(`Publishing query-index at ${publishUrl}`);
+  const publishResponse = await fetch(publishUrl, fetchOptions);
   if (!publishResponse.ok) {
+    const errorCode = publishResponse.headers?.get('x-error-code') || '';
+    const errorMsg = publishResponse.headers?.get('x-error') || '';
+    let bodyText = '';
+    try {
+      bodyText = await publishResponse.text();
+    } catch { /* noop */ }
+    log.error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
   }
-  log.info('Publish of query-index.xlsx succeeded');
+  log.info('Publish of query-index succeeded');
 }
