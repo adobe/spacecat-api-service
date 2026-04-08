@@ -76,6 +76,9 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize-routing',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
+  // Resolve config - UI-only, resolves hlxConfig/code from GitHub URL
+  'POST /sites/:siteId/resolve-config',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',

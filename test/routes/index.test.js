@@ -734,6 +734,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/brand-guidelines',
       'GET /sites/:siteId/brand-profile',
       'POST /sites/:siteId/brand-profile',
+      'POST /sites/:siteId/resolve-config',
       'GET /sites/:siteId/page-citability/counts',
       'GET /sites/:siteId/top-pages',
       'GET /sites/:siteId/top-pages/:source',
