@@ -1,3 +1,10 @@
+# [1.423.0](https://github.com/adobe/spacecat-api-service/compare/v1.422.0...v1.423.0) (2026-04-08)
+
+
+### Features
+
+* add admin PLG record management endpoints ([#2155](https://github.com/adobe/spacecat-api-service/issues/2155)) ([db36ea4](https://github.com/adobe/spacecat-api-service/commit/db36ea4eacf8bb1a5ae4930b7a7b8b8939a32f29))
+
 # [1.422.0](https://github.com/adobe/spacecat-api-service/compare/v1.421.3...v1.422.0) (2026-04-08)
 
 
