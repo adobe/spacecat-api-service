@@ -50,7 +50,7 @@ import AccessControlUtil from '../../support/access-control-util.js';
 
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
-const ASO_TIER = EntitlementModel.TIERS.PRE_ONBOARD;
+const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const PLG_PROFILE_KEY = 'aso_plg';
 
 const REVIEW_REASONS = {
