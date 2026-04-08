@@ -558,6 +558,11 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
 
 function parseMarketTrackingTrendsParams(context) {
   const q = context.data || {};
+  const rawNames = q.competitorNames || q.competitor_names;
+  let competitorNames = null;
+  if (rawNames) {
+    competitorNames = Array.isArray(rawNames) ? rawNames : String(rawNames).split(',').map((s) => s.trim()).filter(Boolean);
+  }
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
@@ -565,11 +570,38 @@ function parseMarketTrackingTrendsParams(context) {
     siteId: q.siteId || q.site_id,
     categoryId: q.categoryId || q.category_id,
     regionCode: q.regionCode || q.region_code || q.region,
+    competitorNames,
   };
 }
 
 // eslint-disable-next-line max-len
 async function callMarketTrackingTrendsRpc(client, organizationId, params, defaults, filterByBrandId, log) {
+  const competitorNames = params.competitorNames || null;
+  const rpcName = competitorNames ? 'rpc_market_tracking_filtered' : 'rpc_market_tracking_trends';
+  const rpcParams = {
+    p_organization_id: organizationId,
+    p_start_date: params.startDate || defaults.startDate,
+    p_end_date: params.endDate || defaults.endDate,
+    p_model: resolveModelFromRequest(params.model),
+    p_brand_id: filterByBrandId || null,
+    p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
+    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
+      ? params.categoryId : null,
+    p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
+      ? params.categoryId : null,
+    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    ...(competitorNames && { p_competitor_names: competitorNames }),
+  };
+  log.info(`RPC ${rpcName} called with: ${JSON.stringify(rpcParams)}`);
+  const start = performance.now();
+  const result = await client.rpc(rpcName, rpcParams);
+  const elapsed = (performance.now() - start).toFixed(0);
+  log.info(`RPC ${rpcName} completed in ${elapsed}ms`);
+  return result;
+}
+
+// eslint-disable-next-line max-len
+async function callCompetitorSummaryRpc(client, organizationId, params, defaults, filterByBrandId, log) {
   const rpcParams = {
     p_organization_id: organizationId,
     p_start_date: params.startDate || defaults.startDate,
@@ -583,11 +615,11 @@ async function callMarketTrackingTrendsRpc(client, organizationId, params, defau
       ? params.categoryId : null,
     p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
   };
-  log.info(`RPC rpc_market_tracking_trends called with: ${JSON.stringify(rpcParams)}`);
+  log.info(`RPC rpc_market_tracking_competitor_summary called with: ${JSON.stringify(rpcParams)}`);
   const start = performance.now();
-  const result = await client.rpc('rpc_market_tracking_trends', rpcParams);
+  const result = await client.rpc('rpc_market_tracking_competitor_summary', rpcParams);
   const elapsed = (performance.now() - start).toFixed(0);
-  log.info(`RPC rpc_market_tracking_trends completed in ${elapsed}ms`);
+  log.info(`RPC rpc_market_tracking_competitor_summary completed in ${elapsed}ms`);
   return result;
 }
 
@@ -672,6 +704,59 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
       return ok({
         weeklyTrends,
         weeklyTrendsForComparison: weeklyTrends,
+      });
+    },
+  );
+}
+
+/**
+ * Creates the getCompetitorSummary handler.
+ * Returns aggregate competitor totals (no weekly breakdown) for the competitor picker.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createCompetitorSummaryHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'competitor-summary',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseMarketTrackingTrendsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const { data, error } = await callCompetitorSummaryRpc(
+        client,
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
+        ctx.log,
+      );
+
+      if (error) {
+        ctx.log.error(`Competitor-summary RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      return ok({
+        competitors: (data || []).map((r) => ({
+          name: r.competitor_name,
+          mentions: r.total_mentions || 0,
+          citations: r.total_citations || 0,
+        })),
       });
     },
   );

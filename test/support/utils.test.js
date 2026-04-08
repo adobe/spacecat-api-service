@@ -31,6 +31,7 @@ import {
   queueDetectCdnAudit,
   queueDeliveryConfigWriter,
   validateSiteForRedirects,
+  sendAutofixMessage,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -705,8 +706,6 @@ describe('utils', () => {
     });
   });
 
-  // Merge conflict resolved: retain both describe blocks in sequence.
-
   describe('filterSitesForProductCode', () => {
     let mockTierClient;
     let mockContext;
@@ -1291,6 +1290,138 @@ describe('utils', () => {
         ),
       ).to.be.rejectedWith('SQS down');
       expect(context.log.error).to.have.been.calledOnce;
+    });
+  });
+
+  describe('sendAutofixMessage', () => {
+    let mockSqs;
+
+    beforeEach(() => {
+      mockSqs = { sendMessage: sinon.stub().resolves() };
+    });
+
+    it('sends message with relationshipContext.fixTargetPageId when provided', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1', 's-2'],
+        'token',
+        null,
+        null,
+        null,
+        {
+          url: 'https://example.com',
+          relationshipContext: { fixTargetPageId: 'page-uuid-123' },
+        },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('relationshipContext');
+      expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-uuid-123' });
+      expect(payload).to.have.property('url', 'https://example.com');
+      expect(payload).to.have.property('siteId', 'site-1');
+      expect(payload).to.have.property('opportunityId', 'opp-1');
+      expect(payload.suggestionIds).to.deep.equal(['s-1', 's-2']);
+    });
+
+    it('sends message with relationshipContext when additional fields are provided', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        {
+          url: 'https://example.com',
+          relationshipContext: {
+            fixTargetPageId: 'page-uuid-123',
+            cancelInheritance: true,
+            fixTargetMode: 'source',
+            appliedOnPagePath: '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+          },
+        },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('relationshipContext');
+      expect(payload.relationshipContext).to.deep.equal({
+        fixTargetPageId: 'page-uuid-123',
+        cancelInheritance: true,
+        fixTargetMode: 'source',
+        appliedOnPagePath: '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+      });
+    });
+
+    it('omits relationshipContext when not provided', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        { url: 'https://example.com' },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('relationshipContext');
+      expect(payload).to.have.property('url', 'https://example.com');
+    });
+
+    it('omits relationshipContext when it is undefined', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        { url: 'https://example.com', relationshipContext: undefined },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('relationshipContext');
+    });
+
+    it('includes customData when provided alongside relationshipContext', async () => {
+      const customData = { key: 'value' };
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        customData,
+        {
+          url: 'https://example.com',
+          relationshipContext: { fixTargetPageId: 'page-123' },
+        },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
+      expect(payload).to.have.property('customData');
+      expect(payload.customData).to.deep.equal({ key: 'value' });
     });
   });
 });
