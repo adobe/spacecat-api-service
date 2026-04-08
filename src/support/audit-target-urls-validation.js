@@ -15,6 +15,20 @@
  * must match the site base URL hostname when that can be derived.
  */
 
+/** Upper bound for manual audit target URLs per site (align with ASO UI). */
+export const MAX_MANUAL_AUDIT_TARGET_URLS = 500;
+
+/**
+ * Compare hostnames as equal if they match after lowercasing and stripping one leading `www.`.
+ *
+ * @param {string} hostname
+ * @returns {string}
+ */
+export function normalizeHostnameForAuditTargetMatch(hostname) {
+  const lower = hostname.toLowerCase();
+  return lower.startsWith('www.') ? lower.slice(4) : lower;
+}
+
 /**
  * @param {string} baseURL
  * @returns {string|null}
@@ -45,10 +59,14 @@ export function validateAuditTargetUrlString(trimmed, siteHostname) {
   if (url.protocol !== 'https:') {
     return { ok: false, error: 'URL must use HTTPS' };
   }
-  if (siteHostname && url.hostname !== siteHostname) {
+  if (
+    siteHostname
+    && normalizeHostnameForAuditTargetMatch(url.hostname)
+      !== normalizeHostnameForAuditTargetMatch(siteHostname)
+  ) {
     return {
       ok: false,
-      error: `URL hostname must match the site domain (${siteHostname})`,
+      error: `URL hostname must match the site domain (${siteHostname}, with or without www.)`,
     };
   }
   return { ok: true };
@@ -77,6 +95,12 @@ export function validateAuditTargetURLsConfig(auditTargetURLs, siteBaseURL) {
   }
   if (!Array.isArray(manual)) {
     return { ok: false, error: 'config.auditTargetURLs.manual must be an array' };
+  }
+  if (manual.length > MAX_MANUAL_AUDIT_TARGET_URLS) {
+    return {
+      ok: false,
+      error: `config.auditTargetURLs.manual cannot contain more than ${MAX_MANUAL_AUDIT_TARGET_URLS} URLs`,
+    };
   }
 
   const normalizedManual = [];

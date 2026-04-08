@@ -16,12 +16,25 @@ import sinon from 'sinon';
 
 import {
   auditTargetURLsPatchGuard,
+  MAX_MANUAL_AUDIT_TARGET_URLS,
+  normalizeHostnameForAuditTargetMatch,
   siteHostnameFromBaseURL,
   validateAuditTargetUrlString,
   validateAuditTargetURLsConfig,
 } from '../../src/support/audit-target-urls-validation.js';
 
 describe('audit-target-urls-validation', () => {
+  describe('normalizeHostnameForAuditTargetMatch', () => {
+    it('lowercases and strips one leading www.', () => {
+      expect(normalizeHostnameForAuditTargetMatch('WWW.Example.COM')).to.equal('example.com');
+    });
+
+    it('does not strip www2 or nested www', () => {
+      expect(normalizeHostnameForAuditTargetMatch('www2.example.com')).to.equal('www2.example.com');
+      expect(normalizeHostnameForAuditTargetMatch('www.www.example.com')).to.equal('www.example.com');
+    });
+  });
+
   describe('siteHostnameFromBaseURL', () => {
     it('returns hostname for valid base URL', () => {
       expect(siteHostnameFromBaseURL('https://main--foo--bar.aem.page')).to.equal('main--foo--bar.aem.page');
@@ -41,6 +54,14 @@ describe('audit-target-urls-validation', () => {
       expect(validateAuditTargetUrlString('https://site1.com/path', 'site1.com')).to.deep.equal({ ok: true });
     });
 
+    it('accepts apex URL when site hostname is www variant', () => {
+      expect(validateAuditTargetUrlString('https://site1.com/path', 'www.site1.com')).to.deep.equal({ ok: true });
+    });
+
+    it('accepts www URL when site hostname is apex', () => {
+      expect(validateAuditTargetUrlString('https://www.site1.com/path', 'site1.com')).to.deep.equal({ ok: true });
+    });
+
     it('skips hostname check when site hostname is null', () => {
       expect(validateAuditTargetUrlString('https://any.example/foo', null).ok).to.equal(true);
     });
@@ -54,7 +75,9 @@ describe('audit-target-urls-validation', () => {
     it('rejects hostname mismatch', () => {
       const r = validateAuditTargetUrlString('https://other.com/', 'site1.com');
       expect(r.ok).to.equal(false);
-      expect(r.error).to.equal('URL hostname must match the site domain (site1.com)');
+      expect(r.error).to.equal(
+        'URL hostname must match the site domain (site1.com, with or without www.)',
+      );
     });
 
     it('rejects invalid URL', () => {
@@ -84,6 +107,17 @@ describe('audit-target-urls-validation', () => {
       expect(r.error).to.include('manual must be an array');
     });
 
+    it('rejects manual list longer than MAX_MANUAL_AUDIT_TARGET_URLS', () => {
+      const manual = Array.from({ length: MAX_MANUAL_AUDIT_TARGET_URLS + 1 }, (_, i) => ({
+        url: `https://site1.com/u${i}`,
+      }));
+      const r = validateAuditTargetURLsConfig({ manual }, 'https://site1.com');
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.equal(
+        `config.auditTargetURLs.manual cannot contain more than ${MAX_MANUAL_AUDIT_TARGET_URLS} URLs`,
+      );
+    });
+
     it('normalizes trimmed manual URLs', () => {
       const r = validateAuditTargetURLsConfig(
         { manual: [{ url: '  https://site1.com/x  ' }] },
@@ -91,6 +125,14 @@ describe('audit-target-urls-validation', () => {
       );
       expect(r.ok).to.equal(true);
       expect(r.normalized).to.deep.equal({ manual: [{ url: 'https://site1.com/x' }] });
+    });
+
+    it('accepts apex manual URL when site base URL uses www hostname', () => {
+      const r = validateAuditTargetURLsConfig(
+        { manual: [{ url: 'https://site1.com/y' }] },
+        'https://www.site1.com',
+      );
+      expect(r.ok).to.equal(true);
     });
 
     it('rejects bad entry shape', () => {
