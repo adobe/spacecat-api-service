@@ -45,6 +45,7 @@ import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
@@ -639,6 +640,16 @@ function SitesController(ctx, log, env) {
         ? Config.toDynamoItem(siteConfig) || {}
         : {};
       const merged = { ...existingConfig, ...requestBody.config };
+      const auditTargetURLsResult = auditTargetURLsPatchGuard(
+        merged,
+        site.getBaseURL(),
+        requestBody.config,
+        badRequest,
+      );
+      if (auditTargetURLsResult?.error) return auditTargetURLsResult.error;
+      if (auditTargetURLsResult?.normalized !== undefined) {
+        merged.auditTargetURLs = auditTargetURLsResult.normalized;
+      }
       site.setConfig(merged);
       updates = true;
     }
