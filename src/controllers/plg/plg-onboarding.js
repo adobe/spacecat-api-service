@@ -18,7 +18,7 @@ import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/pl
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import {
-  badRequest, createResponse, forbidden, internalServerError, notFound, ok,
+  badRequest, createResponse, created, forbidden, internalServerError, noContent, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
@@ -978,11 +978,105 @@ function PlgOnboardingController(ctx) {
     }
   };
 
+  /**
+   * POST /plg/records
+   * Admin: create a PLG onboarding record with a given status (defaults to INACTIVE).
+   * Body: { imsOrgId, domain, status? }
+   */
+  const createOnboarding = async (context) => {
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can create PLG onboarding records');
+    }
+
+    const { data } = context;
+    const { imsOrgId, domain, status = STATUSES.INACTIVE } = data || {};
+
+    if (!hasText(imsOrgId) || !isValidIMSOrgId(imsOrgId)) {
+      return badRequest('Valid imsOrgId is required');
+    }
+    if (!hasText(domain)) {
+      return badRequest('domain is required');
+    }
+    if (!Object.values(STATUSES).includes(status)) {
+      return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+    }
+
+    const { PlgOnboarding } = context.dataAccess;
+
+    const existing = await PlgOnboarding.findByImsOrgIdAndDomain(imsOrgId, domain);
+    if (existing) {
+      return createResponse({ message: `Record already exists for ${imsOrgId} / ${domain}` }, 409);
+    }
+
+    const baseURL = composeBaseURL(domain);
+    const onboarding = await PlgOnboarding.create({
+      imsOrgId, domain, baseURL, status,
+    });
+    return created(PlgOnboardingDto.toJSON(onboarding));
+  };
+
+  /**
+   * PATCH /plg/records/:plgOnboardingId
+   * Admin: update the status of a PLG onboarding record.
+   * Body: { status }
+   */
+  const updateOnboardingStatus = async (context) => {
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update PLG onboarding records');
+    }
+
+    const { data, params } = context;
+    const { plgOnboardingId } = params;
+    const { status } = data || {};
+
+    if (!hasText(status) || !Object.values(STATUSES).includes(status)) {
+      return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+    }
+
+    const { PlgOnboarding } = context.dataAccess;
+    const onboarding = await PlgOnboarding.findById(plgOnboardingId);
+    if (!onboarding) {
+      return notFound(`PLG onboarding record ${plgOnboardingId} not found`);
+    }
+
+    onboarding.setStatus(status);
+    await onboarding.save();
+    return ok(PlgOnboardingDto.toJSON(onboarding));
+  };
+
+  /**
+   * DELETE /plg/records/:plgOnboardingId
+   * Admin: delete a PLG onboarding record.
+   */
+  const deleteOnboarding = async (context) => {
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can delete PLG onboarding records');
+    }
+
+    const { params } = context;
+    const { plgOnboardingId } = params;
+
+    const { PlgOnboarding } = context.dataAccess;
+    const onboarding = await PlgOnboarding.findById(plgOnboardingId);
+    if (!onboarding) {
+      return notFound(`PLG onboarding record ${plgOnboardingId} not found`);
+    }
+
+    await onboarding.remove();
+    return noContent();
+  };
+
   return {
     onboard,
     getStatus,
     getAllOnboardings,
     update,
+    createOnboarding,
+    updateOnboardingStatus,
+    deleteOnboarding,
   };
 }
 

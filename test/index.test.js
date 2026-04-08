@@ -219,6 +219,20 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
   });
 
+  it('handles plgOnboardingId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/plg/records/not-a-uuid';
+
+    request = new Request(`${baseUrl}/plg/records/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+  });
+
   it('handles organizationId not correctly formated error', async () => {
     context.pathInfo.suffix = '/organizations/1234';
 

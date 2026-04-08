@@ -69,6 +69,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
+  'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
@@ -80,6 +81,9 @@ export const INTERNAL_ROUTES = [
   'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
   'PATCH /plg/onboard/:onboardingId',
+  'POST /plg/records',
+  'PATCH /plg/records/:plgOnboardingId',
+  'DELETE /plg/records/:plgOnboardingId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
