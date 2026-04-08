@@ -277,7 +277,9 @@ export default class AccessControlUtil {
       await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
-      if (isDelegatedAccess) { return hasOrgAccess; } // productCode scoping replaces subService check
+      if (isDelegatedAccess) {
+        return hasOrgAccess; // productCode scoping replaces subService check
+      }
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }
     return hasOrgAccess;

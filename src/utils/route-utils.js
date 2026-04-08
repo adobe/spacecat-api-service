@@ -57,7 +57,9 @@ export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
     matched,
     [routePattern, { handler, paramNames }],
   ) => {
-    if (matched) { return matched; } // If already matched, return the result
+    if (matched) {
+      return matched; // If already matched, return the result
+    }
 
     const [patternMethod, ...patternPathSegments] = routePattern.split(' ');
     const patternPath = patternPathSegments.join('/');

@@ -439,7 +439,9 @@ async function getAuditTypesToSkipForSite(
 
   checkableTypes.forEach((auditType, i) => {
     const latestAudit = latestAudits[i];
-    if (!latestAudit) { return; } // no record → always run
+    if (!latestAudit) {
+      return; // no record - always run
+    }
     const ageInMs = Date.now() - new Date(latestAudit.getAuditedAt()).getTime();
     if (ageInMs < freshnessThresholdMs) {
       log.info(`Site ${siteId}: skipping SQS enqueue for ${auditType} — audit ran within ${auditFreshnessDays} days`);
