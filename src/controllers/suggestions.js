@@ -925,6 +925,15 @@ function SuggestionsController(ctx, sqs, env) {
     };
     return createResponse(fullResponse, 207);
   };
+  const getSuggestionUrl = (suggestionData, opp) => suggestionData?.url
+    || suggestionData?.recommendations?.[0]?.pageUrl
+    || suggestionData?.url_from
+    || suggestionData?.urlFrom
+    || (opp?.getType() === 'no-cta-above-the-fold'
+      ? suggestionData?.contentFix?.page_patch?.original_page_url
+      : null)
+    || opp?.getData()?.page;
+
   /**
    * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
    * suggestions, then queues an autofix message via SQS.
@@ -958,7 +967,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('No updates provided');
     }
     const {
-      suggestionIds, variations, action, customData, url: requestUrl, precheckOnly, pages,
+      suggestionIds, variations, action, customData, url: requestUrl,
+      precheckOnly, pages, fixTargetGroups,
     } = context.data;
     const isAssessAction = action === 'assess';
     const isAssessUrlsAction = action === 'assess-urls';
@@ -971,7 +981,43 @@ function SuggestionsController(ctx, sqs, env) {
         return badRequest('precheckOnly must be a boolean');
       }
     }
+    if (fixTargetGroups !== undefined) {
+      if (!isArray(fixTargetGroups)) {
+        return badRequest('fixTargetGroups must be an array');
+      }
+      for (const group of fixTargetGroups) {
+        if (!isArray(group?.suggestionIds) || group.suggestionIds.length === 0) {
+          return badRequest('Each fixTargetGroup must have a non-empty suggestionIds array');
+        }
+        const { relationshipContext } = group;
+        if (!isObject(relationshipContext)) {
+          return badRequest('Each fixTargetGroup must have a relationshipContext object');
+        }
 
+        const {
+          fixTargetPageId,
+          fixTargetMode,
+          appliedOnPagePath,
+          cancelInheritance,
+        } = relationshipContext;
+        if (!hasText(fixTargetPageId)) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string');
+        }
+        if (cancelInheritance !== undefined && typeof cancelInheritance !== 'boolean') {
+          return badRequest('Each fixTargetGroup relationshipContext.cancelInheritance must be a boolean');
+        }
+        if (
+          fixTargetMode !== undefined
+          && fixTargetMode !== 'source'
+          && fixTargetMode !== 'local'
+        ) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"');
+        }
+        if (appliedOnPagePath !== undefined && !hasText(appliedOnPagePath)) {
+          return badRequest('Each fixTargetGroup relationshipContext.appliedOnPagePath must be a non-empty string');
+        }
+      }
+    }
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -1071,29 +1117,62 @@ function SuggestionsController(ctx, sqs, env) {
 
     let suggestionGroups;
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
-      const opportunityData = opportunity.getData();
-      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-        const data = suggestion.getData();
-        const url = data?.url || data?.recommendations?.[0]?.pageUrl
-          || data?.url_from
-          || data?.urlFrom
-          || (opportunity.getType() === 'no-cta-above-the-fold'
-            ? data?.contentFix?.page_patch?.original_page_url
-            : null)
-          || opportunityData?.page; // for high-organic-low-ctr
-        if (!url) return acc;
+      if (isNonEmptyArray(fixTargetGroups)) {
+        // OUR ADDITION: relationship-aware grouping when UI sends fixTargetGroups
+        suggestionGroups = fixTargetGroups
+          .map(({
+            suggestionIds: groupIds,
+            relationshipContext,
+          }) => {
+            const groupedSuggestions = validSuggestions.filter(
+              (s) => groupIds.includes(s.getId()),
+            );
+            return {
+              groupedSuggestions,
+              url: getSuggestionUrl(groupedSuggestions[0]?.getData(), opportunity),
+              relationshipContext: { ...relationshipContext },
+            };
+          })
+          .filter(({ groupedSuggestions }) => groupedSuggestions.length > 0);
 
-        if (!acc[url]) {
-          acc[url] = [];
+        // Handle suggestions not covered by any fixTargetGroup
+        const coveredIds = new Set(
+          suggestionGroups.flatMap(
+            ({ groupedSuggestions }) => groupedSuggestions.map((s) => s.getId()),
+          ),
+        );
+        const uncoveredSuggestions = validSuggestions.filter(
+          (s) => !coveredIds.has(s.getId()),
+        );
+        if (isNonEmptyArray(uncoveredSuggestions)) {
+          const uncoveredByUrl = uncoveredSuggestions.reduce((acc, suggestion) => {
+            const url = getSuggestionUrl(suggestion.getData(), opportunity);
+            if (!url) return acc;
+            if (!acc[url]) acc[url] = [];
+            acc[url].push(suggestion);
+            return acc;
+          }, {});
+          Object.entries(uncoveredByUrl).forEach(([url, grouped]) => {
+            suggestionGroups.push({ groupedSuggestions: grouped, url });
+          });
         }
-        acc[url].push(suggestion);
-        return acc;
-      }, {});
+      } else {
+        const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+          const url = getSuggestionUrl(suggestion.getData(), opportunity);
+          if (!url) return acc;
 
-      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
-        groupedSuggestions,
-        url,
-      }));
+          if (!acc[url]) {
+            acc[url] = [];
+          }
+          acc[url].push(suggestion);
+          return acc;
+        }, {});
+
+        suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
+          groupedSuggestions,
+          url,
+        }));
+      }
     }
 
     suggestionIds.forEach((suggestionId, index) => {
@@ -1161,7 +1240,11 @@ function SuggestionsController(ctx, sqs, env) {
     });
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
-        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
+        suggestionGroups.map(({
+          groupedSuggestions,
+          url,
+          relationshipContext,
+        }) => sendAutofixMessage(
           sqs,
           queueUrl,
           siteId,
@@ -1171,7 +1254,10 @@ function SuggestionsController(ctx, sqs, env) {
           variations,
           action,
           customData,
-          autofixOptions(url),
+          {
+            ...autofixOptions(url),
+            ...(isObject(relationshipContext) && { relationshipContext }),
+          },
         )),
       );
     } else {

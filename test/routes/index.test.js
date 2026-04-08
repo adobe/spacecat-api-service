@@ -408,6 +408,10 @@ describe('getRouteHandlers', () => {
     deleteByOrganizationProductAndName: () => null,
   };
 
+  const mockPageRelationshipsController = {
+    search: sinon.stub(),
+  };
+
   const mockEphemeralRunController = {
     batchRun: () => null,
     batchStatus: () => null,
@@ -461,6 +465,7 @@ describe('getRouteHandlers', () => {
       mockImsOrgAccessController,
       mockContactSalesLeadsController,
       mockFeatureFlagsController,
+      mockPageRelationshipsController,
       mockEphemeralRunController,
     );
 
@@ -565,6 +570,35 @@ describe('getRouteHandlers', () => {
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
       'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
+      'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
+      'GET /org/:spaceCatId/brands/all/brand-presence/weeks',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks',
+      'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview',
+      'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends',
+      'GET /org/:spaceCatId/brands/all/brand-presence/competitor-summary',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/competitor-summary',
+      'GET /org/:spaceCatId/brands/all/brand-presence/topics',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics',
+      'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts',
+      'GET /org/:spaceCatId/brands/all/brand-presence/search',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/search',
+      'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail',
+      'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail',
+      'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers',
+      'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
+      'GET /org/:spaceCatId/brands/all/brand-presence/stats',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+      'GET /org/:spaceCatId/opportunities/count',
+      'GET /org/:spaceCatId/brands/all/opportunities',
+      'GET /org/:spaceCatId/brands/:brandId/opportunities',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',
@@ -604,6 +638,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/top-paid',
       'GET /sites/:siteId/opportunities/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId',
+      'POST /sites/:siteId/page-relationships/search',
       'POST /sites/:siteId/opportunities',
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
@@ -898,6 +933,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['POST /sites/:siteId/opportunities'].handler).to.equal(mockOpportunitiesController.createOpportunity);
     expect(dynamicRoutes['POST /sites/:siteId/opportunities'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/page-relationships/search'].handler)
+      .to.equal(mockPageRelationshipsController.search);
+    expect(dynamicRoutes['POST /sites/:siteId/page-relationships/search'].paramNames)
+      .to.deep.equal(['siteId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.patchOpportunity);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);
