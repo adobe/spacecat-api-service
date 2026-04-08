@@ -567,7 +567,9 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
+          getIMSPromiseToken: async () => {
+            throw new utils.ErrorWithStatusCode('Missing Authorization header', 400);
+          },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -834,6 +836,453 @@ describe('Preflight Controller', () => {
     });
   });
 
+  describe('createBetaPreflightJob', () => {
+    const mockBetaJob = {
+      ...mockJob,
+      setStatus: sandbox.stub(),
+      setError: sandbox.stub(),
+      setEndedAt: sandbox.stub(),
+      save: sandbox.stub().resolves(),
+    };
+
+    let fetchStub;
+
+    beforeEach(() => {
+      if (!global.fetch) {
+        global.fetch = fetch;
+      }
+      fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves({ ok: true });
+      mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockBetaJob);
+    });
+
+    afterEach(() => {
+      if (fetchStub && fetchStub.restore) {
+        fetchStub.restore();
+      }
+    });
+
+    it('returns 400 for missing data', async () => {
+      const response = await preflightController.createBetaPreflightJob({ data: {} });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: missing application/json data');
+    });
+
+    it('returns 400 for missing or invalid url', async () => {
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'not-a-url', step: 'identify' },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: url must be a valid URL');
+    });
+
+    it('returns 400 for invalid step', async () => {
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'bad-step' },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: step must be either identify or suggest');
+    });
+
+    it('returns 500 when site is not found', async () => {
+      mockDataAccess.Site.findByPreviewURL.resolves(null);
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://unknown-site.com/page.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.message).to.include('No site found for URL');
+    });
+
+    it('calls Mysticat and returns 202 with jobId and pollUrl (prod)', async () => {
+      const context = {
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      };
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result.jobId).to.equal(jobId);
+      expect(result.pollUrl).to.equal(
+        `https://spacecat.experiencecloud.live/api/v1/preflight/beta/jobs/${jobId}`,
+      );
+
+      expect(fetchStub).to.have.been.calledOnce;
+      const [calledUrl, calledOptions] = fetchStub.firstCall.args;
+      expect(calledUrl).to.equal('https://mysticat.example.com/v1/preflight/analyze');
+      expect(JSON.parse(calledOptions.body)).to.deep.equal({
+        site_id: 'test-site-123',
+        url: 'https://main--example-site.aem.page/test.html',
+        mode: 'identify',
+        scan_id: jobId,
+        persist: true,
+      });
+
+      // Mysticat owns the job result write-back — SpaceCat does not update the job on success
+      expect(mockBetaJob.setStatus).to.not.have.been.called;
+      expect(mockBetaJob.save).to.not.have.been.called;
+    });
+
+    it('uses ci pollUrl in dev environment', async () => {
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+      const result = await response.json();
+      expect(result.pollUrl).to.equal(
+        `https://spacecat.experiencecloud.live/api/ci/preflight/beta/jobs/${jobId}`,
+      );
+    });
+
+    it('uses mystiqueUrl override in dev environment (full URL)', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io',
+        },
+      });
+      expect(response.status).to.equal(202);
+
+      const [calledUrl] = fetchStub.firstCall.args;
+      expect(calledUrl).to.equal('https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io/v1/preflight/analyze');
+    });
+
+    it('prepends https:// to mystiqueUrl when no scheme is provided', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io',
+        },
+      });
+      expect(response.status).to.equal(202);
+
+      const [calledUrl] = fetchStub.firstCall.args;
+      expect(calledUrl).to.equal('https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io/v1/preflight/analyze');
+    });
+
+    it('returns 400 when mystiqueUrl override is used in prod', async () => {
+      const prodCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await prodCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'https://experience-platform-mystique-deploy-ethos102-stage-abc123.stage.cloud.adobe.io',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('mystiqueUrl override is only allowed in dev');
+    });
+
+    it('returns 400 when mystiqueUrl is not a valid URL', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'not-a-url',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid URL');
+    });
+
+    it('returns 400 when mystiqueUrl is not an allowed Mystique ephemeral host', async () => {
+      const devCtrl = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await devCtrl.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          mystiqueUrl: 'https://evil.example.com',
+        },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid Mystique ephemeral host');
+    });
+
+    it('sets job to FAILED and saves when Mysticat returns non-ok status', async () => {
+      fetchStub.resolves({
+        ok: false,
+        status: 503,
+        text: async () => 'Service Unavailable',
+      });
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(500);
+      expect(mockBetaJob.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockBetaJob.setError).to.have.been.calledWithMatch({ code: 'MYSTICAT_ERROR' });
+      expect(mockBetaJob.save).to.have.been.calledOnce;
+    });
+
+    it('resolves site by siteId when provided', async () => {
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: {
+          url: 'https://main--example-site.aem.page/test.html',
+          step: 'identify',
+          siteId: 'd140668d-aacf-45fb-a8f2-27ffda65bab4',
+        },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockDataAccess.Site.findById).to.have.been
+        .calledWith('d140668d-aacf-45fb-a8f2-27ffda65bab4');
+      expect(mockDataAccess.Site.findByPreviewURL).to.not.have.been.called;
+    });
+
+    it('forwards promiseToken cookie to Mysticat for CS site', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+        pathInfo: { headers: { cookie: 'promiseToken=cookie-token-123' } },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.firstCall.args;
+      expect(calledOptions.headers['x-promise-token']).to.equal('cookie-token-123');
+    });
+
+    it('falls back to IMS when promiseToken cookie is absent for CS_CW site', async () => {
+      const cwSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(cwSite);
+
+      const mockPromiseToken = { promise_token: 'ims-token-456' };
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: async () => mockPromiseToken,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const ctrl = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await ctrl.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.firstCall.args;
+      expect(calledOptions.headers['x-promise-token']).to.equal('ims-token-456');
+    });
+
+    it(
+      'returns 400 when IMS promise token fetch fails with ErrorWithStatusCode for AMS site',
+      async () => {
+        const amsSite = {
+          getId: () => 'test-site-123',
+          getAuthoringType: () => SiteModel.AUTHORING_TYPES.AMS,
+        };
+        mockDataAccess.Site.findByPreviewURL.resolves(amsSite);
+
+        const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+          '../../src/support/utils.js': {
+            ...utils,
+            getIMSPromiseToken: async () => {
+              throw new utils.ErrorWithStatusCode('Missing Authorization header', 400);
+            },
+            ErrorWithStatusCode: utils.ErrorWithStatusCode,
+          },
+        });
+
+        const ctrl = PreflightControllerWithMock(
+          { dataAccess: mockDataAccess, sqs: mockSqs },
+          loggerStub,
+          {
+            AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+            MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+            AWS_ENV: 'prod',
+          },
+        );
+
+        const response = await ctrl.createBetaPreflightJob({
+          data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+        });
+        expect(response.status).to.equal(400);
+        const result = await response.json();
+        expect(result).to.deep.equal({ message: 'Missing Authorization header' });
+      },
+    );
+
+    it('returns 500 when IMS promise token fetch fails with generic error', async () => {
+      const amsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.AMS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(amsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: async () => { throw new Error('IMS unavailable'); },
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const ctrl = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await ctrl.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: 'Error getting promise token' });
+    });
+
+    it('does not send x-promise-token for SP (non-promise-based) site', async () => {
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+        pathInfo: { headers: { cookie: 'promiseToken=should-not-be-forwarded' } },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.firstCall.args;
+      expect(calledOptions.headers['x-promise-token']).to.be.undefined;
+    });
+  });
+
   describe('getPreflightJobStatusAndResult', () => {
     it('gets preflight job status successfully', async () => {
       const context = {
@@ -920,6 +1369,47 @@ describe('Preflight Controller', () => {
       expect(result).to.deep.equal({
         message: 'Something went wrong',
       });
+    });
+  });
+
+  describe('getBetaPreflightJobStatusAndResult', () => {
+    it('returns 400 for invalid jobId', async () => {
+      const response = await preflightController.getBetaPreflightJobStatusAndResult({
+        params: { jobId: 'invalid-uuid' },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: 'Invalid jobId' });
+    });
+
+    it('returns 404 when job is not found', async () => {
+      mockDataAccess.AsyncJob.findById.resolves(null);
+      const response = await preflightController.getBetaPreflightJobStatusAndResult({
+        params: { jobId },
+      });
+      expect(response.status).to.equal(404);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: `Job with ID ${jobId} not found` });
+    });
+
+    it('returns job status and result when job is found', async () => {
+      const response = await preflightController.getBetaPreflightJobStatusAndResult({
+        params: { jobId },
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.jobId).to.equal(jobId);
+      expect(result.status).to.equal('IN_PROGRESS');
+    });
+
+    it('handles errors during job retrieval', async () => {
+      mockDataAccess.AsyncJob.findById.rejects(new Error('DB error'));
+      const response = await preflightController.getBetaPreflightJobStatusAndResult({
+        params: { jobId },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: 'DB error' });
     });
   });
 });

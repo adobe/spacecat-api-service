@@ -41,7 +41,7 @@ page-metrics-by-source:
     summary: Retrieve page metrics by source
     description: |
       This endpoint is useful for retrieving page metrics by source.
-      Currently only `organic-keywords` is supported as a metric and only for source `ahrefs`.
+      Currently only `organic-keywords` is supported as a metric and only for source `seo`.
     operationId: getPageMetricsBySource
     responses:
       '200':
