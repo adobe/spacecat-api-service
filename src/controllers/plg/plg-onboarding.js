@@ -192,7 +192,7 @@ async function createOrFindProject(baseURL, organizationId, context) {
  */
 async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHost }, context) {
   const { dataAccess, log, env } = context;
-  const { Site, PlgOnboarding } = dataAccess;
+  const { Site, PlgOnboarding, Organization } = dataAccess;
 
   if (!isValidHostname(domain)) {
     throw Object.assign(
@@ -238,8 +238,15 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
   if (alreadyOnboarded) {
     log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+    const existingOrgForOnboarded = alreadyOnboarded.getOrganizationId()
+      ? await Organization.findById(alreadyOnboarded.getOrganizationId())
+      /* c8 ignore next */
+      : null;
+    /* c8 ignore next */
+    const existingOrgName = existingOrgForOnboarded?.getName?.()
+      || alreadyOnboarded.getOrganizationId();
     onboarding.setStatus(STATUSES.WAITLISTED);
-    onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG}`);
+    onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
     await onboarding.save();
     return onboarding;
   }
@@ -304,8 +311,13 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
 
       if (existingOrgId !== organizationId
         && !isInternalOrg(existingOrgId, env)) {
+        const existingOrg = await Organization.findById(existingOrgId);
+        /* c8 ignore next */
+        const existingImsOrgId = existingOrg?.getImsOrgId?.() || existingOrgId;
+        /* c8 ignore next */
+        const existingOrgName = existingOrg?.getName?.() || existingOrgId;
         onboarding.setStatus(STATUSES.WAITLISTED);
-        onboarding.setWaitlistReason(`Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED}`);
+        onboarding.setWaitlistReason(`Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId})`);
         onboarding.setSiteId(site.getId());
         onboarding.setSteps(steps);
         await onboarding.save();

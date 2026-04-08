@@ -1419,7 +1419,6 @@ describe('PlgOnboardingController', () => {
       const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
-
       expect(res.status).to.equal(200);
       // Should NOT modify the site
       expect(existingSite.setOrganizationId).to.not.have.been.called;
@@ -1432,6 +1431,23 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.save).to.have.been.called;
       // Should NOT proceed to bot blocker or site creation
       expect(detectBotBlockerStub).to.not.have.been.called;
+    });
+
+    it('uses org ID as fallback in waitlist reason when Organization.findById returns null', async () => {
+      const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Organization.findById.resolves(null); // triggers || existingOrgId fallback
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
+      // Falls back to org UUID in the reason since no org was found
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(new RegExp(OTHER_CUSTOMER_ORG_ID));
     });
   });
 
@@ -1504,6 +1520,25 @@ describe('PlgOnboardingController', () => {
       // Should NOT proceed to org resolution or site creation
       expect(createOrFindOrganizationStub).to.not.have.been.called;
       expect(mockDataAccess.Site.create).to.not.have.been.called;
+    });
+
+    it('waitlists and uses org ID as fallback name when Organization.findById returns null for already-onboarded record', async () => {
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        organizationId: OTHER_CUSTOMER_ORG_ID, // has org ID so findById is called
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Organization.findById.resolves(null); // org not found — fallback to org ID
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
     });
 
     it('allows onboarding when the same domain is already onboarded (re-onboard)', async () => {
