@@ -215,6 +215,7 @@ export default function getRouteHandlers(
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
+    'POST /sites/:siteId/resolve-config': sitesController.resolveConfig,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,

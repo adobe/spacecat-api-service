@@ -46,6 +46,7 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
+import { resolveHlxConfigFromGitHubURL } from '../support/hlx-config.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -1284,6 +1285,49 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  /**
+   * Resolves hlxConfig and code from a GitHub repository URL by calling
+   * admin.hlx.page and falling back to fstab.yaml. Read-only — does not
+   * persist anything.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Resolved hlxConfig and code.
+   */
+  const resolveConfig = async (context) => {
+    const { siteId } = context.params;
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const { gitHubURL } = context.data;
+    if (!hasText(gitHubURL)) {
+      return badRequest('gitHubURL is required');
+    }
+
+    if (!validateRepoUrl(gitHubURL)) {
+      return badRequest('Invalid GitHub repository URL');
+    }
+
+    const hlxAdminToken = env.HLX_ADMIN_TOKEN;
+    if (!hasText(hlxAdminToken)) {
+      log.error('HLX_ADMIN_TOKEN is not configured');
+      return internalServerError('HLX admin token not configured');
+    }
+
+    try {
+      const result = await resolveHlxConfigFromGitHubURL(gitHubURL, hlxAdminToken, log);
+      return ok(result);
+    } catch (e) {
+      log.error(`Error resolving config from ${gitHubURL}: ${e.message}`);
+      return internalServerError('Failed to resolve config');
+    }
+  };
+
   return {
     createSite,
     getAll,
@@ -1300,6 +1344,7 @@ function SitesController(ctx, log, env) {
     getPageCitabilityCounts,
     getTopPages,
     resolveSite,
+    resolveConfig,
     getBrandProfile,
     triggerBrandProfile,
 
