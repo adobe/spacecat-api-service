@@ -98,6 +98,25 @@ const OPPORTUNITY_STRATEGIES = {
       );
     },
   },
+
+  // Sorts CWV suggestions by total pageviews descending so high-traffic
+  // pages are granted first. Ties are broken by id ascending.
+  cwv: {
+    sortFn: (groupA, groupB) => {
+      const getPageviews = (group) => {
+        const s = group.items[0];
+        const data = typeof s?.getData === 'function' ? s.getData() : s?.data;
+        return data?.pageviews ?? 0;
+      };
+      const pvDiff = getPageviews(groupB) - getPageviews(groupA);
+      if (pvDiff !== 0) return pvDiff;
+      const a = groupA.items[0];
+      const b = groupB.items[0];
+      const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
+      const idB = typeof b?.getId === 'function' ? b.getId() : (b?.id ?? '');
+      return idA.localeCompare(idB);
+    },
+  },
 };
 
 /**

@@ -332,7 +332,8 @@ function PreflightController(ctx, log, env) {
       if (!isDev) {
         return badRequest('mystiqueUrl override is only allowed in dev');
       }
-      if (!isValidUrl(normalizedMystiqueUrl)) {
+      if (!isValidUrl(normalizedMystiqueUrl)
+        || !new URL(normalizedMystiqueUrl).hostname.includes('.')) {
         return badRequest('Invalid request: mystiqueUrl must be a valid URL');
       }
       if (!(/\.stage\.cloud\.adobe\.io$/).test(new URL(normalizedMystiqueUrl).hostname)) {
