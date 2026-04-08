@@ -609,10 +609,14 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
   try {
     if (requestContext) {
       const clientType = requestContext.pathInfo?.headers?.['x-client-type'];
-      if (clientType !== 'sites-optimizer-ui') return false;
+      if (clientType !== 'sites-optimizer-ui') {
+        return false;
+      }
     }
     const { Configuration, Entitlement } = context.dataAccess || {};
-    if (!Configuration) return false;
+    if (!Configuration) {
+      return false;
+    }
     const configuration = await Configuration.findLatest();
     if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
       return false;
@@ -622,7 +626,9 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
     }
 
     const organizationId = site.getOrganizationId();
-    if (!Entitlement || !organizationId) return false;
+    if (!Entitlement || !organizationId) {
+      return false;
+    }
 
     const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
       organizationId,
@@ -714,7 +720,9 @@ export async function exchangePromiseToken(context, promiseToken) {
  */
 export function getCookieValue(context, name) {
   const cookieString = context.pathInfo?.headers?.cookie || '';
-  if (!cookieString) return null;
+  if (!cookieString) {
+    return null;
+  }
 
   const cookies = cookieString.split(';');
   for (const cookie of cookies) {

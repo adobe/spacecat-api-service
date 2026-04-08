@@ -40,7 +40,9 @@ function createGroup(items, rankFn) {
 function defaultSortFn(groupA, groupB) {
   const rankA = groupA.getRank();
   const rankB = groupB.getRank();
-  if (rankA !== rankB) return rankA - rankB;
+  if (rankA !== rankB) {
+    return rankA - rankB;
+  }
   const a = groupA.items[0];
   const b = groupB.items[0];
   const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
@@ -154,7 +156,9 @@ async function grantGroups(SuggestionGrant, groups, siteId, tokenType) {
  * @returns {Promise<void>}
  */
 async function revokeGrants(SuggestionGrant, grantIds) {
-  if (!grantIds?.length) return;
+  if (!grantIds?.length) {
+    return;
+  }
   const results = await Promise.allSettled(
     grantIds.map((grantId) => SuggestionGrant.revokeSuggestionGrant(grantId)),
   );
@@ -218,7 +222,9 @@ async function handleExistingTokenCycle(
   const tokenGrants = await SuggestionGrant
     .allByIndexKeys({ tokenId: token.getId() });
 
-  if (!tokenGrants?.length) return { token, didRevoke: false };
+  if (!tokenGrants?.length) {
+    return { token, didRevoke: false };
+  }
 
   const grantedSuggestionIds = tokenGrants.map((g) => g.getSuggestionId());
   const { data: grantedSuggestions } = await Suggestion
@@ -233,7 +239,9 @@ async function handleExistingTokenCycle(
       .map((g) => g.getGrantId()),
   )];
 
-  if (staleGrantIds.length === 0) return { token, didRevoke: false };
+  if (staleGrantIds.length === 0) {
+    return { token, didRevoke: false };
+  }
 
   const revocableGrantIds = [...new Set(
     tokenGrants
@@ -303,12 +311,14 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const tokenType = config?.tokenType;
 
   if (!Suggestion || !SuggestionGrant || !Token || !siteId || !opptyId || !config
-    || !tokenType) return;
+    || !tokenType) { return; }
 
   const newSuggestions = await Suggestion
     .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
   const newSuggestionIds = newSuggestions.map((s) => s.getId());
-  if (!newSuggestionIds.length) return;
+  if (!newSuggestionIds.length) {
+    return;
+  }
 
   const { grantedIds, grantIds, notGrantedIds } = await SuggestionGrant
     .splitSuggestionsByGrantStatus(newSuggestionIds);
@@ -321,7 +331,9 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
     ? await handleExistingTokenCycle(collections, ids, existingToken)
     : await handleNewTokenCycle(collections, ids, { grantedIds, grantIds, newSuggestions });
 
-  if (!token || token.getRemaining() <= 0) return;
+  if (!token || token.getRemaining() <= 0) {
+    return;
+  }
 
   await fillRemainingCapacity(
     collections,

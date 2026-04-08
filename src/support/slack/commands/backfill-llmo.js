@@ -234,7 +234,9 @@ function BackfillLlmoCommand(context) {
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
           timeValue = parseInt(parsed.weeks, 10);
-          if (Number.isNaN(timeValue)) timeValue = 4;
+          if (Number.isNaN(timeValue)) {
+            timeValue = 4;
+          }
 
           if (timeValue > 4) {
             await say(`:warning: Max 4 weeks for ${AUDIT_TYPES.CDN_LOGS_REPORT}`);
@@ -250,7 +252,9 @@ function BackfillLlmoCommand(context) {
 
         case AUDIT_TYPES.LLM_ERROR_PAGES:
           timeValue = parseInt(parsed.weeks, 10);
-          if (Number.isNaN(timeValue)) timeValue = 4;
+          if (Number.isNaN(timeValue)) {
+            timeValue = 4;
+          }
 
           if (timeValue > 4) {
             await say(`:warning: Max 4 weeks for ${AUDIT_TYPES.LLM_ERROR_PAGES}`);
@@ -266,7 +270,9 @@ function BackfillLlmoCommand(context) {
 
         case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC:
           timeValue = parseInt(parsed.weeks, 10);
-          if (Number.isNaN(timeValue)) timeValue = 1;
+          if (Number.isNaN(timeValue)) {
+            timeValue = 1;
+          }
 
           if (timeValue > 10) {
             await say(`:warning: Max 10 weeks for ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);

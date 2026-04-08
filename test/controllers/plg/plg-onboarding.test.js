@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { expect, use } from 'chai';
 import sinon from 'sinon';

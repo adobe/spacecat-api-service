@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
@@ -612,8 +610,12 @@ describe('Brands Controller', () => {
           contains: sandbox.stub().returnsThis(),
           range: sandbox.stub().rejects(new Error('DB connection lost')),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -674,9 +676,15 @@ describe('Brands Controller', () => {
         order: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
         maybeSingle: sandbox.stub().callsFake(() => {
-          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          if (table === 'brands') {
+            return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'llmo_customer_config') {
+            return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          if (table === 'prompts') {
+            return Promise.resolve({ data: null, error: null });
+          }
           return Promise.resolve({ data: null, error: null });
         }),
       }));
@@ -700,9 +708,15 @@ describe('Brands Controller', () => {
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            }
+            if (table === 'prompts') {
+              return Promise.reject(new Error('DB connection lost'));
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -763,8 +777,12 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
         };
-        if (table === 'brands') chain.maybeSingle = sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null });
-        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        if (table === 'brands') {
+          chain.maybeSingle = sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null });
+        }
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
         return chain;
       });
 
@@ -831,7 +849,9 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
-        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
         return chain;
       });
 
@@ -913,9 +933,15 @@ describe('Brands Controller', () => {
         update: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
         maybeSingle: sandbox.stub().callsFake(() => {
-          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          if (table === 'brands') {
+            return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'llmo_customer_config') {
+            return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          if (table === 'prompts') {
+            return Promise.resolve({ data: null, error: null });
+          }
           return Promise.resolve({ data: null, error: null });
         }),
       }));
@@ -973,9 +999,15 @@ describe('Brands Controller', () => {
         update: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
         maybeSingle: sandbox.stub().callsFake(() => {
-          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          if (table === 'brands') {
+            return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'llmo_customer_config') {
+            return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          if (table === 'prompts') {
+            return Promise.resolve({ data: null, error: null });
+          }
           return Promise.resolve({ data: null, error: null });
         }),
       }));
@@ -999,9 +1031,15 @@ describe('Brands Controller', () => {
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            }
+            if (table === 'prompts') {
+              return Promise.reject(new Error('DB connection lost'));
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -1028,9 +1066,15 @@ describe('Brands Controller', () => {
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            }
+            if (table === 'prompts') {
+              return Promise.reject(new Error('DB connection lost'));
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -1475,14 +1519,18 @@ describe('Brands Controller', () => {
             update: sandbox.stub().returnsThis(),
             range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
             maybeSingle: sandbox.stub().callsFake(() => {
-              if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              if (table === 'brands') {
+                return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              }
               if (table === 'llmo_customer_config') {
                 return Promise.resolve({
                   data: { config: { customer: { brands: [] } } },
                   error: null,
                 });
               }
-              if (table === 'prompts') return Promise.resolve({ data: { id: 'row-id' }, error: null });
+              if (table === 'prompts') {
+                return Promise.resolve({ data: { id: 'row-id' }, error: null });
+              }
               return Promise.resolve({ data: null, error: null });
             }),
           };
@@ -1603,7 +1651,9 @@ describe('Brands Controller', () => {
           ilike: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: null, error: null });
+            if (table === 'brands') {
+              return Promise.resolve({ data: null, error: null });
+            }
             if (table === 'llmo_customer_config') {
               return Promise.resolve({
                 data: { config: { customer: { brands: [] } } },

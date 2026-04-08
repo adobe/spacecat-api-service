@@ -51,7 +51,9 @@ function mapDbBrandToV2(row) {
   // base URL itself when no paths are configured).
   const urls = (row.brand_sites || []).flatMap((bs) => {
     const base = bs.sites?.base_url;
-    if (!hasText(base)) return [];
+    if (!hasText(base)) {
+      return [];
+    }
     const paths = bs.paths || [];
     const effectivePaths = paths.length === 0 ? ['/'] : paths;
     return effectivePaths.map((p) => ({ value: p === '/' ? base : `${base}${p}` }));
@@ -101,12 +103,18 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
     .from(table)
     .delete()
     .eq('brand_id', brandId);
-  if (deleteError) throw new Error(`Failed to clear ${table}: ${deleteError.message}`);
-  if (rows.length === 0) return;
+  if (deleteError) {
+    throw new Error(`Failed to clear ${table}: ${deleteError.message}`);
+  }
+  if (rows.length === 0) {
+    return;
+  }
   const { error: insertError } = await postgrestClient
     .from(table)
     .upsert(rows, { onConflict });
-  if (insertError) throw new Error(`Failed to sync ${table}: ${insertError.message}`);
+  if (insertError) {
+    throw new Error(`Failed to sync ${table}: ${insertError.message}`);
+  }
 }
 
 /**
@@ -118,9 +126,13 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .from('brand_sites')
     .delete()
     .eq('brand_id', brandId);
-  if (deleteError) throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
+  if (deleteError) {
+    throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
+  }
 
-  if (!urls || urls.length === 0) return;
+  if (!urls || urls.length === 0) {
+    return;
+  }
 
   // Group paths by base URL
   const pathsByBase = new Map();
@@ -130,11 +142,15 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .forEach((value) => {
       const { base, path } = parseUrlParts(value);
       const normalizedBase = composeBaseURL(base);
-      if (!pathsByBase.has(normalizedBase)) pathsByBase.set(normalizedBase, []);
+      if (!pathsByBase.has(normalizedBase)) {
+        pathsByBase.set(normalizedBase, []);
+      }
       pathsByBase.get(normalizedBase).push(path || '/');
     });
 
-  if (pathsByBase.size === 0) return;
+  if (pathsByBase.size === 0) {
+    return;
+  }
 
   const { data: sites } = await postgrestClient
     .from('sites')
@@ -142,7 +158,9 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .eq('organization_id', organizationId)
     .in('base_url', [...pathsByBase.keys()]);
 
-  if (!sites || sites.length === 0) return;
+  if (!sites || sites.length === 0) {
+    return;
+  }
 
   const rows = sites.map((s) => ({
     organization_id: organizationId,
@@ -155,7 +173,9 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   const { error } = await postgrestClient
     .from('brand_sites')
     .upsert(rows, { onConflict: 'brand_id,site_id' });
-  if (error) throw new Error(`Failed to sync brand_sites: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to sync brand_sites: ${error.message}`);
+  }
 }
 
 /**
@@ -245,7 +265,9 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
  * @returns {Promise<object[]>} Array of brands in V2 config shape
  */
 export async function listBrands(organizationId, postgrestClient, options = {}) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   let query = postgrestClient
     .from('brands')
@@ -260,7 +282,9 @@ export async function listBrands(organizationId, postgrestClient, options = {}) 
   }
 
   const { data, error } = await query;
-  if (error) throw new Error(`Failed to list brands: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list brands: ${error.message}`);
+  }
 
   return (data || []).map(mapDbBrandToV2);
 }
@@ -274,7 +298,9 @@ export async function listBrands(organizationId, postgrestClient, options = {}) 
  * @returns {Promise<object|null>} Brand in V2 config shape or null
  */
 export async function getBrandById(organizationId, brandId, postgrestClient) {
-  if (!postgrestClient?.from || !hasText(brandId)) return null;
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return null;
+  }
 
   const { data, error } = await postgrestClient
     .from('brands')
@@ -283,8 +309,12 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
     .eq('id', brandId)
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to get brand: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to get brand: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   return mapDbBrandToV2(data);
 }
@@ -306,8 +336,12 @@ export async function upsertBrand({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
-  if (!hasText(brand?.name)) throw new Error('Brand name is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (!hasText(brand?.name)) {
+    throw new Error('Brand name is required');
+  }
 
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
@@ -332,7 +366,9 @@ export async function upsertBrand({
     .select('id, name')
     .single();
 
-  if (error) throw new Error(`Failed to upsert brand: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to upsert brand: ${error.message}`);
+  }
 
   const brandId = upserted.id;
 
@@ -368,15 +404,27 @@ export async function updateBrand({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const patch = { updated_by: updatedBy };
 
-  if (updates.name !== undefined) patch.name = updates.name;
-  if (updates.status !== undefined) patch.status = updates.status;
-  if (updates.origin !== undefined) patch.origin = updates.origin;
-  if (updates.description !== undefined) patch.description = updates.description;
-  if (updates.vertical !== undefined) patch.vertical = updates.vertical;
+  if (updates.name !== undefined) {
+    patch.name = updates.name;
+  }
+  if (updates.status !== undefined) {
+    patch.status = updates.status;
+  }
+  if (updates.origin !== undefined) {
+    patch.origin = updates.origin;
+  }
+  if (updates.description !== undefined) {
+    patch.description = updates.description;
+  }
+  if (updates.vertical !== undefined) {
+    patch.vertical = updates.vertical;
+  }
 
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
@@ -395,8 +443,12 @@ export async function updateBrand({
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to update brand: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to update brand: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   const childSyncs = [];
 
@@ -420,7 +472,9 @@ export async function updateBrand({
     );
   }
 
-  if (childSyncs.length > 0) await Promise.all(childSyncs);
+  if (childSyncs.length > 0) {
+    await Promise.all(childSyncs);
+  }
 
   if (updates.urls !== undefined) {
     await syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy);
@@ -439,7 +493,9 @@ export async function updateBrand({
  * @returns {Promise<boolean>} True if deleted, false if not found
  */
 export async function deleteBrand(organizationId, brandId, postgrestClient, updatedBy = 'system') {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const { data, error } = await postgrestClient
     .from('brands')
@@ -449,7 +505,9 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to delete brand: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to delete brand: ${error.message}`);
+  }
   return !!data;
 }
 
@@ -460,13 +518,17 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
  * @returns {Promise<object[]>} Array of { code, name }
  */
 export async function listRegions(postgrestClient) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   const { data, error } = await postgrestClient
     .from('regions')
     .select('code, name')
     .order('code', { ascending: true });
 
-  if (error) throw new Error(`Failed to list regions: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list regions: ${error.message}`);
+  }
   return data || [];
 }

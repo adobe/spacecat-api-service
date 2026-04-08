@@ -126,9 +126,15 @@ export default function openPreflightConfig(lambdaContext) {
                 text: {
                   type: 'plain_text',
                   text: (() => {
-                    if (currentAuthoringType === 'cs') return 'Cloud Service';
-                    if (currentAuthoringType === 'cs/crosswalk') return 'Cloud Service/Crosswalk';
-                    if (currentAuthoringType === 'ams') return 'AMS';
+                    if (currentAuthoringType === 'cs') {
+                      return 'Cloud Service';
+                    }
+                    if (currentAuthoringType === 'cs/crosswalk') {
+                      return 'Cloud Service/Crosswalk';
+                    }
+                    if (currentAuthoringType === 'ams') {
+                      return 'AMS';
+                    }
                     return 'Document Authoring';
                   })(),
                 },

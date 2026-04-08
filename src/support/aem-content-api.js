@@ -135,7 +135,9 @@ const METATAG_PATTERNS = [
  * @returns {string|undefined}
  */
 export function buildCheckPath(suggestionType, deliveryConfig = {}) {
-  if (!suggestionType) return undefined;
+  if (!suggestionType) {
+    return undefined;
+  }
 
   for (const { regex, property, defaultJcr } of METATAG_PATTERNS) {
     if (regex.test(suggestionType)) {

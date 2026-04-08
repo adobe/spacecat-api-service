@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 /* eslint-disable max-classes-per-file */
 
 import { expect, use } from 'chai';
@@ -162,7 +161,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -209,7 +210,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -250,7 +253,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -284,7 +289,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -315,7 +322,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [
@@ -325,7 +334,9 @@ describe('ephemeral-run-batch-store', () => {
             IsTruncated: false,
           });
         }
-        if (callCount === 3) return Promise.resolve(makeBody(result1));
+        if (callCount === 3) {
+          return Promise.resolve(makeBody(result1));
+        }
         return Promise.resolve(makeBody(result2));
       });
 
@@ -352,7 +363,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -384,7 +397,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -413,7 +428,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -427,7 +444,9 @@ describe('ephemeral-run-batch-store', () => {
             IsTruncated: false,
           });
         }
-        if (callCount === 4) return Promise.resolve(makeBody(result1));
+        if (callCount === 4) {
+          return Promise.resolve(makeBody(result1));
+        }
         return Promise.resolve(makeBody(result2));
       });
 
@@ -449,7 +468,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         return Promise.resolve({ Contents: undefined, IsTruncated: false });
       });
 
@@ -471,7 +492,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -500,7 +523,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         if (callCount === 2) {
           return Promise.resolve({
             Contents: [{ Key: 'ephemeral-runs/b-1/results/s-1.json' }],
@@ -527,7 +552,9 @@ describe('ephemeral-run-batch-store', () => {
       let callCount = 0;
       s3.sendStub.callsFake(() => {
         callCount += 1;
-        if (callCount === 1) return Promise.resolve(makeBody(manifest));
+        if (callCount === 1) {
+          return Promise.resolve(makeBody(manifest));
+        }
         return Promise.resolve({ Contents: undefined, IsTruncated: false });
       });
 

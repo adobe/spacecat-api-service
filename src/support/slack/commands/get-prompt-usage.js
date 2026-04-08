@@ -185,7 +185,9 @@ function GetPromptUsageCommand(context) {
 
       const rows = results
         .map((res) => {
-          if (res.status !== 'fulfilled') return undefined;
+          if (res.status !== 'fulfilled') {
+            return undefined;
+          }
           const {
             organizationName,
             imsOrgID,
@@ -194,7 +196,9 @@ function GetPromptUsageCommand(context) {
             aiPromptsCount,
             totalPrompts,
           } = res.value;
-          if (args[0] === '--all' && (totalPrompts === 0 || LLMO_INTERNAL_IMS_ORGS.includes(imsOrgID))) return undefined;
+          if (args[0] === '--all' && (totalPrompts === 0 || LLMO_INTERNAL_IMS_ORGS.includes(imsOrgID))) {
+            return undefined;
+          }
           return {
             organizationName,
             imsOrgID,

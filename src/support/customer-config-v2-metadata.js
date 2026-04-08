@@ -20,7 +20,9 @@ import { deepEqual } from '@adobe/spacecat-shared-utils';
  * @returns {object} A new object without metadata fields.
  */
 const stripMetadata = (obj) => {
-  if (!obj || typeof obj !== 'object') return obj;
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
   const {
     // eslint-disable-next-line no-unused-vars
     updatedAt, updatedBy, status, ...rest

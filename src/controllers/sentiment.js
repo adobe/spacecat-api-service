@@ -49,7 +49,9 @@ const KNOWN_AUDIT_TYPES = [
  * @returns {string[]} - Array of invalid audit types.
  */
 function validateAuditTypes(audits) {
-  if (!isArray(audits)) return [];
+  if (!isArray(audits)) {
+    return [];
+  }
   return audits.filter((audit) => !KNOWN_AUDIT_TYPES.includes(audit));
 }
 
@@ -345,9 +347,15 @@ function SentimentController(ctx, log) {
         return notFound('Topic not found');
       }
 
-      if (hasText(updates.name)) topic.setName(updates.name);
-      if (updates.description !== undefined) topic.setDescription(updates.description);
-      if (typeof updates.enabled === 'boolean') topic.setEnabled(updates.enabled);
+      if (hasText(updates.name)) {
+        topic.setName(updates.name);
+      }
+      if (updates.description !== undefined) {
+        topic.setDescription(updates.description);
+      }
+      if (typeof updates.enabled === 'boolean') {
+        topic.setEnabled(updates.enabled);
+      }
 
       topic.setUpdatedBy(userId);
       topic = await topic.save();
@@ -657,10 +665,18 @@ function SentimentController(ctx, log) {
       }
 
       // Update allowed fields
-      if (hasText(updates.name)) guideline.setName(updates.name);
-      if (hasText(updates.instruction)) guideline.setInstruction(updates.instruction);
-      if (isArray(updates.audits)) guideline.setAudits(updates.audits);
-      if (typeof updates.enabled === 'boolean') guideline.setEnabled(updates.enabled);
+      if (hasText(updates.name)) {
+        guideline.setName(updates.name);
+      }
+      if (hasText(updates.instruction)) {
+        guideline.setInstruction(updates.instruction);
+      }
+      if (isArray(updates.audits)) {
+        guideline.setAudits(updates.audits);
+      }
+      if (typeof updates.enabled === 'boolean') {
+        guideline.setEnabled(updates.enabled);
+      }
 
       guideline.setUpdatedBy(userId);
       guideline = await guideline.save();

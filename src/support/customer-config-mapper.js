@@ -429,7 +429,9 @@ export function convertV2ToV1(customerConfig) {
     const categoryId = prompt.categoryId || prompt.category?.id;
     const topicId = prompt.topicId || prompt.topic?.id;
 
-    if (!categoryId || !topicId) return;
+    if (!categoryId || !topicId) {
+      return;
+    }
 
     const key = `${categoryId}::${topicId}`;
 
@@ -445,7 +447,9 @@ export function convertV2ToV1(customerConfig) {
     const category = categoriesMap.get(categoryId);
     const topic = topicsMap.get(topicId);
 
-    if (!category || !topic) return;
+    if (!category || !topic) {
+      return;
+    }
 
     const isAITopic = prompts.length > 0 && prompts.every((p) => p.origin === 'ai');
     const allDeleted = prompts.every((p) => p.status === 'deleted');

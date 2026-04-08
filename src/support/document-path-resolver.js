@@ -30,13 +30,19 @@ const PAGE_URL_FIELDS = {
  * @returns {string|null}
  */
 function extractPageUrl(opportunityType, changeDetails) {
-  if (!changeDetails) return null;
+  if (!changeDetails) {
+    return null;
+  }
 
   const field = PAGE_URL_FIELDS[opportunityType];
-  if (!field) return null;
+  if (!field) {
+    return null;
+  }
 
   const url = changeDetails[field];
-  if (url) return url;
+  if (url) {
+    return url;
+  }
 
   if (opportunityType === 'structured-data') {
     return changeDetails.path || null;
@@ -56,8 +62,12 @@ function extractPagePath(opportunityType, changeDetails) {
   const pathOrUrl = opportunityType === 'structured-data'
     ? (changeDetails?.path || changeDetails?.url)
     : extractPageUrl(opportunityType, changeDetails);
-  if (!pathOrUrl) return null;
-  if (pathOrUrl.startsWith('/')) return pathOrUrl;
+  if (!pathOrUrl) {
+    return null;
+  }
+  if (pathOrUrl.startsWith('/')) {
+    return pathOrUrl;
+  }
   try {
     return new URL(prependSchema(pathOrUrl)).pathname;
   } catch {
@@ -77,7 +87,9 @@ function resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails) {
   const authorURL = deliveryConfig?.authorURL;
   // Caller (resolveDocumentPath) only invokes us when authorURL is set; this is defensive
   /* c8 ignore next 1 - falsy authorURL branch unreachable from caller */
-  if (!authorURL) return null;
+  if (!authorURL) {
+    return null;
+  }
 
   // deliveryConfig is defined when authorURL is set
   const { redirectsMode, redirectsSource } = deliveryConfig;
@@ -112,10 +124,14 @@ function resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails) {
  */
 async function resolveAEMEdgeEditUrl(contentClient, pagePath) {
   const documentPath = await contentClient.getResourcePath(pagePath);
-  if (!documentPath) return null;
+  if (!documentPath) {
+    return null;
+  }
   const docPath = documentPath.replace(/[.]md$/, '');
   const editUrl = await contentClient.getEditURL(docPath);
-  if (editUrl) return editUrl;
+  if (editUrl) {
+    return editUrl;
+  }
   const urls = await contentClient.getLivePreviewURLs(docPath);
   return urls?.previewURL ?? null;
 }
@@ -149,15 +165,21 @@ export async function resolveDocumentPath(
     const authorURL = deliveryConfig?.authorURL;
 
     if (opportunityType === 'broken-backlinks') {
-      if (!authorURL) return null;
+      if (!authorURL) {
+        return null;
+      }
       return resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails);
     }
 
     if (deliveryType === 'aem_cs') {
-      if (!authorURL) return null;
+      if (!authorURL) {
+        return null;
+      }
 
       const pageUrlRaw = extractPageUrl(opportunityType, changeDetails);
-      if (!pageUrlRaw) return null;
+      if (!pageUrlRaw) {
+        return null;
+      }
       const pageUrl = prependSchema(pageUrlRaw);
 
       const preferContentApi = deliveryConfig?.preferContentApi ?? false;
@@ -169,14 +191,18 @@ export async function resolveDocumentPath(
         preferContentApi,
         log,
       );
-      if (!pageId) return null;
+      if (!pageId) {
+        return null;
+      }
 
       return await getPageEditUrl(authorURL, bearerToken, pageId);
     }
 
     if (deliveryType === 'aem_edge' && contentClient) {
       const pagePath = extractPagePath(opportunityType, changeDetails);
-      if (!pagePath) return null;
+      if (!pagePath) {
+        return null;
+      }
       return await resolveAEMEdgeEditUrl(contentClient, pagePath);
     }
 
