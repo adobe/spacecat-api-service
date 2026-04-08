@@ -173,5 +173,5 @@ export async function resolveHlxConfigFromGitHubURL(gitHubURL, hlxAdminToken, lo
     url: gitHubURL,
   };
 
-  return { hlxConfig, code };
+  return { hlxConfig, code, adminConfig };
 }
