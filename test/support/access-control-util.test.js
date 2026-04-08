@@ -1169,11 +1169,22 @@ describe('Access Control Util', () => {
       await expect(utilWithHeader.hasAccess(mockOrgInstance, '', 'llmo')).to.not.be.rejected;
     });
 
-    it('should throw UnauthorizedProductError for PLG tier entitlement', async () => {
+    it('should not throw for PLG tier entitlement', async () => {
       const entitlement = {
         getId: () => 'entitlement-plg',
         getProductCode: () => 'llmo',
         getTier: () => 'PLG',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+    });
+
+    it('should throw UnauthorizedProductError for PRE_ONBOARD tier entitlement', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-preonboard',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PRE_ONBOARD',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 

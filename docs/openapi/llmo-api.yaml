@@ -667,7 +667,8 @@ llmo-agentic-traffic-global:
       - `week`: optional ISO week filter (`1-53`)
       - `limit`: optional max rows to return (`1-520`, defaults to `52`)
 
-      Human access is admin-only. S2S consumers may call this endpoint when granted the mapped route capability.
+      Human access requires either admin access or membership in an organization with LLMO access.
+      S2S consumers may call this endpoint when granted the mapped route capability.
     operationId: getLlmoAgenticTrafficGlobal
     parameters:
       - name: year
