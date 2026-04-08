@@ -77,7 +77,7 @@ export const INTERNAL_ROUTES = [
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // Resolve config - UI-only, resolves hlxConfig/code from GitHub URL
-  'POST /sites/:siteId/resolve-config',
+  'POST /tools/resolve-config',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',

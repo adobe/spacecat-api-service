@@ -93,6 +93,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
+ * @param {Object} toolsController - The tools controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -144,6 +145,7 @@ export default function getRouteHandlers(
   contactSalesLeadsController,
   featureFlagsController,
   pageRelationshipsController,
+  toolsController,
   ephemeralRunController,
 ) {
   const staticRoutes = {};
@@ -215,7 +217,6 @@ export default function getRouteHandlers(
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
-    'POST /sites/:siteId/resolve-config': sitesController.resolveConfig,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
@@ -348,6 +349,7 @@ export default function getRouteHandlers(
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
+    'POST /tools/resolve-config': toolsController.resolveConfig,
     'POST /tools/api-keys': apiKeyController.createApiKey,
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
