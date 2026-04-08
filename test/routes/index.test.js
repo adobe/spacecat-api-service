@@ -572,6 +572,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview',
       'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends',
+      'GET /org/:spaceCatId/brands/all/brand-presence/competitor-summary',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/competitor-summary',
       'GET /org/:spaceCatId/brands/all/brand-presence/topics',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics',
       'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts',
