@@ -3584,6 +3584,66 @@ describe('Suggestions Controller', () => {
       sandbox.restore();
     });
 
+    it('proceeds with autofix when summit-plg is enabled and all suggestions are granted', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+        notGrantedIds: [],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`, `grant-${SUGGESTION_IDS[2]}`],
+      });
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+    });
+
+    it('does not check grant status when summit-plg is disabled for autofix', async () => {
+      const controllerPlgDisabled = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => ({ promise_token: 'token', expires_in: 14399, token_type: 'promise_token' }),
+          getIsSummitPlgEnabled: async () => false,
+        },
+      });
+      const ctrl = controllerPlgDisabled({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resetHistory();
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await ctrl.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.not.have.been.called;
+    });
+
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
@@ -3641,6 +3701,28 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('returns forbidden when summit-plg is enabled and suggestions are not granted for autofix', async () => {
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0]],
+        notGrantedIds: [SUGGESTION_IDS[2]],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`],
+      });
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.include('not granted');
+      expect(body.message).to.include(SUGGESTION_IDS[2]);
+      expect(body.message).to.not.include(SUGGESTION_IDS[0]);
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
