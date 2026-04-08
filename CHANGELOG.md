@@ -1,3 +1,10 @@
+# [1.420.0](https://github.com/adobe/spacecat-api-service/compare/v1.419.0...v1.420.0) (2026-04-08)
+
+
+### Features
+
+* Support for MSM and lang copies - page-relationship api ([#1973](https://github.com/adobe/spacecat-api-service/issues/1973)) ([de144c4](https://github.com/adobe/spacecat-api-service/commit/de144c44bf07c8b42001370ef99c1d808d32de51))
+
 # [1.419.0](https://github.com/adobe/spacecat-api-service/compare/v1.418.0...v1.419.0) (2026-04-07)
 
 
