@@ -2721,6 +2721,28 @@ describe('PlgOnboardingController', () => {
         expect(res.value).to.include('rumHost');
       });
 
+      it('BYPASS AEM_SITE_CHECK: returns 400 when rumHost format is invalid', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'AEM migration confirmed',
+            siteConfig: { rumHost: 'not-a-valid-rum-host.example.com' },
+          },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('rumHost must be a valid');
+      });
+
       it('BYPASS AEM_SITE_CHECK: pre-sets delivery config and re-runs flow', async () => {
         const record = createMockOnboarding({
           status: 'WAITLISTED',

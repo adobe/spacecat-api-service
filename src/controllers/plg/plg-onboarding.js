@@ -902,6 +902,13 @@ function PlgOnboardingController(ctx) {
           if (!siteConfig || !hasText(siteConfig.rumHost)) {
             return badRequest('siteConfig with rumHost is required for AEM_SITE_CHECK bypass');
           }
+          if (!AEM_CS_PUBLISH_HOST_PATTERN.test(siteConfig.rumHost)
+            && !EDS_HOST_PATTERN.test(siteConfig.rumHost)) {
+            return badRequest(
+              'rumHost must be a valid AEM CS publish host (publish-pXXX-eYYY.adobeaemcloud.com) '
+              + 'or EDS host (ref--repo--owner.aem.live / hlx.live)',
+            );
+          }
 
           // Re-run PLG flow with pre-set rumHost
           // Step 5c will derive CS delivery config (authorURL, programId, environmentId)
