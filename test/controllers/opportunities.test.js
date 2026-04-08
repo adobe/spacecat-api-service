@@ -425,7 +425,7 @@ describe('Opportunities Controller', () => {
     };
     const mockEntitlement = {
       findByOrganizationIdAndProductCode: sandbox.stub().resolves({
-        getTier: () => 'FREE_TRIAL',
+        getTier: () => 'PLG',
       }),
     };
     const ctxWithToken = {
@@ -478,7 +478,7 @@ describe('Opportunities Controller', () => {
     };
     const mockEntitlement = {
       findByOrganizationIdAndProductCode: sandbox.stub().resolves({
-        getTier: () => 'FREE_TRIAL',
+        getTier: () => 'PLG',
       }),
     };
     const ctxWithToken = {

@@ -3793,4 +3793,240 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockSiteConfig.enableImport).to.have.been.calledTwice;
     });
   });
+
+  describe('appendRowsToQueryIndex', () => {
+    it('should append rows with correct format and timestamps', async () => {
+      const mockAppendRowsToSheet = sinon.stub().resolves();
+      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
+      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+
+      const { appendRowsToQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves(mockSPClient),
+          },
+        },
+      );
+
+      await appendRowsToQueryIndex('dev/test-com', ['file1', 'file2.json'], mockEnv, mockLog);
+
+      expect(mockAppendRowsToSheet).to.have.been.calledOnce;
+      const [sheetPath, rows] = mockAppendRowsToSheet.firstCall.args;
+      expect(sheetPath).to.equal('/dev/test-com/query-index.xlsx');
+      expect(rows).to.have.length(2);
+      expect(rows[0][0]).to.equal('/dev/test-com/file1.json');
+      expect(rows[1][0]).to.equal('/dev/test-com/file2.json');
+      expect(rows[0][1]).to.be.a('number');
+      expect(rows[0][2]).to.be.a('number');
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Appending 2 rows/));
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Successfully appended rows/));
+    });
+
+    it('should not double-append .json extension for files already ending in .json', async () => {
+      const mockAppendRowsToSheet = sinon.stub().resolves();
+      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
+      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+
+      const { appendRowsToQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves(mockSPClient),
+          },
+        },
+      );
+
+      await appendRowsToQueryIndex('dev/test-com', ['already.json'], mockEnv, mockLog);
+
+      const [, rows] = mockAppendRowsToSheet.firstCall.args;
+      expect(rows[0][0]).to.equal('/dev/test-com/already.json');
+    });
+  });
+
+  describe('previewAndPublishQueryIndex', () => {
+    it('should successfully preview and publish with .json path', async () => {
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+      const previewCall = mockTracingFetch.firstCall;
+      expect(previewCall.args[0]).to.equal(
+        'https://admin.hlx.page/preview/adobe/project-elmo-ui-data/main/dev/test-com/query-index.json',
+      );
+      expect(previewCall.args[1]).to.deep.include({ method: 'POST', timeout: 30000 });
+
+      const publishCall = mockTracingFetch.secondCall;
+      expect(publishCall.args[0]).to.equal(
+        'https://admin.hlx.page/live/adobe/project-elmo-ui-data/main/dev/test-com/query-index.json',
+      );
+      expect(publishCall.args[1]).to.deep.include({ method: 'POST', timeout: 30000 });
+      expect(mockLog.info).to.have.been.calledWith('Preview of query-index succeeded');
+      expect(mockLog.info).to.have.been.calledWith('Publish of query-index succeeded');
+    });
+
+    it('should throw when HLX_ONBOARDING_TOKEN is not set', async () => {
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {},
+      );
+
+      const envWithoutToken = { ...mockEnv, HLX_ONBOARDING_TOKEN: '' };
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', envWithoutToken, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('HLX_ONBOARDING_TOKEN is not set');
+      }
+    });
+
+    it('should throw and log details when preview fails', async () => {
+      const mockHeaders = { get: sinon.stub() };
+      mockHeaders.get.withArgs('x-error-code').returns('CONTENT_NOT_FOUND');
+      mockHeaders.get.withArgs('x-error').returns('resource not found');
+
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: mockHeaders,
+        text: sinon.stub().resolves('detailed error body'),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Preview failed: 404 Not Found');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Preview failed.*404.*x-error-code: CONTENT_NOT_FOUND.*x-error: resource not found.*body: detailed error body/),
+      );
+    });
+
+    it('should throw and log details when publish fails', async () => {
+      const mockHeaders = { get: sinon.stub() };
+      mockHeaders.get.withArgs('x-error-code').returns('');
+      mockHeaders.get.withArgs('x-error').returns('throttled');
+
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).resolves({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: mockHeaders,
+        text: sinon.stub().resolves(''),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Publish failed: 503 Service Unavailable');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Publish failed.*503/),
+      );
+    });
+
+    it('should handle text() throwing when reading error body', async () => {
+      const mockHeaders = { get: sinon.stub().returns('') };
+
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: mockHeaders,
+        text: sinon.stub().rejects(new Error('stream error')),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Preview failed: 500 Internal Server Error');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Preview failed.*500.*body: $/),
+      );
+    });
+
+    it('should handle text() throwing when reading publish error body', async () => {
+      const mockHeaders = { get: sinon.stub().returns('') };
+
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onFirstCall().resolves({ ok: true });
+      mockTracingFetch.onSecondCall().resolves({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: mockHeaders,
+        text: sinon.stub().rejects(new Error('stream error')),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Publish failed: 502 Bad Gateway');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Publish failed.*502.*body: $/),
+      );
+    });
+  });
 });

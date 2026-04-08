@@ -6393,4 +6393,204 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(404);
     });
   });
+
+  describe('updateQueryIndex', () => {
+    let updateQueryIndexController;
+    let appendRowsStub;
+    let previewAndPublishStub;
+
+    before(async () => {
+      appendRowsStub = sinon.stub().resolves();
+      previewAndPublishStub = sinon.stub().resolves();
+
+      const LlmoControllerForQueryIndex = await esmock(
+        '../../../src/controllers/llmo/llmo.js',
+        {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            appendRowsToQueryIndex: (...args) => appendRowsStub(...args),
+            previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
+          },
+          '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: sinon.stub(),
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+            hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          },
+          '../../../src/support/access-control-util.js': {
+            default: createMockAccessControlUtil(true, true, true),
+          },
+          '@adobe/spacecat-shared-tokowaka-client': {
+            default: { createFrom: () => mockTokowakaClient },
+            calculateForwardedHost: () => 'www.example.com',
+          },
+          '../../../src/utils/slack/base.js': {
+            postSlackMessage: sinon.stub(),
+          },
+        },
+      );
+      updateQueryIndexController = LlmoControllerForQueryIndex;
+    });
+
+    beforeEach(() => {
+      appendRowsStub.reset();
+      appendRowsStub.resolves();
+      previewAndPublishStub.reset();
+      previewAndPublishStub.resolves();
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(mockSite);
+    });
+
+    it('should successfully update query-index', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1', 'file2.json'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.message).to.include('updated, previewed, and published');
+      expect(body.entriesAdded).to.equal(2);
+      expect(appendRowsStub).to.have.been.calledOnce;
+      expect(previewAndPublishStub).to.have.been.calledOnce;
+    });
+
+    it('should return forbidden when user is not LLMO administrator', async () => {
+      const LlmoControllerDeniedAdmin = await esmock(
+        '../../../src/controllers/llmo/llmo.js',
+        {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            appendRowsToQueryIndex: sinon.stub(),
+            previewAndPublishQueryIndex: sinon.stub(),
+          },
+          '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: sinon.stub(),
+            composeBaseURL: (d) => `https://${d}`,
+            hasText: (s) => typeof s === 'string' && s.trim().length > 0,
+            isObject: (o) => o !== null && typeof o === 'object' && !Array.isArray(o),
+          },
+          '../../../src/support/access-control-util.js': {
+            default: createMockAccessControlUtil(true, true, false),
+          },
+          '@adobe/spacecat-shared-tokowaka-client': {
+            default: { createFrom: () => mockTokowakaClient },
+            calculateForwardedHost: () => 'www.example.com',
+          },
+          '../../../src/utils/slack/base.js': {
+            postSlackMessage: sinon.stub(),
+          },
+        },
+      );
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = LlmoControllerDeniedAdmin(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return bad request when body is missing', async () => {
+      const ctx = { ...mockContext, data: null };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Request body is required');
+    });
+
+    it('should return bad request when domain is missing', async () => {
+      const ctx = { ...mockContext, data: { fileNames: ['file1'] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('domain is required');
+    });
+
+    it('should return bad request when fileNames is not a non-empty array', async () => {
+      const ctx = { ...mockContext, data: { domain: 'example.com', fileNames: [] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('fileNames must be a non-empty array of strings');
+    });
+
+    it('should return bad request when fileNames contains non-string entries', async () => {
+      const ctx = { ...mockContext, data: { domain: 'example.com', fileNames: ['valid', ''] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a non-empty string');
+    });
+
+    it('should return not found when site does not exist', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'unknown.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('should return bad request when dataFolder is missing from llmo config', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('dataFolder is missing');
+    });
+
+    it('should return internal server error when appendRows throws', async () => {
+      appendRowsStub.rejects(new Error('SharePoint connection failed'));
+      mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('SharePoint connection failed');
+    });
+
+    it('should return internal server error when previewAndPublish throws', async () => {
+      previewAndPublishStub.rejects(new Error('Preview failed: 503 Service Unavailable'));
+      mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('Preview failed');
+    });
+  });
 });

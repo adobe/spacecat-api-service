@@ -1141,10 +1141,10 @@ describe('Organizations Controller', () => {
       expect(body.map((s) => s.id)).to.deep.equal(['site1']);
     });
 
-    it('excludes delegated sites when target org has PLG-tier entitlement', async () => {
+    it('excludes delegated sites when target org has PRE_ONBOARD-tier entitlement', async () => {
       mockDataAccess.Entitlement.findByIndexKeys.resolves({
         getId: () => TARGET_ENT_ID,
-        getTier: () => 'PLG',
+        getTier: () => 'PRE_ONBOARD',
       });
       mockDataAccess.Organization.findById.resolves(organizations[0]);
       mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
@@ -1160,11 +1160,11 @@ describe('Organizations Controller', () => {
       expect(body.map((s) => s.id)).to.include('site1');
     });
 
-    it('excludes own-org sites when own entitlement has PLG tier', async () => {
+    it('excludes own-org sites when own entitlement has PRE_ONBOARD tier', async () => {
       const plgEntitlement = {
         getId: () => OWN_ENT_ID,
         getProductCode: () => 'abcd',
-        getTier: () => 'PLG',
+        getTier: () => 'PRE_ONBOARD',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement: plgEntitlement });
       mockDataAccess.Organization.findById.resolves(organizations[0]);
