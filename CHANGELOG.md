@@ -1,3 +1,31 @@
+## [1.421.2](https://github.com/adobe/spacecat-api-service/compare/v1.421.1...v1.421.2) (2026-04-08)
+
+
+### Bug Fixes
+
+* updated experimentation engine flow ([#2135](https://github.com/adobe/spacecat-api-service/issues/2135)) ([f37c9c9](https://github.com/adobe/spacecat-api-service/commit/f37c9c9a393e7f2798cf6af8f8ef9fa20b365729))
+
+## [1.421.1](https://github.com/adobe/spacecat-api-service/compare/v1.421.0...v1.421.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* deploy only granted suggestions for summitPlg for ASO UI ([#2065](https://github.com/adobe/spacecat-api-service/issues/2065)) ([f9a70d8](https://github.com/adobe/spacecat-api-service/commit/f9a70d86297045e8f928a2ac7e3674bb2ae8ec06))
+
+# [1.421.0](https://github.com/adobe/spacecat-api-service/compare/v1.420.1...v1.421.0) (2026-04-08)
+
+
+### Features
+
+* add competitor summary handler and update routes | LLMO-3922 ([#2150](https://github.com/adobe/spacecat-api-service/issues/2150)) ([f167ada](https://github.com/adobe/spacecat-api-service/commit/f167ada9904f57a4e35c645bcb4eb5541f3d4896))
+
+## [1.420.1](https://github.com/adobe/spacecat-api-service/compare/v1.420.0...v1.420.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* Update CONSUMER_INTEGRATION_GUIDE.md ([c720ee8](https://github.com/adobe/spacecat-api-service/commit/c720ee88d8398bb48d3b18c08050908f57a71583))
+
 # [1.420.0](https://github.com/adobe/spacecat-api-service/compare/v1.419.0...v1.420.0) (2026-04-08)
 
 

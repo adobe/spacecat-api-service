@@ -43,6 +43,8 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
   'GET /sites/:siteId/geo-experiments',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+  'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
+  'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -188,6 +190,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/competitor-summary': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/competitor-summary': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
