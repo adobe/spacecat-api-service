@@ -1,0 +1,574 @@
+2026-04-04 17:09:46.296 [info] Transport closed
+2026-04-04 17:09:46.302 [info] MCP server closed
+2026-04-04 17:09:46.306 [info] Transport closed
+2026-04-04 17:09:46.313 [info] MCP server closed
+2026-04-06 12:31:11.821 [debug] Initializing ConfigManager from environment variables
+2026-04-06 12:31:11.821 [debug] Initializing ConfigManager from environment variables
+2026-04-06 12:31:11.822 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 12:31:11.822 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 12:31:11.822 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 12:31:11.822 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 12:31:11.823 [debug] ConfigManager initialized
+2026-04-06 12:31:11.823 [debug] ConfigManager initialized
+2026-04-06 12:31:12.169 [info] Initializing MCP Server...
+2026-04-06 12:31:12.169 [info] Initializing MCP Server...
+2026-04-06 12:31:12.169 [info] 📦 Build ID: unknown
+2026-04-06 12:31:12.169 [info] 📦 Build ID: unknown
+2026-04-06 12:31:12.170 [info] 📦 Version: unknown
+2026-04-06 12:31:12.170 [info] 📦 Version: unknown
+2026-04-06 12:31:12.170 [info] 📦 Build Date: unknown
+2026-04-06 12:31:12.170 [info] 📦 Build Date: unknown
+2026-04-06 12:31:12.170 [info] 📦 Timestamp: 1775458872168
+2026-04-06 12:31:12.170 [info] 📦 Timestamp: 1775458872168
+2026-04-06 12:31:12.173 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 12:31:12.173 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 12:31:12.173 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 12:31:12.173 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 12:31:12.174 [info] Using Personal Access Token authentication method
+2026-04-06 12:31:12.174 [info] Using Personal Access Token authentication method
+2026-04-06 12:31:12.174 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 12:31:12.174 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 12:31:12.174 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 12:31:12.174 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 12:31:12.175 [info] Registered expert-wiki-editor prompt
+2026-04-06 12:31:12.175 [info] Registered expert-wiki-editor prompt
+2026-04-06 12:31:12.175 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 12:31:12.175 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 12:31:12.176 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 12:31:12.176 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 12:31:12.176 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 12:31:12.176 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 12:31:12.176 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 12:31:12.176 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 12:31:12.176 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 12:31:12.176 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 12:31:12.176 [info] MCP Server initialized successfully
+2026-04-06 12:31:12.176 [info] MCP Server initialized successfully
+2026-04-06 12:31:12.177 [info] Wiki MCP Server connected via stdio
+2026-04-06 12:31:12.177 [info] Wiki MCP Server connected via stdio
+2026-04-06 12:31:12.177 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 12:31:12.177 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 12:31:17.212 [info] Transport closed
+2026-04-06 12:31:17.219 [info] MCP server closed
+2026-04-06 14:24:22.186 [debug] MCP get-wiki-content called with params: {"url":"https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3773151471&spaceKey=AEMSites&title=ASO%2BPLG%2BOnboarding%2BBackend%2BDesign","preserve_macros":true,"extract_assets":false,"asset_types":"all"}
+2026-04-06 14:24:22.187 [debug] Internal settings: save_temp_file=true, augment_with_ids=true
+2026-04-06 14:24:22.188 [debug] Fetching wiki content from URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3773151471&spaceKey=AEMSites&title=ASO%2BPLG%2BOnboarding%2BBackend%2BDesign
+2026-04-06 14:24:22.188 [debug] Parsing Confluence URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3773151471&spaceKey=AEMSites&title=ASO%2BPLG%2BOnboarding%2BBackend%2BDesign
+2026-04-06 14:24:22.189 [debug] Analyzing URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3773151471&spaceKey=AEMSites&title=ASO%2BPLG%2BOnboarding%2BBackend%2BDesign
+2026-04-06 14:24:22.189 [debug] Pathname: /pages/viewpage.action
+2026-04-06 14:24:22.189 [debug] Search params: ?pageId=3773151471&spaceKey=AEMSites&title=ASO%2BPLG%2BOnboarding%2BBackend%2BDesign
+2026-04-06 14:24:22.189 [debug] Found pageId parameter: 3773151471
+2026-04-06 14:24:22.190 [debug] Extracted from URL pattern: {"pageId":"3773151471","type":"page"}
+2026-04-06 14:24:22.190 [debug] Fetching content for page ID: 3773151471
+2026-04-06 14:24:23.770 [debug] ID Augmentation check: augment_with_ids=true, preserve_macros=true, condition met=true
+2026-04-06 14:24:23.770 [debug] Starting ID augmentation for surgical editing
+2026-04-06 14:24:23.771 [debug] Starting Cheerio ID augmentation for content of length: 17044
+2026-04-06 14:24:23.778 [debug] Successfully augmented content with 483 unique IDs using Cheerio
+2026-04-06 14:24:23.778 [debug] Content augmented with 483 unique IDs
+2026-04-06 14:24:23.779 [debug] Saving augmented content with 483 IDs to temp file for page 3773151471
+2026-04-06 14:24:23.780 [debug] Saved content to temp file: wiki_3773151471.html (30926 chars)
+2026-04-06 14:24:23.780 [debug] Content saved to temp file: 3773151471 (augmented content with 483 IDs)
+2026-04-06 16:07:16.608 [debug] MCP create-wiki-page called with params:
+        space: AEMSites
+        title: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design
+        content_type: markdown
+        content length: 8333
+        parent_id: 3773151471
+      
+2026-04-06 16:07:16.609 [debug] Requested creation of new wiki page. Space: AEMSites, Title: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design, Content length: 8333, Parent ID: 3773151471
+2026-04-06 16:07:16.619 [debug] Converted Markdown to HTML. HTML length: 12697
+2026-04-06 16:07:18.319 [info] Page created successfully. ID: 3825898705, Title: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design
+2026-04-06 19:30:50.803 [info] Transport closed
+2026-04-06 19:30:50.808 [info] MCP server closed
+2026-04-06 19:30:57.665 [debug] Initializing ConfigManager from environment variables
+2026-04-06 19:30:57.665 [debug] Initializing ConfigManager from environment variables
+2026-04-06 19:30:57.666 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 19:30:57.666 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 19:30:57.666 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 19:30:57.666 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 19:30:57.667 [debug] ConfigManager initialized
+2026-04-06 19:30:57.667 [debug] ConfigManager initialized
+2026-04-06 19:30:58.119 [debug] Cleaned up old temp file: wiki_3773151471.html
+2026-04-06 19:30:58.120 [debug] Cleaned up old temp file: wiki_3773151471.html
+2026-04-06 19:30:58.122 [info] Initializing MCP Server...
+2026-04-06 19:30:58.122 [info] Initializing MCP Server...
+2026-04-06 19:30:58.123 [info] 📦 Build ID: unknown
+2026-04-06 19:30:58.123 [info] 📦 Build ID: unknown
+2026-04-06 19:30:58.123 [info] 📦 Version: unknown
+2026-04-06 19:30:58.123 [info] 📦 Version: unknown
+2026-04-06 19:30:58.123 [info] 📦 Build Date: unknown
+2026-04-06 19:30:58.123 [info] 📦 Build Date: unknown
+2026-04-06 19:30:58.123 [info] 📦 Timestamp: 1775484058122
+2026-04-06 19:30:58.123 [info] 📦 Timestamp: 1775484058122
+2026-04-06 19:30:58.127 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 19:30:58.127 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 19:30:58.127 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 19:30:58.127 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 19:30:58.127 [info] Using Personal Access Token authentication method
+2026-04-06 19:30:58.127 [info] Using Personal Access Token authentication method
+2026-04-06 19:30:58.128 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 19:30:58.128 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 19:30:58.128 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 19:30:58.128 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 19:30:58.129 [info] Registered expert-wiki-editor prompt
+2026-04-06 19:30:58.129 [info] Registered expert-wiki-editor prompt
+2026-04-06 19:30:58.129 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 19:30:58.129 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 19:30:58.129 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 19:30:58.129 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 19:30:58.129 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 19:30:58.129 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 19:30:58.130 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 19:30:58.130 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 19:30:58.130 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 19:30:58.130 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 19:30:58.130 [info] MCP Server initialized successfully
+2026-04-06 19:30:58.130 [info] MCP Server initialized successfully
+2026-04-06 19:30:58.131 [info] Wiki MCP Server connected via stdio
+2026-04-06 19:30:58.131 [info] Wiki MCP Server connected via stdio
+2026-04-06 19:30:58.131 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 19:30:58.131 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 19:30:59.582 [debug] Initializing ConfigManager from environment variables
+2026-04-06 19:30:59.583 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 19:30:59.584 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 19:30:59.584 [debug] ConfigManager initialized
+2026-04-06 19:30:59.730 [info] Initializing MCP Server...
+2026-04-06 19:30:59.730 [info] 📦 Build ID: unknown
+2026-04-06 19:30:59.730 [info] 📦 Version: unknown
+2026-04-06 19:30:59.730 [info] 📦 Build Date: unknown
+2026-04-06 19:30:59.730 [info] 📦 Timestamp: 1775484059729
+2026-04-06 19:30:59.734 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 19:30:59.734 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 19:30:59.734 [info] Using Personal Access Token authentication method
+2026-04-06 19:30:59.735 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 19:30:59.735 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 19:30:59.735 [info] Registered expert-wiki-editor prompt
+2026-04-06 19:30:59.736 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 19:30:59.736 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 19:30:59.736 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 19:30:59.736 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 19:30:59.736 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 19:30:59.736 [info] MCP Server initialized successfully
+2026-04-06 19:30:59.737 [info] Wiki MCP Server connected via stdio
+2026-04-06 19:30:59.737 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 19:31:03.161 [info] Transport closed
+2026-04-06 19:31:03.163 [info] MCP server closed
+2026-04-06 21:41:49.083 [info] Transport closed
+2026-04-06 21:41:49.082 [info] Transport closed
+2026-04-06 21:41:49.091 [info] MCP server closed
+2026-04-06 21:41:49.091 [info] MCP server closed
+2026-04-06 21:42:38.597 [debug] Initializing ConfigManager from environment variables
+2026-04-06 21:42:38.597 [debug] Initializing ConfigManager from environment variables
+2026-04-06 21:42:38.598 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 21:42:38.598 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 21:42:38.599 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 21:42:38.599 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 21:42:38.599 [debug] ConfigManager initialized
+2026-04-06 21:42:38.599 [debug] ConfigManager initialized
+2026-04-06 21:42:38.956 [info] Initializing MCP Server...
+2026-04-06 21:42:38.956 [info] Initializing MCP Server...
+2026-04-06 21:42:38.957 [info] 📦 Build ID: unknown
+2026-04-06 21:42:38.957 [info] 📦 Build ID: unknown
+2026-04-06 21:42:38.957 [info] 📦 Version: unknown
+2026-04-06 21:42:38.957 [info] 📦 Version: unknown
+2026-04-06 21:42:38.957 [info] 📦 Build Date: unknown
+2026-04-06 21:42:38.957 [info] 📦 Build Date: unknown
+2026-04-06 21:42:38.958 [info] 📦 Timestamp: 1775491958956
+2026-04-06 21:42:38.958 [info] 📦 Timestamp: 1775491958956
+2026-04-06 21:42:38.961 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 21:42:38.961 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 21:42:38.961 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 21:42:38.961 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 21:42:38.962 [info] Using Personal Access Token authentication method
+2026-04-06 21:42:38.962 [info] Using Personal Access Token authentication method
+2026-04-06 21:42:38.962 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 21:42:38.962 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 21:42:38.962 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 21:42:38.962 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 21:42:38.963 [info] Registered expert-wiki-editor prompt
+2026-04-06 21:42:38.963 [info] Registered expert-wiki-editor prompt
+2026-04-06 21:42:38.963 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 21:42:38.963 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 21:42:38.963 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 21:42:38.963 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 21:42:38.964 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 21:42:38.964 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 21:42:38.964 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 21:42:38.964 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 21:42:38.964 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 21:42:38.964 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 21:42:38.964 [info] MCP Server initialized successfully
+2026-04-06 21:42:38.964 [info] MCP Server initialized successfully
+2026-04-06 21:42:38.965 [info] Wiki MCP Server connected via stdio
+2026-04-06 21:42:38.965 [info] Wiki MCP Server connected via stdio
+2026-04-06 21:42:38.966 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 21:42:38.966 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 21:42:43.996 [info] Transport closed
+2026-04-06 21:42:43.996 [info] MCP server closed
+2026-04-06 21:48:23.998 [debug] Initializing ConfigManager from environment variables
+2026-04-06 21:48:23.999 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 21:48:23.999 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 21:48:23.999 [debug] ConfigManager initialized
+2026-04-06 21:48:24.271 [info] Initializing MCP Server...
+2026-04-06 21:48:24.272 [info] 📦 Build ID: unknown
+2026-04-06 21:48:24.272 [info] 📦 Version: unknown
+2026-04-06 21:48:24.272 [info] 📦 Build Date: unknown
+2026-04-06 21:48:24.272 [info] 📦 Timestamp: 1775492304271
+2026-04-06 21:48:24.276 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 21:48:24.276 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 21:48:24.276 [info] Using Personal Access Token authentication method
+2026-04-06 21:48:24.276 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 21:48:24.277 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 21:48:24.277 [info] Registered expert-wiki-editor prompt
+2026-04-06 21:48:24.277 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 21:48:24.277 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 21:48:24.277 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 21:48:24.277 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 21:48:24.278 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 21:48:24.278 [info] MCP Server initialized successfully
+2026-04-06 21:48:24.278 [info] Wiki MCP Server connected via stdio
+2026-04-06 21:48:24.279 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 21:48:27.066 [debug] Initializing ConfigManager from environment variables
+2026-04-06 21:48:27.067 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-06 21:48:27.068 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-06 21:48:27.068 [debug] ConfigManager initialized
+2026-04-06 21:48:27.204 [info] Initializing MCP Server...
+2026-04-06 21:48:27.204 [info] 📦 Build ID: unknown
+2026-04-06 21:48:27.204 [info] 📦 Version: unknown
+2026-04-06 21:48:27.205 [info] 📦 Build Date: unknown
+2026-04-06 21:48:27.205 [info] 📦 Timestamp: 1775492307204
+2026-04-06 21:48:27.208 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-06 21:48:27.208 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-06 21:48:27.208 [info] Using Personal Access Token authentication method
+2026-04-06 21:48:27.209 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-06 21:48:27.209 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-06 21:48:27.209 [info] Registered expert-wiki-editor prompt
+2026-04-06 21:48:27.209 [info] Registered plantuml_diagram_creator prompt
+2026-04-06 21:48:27.209 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-06 21:48:27.210 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-06 21:48:27.210 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-06 21:48:27.210 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-06 21:48:27.210 [info] MCP Server initialized successfully
+2026-04-06 21:48:27.211 [info] Wiki MCP Server connected via stdio
+2026-04-06 21:48:27.211 [info] Wiki MCP Server started successfully with stdio transport
+2026-04-06 21:54:48.539 [debug] Update wiki content called: traditional mode
+2026-04-06 21:54:48.540 [info] 🚀 [req_1775492688540_d9gvn08jn] updateWikiContent traditional | 13371 chars | markdown
+2026-04-06 21:54:48.541 [info] 📝 [req_1775492688540_d9gvn08jn] Content analysis: 13371 chars, complexity: medium
+2026-04-06 21:54:48.541 [debug] Parsing Confluence URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3825898705
+2026-04-06 21:54:48.542 [debug] Analyzing URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3825898705
+2026-04-06 21:54:48.542 [debug] Pathname: /pages/viewpage.action
+2026-04-06 21:54:48.542 [debug] Search params: ?pageId=3825898705
+2026-04-06 21:54:48.542 [debug] Found pageId parameter: 3825898705
+2026-04-06 21:54:48.542 [debug] Extracted from URL pattern: {"pageId":"3825898705","type":"page"}
+2026-04-06 21:54:48.542 [debug] 🔄 [req_1775492688540_d9gvn08jn] Fetching current page version...
+2026-04-06 21:54:48.987 [error] ❌ [req_1775492688540_d9gvn08jn] Error in updateWikiContent:: unable to get local issuer certificate
+2026-04-06 21:54:48.988 [error] Error: unable to get local issuer certificate
+    at AxiosError.from (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/axios/dist/node/axios.cjs:906:28)
+    at RedirectableRequest.handleRequestError (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/axios/dist/node/axios.cjs:3567:27)
+    at RedirectableRequest.emit (node:events:508:28)
+    at eventHandlers.<computed> (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/follow-redirects/index.js:49:24)
+    at ClientRequest.emit (node:events:508:28)
+    at emitErrorEvent (node:_http_client:108:11)
+    at TLSSocket.socketErrorListener (node:_http_client:575:5)
+    at TLSSocket.emit (node:events:508:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at Axios.request (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/axios/dist/node/axios.cjs:4796:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+2026-04-06 21:54:48.989 [info] ❌ [req_1775492688540_d9gvn08jn] updateWikiContent failed with unknown error
+2026-04-06 21:55:31.898 [debug] MCP create-wiki-page called with params:
+        space: AEMSites
+        title: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design v2
+        content_type: markdown
+        content length: 12922
+        parent_id: 3773151471
+      
+2026-04-06 21:55:31.899 [debug] Requested creation of new wiki page. Space: AEMSites, Title: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design v2, Content length: 12922, Parent ID: 3773151471
+2026-04-06 21:55:31.909 [debug] Converted Markdown to HTML. HTML length: 17085
+2026-04-06 21:55:32.347 [error] Failed to create page: unable to get local issuer certificate
+2026-04-06 21:55:32.348 [error] Error: unable to get local issuer certificate
+    at AxiosError.from (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/axios/dist/node/axios.cjs:906:28)
+    at RedirectableRequest.handleRequestError (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/axios/dist/node/axios.cjs:3567:27)
+    at RedirectableRequest.emit (node:events:508:28)
+    at eventHandlers.<computed> (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/follow-redirects/index.js:49:24)
+    at ClientRequest.emit (node:events:508:28)
+    at emitErrorEvent (node:_http_client:108:11)
+    at TLSSocket.socketErrorListener (node:_http_client:575:5)
+    at TLSSocket.emit (node:events:508:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at Axios.request (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/axios/dist/node/axios.cjs:4796:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+2026-04-06 21:55:32.348 [error] Error in MCP tool: Failed to create the page: unable to get local issuer certificate: Failed to create the page: unable to get local issuer certificate
+2026-04-06 21:55:32.349 [error] ConfluenceError: Failed to create the page: unable to get local issuer certificate
+    at createWikiPage (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/dist/mcp-server/confluence/content-manager.js:1387:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async /Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/dist/mcp-server/server/mcp-server.js:450:26
+    at async /Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/dist/mcp-server/utils/error-handler.js:94:20
+    at async McpServer.executeToolHandler (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/@modelcontextprotocol/sdk/dist/cjs/server/mcp.js:236:20)
+    at async /Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/@modelcontextprotocol/sdk/dist/cjs/server/mcp.js:129:32
+    at async wrappedHandler (/Users/anshulk/.adobe-mcp-servers/src/adobe-wiki/node_modules/@modelcontextprotocol/sdk/dist/cjs/server/index.js:128:32)
+2026-04-06 21:57:43.761 [debug] Update wiki content called: traditional mode
+2026-04-06 21:57:43.763 [info] 🚀 [req_1775492863763_dmo1s3nwn] updateWikiContent traditional | 12835 chars | markdown
+2026-04-06 21:57:43.764 [info] 📝 [req_1775492863763_dmo1s3nwn] Content analysis: 12835 chars, complexity: low
+2026-04-06 21:57:43.764 [debug] Parsing Confluence URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3825898705
+2026-04-06 21:57:43.764 [debug] Analyzing URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3825898705
+2026-04-06 21:57:43.765 [debug] Pathname: /pages/viewpage.action
+2026-04-06 21:57:43.765 [debug] Search params: ?pageId=3825898705
+2026-04-06 21:57:43.765 [debug] Found pageId parameter: 3825898705
+2026-04-06 21:57:43.765 [debug] Extracted from URL pattern: {"pageId":"3825898705","type":"page"}
+2026-04-06 21:57:43.766 [debug] 🔄 [req_1775492863763_dmo1s3nwn] Fetching current page version...
+2026-04-06 21:57:45.016 [debug] 📝 [req_1775492863763_dmo1s3nwn] Page: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design, version 1
+2026-04-06 21:57:45.018 [debug] 📝 [req_1775492863763_dmo1s3nwn] Markdown -> HTML: 16854 chars
+2026-04-06 21:57:46.309 [info] ✅ [req_1775492863763_dmo1s3nwn] Updated: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design v2
+2026-04-06 21:57:46.310 [debug] Starting Cheerio ID augmentation for content of length: 16854
+2026-04-06 21:57:46.316 [debug] Successfully augmented content with 390 unique IDs using Cheerio
+2026-04-06 21:57:46.319 [debug] Saved content to temp file: wiki_3825898705.html (27781 chars)
+2026-04-07 15:48:49.845 [debug] MCP get-wiki-content called with params: {"url":"https://wiki.corp.adobe.com/spaces/AEMSites/pages/3825898705/ASO+PLG+Onboarding+%E2%80%94+Waitlist+Bypass+PATCH+Design","preserve_macros":true,"extract_assets":false,"asset_types":"all"}
+2026-04-07 15:48:49.847 [debug] Internal settings: save_temp_file=true, augment_with_ids=true
+2026-04-07 15:48:49.847 [debug] Fetching wiki content from URL: https://wiki.corp.adobe.com/spaces/AEMSites/pages/3825898705/ASO+PLG+Onboarding+%E2%80%94+Waitlist+Bypass+PATCH+Design
+2026-04-07 15:48:49.848 [debug] Parsing Confluence URL: https://wiki.corp.adobe.com/spaces/AEMSites/pages/3825898705/ASO+PLG+Onboarding+%E2%80%94+Waitlist+Bypass+PATCH+Design
+2026-04-07 15:48:49.848 [debug] Analyzing URL: https://wiki.corp.adobe.com/spaces/AEMSites/pages/3825898705/ASO+PLG+Onboarding+%E2%80%94+Waitlist+Bypass+PATCH+Design
+2026-04-07 15:48:49.848 [debug] Pathname: /spaces/AEMSites/pages/3825898705/ASO+PLG+Onboarding+%E2%80%94+Waitlist+Bypass+PATCH+Design
+2026-04-07 15:48:49.848 [debug] Search params: 
+2026-04-07 15:48:49.849 [debug] Found spaces/pages pattern. Space: AEMSites, PageId: 3825898705
+2026-04-07 15:48:49.849 [debug] Extracted from URL pattern: {"pageId":"3825898705","type":"page","space":"AEMSites"}
+2026-04-07 15:48:49.849 [debug] Fetching content for page ID: 3825898705
+2026-04-07 15:48:51.356 [debug] ID Augmentation check: augment_with_ids=true, preserve_macros=true, condition met=true
+2026-04-07 15:48:51.357 [debug] Starting ID augmentation for surgical editing
+2026-04-07 15:48:51.357 [debug] Starting Cheerio ID augmentation for content of length: 16214
+2026-04-07 15:48:51.361 [debug] Successfully augmented content with 390 unique IDs using Cheerio
+2026-04-07 15:48:51.361 [debug] Content augmented with 390 unique IDs
+2026-04-07 15:48:51.361 [debug] Saving augmented content with 390 IDs to temp file for page 3825898705
+2026-04-07 15:48:51.362 [debug] Saved content to temp file: wiki_3825898705.html (27141 chars)
+2026-04-07 15:48:51.363 [debug] Content saved to temp file: 3825898705 (augmented content with 390 IDs)
+2026-04-07 15:50:15.112 [debug] Update wiki content called: traditional mode
+2026-04-07 15:50:15.113 [info] 🚀 [req_1775557215113_a0kpw5ps0] updateWikiContent traditional | 13987 chars | markdown
+2026-04-07 15:50:15.113 [info] 📝 [req_1775557215113_a0kpw5ps0] Content analysis: 13987 chars, complexity: low
+2026-04-07 15:50:15.114 [debug] Parsing Confluence URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3825898705
+2026-04-07 15:50:15.114 [debug] Analyzing URL: https://wiki.corp.adobe.com/pages/viewpage.action?pageId=3825898705
+2026-04-07 15:50:15.114 [debug] Pathname: /pages/viewpage.action
+2026-04-07 15:50:15.115 [debug] Search params: ?pageId=3825898705
+2026-04-07 15:50:15.115 [debug] Found pageId parameter: 3825898705
+2026-04-07 15:50:15.115 [debug] Extracted from URL pattern: {"pageId":"3825898705","type":"page"}
+2026-04-07 15:50:15.116 [debug] 🔄 [req_1775557215113_a0kpw5ps0] Fetching current page version...
+2026-04-07 15:50:15.985 [debug] 📝 [req_1775557215113_a0kpw5ps0] Page: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design, version 2
+2026-04-07 15:50:15.991 [debug] 📝 [req_1775557215113_a0kpw5ps0] Markdown -> HTML: 18246 chars
+2026-04-07 15:50:16.963 [info] ✅ [req_1775557215113_a0kpw5ps0] Updated: ASO PLG Onboarding — Waitlist Bypass (PATCH) Design v3
+2026-04-07 15:50:16.964 [debug] Starting Cheerio ID augmentation for content of length: 18246
+2026-04-07 15:50:16.966 [debug] Successfully augmented content with 390 unique IDs using Cheerio
+2026-04-07 15:50:16.967 [debug] Saved content to temp file: wiki_3825898705.html (29140 chars)
+2026-04-08 01:51:56.877 [debug] Initializing ConfigManager from environment variables
+2026-04-08 01:51:56.878 [debug] Loaded config from environment (sensitive data redacted):
+2026-04-08 01:51:56.879 [debug] {
+  "host": "wiki.corp.adobe.com",
+  "authMethod": "[REDACTED]",
+  "port": 1984,
+  "assetsOutputDir": "./wiki-mcp/assets",
+  "assets": {
+    "extractAssets": false,
+    "outputDir": "./wiki-mcp/assets",
+    "filenamePrefix": "asset-",
+    "createOutputDirs": true,
+    "useAbsolutePath": true,
+    "assetTypes": [
+      "image",
+      "pdf",
+      "document",
+      "attachment",
+      "plantuml"
+    ]
+  }
+}
+2026-04-08 01:51:56.879 [debug] ConfigManager initialized
+2026-04-08 01:51:57.227 [debug] Cleaned up old temp file: wiki_3825898705.html
+2026-04-08 01:51:57.229 [info] Initializing MCP Server...
+2026-04-08 01:51:57.229 [info] 📦 Build ID: unknown
+2026-04-08 01:51:57.230 [info] 📦 Version: unknown
+2026-04-08 01:51:57.230 [info] 📦 Build Date: unknown
+2026-04-08 01:51:57.230 [info] 📦 Timestamp: 1775593317229
+2026-04-08 01:51:57.233 [debug] Creating authenticated Confluence client via AuthenticationManager
+2026-04-08 01:51:57.234 [debug] Normalized host: wiki.corp.adobe.com
+2026-04-08 01:51:57.234 [info] Using Personal Access Token authentication method
+2026-04-08 01:51:57.234 [info] Confluence client created successfully for host: wiki.corp.adobe.com
+2026-04-08 01:51:57.234 [info] Registered expert-wiki-editing-workflow prompt
+2026-04-08 01:51:57.235 [info] Registered expert-wiki-editor prompt
+2026-04-08 01:51:57.235 [info] Registered plantuml_diagram_creator prompt
+2026-04-08 01:51:57.235 [info] Registered prompts: expert_wiki_editing_workflow, expert_wiki_editor, plantuml_diagram_creator
+2026-04-08 01:51:57.235 [info] Prompt "expert_wiki_editing_workflow" registered: has description=true, has callback=true
+2026-04-08 01:51:57.235 [info] Prompt "expert_wiki_editor" registered: has description=true, has callback=true
+2026-04-08 01:51:57.235 [info] Prompt "plantuml_diagram_creator" registered: has description=true, has callback=true
+2026-04-08 01:51:57.236 [info] MCP Server initialized successfully
+2026-04-08 01:51:57.236 [info] Wiki MCP Server connected via stdio
+2026-04-08 01:51:57.237 [info] Wiki MCP Server started successfully with stdio transport
