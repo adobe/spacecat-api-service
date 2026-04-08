@@ -1,3 +1,15 @@
+# [1.425.0](https://github.com/adobe/spacecat-api-service/compare/v1.424.0...v1.425.0) (2026-04-08)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2159](https://github.com/adobe/spacecat-api-service/issues/2159)) ([5bc0f59](https://github.com/adobe/spacecat-api-service/commit/5bc0f59fb6772c007a2992543a84839424e3072e))
+
+
+### Features
+
+* We only need to analyze top 3 pages for PLG customers ([#2120](https://github.com/adobe/spacecat-api-service/issues/2120)) ([8a66638](https://github.com/adobe/spacecat-api-service/commit/8a66638c22a7c1a669520f2ca55e811671b66aea))
+
 # [1.424.0](https://github.com/adobe/spacecat-api-service/compare/v1.423.0...v1.424.0) (2026-04-08)
 
 
