@@ -43,6 +43,8 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
   'GET /sites/:siteId/geo-experiments',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+  'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
+  'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -67,6 +69,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
+  'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
@@ -187,6 +190,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/competitor-summary': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/competitor-summary': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
@@ -359,6 +364,9 @@ const routeRequiredCapabilities = {
 
   // Graph
   'POST /sites/:siteId/graph': 'site:write',
+
+  // Page Relationships
+  'POST /sites/:siteId/page-relationships/search': 'site:read',
 
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',

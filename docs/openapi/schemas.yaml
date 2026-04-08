@@ -6752,7 +6752,6 @@ StageConfigsResponse:
   description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
   items:
     $ref: '#/StageConfigItem'
-
 PlgOnboarding:
   type: object
   description: A PLG ASO onboarding record tracking the lifecycle of a domain onboarding.
@@ -7308,3 +7307,140 @@ V2TopicListResponse:
       type: array
       items:
         $ref: '#/V2Topic'
+
+PageRelationshipsSearchPage:
+  x-experimental: true
+  type: object
+  required:
+    - pageUrl
+    - key
+  properties:
+    pageUrl:
+      type: string
+      description: Page path or absolute URL to resolve.
+      example: '/us/en/products'
+    suggestionType:
+      type: string
+      description: Suggestion/issue classifier used by the backend to apply relationship checks.
+      example: 'Missing Title'
+    key:
+      type: string
+      description: Caller-provided key used in relationships/errors maps.
+      example: 'row-1'
+
+PageRelationshipChainItem:
+  x-experimental: true
+  type: object
+  description: |
+    A single step in the relationship lineage.
+    Chain items are ordered from the requested page's immediate parent upward through ancestors.
+  required:
+    - pageId
+    - pagePath
+  properties:
+    pageId:
+      type: string
+      description: page identifier for this chain.
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    pagePath:
+      type: string
+      description: Page path for this chain hop.
+      example: '/language-masters/en/adventures'
+    metadata:
+      $ref: '#/PageRelationshipMetadata'
+
+PageRelationshipMetadata:
+  x-experimental: true
+  type: object
+  additionalProperties: true
+  properties:
+    sourceType:
+      oneOf:
+        - type: string
+        - type: "null"
+      description: |
+        Source classification for this chain entry from the relationship provider.
+        Value is provider-defined and intentionally not constrained.
+
+PageRelationship:
+  x-experimental: true
+  type: object
+  required:
+    - pagePath
+    - pageId
+    - chain
+  properties:
+    pagePath:
+      type: string
+      description: Normalized page path or absolute URL for the requested page.
+      example: '/us/en/adventures'
+    pageId:
+      type: string
+      description: Resolved page identifier used by downstream fix operations.
+      example: 'pg-123'
+    chain:
+      type: array
+      description: |
+        Ordered relationship lineage returned by content API.
+        Sequence starts with the immediate parent of the requested page,
+        then grandparent, and so on.
+      items:
+        $ref: '#/PageRelationshipChainItem'
+
+PageRelationshipError:
+  x-experimental: true
+  type: object
+  required:
+    - error
+  properties:
+    error:
+      type: string
+      example: 'Could not determine page ID'
+    detail:
+      type: string
+      example: 'HTTP 404'
+
+PageRelationshipsMapping:
+  x-experimental: true
+  type: object
+  additionalProperties:
+    $ref: '#/PageRelationship'
+
+PageRelationshipsErrorMapping:
+  x-experimental: true
+  type: object
+  additionalProperties:
+    $ref: '#/PageRelationshipError'
+
+PageRelationshipsSearchRequest:
+  x-experimental: true
+  type: object
+  description: |
+    Experimental request schema for the page-relationships proxy endpoint.
+    Used by UI-facing, on-demand relationship lookups backed by AEM Content API.
+  required:
+    - pages
+  properties:
+    pages:
+      type: array
+      items:
+        $ref: '#/PageRelationshipsSearchPage'
+
+PageRelationshipsSearchResponse:
+  x-experimental: true
+  type: object
+  description: |
+    Experimental response schema for the page-relationships proxy endpoint.
+    Returned by the API proxy over AEM Content API relationship lookup results.
+  required:
+    - supported
+    - relationships
+    - errors
+  properties:
+    supported:
+      type: boolean
+      example: true
+    relationships:
+      $ref: '#/PageRelationshipsMapping'
+    errors:
+      $ref: '#/PageRelationshipsErrorMapping'
