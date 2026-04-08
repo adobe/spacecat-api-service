@@ -465,6 +465,7 @@ export default function getRouteHandlers(
     'POST /plg/onboard': plgOnboardingController.onboard,
     'GET /plg/sites': plgOnboardingController.getAllOnboardings,
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
+    'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
     'POST /plg/records': plgOnboardingController.createOnboarding,
     'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
     'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,

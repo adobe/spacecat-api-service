@@ -387,6 +387,7 @@ describe('getRouteHandlers', () => {
     onboard: sinon.stub(),
     getAllOnboardings: sinon.stub(),
     getStatus: sinon.stub(),
+    update: sinon.stub(),
   };
 
   const mockImsOrgAccessController = {
@@ -804,7 +805,6 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'POST /sites/:siteId/llmo/edge-optimize-routing',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
-      'GET /plg/onboard/status/:imsOrgId',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
@@ -843,6 +843,8 @@ describe('getRouteHandlers', () => {
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
       'GET /sites/:siteId/tokens/by-type/:tokenType',
+      'GET /plg/onboard/status/:imsOrgId',
+      'PATCH /plg/onboard/:onboardingId',
       'PATCH /plg/records/:plgOnboardingId',
       'DELETE /plg/records/:plgOnboardingId',
       'POST /sites/:siteId/ims-org-access',

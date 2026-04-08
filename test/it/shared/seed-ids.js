@@ -135,6 +135,8 @@ export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
 export const PLG_ONBOARDING_1_ID = 'd1111111-1111-4111-b111-111111111111';
 export const PLG_ONBOARDING_1_DOMAIN = 'site1.example.com';
+export const PLG_ONBOARDING_2_ID = 'd2222222-2222-4222-b222-222222222222';
+export const PLG_ONBOARDING_2_DOMAIN = 'waitlisted-site.example.com';
 
 // ── ORG_3: Delegate Agency Org ──
 
