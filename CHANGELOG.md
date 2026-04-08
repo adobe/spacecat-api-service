@@ -1,3 +1,10 @@
+# [1.422.0](https://github.com/adobe/spacecat-api-service/compare/v1.421.3...v1.422.0) (2026-04-08)
+
+
+### Features
+
+* introduce query-index editing endpoint ([#2134](https://github.com/adobe/spacecat-api-service/issues/2134)) ([065cfa5](https://github.com/adobe/spacecat-api-service/commit/065cfa5b3adfa5eb3ccf1c1d849cae58de501c47))
+
 ## [1.421.3](https://github.com/adobe/spacecat-api-service/compare/v1.421.2...v1.421.3) (2026-04-08)
 
 
