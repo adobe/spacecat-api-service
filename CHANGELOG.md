@@ -1,3 +1,10 @@
+## [1.421.1](https://github.com/adobe/spacecat-api-service/compare/v1.421.0...v1.421.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* deploy only granted suggestions for summitPlg for ASO UI ([#2065](https://github.com/adobe/spacecat-api-service/issues/2065)) ([f9a70d8](https://github.com/adobe/spacecat-api-service/commit/f9a70d86297045e8f928a2ac7e3674bb2ae8ec06))
+
 # [1.421.0](https://github.com/adobe/spacecat-api-service/compare/v1.420.1...v1.421.0) (2026-04-08)
 
 
