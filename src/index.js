@@ -291,6 +291,9 @@ async function run(request, context) {
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
+      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+      }
       if (params.organizationId
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');

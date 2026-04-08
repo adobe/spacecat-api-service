@@ -147,6 +147,7 @@ describe('PlgOnboardingController', () => {
       setWaitlistReason: sandbox.stub(),
       setCompletedAt: sandbox.stub(),
       save: sandbox.stub().resolves(),
+      remove: sandbox.stub().resolves(),
     };
   }
 
@@ -239,6 +240,7 @@ describe('PlgOnboardingController', () => {
       },
       PlgOnboarding: {
         findByImsOrgIdAndDomain: sandbox.stub().resolves(null),
+        findById: sandbox.stub().resolves(null),
         create: sandbox.stub().resolves(mockOnboarding),
         allByImsOrgId: sandbox.stub().resolves([]),
         all: sandbox.stub().resolves([]),
@@ -1852,9 +1854,11 @@ describe('PlgOnboardingController', () => {
           },
           '@adobe/spacecat-shared-http-utils': {
             badRequest: (msg) => ({ status: 400, value: msg }),
+            created: (data) => ({ status: 201, value: data }),
             createResponse: (body, status) => ({ status, value: body }),
             forbidden: (msg) => ({ status: 403, value: msg }),
             internalServerError: (msg) => ({ status: 500, value: msg }),
+            noContent: () => ({ status: 204 }),
             notFound: (msg) => ({ status: 404, value: msg }),
             ok: (data) => ({ status: 200, value: data }),
           },
@@ -1886,6 +1890,7 @@ describe('PlgOnboardingController', () => {
                 ERROR: 'ERROR',
                 WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                 WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
               },
             },
           },
@@ -2201,6 +2206,247 @@ describe('PlgOnboardingController', () => {
         expect(mockLog.error).to.have.been.calledWithMatch(
           sinon.match(/^Failed to list PLG onboardings: connection reset/),
         );
+      });
+    });
+  });
+
+  // --- Admin: createOnboarding / updateOnboardingStatus / deleteOnboarding ---
+
+  describe('admin onboarding management', () => {
+    let AdminController;
+
+    beforeEach(async () => {
+      AdminController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            created: (data) => ({ status: 201, value: data }),
+            createResponse: (body, status) => ({ status, value: body }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            noContent: () => ({ status: 204 }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({
+                retrieveDomainkey: rumRetrieveDomainkeyStub,
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: { createForSite: tierClientCreateForSiteStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+            ASO_DEMO_ORG: DEMO_ORG_ID,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': { loadProfileConfig: loadProfileConfigStub },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+        },
+      )).default;
+    });
+
+    describe('createOnboarding', () => {
+      it('returns 403 when caller is not admin', async () => {
+        const res = await PlgOnboardingController({ log: mockLog }).createOnboarding({
+          data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 when imsOrgId is missing', async () => {
+        const res = await AdminController({ log: mockLog }).createOnboarding({
+          data: { domain: TEST_DOMAIN },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 when domain is missing', async () => {
+        const res = await AdminController({ log: mockLog }).createOnboarding({
+          data: { imsOrgId: TEST_IMS_ORG_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 when status is invalid', async () => {
+        const res = await AdminController({ log: mockLog }).createOnboarding({
+          data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN, status: 'BOGUS' },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 409 when record already exists', async () => {
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(mockOnboarding);
+        const res = await AdminController({ log: mockLog }).createOnboarding({
+          data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(409);
+      });
+
+      it('creates record with INACTIVE status by default and returns 201', async () => {
+        const res = await AdminController({ log: mockLog }).createOnboarding({
+          data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(201);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN, status: 'INACTIVE' }),
+        );
+      });
+
+      it('creates record with explicit status when provided', async () => {
+        const res = await AdminController({ log: mockLog }).createOnboarding({
+          data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN, status: 'PRE_ONBOARDING' },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(201);
+        expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+          sinon.match({ status: 'PRE_ONBOARDING' }),
+        );
+      });
+    });
+
+    describe('updateOnboardingStatus', () => {
+      it('returns 403 when caller is not admin', async () => {
+        const res = await PlgOnboardingController({ log: mockLog }).updateOnboardingStatus({
+          data: { status: 'INACTIVE' },
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 when status is missing', async () => {
+        const res = await AdminController({ log: mockLog }).updateOnboardingStatus({
+          data: {},
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 when status is invalid', async () => {
+        const res = await AdminController({ log: mockLog }).updateOnboardingStatus({
+          data: { status: 'BOGUS' },
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 404 when record not found', async () => {
+        const res = await AdminController({ log: mockLog }).updateOnboardingStatus({
+          data: { status: 'INACTIVE' },
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('updates status and returns 200', async () => {
+        mockDataAccess.PlgOnboarding.findById.resolves(mockOnboarding);
+        const res = await AdminController({ log: mockLog }).updateOnboardingStatus({
+          data: { status: 'INACTIVE' },
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(200);
+        expect(mockOnboarding.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(mockOnboarding.save).to.have.been.called;
+      });
+    });
+
+    describe('deleteOnboarding', () => {
+      it('returns 403 when caller is not admin', async () => {
+        const res = await PlgOnboardingController({ log: mockLog }).deleteOnboarding({
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 404 when record not found', async () => {
+        const res = await AdminController({ log: mockLog }).deleteOnboarding({
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('deletes record and returns 204', async () => {
+        mockDataAccess.PlgOnboarding.findById.resolves(mockOnboarding);
+        const res = await AdminController({ log: mockLog }).deleteOnboarding({
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(204);
+        expect(mockOnboarding.remove).to.have.been.called;
       });
     });
   });

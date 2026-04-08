@@ -462,6 +462,9 @@ export default function getRouteHandlers(
     'POST /plg/onboard': plgOnboardingController.onboard,
     'GET /plg/sites': plgOnboardingController.getAllOnboardings,
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
+    'POST /plg/records': plgOnboardingController.createOnboarding,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
