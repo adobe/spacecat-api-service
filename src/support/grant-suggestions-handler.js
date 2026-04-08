@@ -98,6 +98,33 @@ const OPPORTUNITY_STRATEGIES = {
       );
     },
   },
+  // For PLG customers, CWV grants are limited to the top 3 pages by page views
+  // (pages with the most traffic that have CWV issues). Among those 3 pages,
+  // suggestions are sorted by confidence score (rank) descending so the most
+  // impactful page is granted first. Confidence score is set by the audit worker
+  // as projected traffic lost (organic × metric-severity multiplier).
+  // Tie-breaks by suggestion ID ascending for deterministic ordering.
+  cwv: {
+    groupFn: (suggestions) => {
+      const getPageviews = (s) => {
+        const data = typeof s?.getData === 'function' ? s.getData() : s?.data;
+        return data?.pageviews ?? 0;
+      };
+      return [...suggestions]
+        .sort((a, b) => getPageviews(b) - getPageviews(a))
+        .slice(0, 3)
+        .map((s) => createGroup([s]));
+    },
+    sortFn: (groupA, groupB) => {
+      const rankDiff = groupB.getRank() - groupA.getRank();
+      if (rankDiff !== 0) return rankDiff;
+      const a = groupA.items[0];
+      const b = groupB.items[0];
+      const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
+      const idB = typeof b?.getId === 'function' ? b.getId() : (b?.id ?? '');
+      return idA.localeCompare(idB);
+    },
+  },
 };
 
 /**
