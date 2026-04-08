@@ -1,3 +1,10 @@
+# [1.426.0](https://github.com/adobe/spacecat-api-service/compare/v1.425.0...v1.426.0) (2026-04-08)
+
+
+### Features
+
+* add PATCH /plg/onboard/:onboardingId for waitlist bypass ([#2153](https://github.com/adobe/spacecat-api-service/issues/2153)) ([e9ff730](https://github.com/adobe/spacecat-api-service/commit/e9ff730cfe13c07047a9a4a0c0cfe12bf0078bed))
+
 # [1.425.0](https://github.com/adobe/spacecat-api-service/compare/v1.424.0...v1.425.0) (2026-04-08)
 
 
