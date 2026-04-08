@@ -946,6 +946,82 @@ site-opportunity-suggestions-auto-fix:
                       description: |
                         Optional. Meaningful for action assess or assess-urls. When true, worker
                         runs only no-AEM checks; for assess, promise token is not required.
+                    fixTargetGroups:
+                      type: array
+                      x-experimental: true
+                      description: |
+                        Experimental (meta-tags only). Optional override for fix-target grouping.
+                        When provided, suggestions
+                        are grouped by the given relationshipContext.fixTargetPageId instead of
+                        by each suggestion's detected page URL. The worker applies the fix to
+                        the specified page directly. Typically populated by the UI when the
+                        page-relationship dialog resolves a source (blueprint/language-master)
+                        page.
+
+                        Effective only for AEM CS meta-tags autofix on the Content API path.
+                        If meta-tags are routed to PSS (for example, disableContentApiForMetaTags=true),
+                        this field is accepted but ignored.
+
+                        When absent, the API falls back to grouping by suggestion URL.
+                      minItems: 1
+                      items:
+                        type: object
+                        required:
+                          - suggestionIds
+                          - relationshipContext
+                        properties:
+                          suggestionIds:
+                            type: array
+                            minItems: 1
+                            items:
+                              $ref: './schemas.yaml#/Id'
+                          relationshipContext:
+                            type: object
+                            x-experimental: true
+                            description: |
+                              Experimental relationship metadata forwarded to the autofix worker.
+                              Required for relationship-aware grouping.
+                              When fixTargetMode is source, appliedOnPagePath should be provided.
+                              Effective only on the AEM CS Content API path for meta-tags;
+                              ignored when meta-tags are handled via PSS.
+                            additionalProperties: false
+                            required:
+                              - fixTargetPageId
+                            properties:
+                              fixTargetPageId:
+                                type: string
+                                minLength: 1
+                                description: |
+                                  Page identifier to apply this group to. For relationship-source
+                                  flows this is typically the source page ID resolved by the UI.
+                                  Used only on Content API meta-tags execution path.
+                                example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+                              fixTargetMode:
+                                type: string
+                                enum: [source, local]
+                                description: |
+                                  Whether this group is being fixed at source or locally.
+                                  Used for Content API relationship-aware meta-tags flow.
+                              cancelInheritance:
+                                type: boolean
+                                description: |
+                                  Experimental. Optional. When true, indicates the fix is intentionally
+                                  applied at a local inheriting page and inheritance should remain cancelled.
+                                  Currently applied for Content API title/description flows only.
+                              appliedOnPagePath:
+                                type: string
+                                minLength: 1
+                                description: |
+                                  Source page path where the fix is applied for source-targeted groups.
+                                  Used for relationship context and downstream reporting.
+                        example:
+                          suggestionIds:
+                            - '2eb0ae0d-baa8-4668-abf5-8b22ef75b95f'
+                            - '85d87ee0-5818-419a-863f-dcb90630ba11'
+                          relationshipContext:
+                            fixTargetPageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+                            fixTargetMode: source
+                            appliedOnPagePath: /content/wknd/language-masters/en/adventures/bali-surf-camp
                     customData:
                       description: Additional custom data to forward to the autofix worker
 

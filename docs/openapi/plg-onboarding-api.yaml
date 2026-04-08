@@ -49,6 +49,55 @@ plg-onboard:
     security:
       - ims_key: [ ]
 
+plg-sites:
+  get:
+    tags:
+      - plg
+    summary: List PLG site onboardings (admin)
+    description: |
+      Admin-only list of PLG ASO onboarding records from `plg_onboardings` (`PlgOnboarding`
+      in `@adobe/spacecat-shared-data-access`). Each item includes `domain`, `baseURL`,
+      onboarding `status`, and when resolved the SpaceCat `siteId` and `organizationId`.
+      Cross-tenant; only SpaceCat administrators may call this endpoint.
+
+      **Payload size:** Without `limit`, the implementation follows all result pages until
+      exhausted, so the JSON array can grow large as the table grows (memory and response
+      size). Use `limit` for a bounded page of rows when tooling or clients need it.
+    operationId: listPlgSites
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        description: |
+          Maximum number of onboarding records to return from the backing query. When omitted,
+          all pages are fetched (unbounded row count; see description). Must be a positive integer
+          (decimal fractions, signs, or trailing non-digits such as `1.5` or `50abc` are rejected
+          with 400).
+        schema:
+          type: integer
+          minimum: 1
+    responses:
+      '200':
+        description: |
+          Array of PLG onboarding records. May be a large payload when `limit` is not set and
+          many rows exist.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
 plg-onboard-status:
   parameters:
     - $ref: './parameters.yaml#/imsOrgId'

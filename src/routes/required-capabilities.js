@@ -43,6 +43,8 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
   'GET /sites/:siteId/geo-experiments',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+  'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
+  'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -75,6 +77,7 @@ export const INTERNAL_ROUTES = [
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
+  'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
@@ -113,6 +116,10 @@ export const INTERNAL_ROUTES = [
   'POST /consumers/register',
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
+
+  // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
+  'POST /ephemeral-run/batch',
+  'GET /ephemeral-run/batch/:batchId/status',
 ];
 
 /**
@@ -182,6 +189,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/competitor-summary': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/competitor-summary': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
@@ -354,6 +363,9 @@ const routeRequiredCapabilities = {
 
   // Graph
   'POST /sites/:siteId/graph': 'site:write',
+
+  // Page Relationships
+  'POST /sites/:siteId/page-relationships/search': 'site:read',
 
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',

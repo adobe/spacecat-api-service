@@ -14,7 +14,7 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import {
   createFilterDimensionsHandler,
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
-  createMarketTrackingTrendsHandler, createTopicsHandler,
+  createMarketTrackingTrendsHandler, createCompetitorSummaryHandler, createTopicsHandler,
   createTopicPromptsHandler,
   createSearchHandler,
   createTopicDetailHandler,
@@ -34,6 +34,7 @@ import {
  */
 function LlmoMysticatController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+  const hasLlmoOrganizationAccess = (organization) => accessControlUtil.hasAccess(organization, '', 'LLMO');
 
   const getOrgAndValidateAccess = async (context) => {
     const { spaceCatId } = context.params;
@@ -44,15 +45,46 @@ function LlmoMysticatController(ctx) {
     if (!organization) {
       throw new Error(`Organization not found: ${spaceCatId}`);
     }
-    if (!await accessControlUtil.hasAccess(organization, '', 'LLMO')) {
+    if (!await hasLlmoOrganizationAccess(organization)) {
       throw new Error('Only users belonging to the organization can view brand presence data');
     }
     return { organization };
   };
 
+  const validateGlobalAgenticTrafficReadAccess = async (context) => {
+    if (accessControlUtil.hasAdminAccess() || context.s2sConsumer) {
+      return;
+    }
+
+    const authInfo = context.attributes?.authInfo;
+    const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
+    const tenantIds = authInfo?.getTenantIds?.()
+      ?? profile?.tenants?.map((tenant) => tenant.id)
+      ?? [];
+    const imsOrgIds = [...new Set(
+      tenantIds
+        .filter(Boolean)
+        .map((tenantId) => {
+          const normalized = String(tenantId);
+          return normalized.includes('@') ? normalized : `${normalized}@AdobeOrg`;
+        }),
+    )];
+    const organizations = (await Promise.all(
+      imsOrgIds.map((imsOrgId) => context.dataAccess.Organization.findByImsOrgId(imsOrgId)),
+    )).filter(Boolean);
+    const accessResults = await Promise.all(
+      organizations.map(hasLlmoOrganizationAccess),
+    );
+
+    if (!accessResults.some(Boolean)) {
+      throw new Error('Only admins or users with LLMO organization access can view global agentic traffic');
+    }
+  };
+
   const getFilterDimensions = createFilterDimensionsHandler(getOrgAndValidateAccess);
   const getBrandPresenceWeeks = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
   const getMarketTrackingTrends = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+  const getCompetitorSummary = createCompetitorSummaryHandler(getOrgAndValidateAccess);
   const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
   const getTopics = createTopicsHandler(getOrgAndValidateAccess);
   const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
@@ -62,13 +94,16 @@ function LlmoMysticatController(ctx) {
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
-  const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(accessControlUtil);
+  const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
+    validateGlobalAgenticTrafficReadAccess,
+  );
   const postAgenticTrafficGlobal = createAgenticTrafficGlobalPostHandler(accessControlUtil);
 
   return {
     getFilterDimensions,
     getBrandPresenceWeeks,
     getMarketTrackingTrends,
+    getCompetitorSummary,
     getSentimentOverview,
     getTopics,
     getTopicPrompts,
