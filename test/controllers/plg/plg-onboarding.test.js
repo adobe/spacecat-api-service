@@ -2302,6 +2302,15 @@ describe('PlgOnboardingController', () => {
         expect(res.status).to.equal(403);
       });
 
+      it('returns 400 when data is null', async () => {
+        const res = await AdminController({ log: mockLog }).createOnboarding({
+          data: null,
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(400);
+      });
+
       it('returns 400 when imsOrgId is missing', async () => {
         const res = await AdminController({ log: mockLog }).createOnboarding({
           data: { domain: TEST_DOMAIN },
@@ -2373,6 +2382,16 @@ describe('PlgOnboardingController', () => {
           attributes: {},
         });
         expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 when data is null', async () => {
+        const res = await AdminController({ log: mockLog }).updateOnboardingStatus({
+          data: null,
+          params: { plgOnboardingId: TEST_ONBOARDING_ID },
+          dataAccess: mockDataAccess,
+          attributes: {},
+        });
+        expect(res.status).to.equal(400);
       });
 
       it('returns 400 when status is missing', async () => {
