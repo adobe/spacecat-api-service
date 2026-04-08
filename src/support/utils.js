@@ -217,7 +217,11 @@ export const sendAutofixMessage = async (
   variations,
   action,
   customData,
-  { url, precheckOnly } = {},
+  {
+    url,
+    precheckOnly,
+    relationshipContext,
+  } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
@@ -226,6 +230,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   url,
+  ...(isObject(relationshipContext) && { relationshipContext }),
   ...(customData && { customData }),
   ...(precheckOnly === true && { precheckOnly: true }),
 });
