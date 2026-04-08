@@ -1049,6 +1049,8 @@ describe('Preflight Controller', () => {
         },
       });
       expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid URL');
     });
 
     it('returns 400 when mystiqueUrl is not an allowed Mystique ephemeral host', async () => {
