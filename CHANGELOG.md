@@ -1,3 +1,10 @@
+# [1.421.0](https://github.com/adobe/spacecat-api-service/compare/v1.420.1...v1.421.0) (2026-04-08)
+
+
+### Features
+
+* add competitor summary handler and update routes | LLMO-3922 ([#2150](https://github.com/adobe/spacecat-api-service/issues/2150)) ([f167ada](https://github.com/adobe/spacecat-api-service/commit/f167ada9904f57a4e35c645bcb4eb5541f3d4896))
+
 ## [1.420.1](https://github.com/adobe/spacecat-api-service/compare/v1.420.0...v1.420.1) (2026-04-08)
 
 
