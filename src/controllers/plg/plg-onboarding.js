@@ -689,7 +689,7 @@ function PlgOnboardingController(ctx) {
   };
 
   /**
-   * POST /plg/admin/onboardings
+   * POST /plg/records
    * Admin: create a PLG onboarding record with a given status (defaults to INACTIVE).
    * Body: { imsOrgId, domain, status? }
    */
@@ -727,7 +727,7 @@ function PlgOnboardingController(ctx) {
   };
 
   /**
-   * PATCH /plg/admin/onboardings/:plgOnboardingId
+   * PATCH /plg/records/:plgOnboardingId
    * Admin: update the status of a PLG onboarding record.
    * Body: { status }
    */
@@ -757,7 +757,7 @@ function PlgOnboardingController(ctx) {
   };
 
   /**
-   * DELETE /plg/admin/onboardings/:plgOnboardingId
+   * DELETE /plg/records/:plgOnboardingId
    * Admin: delete a PLG onboarding record.
    */
   const deleteOnboarding = async (context) => {
