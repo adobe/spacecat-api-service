@@ -191,6 +191,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/competitor-summary': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/competitor-summary': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
@@ -363,6 +365,9 @@ const routeRequiredCapabilities = {
 
   // Graph
   'POST /sites/:siteId/graph': 'site:write',
+
+  // Page Relationships
+  'POST /sites/:siteId/page-relationships/search': 'site:read',
 
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',

@@ -96,6 +96,7 @@ import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
+import PageRelationshipsController from './controllers/page-relationships.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -230,6 +231,7 @@ async function run(request, context) {
     const imsOrgAccessController = ImsOrgAccessController(context);
     const contactSalesLeadsController = ContactSalesLeadsController(context);
     const featureFlagsController = FeatureFlagsController(context);
+    const pageRelationshipsController = PageRelationshipsController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -278,6 +280,7 @@ async function run(request, context) {
       imsOrgAccessController,
       contactSalesLeadsController,
       featureFlagsController,
+      pageRelationshipsController,
       ephemeralRunController,
     );
 
