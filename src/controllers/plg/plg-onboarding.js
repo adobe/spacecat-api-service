@@ -609,23 +609,34 @@ function PlgOnboardingController(ctx) {
       return badRequest('Authentication information is required');
     }
 
-    const profile = authInfo.getProfile();
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    const isAdmin = accessControlUtil.hasAdminAccess();
 
-    if (!profile?.tenants?.[0]?.id) {
-      return badRequest('User profile or organization ID not found in authentication token');
-    }
-
-    // If caller specifies an imsOrgId, validate it matches one of their token's tenants
+    // Admins can onboard on behalf of any IMS org — imsOrgId must be explicitly provided
     let imsOrgId;
-    if (hasText(requestedImsOrgId)) {
-      const matchedTenant = profile.tenants
-        .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
-      if (!matchedTenant) {
-        return forbidden('Requested imsOrgId does not match any tenant in authentication token');
+    if (isAdmin) {
+      if (!hasText(requestedImsOrgId)) {
+        return badRequest('imsOrgId is required when onboarding as admin');
       }
       imsOrgId = requestedImsOrgId;
     } else {
-      imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
+      const profile = authInfo.getProfile();
+
+      if (!profile?.tenants?.[0]?.id) {
+        return badRequest('User profile or organization ID not found in authentication token');
+      }
+
+      // If caller specifies an imsOrgId, validate it matches one of their token's tenants
+      if (hasText(requestedImsOrgId)) {
+        const matchedTenant = profile.tenants
+          .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
+        if (!matchedTenant) {
+          return forbidden('Requested imsOrgId does not match any tenant in authentication token');
+        }
+        imsOrgId = requestedImsOrgId;
+      } else {
+        imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
+      }
     }
 
     try {
@@ -913,6 +924,11 @@ function PlgOnboardingController(ctx) {
 
           const existingImsOrgId = existingOrg.getImsOrgId();
 
+          // Offboard the original record (OrgA's) since domain belongs to OrgB
+          onboarding.setStatus(STATUSES.INACTIVE);
+          await onboarding.save();
+          log.info(`Offboarded onboarding ${onboarding.getId()} for domain ${domain} (belongs to org ${existingImsOrgId})`);
+
           // Check if PLG onboarding already exists for (domain, existingOrg)
           const existingPlgOnboarding = await PlgOnboarding
             .findByImsOrgIdAndDomain(existingImsOrgId, domain);
@@ -922,11 +938,6 @@ function PlgOnboardingController(ctx) {
               409,
             );
           }
-
-          // Offboard the original record (OrgA's) since domain belongs to OrgB
-          onboarding.setStatus(STATUSES.INACTIVE);
-          await onboarding.save();
-          log.info(`Offboarded onboarding ${onboarding.getId()} for domain ${domain} (belongs to org ${existingImsOrgId})`);
 
           // Run the flow under the existing org — it will create the PlgOnboarding record
           const result = await performAsoPlgOnboarding(
