@@ -1,3 +1,10 @@
+# [1.424.0](https://github.com/adobe/spacecat-api-service/compare/v1.423.0...v1.424.0) (2026-04-08)
+
+
+### Features
+
+* Manage a custom list of audit target URLs ([#2142](https://github.com/adobe/spacecat-api-service/issues/2142)) ([6103477](https://github.com/adobe/spacecat-api-service/commit/61034778a9f3e103f589d1f12963f1eb0bfd0fd6))
+
 # [1.423.0](https://github.com/adobe/spacecat-api-service/compare/v1.422.0...v1.423.0) (2026-04-08)
 
 
