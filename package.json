@@ -65,7 +65,7 @@
     "reporter-options": "configFile=.mocha-multi.json"
   },
   "dependencies": {
-    "@adobe/fetch": "4.2.3",
+    "@adobe/fetch": "4.3.0",
     "@adobe/helix-shared-body-data": "2.2.4",
     "@adobe/helix-shared-bounce": "2.0.29",
     "@adobe/helix-shared-utils": "3.0.2",
@@ -73,7 +73,7 @@
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.28",
     "@adobe/spacecat-helix-content-sdk": "1.4.33",
-    "@adobe/spacecat-shared-data-access": "3.47.0",
+    "@adobe/spacecat-shared-data-access": "3.48.0",
     "@adobe/spacecat-shared-ahrefs-client": "1.10.9",
     "@adobe/spacecat-shared-athena-client": "1.9.11",
     "@adobe/spacecat-shared-brand-client": "1.1.40",
@@ -156,7 +156,7 @@
     "yaml": "2.8.3"
   },
   "overrides": {
-    "@adobe/fetch": "4.2.3"
+    "@adobe/fetch": "4.3.0"
   },
   "lint-staged": {
     "*.js": "eslint",
