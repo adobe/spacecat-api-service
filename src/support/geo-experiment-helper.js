@@ -54,9 +54,13 @@ function validatePhaseConfig(phaseConfig, path) {
  * @param {object} env
  * @returns {object|null}
  */
-export function parseScheduleConfig(env) {
-  const raw = env[GeoExperiment.SCHEDULE_CONFIG_ENV_VAR];
-  if (!raw) return null;
+export function parseScheduleConfig(env, log) {
+  const raw = env?.[GeoExperiment.SCHEDULE_CONFIG_ENV_VAR];
+  if (!raw) {
+    log?.warn(`[geo-experiment-helper] ${GeoExperiment.SCHEDULE_CONFIG_ENV_VAR} is not set`);
+    return null;
+  }
+  log?.info(`[geo-experiment-helper] ${GeoExperiment.SCHEDULE_CONFIG_ENV_VAR} : ${JSON.stringify(raw)}`);
 
   let parsed;
   try {
@@ -111,8 +115,8 @@ export function parseScheduleConfig(env) {
  * @param {'pre'|'post'} phase
  * @returns {object}
  */
-export function getScheduleParams(env, strategyType, opportunityType, phase) {
-  const scheduleConfig = parseScheduleConfig(env);
+export function getScheduleParams(context, strategyType, opportunityType, phase) {
+  const scheduleConfig = parseScheduleConfig(context.env, context.log);
   const strategyConfig = scheduleConfig?.[strategyType] ?? {};
   const defaultOverrides = strategyConfig.default?.[phase] ?? {};
   const oppTypeOverrides = strategyConfig[opportunityType?.toLowerCase()]?.[phase] ?? {};
@@ -125,18 +129,18 @@ export function getScheduleParams(env, strategyType, opportunityType, phase) {
  * for the given strategy and opportunity types, so the experimentation engine can
  * read them later without needing to re-resolve.
  *
- * @param {object} env
+ * @param {object} context - Request context
  * @param {object} base - Caller-supplied metadata fields (e.g. { urls })
  * @param {string} strategyType
  * @param {string} opportunityType
  * @returns {object}
  */
-export function buildExperimentMetadata(env, base, strategyType, opportunityType) {
+export function buildExperimentMetadata(context, base, strategyType, opportunityType) {
   return {
     ...base,
     [GeoExperiment.METADATA_KEYS.SCHEDULE_CONFIG]: {
-      pre: getScheduleParams(env, strategyType, opportunityType, 'pre'),
-      post: getScheduleParams(env, strategyType, opportunityType, 'post'),
+      pre: getScheduleParams(context, strategyType, opportunityType, 'pre'),
+      post: getScheduleParams(context, strategyType, opportunityType, 'post'),
     },
   };
 }

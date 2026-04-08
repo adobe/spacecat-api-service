@@ -13,6 +13,7 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
+import sinon from 'sinon';
 import { GeoExperiment } from '@adobe/spacecat-shared-data-access';
 import {
   parseScheduleConfig,
@@ -25,11 +26,36 @@ const ONSITE = TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT;
 const OPP_TYPE = 'recover-content-visibility';
 
 describe('geo-experiment-helper', () => {
+  const sandbox = sinon.createSandbox();
+  let mockLog;
+
+  beforeEach(() => {
+    mockLog = {
+      warn: sandbox.stub(),
+      info: sandbox.stub(),
+    };
+  });
+
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  /** @param {Record<string, unknown>} env */
+  function scheduleContext(env) {
+    return { env, log: mockLog };
+  }
+
   // ─── parseScheduleConfig ─────────────────────────────────────────────────────
 
   describe('parseScheduleConfig', () => {
     it('returns null when env var is absent', () => {
-      expect(parseScheduleConfig({})).to.equal(null);
+      expect(parseScheduleConfig({}, mockLog)).to.equal(null);
+      sinon.assert.calledOnce(mockLog.warn);
+    });
+
+    it('returns null when env object is undefined', () => {
+      expect(parseScheduleConfig(undefined, mockLog)).to.equal(null);
+      sinon.assert.calledOnce(mockLog.warn);
     });
 
     it('returns parsed config with a valid env var', () => {
@@ -49,50 +75,51 @@ describe('geo-experiment-helper', () => {
         },
       };
       const env = { [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) };
-      expect(parseScheduleConfig(env)).to.deep.equal(config);
+      expect(parseScheduleConfig(env, mockLog)).to.deep.equal(config);
+      sinon.assert.calledOnce(mockLog.info);
     });
 
     it('throws SyntaxError on invalid JSON', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: 'not-json' })).to.throw(SyntaxError, SCHEDULE_CONFIG_ENV_VAR);
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: 'not-json' }, mockLog)).to.throw(SyntaxError, SCHEDULE_CONFIG_ENV_VAR);
     });
 
     it('throws TypeError when env var is a JSON array', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: '[]' })).to.throw(TypeError, SCHEDULE_CONFIG_ENV_VAR);
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: '[]' }, mockLog)).to.throw(TypeError, SCHEDULE_CONFIG_ENV_VAR);
     });
 
     it('throws TypeError when a strategy config is not an object', () => {
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: 'bad' }) })).to.throw(TypeError, ONSITE);
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify({ [ONSITE]: 'bad' }) }, mockLog)).to.throw(TypeError, ONSITE);
     });
 
     it('throws TypeError when an opportunity type config is not an object', () => {
       const config = { [ONSITE]: { [OPP_TYPE]: 'bad' } };
       const env = { [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) };
-      expect(() => parseScheduleConfig(env)).to.throw(TypeError, OPP_TYPE);
+      expect(() => parseScheduleConfig(env, mockLog)).to.throw(TypeError, OPP_TYPE);
     });
 
     it('throws TypeError when cronExpression is not a string', () => {
       const config = { [ONSITE]: { default: { pre: { cronExpression: 42 } } } };
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'cronExpression');
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) }, mockLog)).to.throw(TypeError, 'cronExpression');
     });
 
     it('throws TypeError when expiryMs is not a positive integer', () => {
       const config = { [ONSITE]: { default: { pre: { expiryMs: -1 } } } };
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'expiryMs');
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) }, mockLog)).to.throw(TypeError, 'expiryMs');
     });
 
     it('throws TypeError when expiryMs is a float', () => {
       const config = { [ONSITE]: { default: { pre: { expiryMs: 1.5 } } } };
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'expiryMs');
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) }, mockLog)).to.throw(TypeError, 'expiryMs');
     });
 
     it('throws TypeError when platforms is not an array', () => {
       const config = { [ONSITE]: { [OPP_TYPE]: { post: { platforms: 'chatgpt_free' } } } };
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'platforms');
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) }, mockLog)).to.throw(TypeError, 'platforms');
     });
 
     it('throws TypeError when providerIds is not an array', () => {
       const config = { [ONSITE]: { [OPP_TYPE]: { post: { providerIds: 'brightdata' } } } };
-      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) })).to.throw(TypeError, 'providerIds');
+      expect(() => parseScheduleConfig({ [SCHEDULE_CONFIG_ENV_VAR]: JSON.stringify(config) }, mockLog)).to.throw(TypeError, 'providerIds');
     });
   });
 
@@ -100,11 +127,11 @@ describe('geo-experiment-helper', () => {
 
   describe('getScheduleParams', () => {
     it('returns empty object when env var is absent', () => {
-      expect(getScheduleParams({}, ONSITE, OPP_TYPE, 'pre')).to.deep.equal({});
+      expect(getScheduleParams(scheduleContext({}), ONSITE, OPP_TYPE, 'pre')).to.deep.equal({});
     });
 
     it('returns empty object for unknown strategy type', () => {
-      expect(getScheduleParams({}, 'unknown_strategy', OPP_TYPE, 'pre')).to.deep.equal({});
+      expect(getScheduleParams(scheduleContext({}), 'unknown_strategy', OPP_TYPE, 'pre')).to.deep.equal({});
     });
 
     it('applies default key config (field-level)', () => {
@@ -113,7 +140,7 @@ describe('geo-experiment-helper', () => {
           [ONSITE]: { default: { pre: { cronExpression: '*/30 * * * *' } } },
         }),
       };
-      const params = getScheduleParams(env, ONSITE, OPP_TYPE, 'pre');
+      const params = getScheduleParams(scheduleContext(env), ONSITE, OPP_TYPE, 'pre');
       expect(params.cronExpression).to.equal('*/30 * * * *');
       expect(params.platforms).to.be.undefined;
     });
@@ -127,7 +154,7 @@ describe('geo-experiment-helper', () => {
           },
         }),
       };
-      const params = getScheduleParams(env, ONSITE, OPP_TYPE, 'pre');
+      const params = getScheduleParams(scheduleContext(env), ONSITE, OPP_TYPE, 'pre');
       expect(params.cronExpression).to.equal('0 * * * *'); // opp type wins
       expect(params.expiryMs).to.equal(1000); // default key fills the gap
     });
@@ -138,7 +165,7 @@ describe('geo-experiment-helper', () => {
           [ONSITE]: { default: { pre: { cronExpression: '*/30 * * * *' } } },
         }),
       };
-      const params = getScheduleParams(env, ONSITE, 'unknown-opp-type', 'pre');
+      const params = getScheduleParams(scheduleContext(env), ONSITE, 'unknown-opp-type', 'pre');
       expect(params.cronExpression).to.equal('*/30 * * * *');
     });
 
@@ -148,7 +175,7 @@ describe('geo-experiment-helper', () => {
           [ONSITE]: { [OPP_TYPE]: { pre: { cronExpression: '0 12 * * *' } } },
         }),
       };
-      const params = getScheduleParams(env, ONSITE, 'Recover-Content-Visibility', 'pre');
+      const params = getScheduleParams(scheduleContext(env), ONSITE, 'Recover-Content-Visibility', 'pre');
       expect(params.cronExpression).to.equal('0 12 * * *');
     });
 
@@ -158,7 +185,7 @@ describe('geo-experiment-helper', () => {
           [ONSITE]: { default: { pre: { cronExpression: '*/30 * * * *' } } },
         }),
       };
-      const params = getScheduleParams(env, ONSITE, null, 'pre');
+      const params = getScheduleParams(scheduleContext(env), ONSITE, null, 'pre');
       expect(params.cronExpression).to.equal('*/30 * * * *');
     });
 
@@ -171,7 +198,7 @@ describe('geo-experiment-helper', () => {
           [ONSITE]: { [OPP_TYPE]: { post: custom } },
         }),
       };
-      expect(getScheduleParams(env, ONSITE, OPP_TYPE, 'post')).to.deep.equal(custom);
+      expect(getScheduleParams(scheduleContext(env), ONSITE, OPP_TYPE, 'post')).to.deep.equal(custom);
     });
   });
 
@@ -189,7 +216,7 @@ describe('geo-experiment-helper', () => {
           },
         }),
       };
-      const result = buildExperimentMetadata(env, { urls: ['https://example.com'] }, ONSITE, OPP_TYPE);
+      const result = buildExperimentMetadata(scheduleContext(env), { urls: ['https://example.com'] }, ONSITE, OPP_TYPE);
       expect(result.urls).to.deep.equal(['https://example.com']);
       expect(result[METADATA_KEYS.SCHEDULE_CONFIG]).to.be.an('object');
       expect(result[METADATA_KEYS.SCHEDULE_CONFIG].pre.cronExpression).to.equal('0 * * * *');
@@ -202,7 +229,7 @@ describe('geo-experiment-helper', () => {
           [ONSITE]: { [OPP_TYPE]: { post: { cronExpression: '0 6 * * *' } } },
         }),
       };
-      const result = buildExperimentMetadata(env, {}, ONSITE, OPP_TYPE);
+      const result = buildExperimentMetadata(scheduleContext(env), {}, ONSITE, OPP_TYPE);
       expect(result[METADATA_KEYS.SCHEDULE_CONFIG].post.cronExpression).to.equal('0 6 * * *');
     });
 
@@ -212,13 +239,13 @@ describe('geo-experiment-helper', () => {
           [ONSITE]: { default: { post: { cronExpression: '0 6 * * *' } } },
         }),
       };
-      const result = buildExperimentMetadata(env, {}, ONSITE, 'unknown-opp-type');
+      const result = buildExperimentMetadata(scheduleContext(env), {}, ONSITE, 'unknown-opp-type');
       expect(result[METADATA_KEYS.SCHEDULE_CONFIG].post.cronExpression).to.equal('0 6 * * *');
     });
 
     it('does not mutate the base object', () => {
       const base = { urls: ['https://example.com'] };
-      buildExperimentMetadata({}, base, ONSITE, OPP_TYPE);
+      buildExperimentMetadata(scheduleContext({}), base, ONSITE, OPP_TYPE);
       expect(base).to.not.have.key(METADATA_KEYS.SCHEDULE_CONFIG);
     });
   });

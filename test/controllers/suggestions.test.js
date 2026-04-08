@@ -5208,6 +5208,45 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('No prompts found');
     });
 
+    it('returns 207 with failure when pre phase has no cronExpression or expiryMs in env', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: {},
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('Missing required environment variables');
+    });
+
+    it('returns 207 with failure when pre phase has cronExpression but no expiryMs', async () => {
+      const envMissingExpiry = {
+        EXPERIMENT_SCHEDULE_CONFIG: JSON.stringify({
+          onsite_opportunity_deployment: {
+            default: {
+              pre: {
+                cronExpression: '0 9 * * *',
+              },
+            },
+          },
+        }),
+      };
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: envMissingExpiry,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('Missing required environment variables');
+    });
+
     it('returns badRequest for invalid siteId', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,

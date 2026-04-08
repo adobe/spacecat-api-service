@@ -1606,6 +1606,16 @@ function SuggestionsController(ctx, sqs, env) {
 
       let geoExperiment = null;
       try {
+        const preScheduleParams = getScheduleParams(
+          context,
+          GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+          opportunity.getType(),
+          'pre',
+        );
+        if (!preScheduleParams.cronExpression || !preScheduleParams.expiryMs) {
+          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
+          throw new Error('Missing required environment variables');
+        }
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
         let promptSources;
         if (domainWideSuggestions.length > 0) {
@@ -1655,7 +1665,7 @@ function SuggestionsController(ctx, sqs, env) {
           phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
           suggestionIds: validSuggestionIds,
           metadata: buildExperimentMetadata(
-            context.env,
+            context,
             { urls },
             GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
             opportunity.getType(),
@@ -1668,13 +1678,6 @@ function SuggestionsController(ctx, sqs, env) {
         }
 
         context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
-
-        const preScheduleParams = getScheduleParams(
-          context.env,
-          GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          opportunity.getType(),
-          'pre',
-        );
 
         let preScheduleId;
         try {
