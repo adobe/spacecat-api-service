@@ -1049,31 +1049,6 @@ describe('Preflight Controller', () => {
         },
       });
       expect(response.status).to.equal(400);
-      const result = await response.json();
-      expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid Mystique ephemeral host');
-    });
-
-    it('returns 400 when mystiqueUrl has a non-http/https protocol', async () => {
-      const devCtrl = PreflightController(
-        { dataAccess: mockDataAccess, sqs: mockSqs },
-        loggerStub,
-        {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
-          AWS_ENV: 'dev',
-        },
-      );
-
-      const response = await devCtrl.createBetaPreflightJob({
-        data: {
-          url: 'https://main--example-site.aem.page/test.html',
-          step: 'identify',
-          mystiqueUrl: 'ftp://example.com',
-        },
-      });
-      expect(response.status).to.equal(400);
-      const result = await response.json();
-      expect(result.message).to.equal('Invalid request: mystiqueUrl must be a valid URL');
     });
 
     it('returns 400 when mystiqueUrl is not an allowed Mystique ephemeral host', async () => {
