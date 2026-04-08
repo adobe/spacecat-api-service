@@ -362,6 +362,9 @@ const routeRequiredCapabilities = {
   // Graph
   'POST /sites/:siteId/graph': 'site:write',
 
+  // Page Relationships
+  'POST /sites/:siteId/page-relationships/search': 'site:read',
+
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
 

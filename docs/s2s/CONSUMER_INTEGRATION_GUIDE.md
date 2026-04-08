@@ -113,7 +113,7 @@ Once approved, the SpaceCat Security Team will:
 │ 2. Your Service → SpaceCat S2S Login                                │
 │    Exchange IMS Token for Session Token (15min lifetime)            │
 │    Endpoint: POST /auth/s2s/login                                   │
-│    Payload: { imsOrgId or domainBaseURL }                           │
+│    Payload: { imsOrgId or baseURL }                           │
 └─────────────────────────────────────────────────────────────────────┘
                                ↓
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -191,7 +191,7 @@ async function getSpaceCatSessionToken(imsAccessToken, imsOrgId) {
       imsOrgId: imsOrgId,
 
       // Option 2: Using Domain Base URL (alternative to imsOrgId)
-      // domainBaseURL: 'https://example.com'
+      // baseURL: 'https://example.com'
     },
     {
       headers: {
