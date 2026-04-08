@@ -414,6 +414,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,
+    'POST /llmo/onboard/update-query-index': llmoController.updateQueryIndex,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,

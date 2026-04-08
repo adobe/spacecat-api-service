@@ -308,6 +308,7 @@ describe('getRouteHandlers', () => {
     getDemoBrandPresence: () => null,
     getDemoRecommendations: () => null,
     markOpportunitiesReviewed: () => null,
+    updateQueryIndex: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -496,6 +497,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
+      'POST /llmo/onboard/update-query-index',
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
       'POST /plg/onboard',
@@ -525,6 +527,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
+    expect(staticRoutes['POST /llmo/onboard/update-query-index']).to.equal(mockLlmoController.updateQueryIndex);
     expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
     expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
