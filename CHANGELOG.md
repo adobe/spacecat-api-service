@@ -1,3 +1,31 @@
+# [1.422.0](https://github.com/adobe/spacecat-api-service/compare/v1.421.3...v1.422.0) (2026-04-08)
+
+
+### Features
+
+* introduce query-index editing endpoint ([#2134](https://github.com/adobe/spacecat-api-service/issues/2134)) ([065cfa5](https://github.com/adobe/spacecat-api-service/commit/065cfa5b3adfa5eb3ccf1c1d849cae58de501c47))
+
+## [1.421.3](https://github.com/adobe/spacecat-api-service/compare/v1.421.2...v1.421.3) (2026-04-08)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2148](https://github.com/adobe/spacecat-api-service/issues/2148)) ([1e624d6](https://github.com/adobe/spacecat-api-service/commit/1e624d6ca4aa1043c4e55039268664c6dcbf1daa))
+
+## [1.421.2](https://github.com/adobe/spacecat-api-service/compare/v1.421.1...v1.421.2) (2026-04-08)
+
+
+### Bug Fixes
+
+* updated experimentation engine flow ([#2135](https://github.com/adobe/spacecat-api-service/issues/2135)) ([f37c9c9](https://github.com/adobe/spacecat-api-service/commit/f37c9c9a393e7f2798cf6af8f8ef9fa20b365729))
+
+## [1.421.1](https://github.com/adobe/spacecat-api-service/compare/v1.421.0...v1.421.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* deploy only granted suggestions for summitPlg for ASO UI ([#2065](https://github.com/adobe/spacecat-api-service/issues/2065)) ([f9a70d8](https://github.com/adobe/spacecat-api-service/commit/f9a70d86297045e8f928a2ac7e3674bb2ae8ec06))
+
 # [1.421.0](https://github.com/adobe/spacecat-api-service/compare/v1.420.1...v1.421.0) (2026-04-08)
 
 
