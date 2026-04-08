@@ -101,6 +101,7 @@ describe('PlgOnboardingController', () => {
       setProjectId: sandbox.stub(),
       getAuthoringType: sandbox.stub().returns(overrides.authoringType ?? null),
       getDeliveryType: sandbox.stub().returns(overrides.deliveryType ?? null),
+      setDeliveryType: sandbox.stub(),
       save: sandbox.stub().resolves(),
     };
   }

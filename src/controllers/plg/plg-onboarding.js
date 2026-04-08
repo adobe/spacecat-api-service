@@ -417,6 +417,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
             preferContentApi: true,
             imsOrgId,
           });
+          site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
           log.info(`Derived author URL from preset rumHost: ${authorURL}`);
           steps.authorUrlResolved = true;
         }
@@ -466,6 +467,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
             ref, site: repo, owner, tld,
           },
         });
+        site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_EDGE);
         log.info(`Set hlxConfig for site ${site.getId()}: ${ref}--${repo}--${owner}.${tld}`);
         steps.hlxConfigSet = true;
       }
