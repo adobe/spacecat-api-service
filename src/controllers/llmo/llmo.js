@@ -1468,8 +1468,12 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
-    const promiseToken = context.request?.headers?.get?.('x-promise-token');
+    const promiseToken = context.pathInfo?.headers?.['x-promise-token'];
     log.info(`Edge optimize routing update request received for site ${siteId}`);
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update edge optimize routing');
+    }
 
     if (env?.ENV && env.ENV !== 'prod') {
       return createResponse(
