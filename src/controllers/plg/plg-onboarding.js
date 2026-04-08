@@ -84,16 +84,18 @@ function deriveCheckKey(onboarding) {
 }
 
 /**
- * Checks whether a specific blocking reason has been bypassed in the reviews array.
+ * Checks whether a specific blocking reason has been bypassed by the most recent review.
+ * Only the last review in the array is considered — if a newer bypass was added for a
+ * different reason (e.g. DOMAIN_ALREADY_ONBOARDED_IN_ORG after AEM_SITE_CHECK), the
+ * earlier bypass is no longer active and the check will run again.
  * @param {Array} reviews - The reviews array from the onboarding record.
  * @param {string} reasonSubstring - Substring to match against the review reason.
- * @returns {boolean} True if the latest matching review is BYPASSED.
+ * @returns {boolean} True if the most recent review matches the reason and is BYPASSED.
  */
 function isBypassed(reviews, reasonSubstring) {
   /* c8 ignore next 3 */
-  return (reviews || [])
-    .filter((r) => r.reason?.includes(reasonSubstring))
-    .at(-1)?.decision === REVIEW_DECISIONS.BYPASSED;
+  const last = (reviews || []).at(-1);
+  return last?.reason?.includes(reasonSubstring) && last?.decision === REVIEW_DECISIONS.BYPASSED;
 }
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
