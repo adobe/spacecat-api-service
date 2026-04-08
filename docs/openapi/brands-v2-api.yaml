@@ -1,0 +1,197 @@
+v2-brands-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: status
+      in: query
+      required: false
+      description: Filter by brand status. Default excludes deleted brands.
+      schema:
+        type: string
+        enum: [active, pending, deleted]
+        example: 'active'
+  get:
+    tags:
+      - brands
+      - customer-config
+    summary: List brands for an organization (v2)
+    description: |
+      Returns all brands for the given organization, backed by PostgREST/Aurora.
+      By default, deleted brands are excluded. Use the `status` query parameter
+      to filter by specific status or include deleted brands.
+    operationId: listBrandsForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Brands retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2BrandListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  post:
+    tags:
+      - brands
+      - customer-config
+    summary: Create or upsert a brand (v2)
+    description: |
+      Creates a new brand for the organization. If a brand with the same name
+      already exists for this organization, the existing brand is updated
+      (upsert on `organization_id, name` conflict).
+
+      Nested arrays (`urls`, `socialAccounts`, `earnedContent`, `brandAliases`,
+      `competitors`) use full-replace semantics — existing child rows are deleted
+      and re-inserted on each write.
+
+      **Note:** The current implementation always returns 201 regardless of
+      create vs update. Per HTTP semantics, upsert-update should return 200.
+    operationId: createBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2BrandInput'
+    responses:
+      '201':
+        description: Brand created (or updated via upsert)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - brands
+      - customer-config
+    summary: Get a brand by ID (v2)
+    description: |
+      Retrieves a single brand by its UUID for the given organization.
+    operationId: getBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Brand retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  patch:
+    tags:
+      - brands
+      - customer-config
+    summary: Update a brand (v2)
+    description: |
+      Updates an existing brand. Only provided fields are updated.
+      Nested arrays use full-replace semantics on each write.
+    operationId: updateBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2BrandUpdateInput'
+    responses:
+      '200':
+        description: Brand updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Brand'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  delete:
+    tags:
+      - brands
+      - customer-config
+    summary: Delete a brand (v2)
+    description: |
+      Soft-deletes a brand by setting its status to `deleted`.
+      The brand remains queryable with `?status=deleted`.
+    operationId: deleteBrandForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '204':
+        description: Brand deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)

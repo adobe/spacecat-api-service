@@ -50,7 +50,9 @@ describe('topics-storage', () => {
         description: 'All about SEO',
         status: 'active',
         brand_id: null,
-        updated_at: '2026-01-01',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'admin@test.com',
+        updated_at: '2026-02-01T00:00:00Z',
         updated_by: 'user@test.com',
       };
 
@@ -62,6 +64,10 @@ describe('topics-storage', () => {
       expect(result[0].id).to.equal('seo-best-practices');
       expect(result[0].uuid).to.equal('uuid-1');
       expect(result[0].name).to.equal('SEO Best Practices');
+      expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
+      expect(result[0].createdBy).to.equal('admin@test.com');
+      expect(result[0].updatedAt).to.equal('2026-02-01T00:00:00Z');
+      expect(result[0].updatedBy).to.equal('user@test.com');
     });
 
     it('returns empty array and defaults status when data is null', async () => {
@@ -80,6 +86,8 @@ describe('topics-storage', () => {
         description: null,
         status: null,
         brand_id: null,
+        created_at: null,
+        created_by: null,
         updated_at: '2026-01-01',
         updated_by: 'system',
       };
@@ -121,6 +129,8 @@ describe('topics-storage', () => {
         description: 'A description',
         status: 'active',
         brand_id: 'brand-uuid',
+        created_at: '2026-03-01T00:00:00Z',
+        created_by: 'user@test.com',
         updated_at: '2026-03-01',
         updated_by: 'user@test.com',
       };
@@ -141,6 +151,8 @@ describe('topics-storage', () => {
       expect(result.description).to.equal('A description');
       expect(result.brandId).to.equal('brand-uuid');
       expect(result.status).to.equal('active');
+      expect(result.createdAt).to.equal('2026-03-01T00:00:00Z');
+      expect(result.createdBy).to.equal('user@test.com');
     });
 
     it('throws on database error during create', async () => {
@@ -170,6 +182,8 @@ describe('topics-storage', () => {
         description: null,
         status: 'active',
         brand_id: null,
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
         updated_at: '2026-03-15',
         updated_by: 'editor@test.com',
       };
@@ -200,6 +214,8 @@ describe('topics-storage', () => {
         description: 'New desc',
         status: 'active',
         brand_id: 'brand-uuid',
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
         updated_at: '2026-03-15',
         updated_by: 'editor@test.com',
       };

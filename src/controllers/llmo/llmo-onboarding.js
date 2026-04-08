@@ -24,7 +24,7 @@ import {
   readCustomerConfigV2FromPostgres,
   writeCustomerConfigV2ToPostgres,
 } from '../../support/customer-config-v2-storage.js';
-import { convertV1ToV2 } from '../../support/customer-config-mapper.js';
+import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
 import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V1,
@@ -33,6 +33,7 @@ import {
   LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
+import { upsertBrand } from '../../support/brands-storage.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -238,7 +239,49 @@ export async function ensureInitialCustomerConfigV2({
 
   const existingConfig = await readCustomerConfigV2FromPostgres(organizationId, postgrestClient);
   if (existingConfig) {
-    context.log.info(`V2 customer config already exists for organization ${organizationId}, skipping initialization`);
+    if (!existingConfig.customer) existingConfig.customer = {};
+    if (!existingConfig.customer.brands) existingConfig.customer.brands = [];
+    const { brands } = existingConfig.customer;
+    const siteAlreadyRegistered = brands.some((b) => b.v1SiteId === siteId);
+
+    if (siteAlreadyRegistered) {
+      context.log.info(`V2 customer config already exists for organization ${organizationId} with site ${siteId}, skipping`);
+      return existingConfig;
+    }
+
+    // Add the new site as a brand to the existing config
+    const primaryUrl = overrideBaseURL || baseURL;
+    const timestamp = new Date().toISOString();
+    const trimmedName = brandName.trim();
+    let brandId = generateBrandId(trimmedName);
+
+    // Ensure brand ID is unique within the config
+    const existingIds = new Set(brands.map((b) => b.id));
+    if (existingIds.has(brandId)) {
+      brandId = `${brandId}-${siteId.slice(0, 8)}`;
+    }
+
+    brands.push({
+      id: brandId,
+      v1SiteId: siteId,
+      name: trimmedName,
+      baseUrl: primaryUrl,
+      status: 'active',
+      origin: 'system',
+      regions: ['gl'],
+      updatedAt: timestamp,
+      updatedBy: resolveUpdatedBy(context),
+      urls: [{ value: primaryUrl, type: 'url' }],
+      brandAliases: [{ name: trimmedName, regions: ['gl'] }],
+    });
+
+    await writeCustomerConfigV2ToPostgres(
+      organizationId,
+      existingConfig,
+      postgrestClient,
+      resolveUpdatedBy(context),
+    );
+    context.log.info(`Added site ${siteId} as brand "${brandName}" to existing V2 config for organization ${organizationId}`);
     return existingConfig;
   }
 
@@ -1050,13 +1093,7 @@ export async function removeLlmoConfig(site, config, context) {
     'llm-error-pages',
     'cdn-logs-analysis',
     'cdn-logs-report',
-    'geo-brand-presence',
-    'geo-brand-presence-free',
-    'geo-brand-presence-paid',
-    'geo-brand-presence-daily',
     'wikipedia-analysis',
-    // geo-brand-presence-free splits
-    ...Array.from({ length: 23 }, (_, i) => `geo-brand-presence-free-${i + 1}`),
   ];
 
   // Update configuration to disable audits
@@ -1195,6 +1232,8 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
+ * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
+ *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
@@ -1202,6 +1241,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
+    tempOnboarding,
   } = params;
   const { env, log } = context;
 
@@ -1234,8 +1274,13 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
     }
 
-    // Update index config
-    await updateIndexConfig(dataFolder, context, say);
+    // Update helix-query.yaml in project-elmo-ui-data (skip for temporary onboarding)
+    if (tempOnboarding) {
+      log.info(`Skipping helix-query.yaml update (temp-onboarding) for data folder ${dataFolder}`);
+      await say(`:information_source: Skipping helix-query.yaml update (temp-onboarding) for ${dataFolder}`);
+    } else {
+      await updateIndexConfig(dataFolder, context, say);
+    }
 
     // Enable audits (continues on partial failure, logs warnings)
     await enableAudits(
@@ -1300,6 +1345,29 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         postgrestClient,
       });
       log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
+
+      // Write initial brand to normalized brands table so DRS prompt sync can
+      // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
+      // Brandalf will upsert over this with LLM-identified sub-brands later.
+      // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
+      // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
+      // and would fail the exact-match lookup against the sites table.
+      try {
+        await upsertBrand({
+          organizationId: organization.getId(),
+          brand: {
+            name: brandName.trim(),
+            status: 'active',
+            urls: [{ value: baseURL, type: 'url' }],
+            brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
+          },
+          postgrestClient,
+          updatedBy: 'llmo-onboarding',
+        });
+        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+      } catch (brandError) {
+        log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+      }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream
       // brand sync can attach results to the newly created organization.
@@ -1379,7 +1447,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     if (site) {
       await revokeEnrollment(site, context);
     }
-    // Rolling back llmo config is not required, as it's the last step and won't have been saved
+    // Note: some config may already be persisted (audits, v2 customer config).
+    // Full rollback is not attempted; cleanup is limited to SharePoint and enrollment.
     throw error;
   }
 }

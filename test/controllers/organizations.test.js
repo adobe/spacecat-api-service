@@ -472,7 +472,7 @@ describe('Organizations Controller', () => {
     const mockEntitlement = {
       getId: () => 'entitlement-123',
       getProductCode: () => 'abcd',
-      getTier: () => 'premium',
+      getTier: () => 'FREE_TRIAL',
     };
     const mockSiteEnrollments = [
       {
@@ -952,7 +952,7 @@ describe('Organizations Controller', () => {
       mockEntitlement = {
         getId: () => OWN_ENT_ID,
         getProductCode: () => 'abcd',
-        getTier: () => 'paid',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClient = {
@@ -963,7 +963,7 @@ describe('Organizations Controller', () => {
 
       // Target org's entitlement (used by the delegation retrieval-time enrollment check)
       mockDataAccess.Entitlement = {
-        findByIndexKeys: sinon.stub().resolves({ getId: () => TARGET_ENT_ID }),
+        findByIndexKeys: sinon.stub().resolves({ getId: () => TARGET_ENT_ID, getTier: () => 'FREE_TRIAL' }),
       };
 
       // allByEntitlementId is called by two paths:
@@ -1139,6 +1139,46 @@ describe('Organizations Controller', () => {
       expect(result.status).to.equal(200);
       expect(mockSiteImsOrgAccess.allByOrganizationIdWithSites).to.not.have.been.called;
       expect(body.map((s) => s.id)).to.deep.equal(['site1']);
+    });
+
+    it('excludes delegated sites when target org has PRE_ONBOARD-tier entitlement', async () => {
+      mockDataAccess.Entitlement.findByIndexKeys.resolves({
+        getId: () => TARGET_ENT_ID,
+        getTier: () => 'PRE_ONBOARD',
+      });
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id)).to.not.include('delegated-site-1');
+      expect(body.map((s) => s.id)).to.include('site1');
+    });
+
+    it('excludes own-org sites when own entitlement has PRE_ONBOARD tier', async () => {
+      const plgEntitlement = {
+        getId: () => OWN_ENT_ID,
+        getProductCode: () => 'abcd',
+        getTier: () => 'PRE_ONBOARD',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: plgEntitlement });
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(0);
     });
   });
 });
