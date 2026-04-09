@@ -1206,7 +1206,8 @@ function SitesController(ctx, log, env) {
           const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();
 
-          if (enrolledSite && CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier())) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
@@ -1224,7 +1225,8 @@ function SitesController(ctx, log, env) {
           const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();
 
-          if (enrolledSite && CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier())) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),

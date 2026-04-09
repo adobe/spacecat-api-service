@@ -1,3 +1,10 @@
+# [1.428.0](https://github.com/adobe/spacecat-api-service/compare/v1.427.2...v1.428.0) (2026-04-09)
+
+
+### Features
+
+* fix/show pre onboard customer to admin ([#2165](https://github.com/adobe/spacecat-api-service/issues/2165)) ([41d9bc2](https://github.com/adobe/spacecat-api-service/commit/41d9bc27f01f21acd8d1b491d865024da6869ba1))
+
 ## [1.427.2](https://github.com/adobe/spacecat-api-service/compare/v1.427.1...v1.427.2) (2026-04-09)
 
 
