@@ -59,7 +59,9 @@ function mapDbBrandToV2(row) {
     return effectivePaths.map((p) => {
       const entry = { value: p === '/' ? base : `${base}${p}` };
       // Only the root entry (/) carries the base-URL type; subpaths are plain URLs
-      if (p === '/' && hasText(bs.type)) entry.type = bs.type;
+      if (p === '/' && hasText(bs.type)) {
+        entry.type = bs.type;
+      }
       return entry;
     });
   });
@@ -145,14 +147,18 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   urls
     .forEach((u) => {
       const value = typeof u === 'string' ? u : u?.value;
-      if (!hasText(value)) return;
+      if (!hasText(value)) {
+        return;
+      }
       const { base, path } = parseUrlParts(value);
       const normalizedBase = composeBaseURL(base);
       if (!pathsByBase.has(normalizedBase)) {
         pathsByBase.set(normalizedBase, []);
       }
       pathsByBase.get(normalizedBase).push(path || '/');
-      if (typeof u === 'object' && hasText(u?.type)) typeByBase.set(normalizedBase, u.type);
+      if (typeof u === 'object' && hasText(u?.type)) {
+        typeByBase.set(normalizedBase, u.type);
+      }
     });
 
   if (pathsByBase.size === 0) {
