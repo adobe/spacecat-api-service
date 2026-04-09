@@ -82,44 +82,6 @@ export function validateAuditTargetUrlString(trimmed, siteHostname) {
 }
 
 /**
- * Validates and normalizes a single audit target URL source list.
- *
- * @param {unknown} list
- * @param {string} sourceName
- * @param {string|null} siteHostname
- * @param {number} maxCount
- * @returns {{ ok: true, normalized: object[] } | { ok: false, error: string }}
- */
-function validateAuditTargetSourceList(list, sourceName, siteHostname, maxCount) {
-  if (!Array.isArray(list)) {
-    return { ok: false, error: `config.auditTargetURLs.${sourceName} must be an array` };
-  }
-  if (list.length > maxCount) {
-    return {
-      ok: false,
-      error: `config.auditTargetURLs.${sourceName} cannot contain more than ${maxCount} URLs`,
-    };
-  }
-  const normalized = [];
-  for (let i = 0; i < list.length; i += 1) {
-    const entry = list[i];
-    if (!entry || typeof entry !== 'object' || typeof entry.url !== 'string') {
-      return {
-        ok: false,
-        error: `config.auditTargetURLs.${sourceName}[${i}] must be an object with a string "url" property`,
-      };
-    }
-    const trimmed = entry.url.trim();
-    const result = validateAuditTargetUrlString(trimmed, siteHostname);
-    if (!result.ok) {
-      return { ok: false, error: `Invalid audit target URL at index ${i}: ${result.error}` };
-    }
-    normalized.push({ url: trimmed });
-  }
-  return { ok: true, normalized };
-}
-
-/**
  * Validates config.auditTargetURLs after merge (all known sources).
  *
  * @param {unknown} auditTargetURLs
@@ -142,11 +104,32 @@ export function validateAuditTargetURLsConfig(auditTargetURLs, siteBaseURL) {
     const list = auditTargetURLs[sourceName];
     if (list !== undefined) {
       anySourcePresent = true;
-      const result = validateAuditTargetSourceList(list, sourceName, siteHostname, maxCount);
-      if (!result.ok) {
-        return { ok: false, error: result.error };
+      if (!Array.isArray(list)) {
+        return { ok: false, error: `config.auditTargetURLs.${sourceName} must be an array` };
       }
-      normalizedSources[sourceName] = result.normalized;
+      if (list.length > maxCount) {
+        return {
+          ok: false,
+          error: `config.auditTargetURLs.${sourceName} cannot contain more than ${maxCount} URLs`,
+        };
+      }
+      const normalized = [];
+      for (let i = 0; i < list.length; i += 1) {
+        const entry = list[i];
+        if (!entry || typeof entry !== 'object' || typeof entry.url !== 'string') {
+          return {
+            ok: false,
+            error: `config.auditTargetURLs.${sourceName}[${i}] must be an object with a string "url" property`,
+          };
+        }
+        const trimmed = entry.url.trim();
+        const result = validateAuditTargetUrlString(trimmed, siteHostname);
+        if (!result.ok) {
+          return { ok: false, error: `Invalid audit target URL at index ${i}: ${result.error}` };
+        }
+        normalized.push({ url: trimmed });
+      }
+      normalizedSources[sourceName] = normalized;
     }
   }
 
