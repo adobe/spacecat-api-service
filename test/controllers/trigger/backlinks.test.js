@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Audit } from '@adobe/spacecat-shared-data-access';
 
 import { expect, use } from 'chai';

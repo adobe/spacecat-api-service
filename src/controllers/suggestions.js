@@ -89,7 +89,9 @@ function SuggestionsController(ctx, sqs, env) {
    * @throws {Error} If view is invalid.
    */
   const validateView = (view) => {
-    if (!view) return 'full';
+    if (!view) {
+      return 'full';
+    }
     if (!SUGGESTION_VIEWS.includes(view)) {
       throw new Error(`Invalid view. Must be one of: ${SUGGESTION_VIEWS.join(', ')}`);
     }
@@ -116,9 +118,13 @@ function SuggestionsController(ctx, sqs, env) {
    * @throws {Error} If any status value is invalid.
    */
   const validateStatuses = (statusParam) => {
-    if (!statusParam) return [];
+    if (!statusParam) {
+      return [];
+    }
     const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
-    if (statuses.length === 0) return [];
+    if (statuses.length === 0) {
+      return [];
+    }
 
     const validStatuses = Object.values(SuggestionModel.STATUSES);
     const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
@@ -239,7 +245,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     let statuses;
     try {
@@ -316,7 +324,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -377,7 +387,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -431,7 +443,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -493,7 +507,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -1043,9 +1059,13 @@ function SuggestionsController(ctx, sqs, env) {
         }
         if (isObject(p) && p !== null) {
           const { pageUrl, imageUrls } = p;
-          if (typeof pageUrl !== 'string' || !isValidUrl(pageUrl)) return true;
+          if (typeof pageUrl !== 'string' || !isValidUrl(pageUrl)) {
+            return true;
+          }
           if (imageUrls !== undefined) {
-            if (!isArray(imageUrls)) return true;
+            if (!isArray(imageUrls)) {
+              return true;
+            }
             return imageUrls.some((u) => typeof u !== 'string' || !isValidUrl(u));
           }
           return false;
@@ -1155,8 +1175,12 @@ function SuggestionsController(ctx, sqs, env) {
         if (isNonEmptyArray(uncoveredSuggestions)) {
           const uncoveredByUrl = uncoveredSuggestions.reduce((acc, suggestion) => {
             const url = getSuggestionUrl(suggestion.getData(), opportunity);
-            if (!url) return acc;
-            if (!acc[url]) acc[url] = [];
+            if (!url) {
+              return acc;
+            }
+            if (!acc[url]) {
+              acc[url] = [];
+            }
             acc[url].push(suggestion);
             return acc;
           }, {});
@@ -1167,7 +1191,9 @@ function SuggestionsController(ctx, sqs, env) {
       } else {
         const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
           const url = getSuggestionUrl(suggestion.getData(), opportunity);
-          if (!url) return acc;
+          if (!url) {
+            return acc;
+          }
 
           if (!acc[url]) {
             acc[url] = [];
@@ -1996,11 +2022,17 @@ function SuggestionsController(ctx, sqs, env) {
   const getGeoExperiment = async (context) => {
     const { siteId, geoExperimentId } = context.params;
 
-    if (!isValidUUID(siteId)) return badRequest('Site ID required');
-    if (!isValidUUID(geoExperimentId)) return badRequest('GeoExperiment ID required');
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
 
     const site = await Site.findById(siteId);
-    if (!site) return notFound('Site not found');
+    if (!site) {
+      return notFound('Site not found');
+    }
 
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
@@ -2041,14 +2073,22 @@ function SuggestionsController(ctx, sqs, env) {
     const { siteId, geoExperimentId } = context.params;
     const { authInfo: { profile } } = context.attributes;
 
-    if (!isValidUUID(siteId)) return badRequest('Site ID required');
-    if (!isValidUUID(geoExperimentId)) return badRequest('GeoExperiment ID required');
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
 
     const requestBody = context.data;
-    if (!isObject(requestBody)) return badRequest('Request body required');
+    if (!isObject(requestBody)) {
+      return badRequest('Request body required');
+    }
 
     const site = await Site.findById(siteId);
-    if (!site) return notFound('Site not found');
+    if (!site) {
+      return notFound('Site not found');
+    }
 
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
@@ -2106,7 +2146,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const site = await Site.findById(siteId);
-    if (!site) return notFound('Site not found');
+    if (!site) {
+      return notFound('Site not found');
+    }
 
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
