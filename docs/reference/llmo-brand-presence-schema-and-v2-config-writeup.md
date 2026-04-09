@@ -10,7 +10,7 @@ Postgres schema for brand presence. V2 customer config brands are synced to `bra
 |-------------------|-----------|----------|--------|
 | id                | uuid      | no       | Default uuid_generate_v7() |
 | organization_id   | uuid      | yes      | FK organizations(id). Unique (organization_id, name). |
-| site_id           | uuid      | no       | Deprecated; nullable. FK sites(id). |
+| site_id           | uuid      | no       | Base site ID (primary URL). FK sites(id). Immutable once set; unique per organization. Brands without a `site_id` are forced to `pending` status on creation. Exposed in the API as `baseSiteId`. |
 | name              | text      | yes      | Unique per organization. |
 | status            | text      | yes      | Default 'active'. CHECK: 'pending' \| 'active' \| 'deleted'. |
 | origin            | category_origin | yes | Default 'human'. Enum: 'human' \| 'ai'. |

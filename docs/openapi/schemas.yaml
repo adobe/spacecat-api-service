@@ -3565,6 +3565,14 @@ Brand:
     name:
       description: The name of the brand
       type: string
+    baseSiteId:
+      description: UUID of the brand's primary site. Immutable once set. Unique per organization.
+      type: string
+      format: uuid
+    baseUrl:
+      description: Read-only. The base URL of the primary site, resolved from baseSiteId.
+      type: string
+      readOnly: true
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'

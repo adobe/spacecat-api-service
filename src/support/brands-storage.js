@@ -17,6 +17,7 @@ import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
  */
 const BRAND_SELECT = [
   '*',
+  'base_site:sites!site_id(id, base_url)',
   'brand_aliases(alias, regions)',
   'brand_social_accounts(url, regions)',
   'brand_earned_sources(name, url, regions)',
@@ -62,6 +63,8 @@ function mapDbBrandToV2(row) {
   return {
     id: row.id,
     name: row.name,
+    baseSiteId: row.base_site?.id || row.site_id || null,
+    baseUrl: row.base_site?.base_url || null,
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
@@ -346,6 +349,23 @@ export async function upsertBrand({
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
+  // Validate baseSiteId uniqueness within the organization if provided.
+  if (hasText(brand.baseSiteId)) {
+    const { data: existing } = await postgrestClient
+      .from('brands')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('site_id', brand.baseSiteId)
+      .neq('status', 'deleted')
+      .maybeSingle();
+
+    if (existing) {
+      const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
+  }
+
   const row = {
     organization_id: organizationId,
     name: brand.name,
@@ -359,6 +379,11 @@ export async function upsertBrand({
     social: [],
     updated_by: updatedBy,
   };
+
+  // Set base site ID if provided.
+  if (hasText(brand.baseSiteId)) {
+    row.site_id = brand.baseSiteId;
+  }
 
   const { data: upserted, error } = await postgrestClient
     .from('brands')
@@ -424,6 +449,34 @@ export async function updateBrand({
   }
   if (updates.vertical !== undefined) {
     patch.vertical = updates.vertical;
+  }
+
+  // baseSiteId is immutable once set — only allow setting from NULL.
+  if (hasText(updates.baseSiteId)) {
+    const { data: current } = await postgrestClient
+      .from('brands')
+      .select('site_id')
+      .eq('id', brandId)
+      .maybeSingle();
+
+    if (!current?.site_id) {
+      // Validate uniqueness before setting.
+      const { data: existing } = await postgrestClient
+        .from('brands')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .eq('site_id', updates.baseSiteId)
+        .neq('status', 'deleted')
+        .maybeSingle();
+
+      if (existing) {
+        const err = new Error('This site is already the primary URL for another brand');
+        err.status = 409;
+        throw err;
+      }
+      patch.site_id = updates.baseSiteId;
+    }
+    // If site_id is already set, silently ignore the update (immutable).
   }
 
   if (updates.region !== undefined) {
