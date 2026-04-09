@@ -15,6 +15,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
+import LaunchDarklyClient from '@adobe/spacecat-shared-launchdarkly-client';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import {
@@ -53,6 +54,7 @@ const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.PLG;
 const PLG_PROFILE_KEY = 'aso_plg';
 const LD_FF_PROJECT_NAME = 'experience-success-studio';
+const LD_AUTO_FIX_META_TAGS_FLAG = 'auto-fix-meta-tags';
 
 const REVIEW_REASONS = {
   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -186,11 +188,61 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
  * @param {object} site - The onboarded site.
  * @param {object} context - Request context.
  */
-// eslint-disable-next-line no-unused-vars
+/**
+ * Enables the `auto-fix-meta-tags` LaunchDarkly feature flag for the given site's org.
+ * Variation 0 of the flag holds a JSON object mapping IMS org IDs to site base URL arrays.
+ * This function adds the org + site URL to that variation (upsert semantics).
+ * @param {object} site - The onboarded site.
+ * @param {object} context - Request context.
+ */
 async function updateLaunchDarklyFlags(site, context) {
-  // TODO: implement once flag names and LD API details are confirmed
-  // LD FF project: experience-success-studio (LD_FF_PROJECT_NAME)
-  context.log.info(`[TODO] LaunchDarkly FF update placeholder for site ${site.getId()} (LD project: ${LD_FF_PROJECT_NAME})`);
+  const { log } = context;
+  const ldClient = LaunchDarklyClient.createFrom(context);
+
+  const imsOrgId = (await context.dataAccess.Organization.findById(
+    await site.getOrganizationId(),
+  ))?.getImsOrgId();
+
+  if (!imsOrgId) {
+    log.warn(`Cannot update LaunchDarkly flags: no IMS org ID for site ${site.getId()}`);
+    return;
+  }
+
+  const siteBaseURL = site.getBaseURL();
+
+  try {
+    const flag = await ldClient.getFeatureFlag(LD_FF_PROJECT_NAME, LD_AUTO_FIX_META_TAGS_FLAG);
+    const rawValue = flag.variations?.[0]?.value;
+
+    if (rawValue === undefined) {
+      log.warn(`LaunchDarkly flag ${LD_AUTO_FIX_META_TAGS_FLAG} has no variations`);
+      return;
+    }
+
+    const isStringWrapped = typeof rawValue === 'string';
+    const parsed = isStringWrapped ? JSON.parse(rawValue) : rawValue;
+
+    const existingSites = parsed[imsOrgId] ?? [];
+    if (existingSites.includes(siteBaseURL)) {
+      log.info(`LaunchDarkly: ${siteBaseURL} already in ${LD_AUTO_FIX_META_TAGS_FLAG} for org ${imsOrgId}`);
+      return;
+    }
+
+    const merged = { ...parsed, [imsOrgId]: [...existingSites, siteBaseURL] };
+    const newValue = isStringWrapped ? JSON.stringify(merged) : merged;
+
+    await ldClient.updateVariationValue(
+      LD_FF_PROJECT_NAME,
+      LD_AUTO_FIX_META_TAGS_FLAG,
+      0,
+      newValue,
+      `plg-onboarding: enable auto-fix-meta-tags for ${imsOrgId} / ${siteBaseURL}`,
+    );
+
+    log.info(`LaunchDarkly: enabled ${LD_AUTO_FIX_META_TAGS_FLAG} for org ${imsOrgId}, site ${siteBaseURL}`);
+  } catch (error) {
+    log.error(`Failed to update LaunchDarkly flag ${LD_AUTO_FIX_META_TAGS_FLAG}: ${error.message}`);
+  }
 }
 
 async function createOrFindProject(baseURL, organizationId, context) {

@@ -52,6 +52,9 @@ describe('PlgOnboardingController', () => {
   let triggerBrandProfileAgentStub;
   let tierClientCreateForSiteStub;
   let tierClientCreateEntitlementStub;
+  let ldGetFeatureFlagStub;
+  let ldUpdateVariationValueStub;
+  let ldCreateFromStub;
   let configToDynamoItemStub;
 
   // Mock objects
@@ -189,6 +192,16 @@ describe('PlgOnboardingController', () => {
     // Brand profile
     triggerBrandProfileAgentStub = sandbox.stub().resolves('exec-123');
 
+    // LaunchDarkly
+    ldGetFeatureFlagStub = sandbox.stub().resolves({
+      variations: [{ value: {} }],
+    });
+    ldUpdateVariationValueStub = sandbox.stub().resolves({});
+    ldCreateFromStub = sandbox.stub().returns({
+      getFeatureFlag: ldGetFeatureFlagStub,
+      updateVariationValue: ldUpdateVariationValueStub,
+    });
+
     // TierClient
     tierClientCreateEntitlementStub = sandbox.stub().resolves({
       entitlement: { getId: () => 'ent-1' },
@@ -288,6 +301,9 @@ describe('PlgOnboardingController', () => {
           internalServerError: (msg) => ({ status: 500, value: msg }),
           notFound: (msg) => ({ status: 404, value: msg }),
           ok: (data) => ({ status: 200, value: data }),
+        },
+        '@adobe/spacecat-shared-launchdarkly-client': {
+          default: { createFrom: ldCreateFromStub },
         },
         '@adobe/spacecat-shared-rum-api-client': {
           default: {
@@ -503,6 +519,9 @@ describe('PlgOnboardingController', () => {
               }),
             },
           },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: { createFrom: ldCreateFromStub },
+          },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
           },
@@ -512,7 +531,7 @@ describe('PlgOnboardingController', () => {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -1619,6 +1638,54 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- LaunchDarkly feature flag update ---
+
+  describe('onboard - LaunchDarkly flag update', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('adds org and site to auto-fix-meta-tags flag variation 0', async () => {
+      ldGetFeatureFlagStub.resolves({ variations: [{ value: {} }] });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(ldGetFeatureFlagStub).to.have.been.calledWith(
+        'experience-success-studio',
+        'auto-fix-meta-tags',
+      );
+      expect(ldUpdateVariationValueStub).to.have.been.calledOnce;
+      const [projectKey, flagKey, varIndex, newValue] = ldUpdateVariationValueStub.firstCall.args;
+      expect(projectKey).to.equal('experience-success-studio');
+      expect(flagKey).to.equal('auto-fix-meta-tags');
+      expect(varIndex).to.equal(0);
+      expect(newValue).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
+    });
+
+    it('skips duplicate site already present in variation 0', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: { [TEST_IMS_ORG_ID]: [TEST_BASE_URL] } }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('continues onboarding when LD flag update fails', async () => {
+      ldGetFeatureFlagStub.rejects(new Error('LD service unavailable'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+  });
+
   // --- Delivery config writer (CDN + optional redirect params) ---
 
   describe('onboard - delivery config writer', () => {
@@ -2050,6 +2117,9 @@ describe('PlgOnboardingController', () => {
               }),
             },
           },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: { createFrom: ldCreateFromStub },
+          },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
           },
@@ -2059,7 +2129,7 @@ describe('PlgOnboardingController', () => {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -2425,6 +2495,9 @@ describe('PlgOnboardingController', () => {
               }),
             },
           },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: { createFrom: ldCreateFromStub },
+          },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
           },
@@ -2434,7 +2507,7 @@ describe('PlgOnboardingController', () => {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -2516,6 +2589,9 @@ describe('PlgOnboardingController', () => {
                 }),
               },
             },
+            '@adobe/spacecat-shared-launchdarkly-client': {
+              default: { createFrom: ldCreateFromStub },
+            },
             '@adobe/spacecat-shared-tier-client': {
               default: { createForSite: sandbox.stub() },
             },
@@ -2523,7 +2599,7 @@ describe('PlgOnboardingController', () => {
               Config: { toDynamoItem: sandbox.stub() },
             },
             '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-              Entitlement: { PRODUCT_CODES: { ASO: 'aso_optimizer' }, TIERS: { FREE_TRIAL: 'FREE_TRIAL' } },
+              Entitlement: { PRODUCT_CODES: { ASO: 'aso_optimizer' }, TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' } },
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
