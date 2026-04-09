@@ -35,7 +35,9 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
       .eq('organization_id', organizationId)
       .eq('id', brandId)
       .maybeSingle();
-    if (!error && data?.id) return data.id;
+    if (!error && data?.id) {
+      return data.id;
+    }
     return null;
   }
 
@@ -46,7 +48,9 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
     .ilike('name', brandId)
     .maybeSingle();
 
-  if (!error && data?.id) return data.id;
+  if (!error && data?.id) {
+    return data.id;
+  }
   return null;
 }
 
@@ -59,7 +63,9 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
  * @returns {Promise<string|null>} categories.id (uuid) or null
  */
 export async function resolveCategoryUuid(organizationId, categoryId, postgrestClient) {
-  if (!hasText(categoryId) || !postgrestClient?.from) return null;
+  if (!hasText(categoryId) || !postgrestClient?.from) {
+    return null;
+  }
   const { data, error } = await postgrestClient
     .from('categories')
     .select('id')
@@ -78,7 +84,9 @@ export async function resolveCategoryUuid(organizationId, categoryId, postgrestC
  * @returns {Promise<string|null>} topics.id (uuid) or null
  */
 export async function resolveTopicUuid(organizationId, topicId, postgrestClient) {
-  if (!hasText(topicId) || !postgrestClient?.from) return null;
+  if (!hasText(topicId) || !postgrestClient?.from) {
+    return null;
+  }
   const { data, error } = await postgrestClient
     .from('topics')
     .select('id')
@@ -266,7 +274,9 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
     );
   }
 
-  if (ops.length > 0) await Promise.all(ops);
+  if (ops.length > 0) {
+    await Promise.all(ops);
+  }
 }
 
 const SORT_COLUMN_MAP = {
@@ -355,12 +365,16 @@ export async function listPrompts({
   page = 1,
   postgrestClient,
 }) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   let brandUuid = null;
   if (hasText(brandId)) {
     brandUuid = await resolveBrandUuid(organizationId, brandId, postgrestClient);
-    if (!brandUuid) return [];
+    if (!brandUuid) {
+      return [];
+    }
   }
 
   const MAX_LIMIT = 5000;
@@ -414,7 +428,9 @@ export async function listPrompts({
       .order('id', { ascending: true });
   }
 
-  if (brandUuid) baseQuery = baseQuery.eq('brand_id', brandUuid);
+  if (brandUuid) {
+    baseQuery = baseQuery.eq('brand_id', brandUuid);
+  }
   if (hasText(status)) {
     baseQuery = baseQuery.eq('status', status);
   } else {
@@ -441,13 +457,19 @@ export async function listPrompts({
     const topicUuid = hasText(topicId)
       ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
       : null;
-    if (categoryUuid) baseQuery = baseQuery.eq('category_id', categoryUuid);
-    if (topicUuid) baseQuery = baseQuery.eq('topic_id', topicUuid);
+    if (categoryUuid) {
+      baseQuery = baseQuery.eq('category_id', categoryUuid);
+    }
+    if (topicUuid) {
+      baseQuery = baseQuery.eq('topic_id', topicUuid);
+    }
   }
 
   const { data: rows, error, count } = await baseQuery.range(offset, offset + limitNum - 1);
 
-  if (error) throw new Error(`Failed to list prompts: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list prompts: ${error.message}`);
+  }
   if (!rows?.length) {
     return {
       items: [], total: count ?? 0, limit: limitNum, page: pageNum,
@@ -476,8 +498,12 @@ export async function getPromptById({
   promptId,
   postgrestClient,
 }) {
-  if (!postgrestClient?.from) return null;
-  if (!hasText(promptId)) return null;
+  if (!postgrestClient?.from) {
+    return null;
+  }
+  if (!hasText(promptId)) {
+    return null;
+  }
 
   const { data, error } = await postgrestClient
     .from('prompts')
@@ -506,8 +532,12 @@ export async function getPromptById({
     .eq('prompt_id', promptId)
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to get prompt: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to get prompt: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   return mapRowToPrompt(data);
 }
@@ -620,7 +650,9 @@ export async function upsertPrompts({
 
   if (toInsert.length > 0) {
     const { data: inserted, error } = await postgrestClient.from('prompts').insert(toInsert).select();
-    if (error) throw new Error(`Failed to insert prompts: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to insert prompts: ${error.message}`);
+    }
     created = inserted?.length ?? toInsert.length;
   }
 
@@ -628,7 +660,9 @@ export async function upsertPrompts({
     const { id, ...patch } = row;
     // eslint-disable-next-line no-await-in-loop, max-len
     const { error } = await postgrestClient.from('prompts').update(patch).eq('id', id);
-    if (error) throw new Error(`Failed to update prompt: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to update prompt: ${error.message}`);
+    }
     updated += 1;
   }
 
@@ -670,14 +704,26 @@ export async function updatePromptById({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const patch = { updated_by: updatedBy };
-  if (updates.prompt !== undefined) patch.text = updates.prompt;
-  if (updates.name !== undefined) patch.name = updates.name;
-  if (updates.regions !== undefined) patch.regions = updates.regions;
-  if (updates.status !== undefined) patch.status = updates.status;
-  if (updates.origin !== undefined) patch.origin = updates.origin;
+  if (updates.prompt !== undefined) {
+    patch.text = updates.prompt;
+  }
+  if (updates.name !== undefined) {
+    patch.name = updates.name;
+  }
+  if (updates.regions !== undefined) {
+    patch.regions = updates.regions;
+  }
+  if (updates.status !== undefined) {
+    patch.status = updates.status;
+  }
+  if (updates.origin !== undefined) {
+    patch.origin = updates.origin;
+  }
   if (updates.categoryId !== undefined) {
     patch.category_id = hasText(updates.categoryId)
       ? await resolveCategoryUuid(organizationId, updates.categoryId, postgrestClient)
@@ -698,8 +744,12 @@ export async function updatePromptById({
     .select()
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to update prompt: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to update prompt: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   return getPromptById({
     organizationId,
@@ -727,7 +777,9 @@ export async function deletePromptById({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const { data, error } = await postgrestClient
     .from('prompts')
@@ -738,7 +790,9 @@ export async function deletePromptById({
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to delete prompt: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to delete prompt: ${error.message}`);
+  }
   return !!data;
 }
 
@@ -760,7 +814,9 @@ export async function bulkDeletePrompts({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const total = promptIds.length;
   let success = 0;

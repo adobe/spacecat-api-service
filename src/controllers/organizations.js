@@ -239,7 +239,9 @@ function OrganizationsController(ctx, env) {
               const entitlement = entitlementResults[i];
               if (entitlement) {
                 // PLG and any future internal tiers are not customer-visible
-                if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) return;
+                if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+                  return;
+                }
 
                 const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
                 // eslint-disable-next-line max-len

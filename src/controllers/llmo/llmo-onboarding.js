@@ -239,8 +239,12 @@ export async function ensureInitialCustomerConfigV2({
 
   const existingConfig = await readCustomerConfigV2FromPostgres(organizationId, postgrestClient);
   if (existingConfig) {
-    if (!existingConfig.customer) existingConfig.customer = {};
-    if (!existingConfig.customer.brands) existingConfig.customer.brands = [];
+    if (!existingConfig.customer) {
+      existingConfig.customer = {};
+    }
+    if (!existingConfig.customer.brands) {
+      existingConfig.customer.brands = [];
+    }
     const { brands } = existingConfig.customer;
     const siteAlreadyRegistered = brands.some((b) => b.v1SiteId === siteId);
 
@@ -1542,7 +1546,9 @@ export async function previewAndPublishQueryIndex(dataFolder, env, log) {
     let bodyText = '';
     try {
       bodyText = await previewResponse.text();
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
     log.error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
   }
@@ -1557,7 +1563,9 @@ export async function previewAndPublishQueryIndex(dataFolder, env, log) {
     let bodyText = '';
     try {
       bodyText = await publishResponse.text();
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
     log.error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
   }

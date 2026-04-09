@@ -153,8 +153,6 @@ describe('getRouteHandlers', () => {
   const mockBrandsController = {
     getBrandsForOrganization: sinon.stub(),
     getBrandGuidelinesForSite: sinon.stub(),
-    getCustomerConfig: sinon.stub(),
-    saveCustomerConfig: sinon.stub(),
     listBrandsForOrg: sinon.stub(),
     listCategoriesForOrg: sinon.stub(),
     createCategoryForOrg: sinon.stub(),
@@ -387,6 +385,7 @@ describe('getRouteHandlers', () => {
     onboard: sinon.stub(),
     getAllOnboardings: sinon.stub(),
     getStatus: sinon.stub(),
+    update: sinon.stub(),
   };
 
   const mockImsOrgAccessController = {
@@ -420,6 +419,10 @@ describe('getRouteHandlers', () => {
   const mockEphemeralRunController = {
     batchRun: () => null,
     batchStatus: () => null,
+  };
+
+  const mockAutofixChecksController = {
+    runChecks: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -473,6 +476,7 @@ describe('getRouteHandlers', () => {
       mockPageRelationshipsController,
       mockToolsController,
       mockEphemeralRunController,
+      mockAutofixChecksController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -508,6 +512,7 @@ describe('getRouteHandlers', () => {
       'POST /llmo/agentic-traffic/global',
       'POST /plg/onboard',
       'GET /plg/sites',
+      'POST /plg/records',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -810,7 +815,6 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'POST /sites/:siteId/llmo/edge-optimize-routing',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
-      'GET /plg/onboard/status/:imsOrgId',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
@@ -849,6 +853,10 @@ describe('getRouteHandlers', () => {
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
       'GET /sites/:siteId/tokens/by-type/:tokenType',
+      'GET /plg/onboard/status/:imsOrgId',
+      'PATCH /plg/onboard/:onboardingId',
+      'PATCH /plg/records/:plgOnboardingId',
+      'DELETE /plg/records/:plgOnboardingId',
       'POST /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access/:accessId',
@@ -857,6 +865,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/contact-sales-leads',
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
+      'POST /sites/:siteId/autofix-checks',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
