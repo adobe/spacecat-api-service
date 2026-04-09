@@ -593,14 +593,14 @@ describe('PlgOnboardingController', () => {
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await adminController.onboard(context);
       expect(res.status).to.equal(400);
-      expect(res.value).to.equal('imsOrgId is required when onboarding as admin');
+      expect(res.value).to.equal('Valid imsOrgId is required when onboarding as admin');
     });
 
     it('returns 400 when imsOrgId is empty string in admin onboard call', async () => {
       const context = buildContext({ domain: TEST_DOMAIN, imsOrgId: '' });
       const res = await adminController.onboard(context);
       expect(res.status).to.equal(400);
-      expect(res.value).to.equal('imsOrgId is required when onboarding as admin');
+      expect(res.value).to.equal('Valid imsOrgId is required when onboarding as admin');
     });
 
     it('onboards successfully when admin provides imsOrgId', async () => {
@@ -1666,6 +1666,27 @@ describe('PlgOnboardingController', () => {
       expect(mockEnrollment.remove).to.have.been.calledOnce;
     });
 
+    it('revokes all other enrollments when multiple exist under same entitlement', async () => {
+      const mockEnrollment1 = {
+        getId: sandbox.stub().returns('enroll-old-1'),
+        getSiteId: sandbox.stub().returns('other-site-1'),
+        remove: sandbox.stub().resolves(),
+      };
+      const mockEnrollment2 = {
+        getId: sandbox.stub().returns('enroll-old-2'),
+        getSiteId: sandbox.stub().returns('other-site-2'),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment1, mockEnrollment2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockEnrollment1.remove).to.have.been.calledOnce;
+      expect(mockEnrollment2.remove).to.have.been.calledOnce;
+    });
+
     it('does not revoke when no other enrollment exists', async () => {
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
 
@@ -1673,6 +1694,21 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
+    });
+
+    it('returns error status when enrollment removal fails', async () => {
+      const mockEnrollment = {
+        getId: sandbox.stub().returns('enroll-old'),
+        getSiteId: sandbox.stub().returns('other-site-uuid'),
+        remove: sandbox.stub().rejects(new Error('DB remove failed')),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(500);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
     });
   });
 
@@ -1988,6 +2024,9 @@ describe('PlgOnboardingController', () => {
           entitlementCreated: true,
         }),
       );
+      // Revocation and LD flag steps must run in the fast path
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
+      expect(ldGetFeatureFlagStub).to.have.been.called;
       // Should NOT run full onboarding steps
       expect(createOrFindOrganizationStub).to.not.have.been.called;
       expect(detectBotBlockerStub).to.not.have.been.called;

@@ -173,21 +173,26 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
   const { SiteEnrollment } = dataAccess;
 
   const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
-  const toRevoke = enrollments.find((e) => e.getSiteId() !== site.getId());
+  const toRevoke = enrollments.filter((e) => e.getSiteId() !== site.getId());
 
-  if (toRevoke) {
-    log.info(`Revoking ASO enrollment ${toRevoke.getId()} for previously enrolled site ${toRevoke.getSiteId()}`);
-    await toRevoke.remove();
-  }
+  await Promise.all(toRevoke.map((e) => {
+    log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${e.getSiteId()}`);
+    return e.remove();
+  }));
 }
 
 /**
  * Upserts a single LaunchDarkly flag's variation 0 to include the org + site.
- * Variation 0 value is a JSON object: { [imsOrgId]: [siteBaseURLs] }.
+ * Variation 0 value is a JSON object: { [imsOrgId]: [siteIds] }.
+ *
+ * NOTE: This function performs a read-modify-write on the flag variation without
+ * locking. Two concurrent onboardings could overwrite each other's addition. The
+ * idempotent check makes this self-healing on retry (re-running onboarding will
+ * re-add a lost entry), but a missed write will not be detected automatically.
  * @param {object} ldClient - LaunchDarklyClient instance.
  * @param {string} flagKey - Flag key.
  * @param {string} imsOrgId - IMS org ID.
- * @param {string} siteBaseURL - Site base URL.
+ * @param {string} siteId - Site ID.
  * @param {object} log - Logger.
  */
 async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
@@ -200,7 +205,13 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
   }
 
   const isStringWrapped = typeof rawValue === 'string';
-  const parsed = isStringWrapped ? JSON.parse(rawValue) : rawValue;
+  let parsed;
+  try {
+    parsed = isStringWrapped ? JSON.parse(rawValue) : rawValue;
+  } catch (e) {
+    log.warn(`LaunchDarkly flag ${flagKey} has malformed JSON in variation 0, skipping: ${e.message}`);
+    return;
+  }
 
   const existingSites = parsed[imsOrgId] ?? [];
   if (existingSites.includes(siteId)) {
@@ -241,7 +252,7 @@ async function updateLaunchDarklyFlags(site, context) {
   const ldClient = new LaunchDarklyClient({ apiToken }, log);
 
   const imsOrgId = (await context.dataAccess.Organization.findById(
-    await site.getOrganizationId(),
+    site.getOrganizationId(),
   ))?.getImsOrgId();
 
   if (!imsOrgId) {
@@ -739,8 +750,8 @@ function PlgOnboardingController(ctx) {
     // Admins can onboard on behalf of any IMS org — imsOrgId must be explicitly provided
     let imsOrgId;
     if (isAdmin) {
-      if (!hasText(requestedImsOrgId)) {
-        return badRequest('imsOrgId is required when onboarding as admin');
+      if (!hasText(requestedImsOrgId) || !isValidIMSOrgId(requestedImsOrgId)) {
+        return badRequest('Valid imsOrgId is required when onboarding as admin');
       }
       imsOrgId = requestedImsOrgId;
     } else {
