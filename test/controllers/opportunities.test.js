@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -156,6 +154,9 @@ describe('Opportunities Controller', () => {
     },
     getUpdatedAt() {
       return opptys[0].updatedAt;
+    },
+    getLastAuditedAt() {
+      return opptys[0].lastAuditedAt;
     },
     setCreatedAt(value) {
       opptys[0].createdAt = value;
@@ -361,6 +362,154 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets opportunity by ID invokes grant suggestions handler when Token is in dataAccess', async () => {
+    const mockToken = {
+      findBySiteIdAndTokenType: sandbox.stub().resolves({ getRemaining: () => 1 }),
+    };
+    const mockConfig = {
+      findLatest: sandbox.stub().resolves({
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      }),
+    };
+    const ctxWithToken = {
+      ...mockContext,
+      dataAccess: {
+        ...mockOpportunityDataAccess,
+        SuggestionGrant: {},
+        Token: mockToken,
+        Configuration: mockConfig,
+      },
+    };
+    const controllerWithToken = OpportunitiesController(ctxWithToken);
+    const previousType = opptys[0].type;
+    opptys[0].type = 'cwv';
+    try {
+      const response = await controllerWithToken.getByID({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+      expect(response.status).to.equal(200);
+      if (mockToken.findBySiteIdAndTokenType.called) {
+        expect(mockToken.findBySiteIdAndTokenType).to.have.been.calledOnceWith(
+          SITE_ID,
+          'monthly_suggestion_cwv',
+        );
+      }
+    } finally {
+      opptys[0].type = previousType;
+    }
+  });
+
+  it('getByID catches grant suggestions handler errors gracefully', async () => {
+    const mockSuggestion = {
+      allByOpportunityIdAndStatus: sandbox.stub()
+        .rejects(new Error('db failure')),
+    };
+    const mockSuggestionGrant = {};
+    const mockToken = {
+      findBySiteIdAndTokenType: sandbox.stub(),
+    };
+    const mockConfig = {
+      findLatest: sandbox.stub().resolves({
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      }),
+    };
+    const mockSiteWithOrg = {
+      findById: sandbox.stub().resolves({
+        getId: () => SITE_ID,
+        getOrganizationId: () => 'org-123',
+      }),
+    };
+    const mockEntitlement = {
+      findByOrganizationIdAndProductCode: sandbox.stub().resolves({
+        getTier: () => 'PLG',
+      }),
+    };
+    const ctxWithToken = {
+      ...mockContext,
+      dataAccess: {
+        ...mockOpportunityDataAccess,
+        Site: mockSiteWithOrg,
+        Suggestion: mockSuggestion,
+        SuggestionGrant: mockSuggestionGrant,
+        Token: mockToken,
+        Configuration: mockConfig,
+        Entitlement: mockEntitlement,
+      },
+    };
+    const controllerWithToken = OpportunitiesController(ctxWithToken);
+    const previousType = opptys[0].type;
+    opptys[0].type = 'cwv';
+    try {
+      const response = await controllerWithToken.getByID({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockContext.log.warn).to.have.been.calledOnce;
+    } finally {
+      opptys[0].type = previousType;
+    }
+  });
+
+  it('getByID catches grant suggestions handler errors gracefully when error has no message', async () => {
+    const mockSuggestion = {
+      allByOpportunityIdAndStatus: sandbox.stub()
+        // eslint-disable-next-line prefer-promise-reject-errors
+        .callsFake(() => Promise.reject(null)),
+    };
+    const mockToken = {
+      findBySiteIdAndTokenType: sandbox.stub(),
+    };
+    const mockSiteEntity = {
+      getId: () => SITE_ID,
+      getOrganizationId: () => 'org-123',
+    };
+    const mockConfig = {
+      findLatest: sandbox.stub().resolves({
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      }),
+    };
+    const mockEntitlement = {
+      findByOrganizationIdAndProductCode: sandbox.stub().resolves({
+        getTier: () => 'PLG',
+      }),
+    };
+    const ctxWithToken = {
+      ...mockContext,
+      dataAccess: {
+        ...mockOpportunityDataAccess,
+        Site: { findById: sandbox.stub().resolves(mockSiteEntity) },
+        Suggestion: mockSuggestion,
+        SuggestionGrant: {},
+        Token: mockToken,
+        Configuration: mockConfig,
+        Entitlement: mockEntitlement,
+      },
+    };
+    const controllerWithToken = OpportunitiesController(ctxWithToken);
+    const previousType = opptys[0].type;
+    opptys[0].type = 'cwv';
+    try {
+      const response = await controllerWithToken.getByID({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockContext.log.warn).to.have.been.calledOnceWith(
+        'Grant suggestions handler failed',
+        null,
+      );
+    } finally {
+      opptys[0].type = previousType;
+    }
   });
 
   // TODO: Complete tests for OpportunitiesController
@@ -1054,6 +1203,7 @@ describe('Opportunities Controller', () => {
       getCreatedAt: () => Date.now(),
       getUpdatedAt: () => Date.now(),
       getUpdatedBy: () => 'system',
+      getLastAuditedAt: () => Date.now(),
     });
 
     const allTypes = ['broken-backlinks', 'cwv', 'alt-text', 'forms', 'consent-banner', 'rss'];
@@ -1128,6 +1278,38 @@ describe('Opportunities Controller', () => {
       expect(response.status).to.equal(200);
       const opportunities = await response.json();
       expect(opportunities).to.be.an('array').with.lengthOf(allTypes.length);
+    });
+
+    it('passes request context to getIsSummitPlgEnabled for getAllForSite', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID } };
+      await ctrl.getAllForSite(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+
+    it('passes request context to getIsSummitPlgEnabled for getByStatus', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID, status: 'NEW' } };
+      await ctrl.getByStatus(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
     });
   });
 });

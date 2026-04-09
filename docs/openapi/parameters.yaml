@@ -101,9 +101,9 @@ source:
   schema:
     type: string
     enum:
-      - 'ahrefs'
+      - 'seo'
       - 'google'
-    example: 'ahrefs'
+    example: 'seo'
 geo:
   name: geo
   description: The geo of the top pages

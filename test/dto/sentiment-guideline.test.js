@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import { SentimentGuidelineDto } from '../../src/dto/sentiment-guideline.js';
 
@@ -23,7 +21,7 @@ describe('SentimentGuidelineDto', () => {
         getGuidelineId: () => 'guideline-456',
         getName: () => 'Product Quality Focus',
         getInstruction: () => 'Focus on product quality aspects in sentiment analysis',
-        getAudits: () => ['wikipedia-analysis', 'reddit-analysis'],
+        getAudits: () => ['wikipedia-analysis', 'reddit-analysis', 'youtube-analysis', 'cited-analysis'],
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-02T00:00:00Z',
@@ -38,7 +36,7 @@ describe('SentimentGuidelineDto', () => {
         guidelineId: 'guideline-456',
         name: 'Product Quality Focus',
         instruction: 'Focus on product quality aspects in sentiment analysis',
-        audits: ['wikipedia-analysis', 'reddit-analysis'],
+        audits: ['wikipedia-analysis', 'reddit-analysis', 'youtube-analysis', 'cited-analysis'],
         enabled: true,
         createdAt: '2026-01-01T00:00:00Z',
         updatedAt: '2026-01-02T00:00:00Z',

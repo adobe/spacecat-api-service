@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Request } from '@adobe/fetch';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
@@ -219,6 +217,20 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
   });
 
+  it('handles plgOnboardingId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/plg/records/not-a-uuid';
+
+    request = new Request(`${baseUrl}/plg/records/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+  });
+
   it('handles organizationId not correctly formated error', async () => {
     context.pathInfo.suffix = '/organizations/1234';
 
@@ -228,6 +240,41 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles spaceCatId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/v2/orgs/not-a-uuid/brands/brand-1/prompts';
+    context.dataAccess.services = {
+      postgrestClient: {
+        from: () => ({
+          // eslint-disable-next-line max-len
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+        }),
+      },
+    };
+
+    // eslint-disable-next-line max-len
+    const url = `${baseUrl}/v2/orgs/not-a-uuid/brands/brand-1/prompts`;
+    request = new Request(url, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Organization Id (spaceCatId) is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles brandId not correctly formatted error for filter-dimensions', async () => {
+    context.pathInfo.suffix = '/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/invalid-brand/brand-presence/filter-dimensions';
+
+    request = new Request(`${baseUrl}/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/invalid-brand/brand-presence/filter-dimensions`, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Brand Id is invalid. Please provide a valid UUID or "all".');
   });
 
   it('handles dynamic route errors', async () => {

@@ -16,6 +16,8 @@ import { generateKeyPair, exportSPKI, SignJWT } from 'jose';
 const ISSUER = 'https://spacecat.experiencecloud.live';
 const AUDIENCE = 'spacecat-users';
 const IMS_ORG_IDENT = 'AAAAAAAABBBBBBBBCCCCCCCC';
+const ORG_3_IMS_ORG_IDENT = 'GGGGGGGGHHHHHHHHIIIIIIII';
+const ORG_3_ID = '33330000-3333-4333-b333-000000000333';
 
 let keys;
 
@@ -91,11 +93,82 @@ export async function createTrialUserToken() {
   });
 }
 
+/**
+ * Delegated agency user — primary tenant is ORG_3, has a LLMO delegation entry pointing
+ * back to ORG_1 (Path A: delegated_tenants_complete=true).
+ * Includes trial_email so the FREE_TRIAL validateEntitlement branch finds TRIAL_USER_2
+ * instead of attempting to create a new trial user.
+ */
+export async function createDelegatedUserToken() {
+  return signToken({
+    sub: 'test-delegate@example.com',
+    email: 'test-delegate@example.com',
+    trial_email: 'test-delegate@example.com',
+    first_name: 'Test',
+    last_name: 'Delegate',
+    is_admin: false,
+    is_llmo_administrator: false,
+    tenants: [{ id: ORG_3_IMS_ORG_IDENT, subServices: [], entitlement: {} }],
+    delegated_tenants: [{
+      id: IMS_ORG_IDENT,
+      sourceOrganizationId: ORG_3_ID,
+      productCode: 'LLMO',
+      role: 'agency',
+    }],
+    delegated_tenants_complete: true,
+  });
+}
+
+/**
+ * Truncated delegated user — same as delegatedUser but delegated_tenants_complete=false
+ * (Path B: skip JWT gate, use getDelegatedTenants()[0].sourceOrganizationId for DB lookup).
+ */
+export async function createDelegatedUserTruncatedToken() {
+  return signToken({
+    sub: 'test-delegate-truncated@example.com',
+    email: 'test-delegate-truncated@example.com',
+    trial_email: 'test-delegate@example.com',
+    is_admin: false,
+    is_llmo_administrator: false,
+    tenants: [{ id: ORG_3_IMS_ORG_IDENT, subServices: [], entitlement: {} }],
+    delegated_tenants: [{
+      id: IMS_ORG_IDENT,
+      sourceOrganizationId: ORG_3_ID,
+      productCode: 'LLMO',
+      role: 'agency',
+    }],
+    delegated_tenants_complete: false,
+  });
+}
+
+/**
+ * Truncated delegated user with missing sourceOrganizationId — exercises the
+ * Path B "!sourceOrganizationId → log.warn → return false" branch.
+ */
+export async function createDelegatedUserNoSourceToken() {
+  return signToken({
+    sub: 'test-delegate-nosource@example.com',
+    email: 'test-delegate-nosource@example.com',
+    is_admin: false,
+    is_llmo_administrator: false,
+    tenants: [{ id: ORG_3_IMS_ORG_IDENT, subServices: [], entitlement: {} }],
+    delegated_tenants: [{ id: IMS_ORG_IDENT, productCode: 'LLMO', role: 'agency' }],
+    delegated_tenants_complete: false,
+  });
+}
+
 export async function createAllTokens() {
-  const [admin, user, trialUser] = await Promise.all([
+  const [
+    admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+  ] = await Promise.all([
     createAdminToken(),
     createUserToken(),
     createTrialUserToken(),
+    createDelegatedUserToken(),
+    createDelegatedUserTruncatedToken(),
+    createDelegatedUserNoSourceToken(),
   ]);
-  return { admin, user, trialUser };
+  return {
+    admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+  };
 }

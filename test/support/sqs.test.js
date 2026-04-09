@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 /* eslint-disable no-use-before-define */
 
 import wrap from '@adobe/helix-shared-wrap';
@@ -151,6 +150,32 @@ describe('sqs', () => {
 
     await wrap(async (req, ctx) => {
       await ctx.sqs.sendMessage(QUEUE_URL, message);
+    }).with(sqsWrapper)({}, context);
+
+    expect(context.log.debug).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);
+  });
+
+  it('passes DelaySeconds when provided', async () => {
+    const messageId = 'message-id';
+    const message = { key: 'value' };
+
+    nock('https://sqs.us-east-1.amazonaws.com')
+      .post('/')
+      .reply(200, (_, body) => {
+        const {
+          MessageBody, QueueUrl, DelaySeconds,
+        } = JSON.parse(body);
+        expect(QueueUrl).to.equal(QUEUE_URL);
+        expect(DelaySeconds).to.equal(10);
+        expect(JSON.parse(MessageBody).key).to.equal(message.key);
+        return {
+          MessageId: messageId,
+          MD5OfMessageBody: crypto.createHash('md5').update(MessageBody, 'utf-8').digest('hex'),
+        };
+      });
+
+    await wrap(async (req, ctx) => {
+      await ctx.sqs.sendMessage(QUEUE_URL, message, undefined, { delaySeconds: 10 });
     }).with(sqsWrapper)({}, context);
 
     expect(context.log.debug).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);

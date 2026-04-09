@@ -27,6 +27,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
@@ -61,8 +62,8 @@ function OpportunitiesController(ctx) {
    * @param {Array} opportunities - Array of opportunity entities
    * @returns {Promise<Array>} Filtered (or unfiltered) opportunities
    */
-  async function filterForSummitPlg(site, opportunities) {
-    if (await getIsSummitPlgEnabled(site, ctx)) {
+  async function filterForSummitPlg(site, opportunities, requestContext) {
+    if (await getIsSummitPlgEnabled(site, ctx, requestContext)) {
       return opportunities.filter(
         (oppty) => SUMMIT_PLG_ALLOWED_TYPES.includes(oppty.getType()),
       );
@@ -109,7 +110,7 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteId(siteId);
-    const opptys = (await filterForSummitPlg(site, allOpptys))
+    const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -140,7 +141,7 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
-    const opptys = (await filterForSummitPlg(site, allOpptys))
+    const opptys = (await filterForSummitPlg(site, allOpptys, context))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -174,6 +175,14 @@ function OpportunitiesController(ctx) {
     const oppty = await Opportunity.findById(opptyId);
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+      try {
+        await grantSuggestionsForOpportunity(dataAccess, site, oppty);
+      /* c8 ignore next 3 */
+      } catch (err) {
+        ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
+      }
     }
     return ok(OpportunityDto.toJSON(oppty));
   };

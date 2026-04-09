@@ -1,0 +1,211 @@
+plg-onboard:
+  post:
+    tags:
+      - plg
+    summary: Onboard a domain via PLG ASO flow
+    description: |
+      Performs ASO PLG onboarding for a given domain and IMS organization.
+      Creates or resumes a PlgOnboarding record, resolves/creates the organization and site,
+      checks for bot blockers, configures audits and imports, creates ASO entitlements,
+      and triggers initial audit runs and brand profile generation.
+    operationId: plgOnboard
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - domain
+            properties:
+              domain:
+                type: string
+                format: hostname
+                description: The domain name to onboard (without protocol)
+                example: "example.com"
+              imsOrgId:
+                $ref: './schemas.yaml#/ImsOrganizationId'
+                description: |
+                  Optional IMS Organization ID hint. When provided, must match one of the
+                  caller's token tenants. Use this when the caller belongs to multiple orgs.
+                  If omitted, the first tenant from the token is used.
+    responses:
+      '200':
+        description: PLG onboarding completed or in progress
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '409':
+        description: Conflict - organization creation conflict
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+plg-sites:
+  get:
+    tags:
+      - plg
+    summary: List PLG site onboardings (admin)
+    description: |
+      Admin-only list of PLG ASO onboarding records from `plg_onboardings` (`PlgOnboarding`
+      in `@adobe/spacecat-shared-data-access`). Each item includes `domain`, `baseURL`,
+      onboarding `status`, and when resolved the SpaceCat `siteId` and `organizationId`.
+      Cross-tenant; only SpaceCat administrators may call this endpoint.
+
+      **Payload size:** Without `limit`, the implementation follows all result pages until
+      exhausted, so the JSON array can grow large as the table grows (memory and response
+      size). Use `limit` for a bounded page of rows when tooling or clients need it.
+    operationId: listPlgSites
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        description: |
+          Maximum number of onboarding records to return from the backing query. When omitted,
+          all pages are fetched (unbounded row count; see description). Must be a positive integer
+          (decimal fractions, signs, or trailing non-digits such as `1.5` or `50abc` are rejected
+          with 400).
+        schema:
+          type: integer
+          minimum: 1
+    responses:
+      '200':
+        description: |
+          Array of PLG onboarding records. May be a large payload when `limit` is not set and
+          many rows exist.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+plg-onboard-update:
+  parameters:
+    - name: onboardingId
+      in: path
+      required: true
+      schema:
+        $ref: './schemas.yaml#/Id'
+      description: The PLG onboarding record ID
+  patch:
+    tags:
+      - plg
+    summary: Review a waitlisted PLG onboarding
+    description: |
+      Admin-only endpoint for ESEs to review a waitlisted PLG onboarding.
+      Supports BYPASSED (skip the blocking check and re-run the onboarding flow)
+      or UPHELD (block stands, no re-run).
+
+      Behavior per waitlist reason:
+      - **DOMAIN_ALREADY_ONBOARDED_IN_ORG**: Sets the old onboarded domain to INACTIVE,
+        then re-runs the flow for the new domain.
+      - **AEM_SITE_CHECK**: Requires `siteConfig.rumHost`. Derives delivery config (AEM CS)
+        or code/hlx config (AEM EDS) from rumHost, then re-runs the flow.
+      - **DOMAIN_ALREADY_ASSIGNED**: Sets the current record to INACTIVE, then runs the
+        flow under the existing org that owns the site.
+    operationId: updatePlgOnboard
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - decision
+              - justification
+            properties:
+              decision:
+                type: string
+                enum:
+                  - BYPASSED
+                  - UPHELD
+                description: "BYPASSED: skip check and resume onboarding. UPHELD: block stands."
+              justification:
+                type: string
+                description: ESE's reason for the decision
+                example: "Customer confirmed AEM migration in progress"
+              siteConfig:
+                type: object
+                description: Required for AEM_SITE_CHECK bypass. Provide rumHost.
+                properties:
+                  rumHost:
+                    type: string
+                    description: |
+                      The RUM host for the site. For AEM CS: publish-p{programId}-e{envId}.adobeaemcloud.com.
+                      For AEM EDS: ref--repo--owner.aem.live.
+                    example: "publish-p123-e456.adobeaemcloud.com"
+    responses:
+      '200':
+        description: |
+          BYPASSED: onboarding flow result (ONBOARDED or re-waitlisted at different check).
+          UPHELD: record returned as-is with WAITLISTED status.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '409':
+        description: Conflict - PLG onboarding already exists for domain under existing org
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: [ ]
+
+plg-onboard-status:
+  parameters:
+    - $ref: './parameters.yaml#/imsOrgId'
+  get:
+    tags:
+      - plg
+    summary: Get PLG onboarding status for an IMS org
+    description: |
+      Retrieves all PLG onboarding records for a given IMS Organization ID.
+      Returns the current status and progress of each onboarding.
+    operationId: getPlgOnboardStatus
+    responses:
+      '200':
+        description: List of PLG onboarding records
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]

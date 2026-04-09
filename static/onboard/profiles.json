@@ -21,6 +21,29 @@
 		},
 		"integrations": {}
 	},
+	"aso_plg": {
+		"audits": {
+			"alt-text": {},
+			"cwv": {},
+			"broken-backlinks": {},
+			"scrape-top-pages": {},
+			"broken-backlinks-auto-suggest": {},
+			"broken-backlinks-auto-fix": {},
+			"alt-text-auto-fix": {},
+			"alt-text-auto-suggest-mystique": {},
+			"cwv-auto-fix": {},
+			"cwv-auto-suggest": {}
+		},
+		"imports": {
+			"organic-traffic": {},
+			"top-pages": {},
+			"all-traffic": {}
+		},
+		"config": {
+			"scheduledRun": false
+		},
+		"integrations": {}
+	},
 	"plg":  {
 		"audits": {
 			"scrape-top-pages": {},
@@ -88,6 +111,7 @@
 		"integrations": {}
 	},
 	"paid":  {
+		"protected": true,
 		"audits": {
 			"scrape-top-pages": {},
 			"broken-backlinks": {},

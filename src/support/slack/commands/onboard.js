@@ -207,7 +207,11 @@ function OnboardCommand(context) {
         // Write headers to CSV report
         fileStream.write(csvStringifier.getHeaderString());
 
-        // Process batch onboarding
+        // Process batch onboarding.
+        // force is intentionally not supported in CSV batch mode — force re-onboarding a paid
+        // site is a high-risk action that requires deliberate per-site confirmation via the
+        // modal Force Onboard checkbox. Blocked paid sites appear in the report and Slack
+        // output; use the modal to re-onboard them individually with force if needed.
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID, tier, projectId, language, region] = row;
@@ -272,13 +276,27 @@ function OnboardCommand(context) {
             initialValues.site = normalizedSite;
           }
         }
-        if (imsOrgId) initialValues.imsOrgId = imsOrgId;
-        if (profile) initialValues.profile = profile;
-        if (workflowWaitTime) initialValues.workflowWaitTime = workflowWaitTime;
-        if (tier) initialValues.tier = tier;
-        if (projectId) initialValues.projectId = projectId;
-        if (language) initialValues.language = language;
-        if (region) initialValues.region = region;
+        if (imsOrgId) {
+          initialValues.imsOrgId = imsOrgId;
+        }
+        if (profile) {
+          initialValues.profile = profile;
+        }
+        if (workflowWaitTime) {
+          initialValues.workflowWaitTime = workflowWaitTime;
+        }
+        if (tier) {
+          initialValues.tier = tier;
+        }
+        if (projectId) {
+          initialValues.projectId = projectId;
+        }
+        if (language) {
+          initialValues.language = language;
+        }
+        if (region) {
+          initialValues.region = region;
+        }
 
         const buttonValue = Object.keys(initialValues).length > 0
           ? JSON.stringify(initialValues)
