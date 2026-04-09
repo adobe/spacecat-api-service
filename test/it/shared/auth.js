@@ -157,9 +157,32 @@ export async function createDelegatedUserNoSourceToken() {
   });
 }
 
+/**
+ * Read-only admin — is_admin: false, is_read_only_admin: true.
+ * The readOnlyAdminWrapper evaluates a LaunchDarkly feature flag before granting
+ * access; without LD configured (e.g. in IT tests) the wrapper is fail-closed
+ * and returns 403 for all routes. Use this persona to verify fail-closed behaviour
+ * or in environments where the LD flag is enabled.
+ */
+export async function createReadOnlyAdminToken() {
+  return signToken({
+    sub: 'test-readonly-admin@adobe.com',
+    email: 'test-readonly-admin@adobe.com',
+    is_admin: false,
+    is_read_only_admin: true,
+    is_llmo_administrator: false,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
 export async function createAllTokens() {
   const [
     admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    readOnlyAdmin,
   ] = await Promise.all([
     createAdminToken(),
     createUserToken(),
@@ -167,8 +190,15 @@ export async function createAllTokens() {
     createDelegatedUserToken(),
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
+    createReadOnlyAdminToken(),
   ]);
   return {
-    admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    admin,
+    user,
+    trialUser,
+    delegatedUser,
+    delegatedUserTruncated,
+    delegatedUserNoSource,
+    readOnlyAdmin,
   };
 }

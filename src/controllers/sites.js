@@ -319,7 +319,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAll = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
 
@@ -344,7 +344,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAllByDeliveryType = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const deliveryType = context.params?.deliveryType;
@@ -368,7 +368,7 @@ function SitesController(ctx, log, env) {
    * @return {Promise<Response>} Array of sites response.
    */
   const getAllWithLatestAudit = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const auditType = context.params?.auditType;
@@ -394,7 +394,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} XLS file.
    */
   const getAllAsXLS = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const sites = await Site.all();
@@ -406,7 +406,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} CSV file.
    */
   const getAllAsCSV = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all sites');
     }
     const sites = await Site.all();

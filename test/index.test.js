@@ -309,4 +309,25 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(200);
     expect(context.dataAccess.Audit.findBySiteIdAndAuditTypeAndAuditedAt).to.have.been.calledOnce;
   });
+
+  it('wires readOnlyAdminWrapper with routeCapabilities', async () => {
+    let capturedOpts;
+    const { main: testMain } = await esmock('../src/index.js', {
+      '@adobe/spacecat-shared-http-utils': {
+        readOnlyAdminWrapper: (fn, opts) => {
+          capturedOpts = opts;
+          return fn;
+        },
+        s2sAuthWrapper: s2sAuthWrapperStub,
+      },
+    });
+    // Trigger a request so the chain initialises (top-level .with() runs at import time,
+    // but we confirm capturedOpts was populated by the module load)
+    expect(capturedOpts, 'readOnlyAdminWrapper must receive an options object').to.be.an('object');
+    expect(capturedOpts, 'routeCapabilities must be passed to readOnlyAdminWrapper').to.have.property('routeCapabilities');
+    expect(capturedOpts.routeCapabilities, 'routeCapabilities must be a non-empty object').to.be.an('object').that.is.not.empty;
+    // Sanity-check a known read route is present so an accidental empty map is caught
+    expect(capturedOpts.routeCapabilities).to.have.property('GET /sites/:siteId');
+    expect(testMain).to.exist; // reference to satisfy no-unused-vars
+  });
 });

@@ -98,6 +98,7 @@ describe('User Details Controller', () => {
     mockAccessControlUtil = {
       hasAccess: sandbox.stub().resolves(true),
       hasAdminAccess: sandbox.stub().returns(true),
+      hasAdminReadAccess: sandbox.stub().returns(true),
     };
 
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
@@ -190,7 +191,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'not-found-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
 
       const result = await controller.getUserDetailsByExternalUserId(context);
 
@@ -210,7 +211,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'not-found-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.rejects(new Error('IMS error'));
 
       const result = await controller.getUserDetailsByExternalUserId(context);
@@ -231,7 +232,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'incomplete-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.resolves({
         userId: 'incomplete-user-123',
         // first_name, last_name, email are missing/null
@@ -254,7 +255,7 @@ describe('User Details Controller', () => {
         organizationId,
         externalUserId: 'not-found-user@AdobeOrg',
       };
-      mockAccessControlUtil.hasAdminAccess.returns(false);
+      mockAccessControlUtil.hasAdminReadAccess.returns(false);
 
       const result = await controller.getUserDetailsByExternalUserId(context);
 
@@ -368,7 +369,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: [externalUserId, 'not-found-user@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
 
       const result = await controller.getUserDetailsInBulk(context);
 
@@ -393,7 +394,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: [externalUserId, 'not-found-user@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(false);
+      mockAccessControlUtil.hasAdminReadAccess.returns(false);
 
       const result = await controller.getUserDetailsInBulk(context);
 
@@ -416,7 +417,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: ['not-found-user-1@AdobeOrg', 'not-found-user-2@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.rejects(new Error('IMS error'));
 
       const result = await controller.getUserDetailsInBulk(context);
@@ -440,7 +441,7 @@ describe('User Details Controller', () => {
       context.data = {
         userIds: ['incomplete-user@AdobeOrg'],
       };
-      mockAccessControlUtil.hasAdminAccess.returns(true);
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
       mockImsClient.getImsAdminProfile.resolves({
         userId: 'incomplete-user-123',
         first_name: null,

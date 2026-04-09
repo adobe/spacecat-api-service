@@ -15,9 +15,11 @@
  *
  * @param {string} baseUrl - The dev server base URL (e.g., http://localhost:3002)
  * @param {{ admin: string, user: string, trialUser: string, delegatedUser: string,
- *   delegatedUserTruncated: string, delegatedUserNoSource: string }} tokens - JWT tokens
+ *   delegatedUserTruncated: string, delegatedUserNoSource: string,
+ *   readOnlyAdmin: string }} tokens - JWT tokens
  * @returns {{ admin: object, user: object, trialUser: object, delegatedUser: object,
- *   delegatedUserTruncated: object, delegatedUserNoSource: object }}
+ *   delegatedUserTruncated: object, delegatedUserNoSource: object,
+ *   readOnlyAdmin: object }}
  */
 export function createHttpClient(baseUrl, tokens) {
   async function request(method, path, body, token, extraHeaders = {}) {
@@ -75,5 +77,6 @@ export function createHttpClient(baseUrl, tokens) {
     delegatedUser: makeMethods(tokens.delegatedUser),
     delegatedUserTruncated: makeMethods(tokens.delegatedUserTruncated),
     delegatedUserNoSource: makeMethods(tokens.delegatedUserNoSource),
+    readOnlyAdmin: makeMethods(tokens.readOnlyAdmin),
   };
 }
