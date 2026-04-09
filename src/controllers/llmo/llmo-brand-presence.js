@@ -276,39 +276,33 @@ function parseFilterDimensionsSiteQuery(context) {
 }
 
 /**
- * Site IDs in the organization (or a single site when `siteFilter` is set).
- * @internal Exported for tests
- */
-export async function fetchSiteIdsInOrg(client, organizationId, siteFilter) {
-  if (shouldApplyFilter(siteFilter)) {
-    return [siteFilter];
-  }
-  const { data, error } = await client
-    .from('sites')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .limit(QUERY_LIMIT);
-  if (error || !data?.length) {
-    return [];
-  }
-  return data.map((s) => s.id).filter(Boolean);
-}
-
-/**
  * True if the brand is tied to the site via legacy `brands.site_id` or `brand_sites` (M2M).
+ * When `preloadedBrandSiteId` is passed (including `null`), skips the initial `brands` lookup — use
+ * when the caller already selected `site_id` on the same brand row.
+ * @param {string|null|undefined} [preloadedBrandSiteId] - Known brands.site_id, else query DB
  * @internal Exported for tests
  */
-export async function brandLinkedToSite(client, organizationId, brandId, siteId) {
-  const { data: rows, error } = await client
-    .from('brands')
-    .select('site_id')
-    .eq('id', brandId)
-    .eq('organization_id', organizationId)
-    .limit(1);
-  if (error || !rows?.length) {
-    return false;
+export async function brandLinkedToSite(
+  client,
+  organizationId,
+  brandId,
+  siteId,
+  preloadedBrandSiteId,
+) {
+  let legacySiteId = preloadedBrandSiteId;
+  if (legacySiteId === undefined) {
+    const { data: rows, error } = await client
+      .from('brands')
+      .select('site_id')
+      .eq('id', brandId)
+      .eq('organization_id', organizationId)
+      .limit(1);
+    if (error || !rows?.length) {
+      return false;
+    }
+    legacySiteId = rows[0].site_id;
   }
-  if (rows[0].site_id === siteId) {
+  if (legacySiteId === siteId) {
     return true;
   }
   const { data: links } = await client
@@ -429,7 +423,13 @@ export async function fetchBrandsForConfig(client, organizationId, siteFilter, f
     }
     const b = data[0];
     if (shouldApplyFilter(siteFilter)) {
-      const linked = await brandLinkedToSite(client, organizationId, filterByBrandId, siteFilter);
+      const linked = await brandLinkedToSite(
+        client,
+        organizationId,
+        filterByBrandId,
+        siteFilter,
+        b.site_id,
+      );
       if (!linked) {
         return [];
       }

@@ -30,7 +30,6 @@ import {
   brandLinkedToSite,
   fetchDistinctPromptCountForConfig,
   fetchBrandsForOrgSite,
-  fetchSiteIdsInOrg,
   resolveSiteIdsForConfigPageIntents,
   createPromptDetailHandler,
   createSentimentOverviewHandler,
@@ -893,63 +892,6 @@ describe('llmo-brand-presence', () => {
     });
   });
 
-  describe('fetchSiteIdsInOrg', () => {
-    it('returns all org site ids when siteFilter is not set', async () => {
-      const client = createTableAwareMock({
-        sites: {
-          data: [
-            { id: '0178a3f0-1234-7000-8000-0000000000aa' },
-            { id: '0178a3f0-1234-7000-8000-0000000000bb' },
-          ],
-          error: null,
-        },
-      });
-      const ids = await fetchSiteIdsInOrg(
-        client,
-        '0178a3f0-1234-7000-8000-000000000001',
-        undefined,
-      );
-      expect(ids).to.deep.equal([
-        '0178a3f0-1234-7000-8000-0000000000aa',
-        '0178a3f0-1234-7000-8000-0000000000bb',
-      ]);
-    });
-
-    it('returns single site id when siteFilter is set', async () => {
-      const sid = '0178a3f0-1234-7000-8000-000000000099';
-      const ids = await fetchSiteIdsInOrg(
-        createTableAwareMock({}),
-        '0178a3f0-1234-7000-8000-000000000001',
-        sid,
-      );
-      expect(ids).to.deep.equal([sid]);
-    });
-
-    it('returns empty when sites query errors', async () => {
-      const client = createTableAwareMock({
-        sites: { data: [], error: { message: 'fail' } },
-      });
-      const ids = await fetchSiteIdsInOrg(
-        client,
-        '0178a3f0-1234-7000-8000-000000000001',
-        undefined,
-      );
-      expect(ids).to.deep.equal([]);
-    });
-
-    it('returns empty when sites query returns no rows', async () => {
-      const client = createTableAwareMock({
-        sites: { data: [], error: null },
-      });
-      const ids = await fetchSiteIdsInOrg(
-        client,
-        '0178a3f0-1234-7000-8000-000000000001',
-        undefined,
-      );
-      expect(ids).to.deep.equal([]);
-    });
-  });
-
   describe('brandLinkedToSite', () => {
     it('returns true when brands.site_id matches siteId', async () => {
       const siteId = '0178a3f0-1234-7000-8000-000000000099';
@@ -1003,6 +945,34 @@ describe('llmo-brand-presence', () => {
         '0178a3f0-1234-7000-8000-000000000099',
       );
       expect(ok).to.equal(false);
+    });
+
+    it('returns true when preloaded site_id matches without querying brands', async () => {
+      const siteId = '0178a3f0-1234-7000-8000-000000000099';
+      const client = createTableAwareMock({});
+      const ok = await brandLinkedToSite(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        siteId,
+        siteId,
+      );
+      expect(ok).to.equal(true);
+      expect(client.from).not.to.have.been.called;
+    });
+
+    it('uses preloaded null and resolves via brand_sites only', async () => {
+      const client = createTableAwareMock({
+        brand_sites: { data: [{ id: 'link-1' }], error: null },
+      });
+      const ok = await brandLinkedToSite(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        '0178a3f0-1234-7000-8000-000000000099',
+        null,
+      );
+      expect(ok).to.equal(true);
     });
   });
 
