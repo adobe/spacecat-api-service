@@ -1164,7 +1164,9 @@ describe('Organizations Controller', () => {
       expect(body.map((s) => s.id)).to.include('site1');
     });
 
-    it('excludes own-org sites when own entitlement has PRE_ONBOARD tier', async () => {
+    it('excludes own-org sites when own entitlement has PRE_ONBOARD tier for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       const plgEntitlement = {
         getId: () => OWN_ENT_ID,
         getProductCode: () => 'abcd',
@@ -1183,6 +1185,28 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(body).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('returns own-org PRE_ONBOARD sites for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      const preOnboardEntitlement = {
+        getId: () => OWN_ENT_ID,
+        getProductCode: () => 'abcd',
+        getTier: () => 'PRE_ONBOARD',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: preOnboardEntitlement });
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationId.resolves([sites[0]]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{ getSiteId: () => 'site1' }]);
+
+      const result = await organizationsController.getSitesForOrganization({
+        params: { organizationId: orgId2 },
+        ...context,
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.map((s) => s.id)).to.include('site1');
     });
   });
 });
