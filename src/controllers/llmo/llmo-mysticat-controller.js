@@ -13,6 +13,7 @@
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
   createFilterDimensionsHandler,
+  createFilterDimensionsFromConfigHandler,
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler, createCompetitorSummaryHandler, createTopicsHandler,
   createTopicPromptsHandler,
@@ -82,6 +83,9 @@ function LlmoMysticatController(ctx) {
   };
 
   const getFilterDimensions = createFilterDimensionsHandler(getOrgAndValidateAccess);
+  const getFilterDimensionsFromConfig = createFilterDimensionsFromConfigHandler(
+    getOrgAndValidateAccess,
+  );
   const getBrandPresenceWeeks = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
   const getMarketTrackingTrends = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
   const getCompetitorSummary = createCompetitorSummaryHandler(getOrgAndValidateAccess);
@@ -101,6 +105,7 @@ function LlmoMysticatController(ctx) {
 
   return {
     getFilterDimensions,
+    getFilterDimensionsFromConfig,
     getBrandPresenceWeeks,
     getMarketTrackingTrends,
     getCompetitorSummary,

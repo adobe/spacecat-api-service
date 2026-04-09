@@ -184,6 +184,8 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': 'organization:write',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions-from-config': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions-from-config': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': 'brand:read',

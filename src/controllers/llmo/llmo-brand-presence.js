@@ -306,7 +306,11 @@ export async function resolveSiteIds(client, organizationId, siteId, filterByBra
   return [];
 }
 
-async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
+/**
+ * Distinct page intent values for filter dropdowns (same semantics as filter-dimensions).
+ * @internal Exported for filter-dimensions-from-config and tests.
+ */
+export async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
   if (shouldApplyFilter(siteId)) {
     const { data: piData, error: piError } = await client
       .from('page_intents')
@@ -349,6 +353,370 @@ async function fetchPageIntents(client, organizationId, siteId, filterByBrandId,
     return sorted.map((p) => toFilterOption(p, p));
   }
   return [];
+}
+
+/** Hardcoded origin options for filter-dimensions-from-config (category_origin values). */
+const CONFIG_FILTER_ORIGINS = Object.freeze([
+  toFilterOption('human', 'human'),
+  toFilterOption('ai', 'ai'),
+]);
+
+/**
+ * Optional query param only: siteId / site_id.
+ * @param {Object} context
+ * @returns {{ siteId: string|undefined }}
+ */
+function parseFilterDimensionsFromConfigParams(context) {
+  const q = context.data || {};
+  return {
+    siteId: q.siteId || q.site_id,
+  };
+}
+
+/**
+ * Site IDs in the organization (or a single site when `siteFilter` is set).
+ * @internal Exported for tests
+ */
+export async function fetchSiteIdsInOrg(client, organizationId, siteFilter) {
+  if (shouldApplyFilter(siteFilter)) {
+    return [siteFilter];
+  }
+  const { data, error } = await client
+    .from('sites')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) return [];
+  return data.map((s) => s.id).filter(Boolean);
+}
+
+/**
+ * True if the brand is tied to the site via legacy `brands.site_id` or `brand_sites` (M2M).
+ * @internal Exported for tests
+ */
+export async function brandLinkedToSite(client, organizationId, brandId, siteId) {
+  const { data: rows, error } = await client
+    .from('brands')
+    .select('site_id')
+    .eq('id', brandId)
+    .eq('organization_id', organizationId)
+    .limit(1);
+  if (error || !rows?.length) return false;
+  if (rows[0].site_id === siteId) return true;
+  const { data: links } = await client
+    .from('brand_sites')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandId)
+    .eq('site_id', siteId)
+    .limit(1);
+  return !!(links?.length);
+}
+
+/**
+ * Resolves site_id for page_intents for a brand: prefer `brands.site_id`,
+ * else first matching `brand_sites` row.
+ */
+async function resolveBrandPrimarySiteId(client, organizationId, brandId) {
+  const { data: bRows, error } = await client
+    .from('brands')
+    .select('site_id')
+    .eq('id', brandId)
+    .eq('organization_id', organizationId)
+    .limit(1);
+  if (error || !bRows?.length) return null;
+  if (bRows[0].site_id) return bRows[0].site_id;
+  const { data: bsRows } = await client
+    .from('brand_sites')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandId)
+    .limit(1);
+  return bsRows?.[0]?.site_id ?? null;
+}
+
+/**
+ * Resolves site_id list for page_intents when using config-based dimensions (no execution query).
+ * @internal Exported for tests
+ */
+export async function resolveSiteIdsForConfigPageIntents(
+  client,
+  organizationId,
+  siteId,
+  filterByBrandId,
+) {
+  if (shouldApplyFilter(siteId)) {
+    return [siteId];
+  }
+  if (filterByBrandId) {
+    const sid = await resolveBrandPrimarySiteId(client, organizationId, filterByBrandId);
+    if (!sid) return [];
+    const siteBelongs = await validateSiteBelongsToOrg(client, organizationId, sid);
+    return siteBelongs ? [sid] : [];
+  }
+  return [];
+}
+
+/**
+ * @internal Exported for tests
+ */
+export async function fetchRegionsForConfig(client) {
+  const { data, error } = await client
+    .from('regions')
+    .select('code, name')
+    .order('name', { ascending: true });
+  if (error || !data?.length) return [];
+  return data.map((r) => toFilterOption(r.code, r.name));
+}
+
+/**
+ * Brands linked to one site: M2M `brand_sites` plus legacy `brands.site_id` rows.
+ */
+async function fetchBrandsForOrgSite(client, organizationId, siteFilter) {
+  const { data: bsData, error: bsErr } = await client
+    .from('brand_sites')
+    .select('brands(id, name)')
+    .eq('organization_id', organizationId)
+    .eq('site_id', siteFilter)
+    .limit(QUERY_LIMIT);
+  const byId = new Map();
+  if (!bsErr && bsData?.length) {
+    bsData.forEach((row) => {
+      const br = row.brands;
+      if (br?.id && br?.name) byId.set(String(br.id), toFilterOption(String(br.id), br.name));
+    });
+  }
+  const { data: legData, error: legErr } = await client
+    .from('brands')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .eq('site_id', siteFilter)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (!legErr && legData?.length) {
+    legData.forEach((br) => {
+      if (br?.id && br?.name) byId.set(String(br.id), toFilterOption(String(br.id), br.name));
+    });
+  }
+  const opts = [...byId.values()];
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Brands scoped by org (`organization_id`), optional site filter, optional single brand path.
+ * Uses `brand_sites` M2M + legacy `brands.site_id` because `site_id` on brands is often null.
+ * @internal Exported for tests
+ */
+export async function fetchBrandsForConfig(client, organizationId, siteFilter, filterByBrandId) {
+  if (filterByBrandId) {
+    const { data, error } = await client
+      .from('brands')
+      .select('id, name, site_id')
+      .eq('id', filterByBrandId)
+      .eq('organization_id', organizationId)
+      .limit(1);
+    if (error || !data?.length) return [];
+    const b = data[0];
+    if (shouldApplyFilter(siteFilter)) {
+      const linked = await brandLinkedToSite(client, organizationId, filterByBrandId, siteFilter);
+      if (!linked) return [];
+    }
+    return [toFilterOption(String(b.id), b.name)];
+  }
+  if (shouldApplyFilter(siteFilter)) {
+    return fetchBrandsForOrgSite(client, organizationId, siteFilter);
+  }
+  const { data, error } = await client
+    .from('brands')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) return [];
+  const opts = data.map((b) => toFilterOption(String(b.id), b.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Org-scoped categories (active / pending).
+ * @internal Exported for tests
+ */
+export async function fetchCategoriesForConfig(client, organizationId) {
+  const { data, error } = await client
+    .from('categories')
+    .select('category_id, name')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) return [];
+  const opts = data.map((c) => toFilterOption(c.category_id, c.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Topics for org, optionally scoped to brand_ids from config brands (includes brand_id NULL).
+ * @internal Exported for tests
+ */
+export async function fetchTopicsForConfig(client, organizationId, brandOptions) {
+  const brandIdSet = new Set(
+    brandOptions.map((b) => b.id).filter((id) => hasText(id)),
+  );
+  const { data, error } = await client
+    .from('topics')
+    .select('id, name, brand_id')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) return [];
+  const filtered = data.filter((t) => !t.brand_id || brandIdSet.has(String(t.brand_id)));
+  const opts = filtered.map((t) => toFilterOption(String(t.id), t.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+const PROMPT_STATUS_FOR_CONFIG_STATS = ['pending', 'active'];
+
+/**
+ * Counts `prompts` rows for the same brand scope as filter-dimensions-from-config dimensions.
+ * @internal Exported for tests
+ */
+export async function fetchDistinctPromptCountForConfig(
+  client,
+  organizationId,
+  filterByBrandId,
+  brandOptions,
+) {
+  if (filterByBrandId) {
+    const { count, error } = await client
+      .from('prompts')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
+      .eq('brand_id', filterByBrandId)
+      .in('status', PROMPT_STATUS_FOR_CONFIG_STATS);
+    if (error) return 0;
+    return Number.isFinite(Number(count)) ? Number(count) : 0;
+  }
+  const brandIds = brandOptions.map((b) => b.id).filter((id) => hasText(id));
+  if (brandIds.length === 0) return 0;
+  const chunks = [];
+  for (let i = 0; i < brandIds.length; i += IN_FILTER_CHUNK_SIZE) {
+    chunks.push(brandIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
+  }
+  const rows = await Promise.all(chunks.map((chunk) => client
+    .from('prompts')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .in('brand_id', chunk)
+    .in('status', PROMPT_STATUS_FOR_CONFIG_STATS)));
+  let total = 0;
+  for (const { count, error } of rows) {
+    if (error) return 0;
+    total += Number.isFinite(Number(count)) ? Number(count) : 0;
+  }
+  return total;
+}
+
+/**
+ * Stats for filter-dimensions-from-config: prompt count from `prompts`;
+ * execution fields reserved (0) until wired to executions.
+ * @internal Exported for tests
+ */
+export async function fetchFilterDimensionsFromConfigStats(
+  client,
+  organizationId,
+  filterByBrandId,
+  brandOptions,
+) {
+  const distinctPromptCount = await fetchDistinctPromptCountForConfig(
+    client,
+    organizationId,
+    filterByBrandId,
+    brandOptions,
+  );
+  return {
+    distinct_prompt_count: distinctPromptCount,
+    total_execution_count: 0,
+    empty_answer_execution_count: 0,
+  };
+}
+
+/**
+ * Creates the getFilterDimensionsFromConfig handler.
+ * Returns the same dimension keys as filter-dimensions; stats include `distinct_prompt_count`
+ * from `prompts` and placeholder execution counts (0) until wired to executions.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'filter-dimensions-from-config',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const { siteId: siteFilter } = parseFilterDimensionsFromConfigParams(ctx);
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (filterByBrandId && !isValidUUID(filterByBrandId)) {
+        return badRequest('Brand id must be a valid UUID');
+      }
+
+      if (shouldApplyFilter(siteFilter)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const [regions, brandOptions, categories] = await Promise.all([
+        fetchRegionsForConfig(client),
+        fetchBrandsForConfig(client, organizationId, siteFilter, filterByBrandId),
+        fetchCategoriesForConfig(client, organizationId),
+      ]);
+
+      if (filterByBrandId && brandOptions.length === 0) {
+        return forbidden('Brand not found or not accessible for this organization');
+      }
+
+      const [topics, stats] = await Promise.all([
+        fetchTopicsForConfig(client, organizationId, brandOptions),
+        fetchFilterDimensionsFromConfigStats(
+          client,
+          organizationId,
+          filterByBrandId,
+          brandOptions,
+        ),
+      ]);
+      const origins = [...CONFIG_FILTER_ORIGINS];
+
+      const siteIdsForPageIntents = await resolveSiteIdsForConfigPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+      );
+      const pageIntents = await fetchPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+        siteIdsForPageIntents,
+      );
+
+      return ok({
+        brands: brandOptions,
+        categories,
+        topics,
+        origins,
+        regions,
+        stats,
+        page_intents: pageIntents,
+      });
+    },
+  );
 }
 
 function parseWeeksParams(context) {

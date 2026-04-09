@@ -28,7 +28,12 @@ import {
   createBrandPresenceWeeksHandler,
   generateIsoWeekRange,
   createFilterDimensionsHandler,
+  brandLinkedToSite,
+  createFilterDimensionsFromConfigHandler,
+  fetchDistinctPromptCountForConfig,
+  fetchSiteIdsInOrg,
   normalizeFilterDimensionsStatsFromRpc,
+  resolveSiteIdsForConfigPageIntents,
   createPromptDetailHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
@@ -1229,6 +1234,477 @@ describe('llmo-brand-presence', () => {
         expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
       },
     );
+  });
+
+  describe('createFilterDimensionsFromConfigHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns dimensions with stats (prompt count + placeholder execution counts), origins, page_intents', async () => {
+      mockContext.params.brandId = 'all';
+      mockContext.data = {};
+      const tableMock = createTableAwareMock({
+        regions: { data: [{ code: 'US', name: 'United States' }], error: null },
+        sites: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000aa' }], error: null },
+        brands: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000bb', name: 'Acme' }], error: null },
+        prompts: { data: null, count: 12, error: null },
+        categories: { data: [{ category_id: 'books', name: 'Books' }], error: null },
+        topics: {
+          data: [{
+            id: '0178a3f0-1234-7000-8000-0000000000cc',
+            name: 'Topic A',
+            brand_id: null,
+          }],
+          error: null,
+        },
+        page_intents: { data: [{ page_intent: 'informational' }], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = tableMock;
+
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats).to.deep.equal({
+        distinct_prompt_count: 12,
+        total_execution_count: 0,
+        empty_answer_execution_count: 0,
+      });
+      expect(body.origins).to.deep.equal([
+        { id: 'human', label: 'human' },
+        { id: 'ai', label: 'ai' },
+      ]);
+      expect(body.regions).to.deep.equal([{ id: 'US', label: 'United States' }]);
+      expect(body.brands).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000bb', label: 'Acme' }]);
+      expect(body.categories).to.deep.equal([{ id: 'books', label: 'Books' }]);
+      expect(body.topics).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000cc', label: 'Topic A' }]);
+      expect(body.page_intents).to.deep.equal([{ id: 'informational', label: 'informational' }]);
+      expect(tableMock.rpc).not.to.have.been.called;
+    });
+
+    it('returns badRequest when brandId is not a valid UUID', async () => {
+      mockContext.params.brandId = 'not-a-uuid';
+      mockContext.data = {};
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({});
+
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden when siteId does not belong to the organization', async () => {
+      mockContext.data = { siteId: '0178a3f0-1234-7000-8000-000000000099' };
+      const tableMock = createTableAwareMock({
+        sites: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = tableMock;
+
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns dimensions when siteId scopes brands via brand_sites', async () => {
+      const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
+      mockContext.data = { siteId: siteUuid };
+      const tableMock = createTableAwareMock({
+        regions: { data: [{ code: 'US', name: 'United States' }], error: null },
+        sites: { data: [{ id: siteUuid }], error: null },
+        brand_sites: {
+          data: [{ brands: { id: '0178a3f0-1234-7000-8000-0000000000bb', name: 'Scoped' } }],
+          error: null,
+        },
+        brands: {
+          data: [{
+            id: '0178a3f0-1234-7000-8000-0000000000dd',
+            name: 'LegacySite',
+          }],
+          error: null,
+        },
+        prompts: { data: null, count: 3, error: null },
+        categories: { data: [{ category_id: 'books', name: 'Books' }], error: null },
+        topics: {
+          data: [{
+            id: '0178a3f0-1234-7000-8000-0000000000cc',
+            name: 'Topic A',
+            brand_id: null,
+          }],
+          error: null,
+        },
+        page_intents: { data: [{ page_intent: 'informational' }], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = tableMock;
+
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.brands).to.deep.equal([
+        { id: '0178a3f0-1234-7000-8000-0000000000dd', label: 'LegacySite' },
+        { id: '0178a3f0-1234-7000-8000-0000000000bb', label: 'Scoped' },
+      ]);
+      expect(body.stats.distinct_prompt_count).to.equal(3);
+    });
+
+    it('returns dimensions for single brand with siteId when linked via brands.site_id', async () => {
+      const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
+      const brandUuid = '0178a3f0-1234-7000-8000-0000000000bb';
+      mockContext.params.brandId = brandUuid;
+      mockContext.data = { siteId: siteUuid };
+      const tableMock = createTableAwareMock({
+        regions: { data: [{ code: 'US', name: 'United States' }], error: null },
+        sites: { data: [{ id: siteUuid }], error: null },
+        brands: {
+          data: [{
+            id: brandUuid,
+            name: 'Single',
+            site_id: siteUuid,
+          }],
+          error: null,
+        },
+        prompts: { data: null, count: 7, error: null },
+        categories: { data: [{ category_id: 'books', name: 'Books' }], error: null },
+        topics: {
+          data: [{
+            id: '0178a3f0-1234-7000-8000-0000000000cc',
+            name: 'Topic A',
+            brand_id: brandUuid,
+          }],
+          error: null,
+        },
+        page_intents: { data: [{ page_intent: 'informational' }], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = tableMock;
+
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.brands).to.deep.equal([{ id: brandUuid, label: 'Single' }]);
+      expect(body.stats.distinct_prompt_count).to.equal(7);
+    });
+
+    it('returns forbidden when single brand is not found or not accessible', async () => {
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-0000000000bb';
+      mockContext.data = {};
+      const tableMock = createTableAwareMock({
+        brands: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = tableMock;
+
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns forbidden when single brand is not linked to siteId', async () => {
+      const siteUuid = '0178a3f0-1234-7000-8000-000000000099';
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-0000000000bb';
+      mockContext.data = { siteId: siteUuid };
+      const tableMock = createTableAwareMock({
+        sites: { data: [{ id: siteUuid }], error: null },
+        brands: {
+          data: [{
+            id: '0178a3f0-1234-7000-8000-0000000000bb',
+            name: 'Orphan',
+            site_id: null,
+          }],
+          error: null,
+        },
+        brand_sites: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = tableMock;
+
+      const handler = createFilterDimensionsFromConfigHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+  });
+
+  describe('fetchDistinctPromptCountForConfig', () => {
+    function createPromptsCountClient(resolution) {
+      const chain = {
+        select() {
+          return chain;
+        },
+        eq() {
+          return chain;
+        },
+        in() {
+          return chain;
+        },
+        then(onFulfilled, onRejected) {
+          return Promise.resolve(resolution).then(onFulfilled, onRejected);
+        },
+      };
+      return { from: () => chain };
+    }
+
+    it('returns 0 when single-brand count query errors', async () => {
+      const client = createPromptsCountClient({ count: null, error: { message: 'db' } });
+      const n = await fetchDistinctPromptCountForConfig(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        [],
+      );
+      expect(n).to.equal(0);
+    });
+
+    it('returns 0 when brand scope is empty (all brands)', async () => {
+      const n = await fetchDistinctPromptCountForConfig(
+        createPromptsCountClient({ count: 0, error: null }),
+        '0178a3f0-1234-7000-8000-000000000001',
+        null,
+        [],
+      );
+      expect(n).to.equal(0);
+    });
+
+    it('returns 0 when a chunked count query errors', async () => {
+      const client = createPromptsCountClient({ count: null, error: { message: 'fail' } });
+      const n = await fetchDistinctPromptCountForConfig(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        null,
+        [{ id: '0178a3f0-1234-7000-8000-0000000000aa', label: 'A' }],
+      );
+      expect(n).to.equal(0);
+    });
+
+    it('treats non-finite count as 0', async () => {
+      const client = createPromptsCountClient({ count: undefined, error: null });
+      const n = await fetchDistinctPromptCountForConfig(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        [],
+      );
+      expect(n).to.equal(0);
+    });
+
+    it('treats non-finite count as 0 in chunked query', async () => {
+      const client = createPromptsCountClient({ count: Number.NaN, error: null });
+      const n = await fetchDistinctPromptCountForConfig(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        null,
+        [{ id: '0178a3f0-1234-7000-8000-0000000000aa', label: 'A' }],
+      );
+      expect(n).to.equal(0);
+    });
+  });
+
+  describe('fetchSiteIdsInOrg', () => {
+    it('returns all org site ids when siteFilter is not set', async () => {
+      const client = createTableAwareMock({
+        sites: {
+          data: [
+            { id: '0178a3f0-1234-7000-8000-0000000000aa' },
+            { id: '0178a3f0-1234-7000-8000-0000000000bb' },
+          ],
+          error: null,
+        },
+      });
+      const ids = await fetchSiteIdsInOrg(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        undefined,
+      );
+      expect(ids).to.deep.equal([
+        '0178a3f0-1234-7000-8000-0000000000aa',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+      ]);
+    });
+
+    it('returns single site id when siteFilter is set', async () => {
+      const sid = '0178a3f0-1234-7000-8000-000000000099';
+      const ids = await fetchSiteIdsInOrg(
+        createTableAwareMock({}),
+        '0178a3f0-1234-7000-8000-000000000001',
+        sid,
+      );
+      expect(ids).to.deep.equal([sid]);
+    });
+
+    it('returns empty when sites query errors', async () => {
+      const client = createTableAwareMock({
+        sites: { data: [], error: { message: 'fail' } },
+      });
+      const ids = await fetchSiteIdsInOrg(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        undefined,
+      );
+      expect(ids).to.deep.equal([]);
+    });
+
+    it('returns empty when sites query returns no rows', async () => {
+      const client = createTableAwareMock({
+        sites: { data: [], error: null },
+      });
+      const ids = await fetchSiteIdsInOrg(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        undefined,
+      );
+      expect(ids).to.deep.equal([]);
+    });
+  });
+
+  describe('brandLinkedToSite', () => {
+    it('returns true when brands.site_id matches siteId', async () => {
+      const siteId = '0178a3f0-1234-7000-8000-000000000099';
+      const client = createTableAwareMock({
+        brands: { data: [{ site_id: siteId }], error: null },
+      });
+      const ok = await brandLinkedToSite(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        siteId,
+      );
+      expect(ok).to.equal(true);
+    });
+
+    it('returns true when M2M brand_sites links brand to site', async () => {
+      const client = createTableAwareMock({
+        brands: { data: [{ site_id: '0178a3f0-1234-7000-8000-000000000088' }], error: null },
+        brand_sites: { data: [{ id: 'link-1' }], error: null },
+      });
+      const ok = await brandLinkedToSite(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        '0178a3f0-1234-7000-8000-000000000099',
+      );
+      expect(ok).to.equal(true);
+    });
+
+    it('returns false when brands query errors', async () => {
+      const client = createTableAwareMock({
+        brands: { data: [], error: { message: 'fail' } },
+      });
+      const ok = await brandLinkedToSite(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        '0178a3f0-1234-7000-8000-000000000099',
+      );
+      expect(ok).to.equal(false);
+    });
+
+    it('returns false when brands query returns no rows', async () => {
+      const client = createTableAwareMock({
+        brands: { data: [], error: null },
+      });
+      const ok = await brandLinkedToSite(
+        client,
+        '0178a3f0-1234-7000-8000-000000000001',
+        '0178a3f0-1234-7000-8000-0000000000bb',
+        '0178a3f0-1234-7000-8000-000000000099',
+      );
+      expect(ok).to.equal(false);
+    });
+  });
+
+  describe('resolveSiteIdsForConfigPageIntents', () => {
+    it('resolves site from brands.site_id when set', async () => {
+      const org = '0178a3f0-1234-7000-8000-000000000001';
+      const brandId = '0178a3f0-1234-7000-8000-0000000000bb';
+      const resolvedSite = '0178a3f0-1234-7000-8000-0000000000aa';
+      const client = createTableAwareMock({
+        brands: { data: [{ site_id: resolvedSite }], error: null },
+        sites: { data: [{ id: resolvedSite }], error: null },
+      });
+      const ids = await resolveSiteIdsForConfigPageIntents(
+        client,
+        org,
+        undefined,
+        brandId,
+      );
+      expect(ids).to.deep.equal([resolvedSite]);
+    });
+
+    it('resolves site from brand_sites when brand.site_id is null', async () => {
+      const org = '0178a3f0-1234-7000-8000-000000000001';
+      const brandId = '0178a3f0-1234-7000-8000-0000000000bb';
+      const resolvedSite = '0178a3f0-1234-7000-8000-0000000000aa';
+      const client = createTableAwareMock({
+        brands: { data: [{ site_id: null }], error: null },
+        brand_sites: { data: [{ site_id: resolvedSite }], error: null },
+        sites: { data: [{ id: resolvedSite }], error: null },
+      });
+      const ids = await resolveSiteIdsForConfigPageIntents(
+        client,
+        org,
+        undefined,
+        brandId,
+      );
+      expect(ids).to.deep.equal([resolvedSite]);
+    });
+
+    it('returns empty when brand has no resolvable site', async () => {
+      const org = '0178a3f0-1234-7000-8000-000000000001';
+      const brandId = '0178a3f0-1234-7000-8000-0000000000bb';
+      const client = createTableAwareMock({
+        brands: { data: [{ site_id: null }], error: null },
+        brand_sites: { data: [], error: null },
+      });
+      const ids = await resolveSiteIdsForConfigPageIntents(
+        client,
+        org,
+        undefined,
+        brandId,
+      );
+      expect(ids).to.deep.equal([]);
+    });
+
+    it('returns empty when brand lookup errors', async () => {
+      const org = '0178a3f0-1234-7000-8000-000000000001';
+      const brandId = '0178a3f0-1234-7000-8000-0000000000bb';
+      const client = createTableAwareMock({
+        brands: { data: [], error: { message: 'fail' } },
+      });
+      const ids = await resolveSiteIdsForConfigPageIntents(
+        client,
+        org,
+        undefined,
+        brandId,
+      );
+      expect(ids).to.deep.equal([]);
+    });
+
+    it('returns empty when resolved site does not belong to organization', async () => {
+      const org = '0178a3f0-1234-7000-8000-000000000001';
+      const brandId = '0178a3f0-1234-7000-8000-0000000000bb';
+      const resolvedSite = '0178a3f0-1234-7000-8000-0000000000aa';
+      const client = createTableAwareMock({
+        brands: { data: [{ site_id: null }], error: null },
+        brand_sites: { data: [{ site_id: resolvedSite }], error: null },
+        sites: { data: [], error: null },
+      });
+      const ids = await resolveSiteIdsForConfigPageIntents(
+        client,
+        org,
+        undefined,
+        brandId,
+      );
+      expect(ids).to.deep.equal([]);
+    });
   });
 
   describe('createBrandPresenceWeeksHandler', () => {
