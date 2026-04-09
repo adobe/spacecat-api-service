@@ -39,7 +39,6 @@ import {
 import {
   autoResolveAuthorUrl,
   findDeliveryType,
-  deriveProjectName,
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
@@ -50,8 +49,9 @@ import AccessControlUtil from '../../support/access-control-util.js';
 
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
-const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+const ASO_TIER = EntitlementModel.TIERS.PLG;
 const PLG_PROFILE_KEY = 'aso_plg';
+const PLG_PROJECT_NAME = 'experience-success-studio';
 
 const REVIEW_REASONS = {
   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -144,30 +144,60 @@ function isInternalOrg(orgId, env) {
 
 async function ensureAsoEntitlement(site, context) {
   const { log } = context;
+  const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
   try {
-    const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
-    const { entitlement, siteEnrollment } = await tierClient
-      .createEntitlement(ASO_TIER);
-    log.info(`Created ASO entitlement ${entitlement.getId()} and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`);
-    return { entitlement, siteEnrollment };
+    const result = await tierClient.createEntitlement(ASO_TIER);
+    log.info(`ASO entitlement ${result.entitlement.getId()} and enrollment ${result.siteEnrollment?.getId()} ensured for site ${site.getId()}`);
+    return result;
   } catch (error) {
-    if (error.message?.includes('already exists')
-      || error.message?.includes('Already enrolled')) {
-      log.info(`ASO entitlement already exists for site ${site.getId()}`);
-      return null;
+    if (error.message?.includes('already exists') || error.message?.includes('Already enrolled')) {
+      log.info(`ASO entitlement already exists for site ${site.getId()}, fetching existing`);
+      return tierClient.checkValidEntitlement();
     }
     throw error;
   }
 }
 
-async function createOrFindProject(baseURL, organizationId, context) {
+/**
+ * Revokes the ASO site enrollment for any other site under the same entitlement.
+ * Used to enforce one active PLG enrollment per org when upgrading from PRE_ONBOARD.
+ * @param {object} site - The newly enrolled site.
+ * @param {object} entitlement - The ASO entitlement for the org.
+ * @param {object} context - Request context.
+ */
+async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
+  const { dataAccess, log } = context;
+  const { SiteEnrollment } = dataAccess;
+
+  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  const toRevoke = enrollments.find((e) => e.getSiteId() !== site.getId());
+
+  if (toRevoke) {
+    log.info(`Revoking ASO enrollment ${toRevoke.getId()} for previously enrolled site ${toRevoke.getSiteId()}`);
+    await toRevoke.remove();
+  }
+}
+
+/**
+ * TODO: Update LaunchDarkly feature flags for the PLG tier transition.
+ * Called after a site is successfully enrolled in the PLG tier.
+ * Flag names and API details to be provided by the team.
+ * @param {object} site - The onboarded site.
+ * @param {object} context - Request context.
+ */
+// eslint-disable-next-line no-unused-vars
+async function updateLaunchDarklyFlags(site, context) {
+  // TODO: implement once flag names and LD API details are confirmed
+  context.log.info(`[TODO] LaunchDarkly FF update placeholder for site ${site.getId()}`);
+}
+
+async function createOrFindProject(organizationId, context) {
   const { dataAccess, log } = context;
   const { Project } = dataAccess;
-  const projectName = deriveProjectName(baseURL);
 
   const existingProject = (
     await Project.allByOrganizationId(organizationId)
-  ).find((p) => p.getProjectName() === projectName);
+  ).find((p) => p.getProjectName() === PLG_PROJECT_NAME);
 
   if (existingProject) {
     log.debug(`Found existing project ${existingProject.getId()}`);
@@ -175,9 +205,9 @@ async function createOrFindProject(baseURL, organizationId, context) {
   }
 
   const newProject = await Project.create({
-    projectName, organizationId,
+    projectName: PLG_PROJECT_NAME, organizationId,
   });
-  log.info(`Created project ${newProject.getId()} for ${baseURL}`);
+  log.info(`Created project ${newProject.getId()} for org ${organizationId}`);
   return newProject;
 }
 
@@ -260,7 +290,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
     const site = await Site.findById(onboarding.getSiteId());
     if (site) {
-      await ensureAsoEntitlement(site, context);
+      const { entitlement } = await ensureAsoEntitlement(site, context);
+      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+      await updateLaunchDarklyFlags(site, context);
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setSteps(steps);
@@ -506,7 +538,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     }
 
     // Create/assign project
-    const project = await createOrFindProject(baseURL, organizationId, context);
+    const project = await createOrFindProject(organizationId, context);
     if (!site.getProjectId()) {
       site.setProjectId(project.getId());
     }
@@ -565,8 +597,10 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
       log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
-    // Step 9: Add ASO entitlement
-    await ensureAsoEntitlement(site, context);
+    // Step 9: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
+    const { entitlement } = await ensureAsoEntitlement(site, context);
+    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+    await updateLaunchDarklyFlags(site, context);
     steps.entitlementCreated = true;
 
     // Step 10: Trigger audit runs

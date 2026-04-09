@@ -196,6 +196,10 @@ describe('PlgOnboardingController', () => {
     });
     tierClientCreateForSiteStub = sandbox.stub().resolves({
       createEntitlement: tierClientCreateEntitlementStub,
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: { getId: () => 'ent-1' },
+        siteEnrollment: { getId: () => 'enroll-1' },
+      }),
     });
 
     // Config
@@ -215,7 +219,7 @@ describe('PlgOnboardingController', () => {
     // Project
     mockProject = {
       getId: sandbox.stub().returns(TEST_PROJECT_ID),
-      getProjectName: sandbox.stub().returns('example.com'),
+      getProjectName: sandbox.stub().returns('experience-success-studio'),
     };
 
     // PlgOnboarding mock
@@ -249,6 +253,9 @@ describe('PlgOnboardingController', () => {
         create: sandbox.stub().resolves(mockOnboarding),
         allByImsOrgId: sandbox.stub().resolves([]),
         all: sandbox.stub().resolves([]),
+      },
+      SiteEnrollment: {
+        allByEntitlementId: sandbox.stub().resolves([]),
       },
     };
 
@@ -298,7 +305,7 @@ describe('PlgOnboardingController', () => {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
             PRODUCT_CODES: { ASO: 'aso_optimizer' },
-            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
           },
         },
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -960,7 +967,7 @@ describe('PlgOnboardingController', () => {
       await controller.onboard(context);
 
       expect(mockDataAccess.Project.create).to.have.been.calledWith({
-        projectName: 'example.com',
+        projectName: 'experience-success-studio',
         organizationId: TEST_ORG_ID,
       });
       expect(mockSite.setProjectId).to.have.been.calledWith(TEST_PROJECT_ID);
