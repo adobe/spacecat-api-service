@@ -13,6 +13,20 @@
 // LLMO constants
 export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
+// Supported CDN types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
+export const CDN_TYPES = {
+  BYOCDN_FASTLY: 'byocdn-fastly',
+  BYOCDN_AKAMAI: 'byocdn-akamai',
+  BYOCDN_CLOUDFRONT: 'byocdn-cloudfront',
+  BYOCDN_CLOUDFLARE: 'byocdn-cloudflare',
+  BYOCDN_IMPERVA: 'byocdn-imperva',
+  BYOCDN_OTHER: 'byocdn-other',
+  AMS_CLOUDFRONT: 'ams-cloudfront',
+  AMS_FRONTDOOR: 'ams-frontdoor',
+  AEM_CS_FASTLY: 'aem-cs-fastly',
+  COMMERCE_FASTLY: 'commerce-fastly',
+};
+
 export const LLMO_ADMIN_GROUP_NAME = 'LLMO Admin';
 
 // Apply filters to data arrays with case-insensitive exact matching

@@ -13,24 +13,11 @@
 import { promises as dns } from 'dns';
 import { isObject, isValidUrl, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
-
-// Supported CDN / log source types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
-export const LOG_SOURCES = {
-  BYOCDN_FASTLY: 'byocdn-fastly',
-  BYOCDN_AKAMAI: 'byocdn-akamai',
-  BYOCDN_CLOUDFRONT: 'byocdn-cloudfront',
-  BYOCDN_CLOUDFLARE: 'byocdn-cloudflare',
-  BYOCDN_IMPERVA: 'byocdn-imperva',
-  BYOCDN_OTHER: 'byocdn-other',
-  AMS_CLOUDFRONT: 'ams-cloudfront',
-  AMS_FRONTDOOR: 'ams-frontdoor',
-  AEM_CS_FASTLY: 'aem-cs-fastly',
-  COMMERCE_FASTLY: 'commerce-fastly',
-};
+import { CDN_TYPES } from '../controllers/llmo/llmo-utils.js';
 
 // Per-CDN strategies for edge optimize routing.
 export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
-  [LOG_SOURCES.AEM_CS_FASTLY]: {
+  [CDN_TYPES.AEM_CS_FASTLY]: {
     buildUrl: (cdnConfig, domain) => {
       const base = cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '');
       return `${base}/${domain}/edgeoptimize`;
@@ -201,12 +188,12 @@ const AEM_CS_FASTLY_IPS = new Set([
 async function checkHost(host) {
   const cnames = await dns.resolveCname(host).catch(() => []);
   if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((pattern) => c.includes(pattern)))) {
-    return LOG_SOURCES.AEM_CS_FASTLY;
+    return CDN_TYPES.AEM_CS_FASTLY;
   }
 
   const ips = await dns.resolve4(host).catch(() => []);
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
-    return LOG_SOURCES.AEM_CS_FASTLY;
+    return CDN_TYPES.AEM_CS_FASTLY;
   }
 
   return null;
