@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { promises as dns } from 'dns';
 import { isObject, isValidUrl, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 
@@ -144,18 +145,6 @@ export function parseEdgeRoutingConfig(configJson, cdnTypeNormalized) {
 }
 
 /**
- * Error thrown when the CDN routing API returns a non-successful response.
- * Carries an HTTP `status` code so callers can map it to the appropriate HTTP response.
- */
-export class CdnApiError extends Error {
-  constructor(message, status) {
-    super(message);
-    this.name = 'CdnApiError';
-    this.status = status;
-  }
-}
-
-/**
  * Calls the CDN routing API with the given strategy and SP token.
  *
  * @param {object} strategy - The CDN strategy ({ buildUrl, buildBody, method }).
@@ -165,7 +154,6 @@ export class CdnApiError extends Error {
  * @param {boolean} routingEnabled - Whether to enable or disable CDN routing.
  * @param {object} log - Logger.
  * @returns {Promise<void>} Resolves on success.
- * @throws {CdnApiError} On a non-2xx CDN API response.
  * @throws {Error} On network/timeout failure.
  */
 export async function callCdnRoutingApi(
@@ -193,9 +181,56 @@ export async function callCdnRoutingApi(
   if (!cdnResponse.ok) {
     const body = await cdnResponse.text();
     log.error(`[edge-routing-utils] CDN API failed for domain ${domain}: ${cdnResponse.status} ${body}`);
-    if (cdnResponse.status === 401 || cdnResponse.status === 403) {
-      throw new CdnApiError('User is not authorized to update CDN routing', cdnResponse.status);
-    }
-    throw new CdnApiError(`Upstream call failed with status ${cdnResponse.status}`, cdnResponse.status);
+    throw new Error(`Upstream call failed with status ${cdnResponse.status}`, cdnResponse.status);
   }
+}
+
+const AEM_CS_FASTLY_CNAME_PATTERNS = [
+  'cdn.adobeaemcloud.com',
+  'adobeaemcloud.com',
+  'fastly.net',
+];
+const AEM_CS_FASTLY_IPS = new Set([
+  '146.75.123.10',
+  '151.101.195.10',
+  '151.101.67.10',
+  '151.101.3.10',
+  '151.101.107.10',
+]);
+
+async function checkHost(host) {
+  const cnames = await dns.resolveCname(host).catch(() => []);
+  if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((pattern) => c.includes(pattern)))) {
+    return LOG_SOURCES.AEM_CS_FASTLY;
+  }
+
+  const ips = await dns.resolve4(host).catch(() => []);
+  if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
+    return LOG_SOURCES.AEM_CS_FASTLY;
+  }
+
+  return null;
+}
+
+/**
+ * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly)
+ * by checking DNS CNAME and A records.
+ *
+ * Returns 'aem-cs-fastly' if the domain resolves to the known CS Fastly
+ * CNAME or IP addresses, otherwise returns null.
+ *
+ * Never throws — DNS failures are treated as undetected.
+ *
+ * @param {string} domain - Hostname to check (e.g. 'example.com')
+ * @returns {Promise<string|null>} CDN identifier or null
+ */
+export async function detectCdnForDomain(domain) {
+  try {
+    return await checkHost(`www.${domain}`) ?? await checkHost(domain);
+  } catch (err) {
+    // DNS errors are treated as undetected — never break callers
+    /* eslint-disable-next-line no-console -- no logger in this util; surface for ops debugging */
+    console.error('detectCdnForDomain error', err);
+  }
+  return null;
 }

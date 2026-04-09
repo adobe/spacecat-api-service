@@ -136,6 +136,17 @@ describe('edge-routing-utils', () => {
     });
   });
 
+  describe('EDGE_OPTIMIZE_CDN_STRATEGIES AEM_CS_FASTLY', () => {
+    it('buildUrl trims trailing slashes and appends domain path', async () => {
+      const mod = await import('../../src/support/edge-routing-utils.js');
+      const s = mod.EDGE_OPTIMIZE_CDN_STRATEGIES[mod.LOG_SOURCES.AEM_CS_FASTLY];
+      expect(s.buildUrl({ cdnRoutingUrl: 'https://cdn.example.com///' }, 'mysite.com'))
+        .to.equal('https://cdn.example.com/mysite.com/edgeoptimize');
+      expect(s.buildBody(true)).to.deep.equal({ enabled: true });
+      expect(s.method).to.equal('POST');
+    });
+  });
+
   describe('parseEdgeRoutingConfig', () => {
     it('returns cdnConfig for a valid entry', () => {
       const configJson = JSON.stringify({
@@ -193,45 +204,40 @@ describe('edge-routing-utils', () => {
       expect(opts.headers.Authorization).to.equal('Bearer test-sp-token');
     });
 
-    it('throws CdnApiError with status 403 when CDN responds 403', async () => {
+    it('throws Error mentioning status when CDN responds 403', async () => {
       fetchStub.resolves({
         ok: false,
         status: 403,
         text: sandbox.stub().resolves('forbidden'),
       });
 
-      const err = await edgeUtils.callCdnRoutingApi(strategy, cdnConfig, domain, spToken, true, log)
-        .catch((e) => e);
-      expect(err).to.be.instanceOf(edgeUtils.CdnApiError);
-      expect(err.status).to.equal(403);
-      expect(err.message).to.include('not authorized');
+      await expect(
+        edgeUtils.callCdnRoutingApi(strategy, cdnConfig, domain, spToken, true, log),
+      ).to.be.rejectedWith(Error, /403/);
     });
 
-    it('throws CdnApiError with status 401 when CDN responds 401', async () => {
+    it('throws Error mentioning status when CDN responds 401', async () => {
       fetchStub.resolves({
         ok: false,
         status: 401,
         text: sandbox.stub().resolves('unauthorized'),
       });
 
-      const err = await edgeUtils.callCdnRoutingApi(strategy, cdnConfig, domain, spToken, true, log)
-        .catch((e) => e);
-      expect(err).to.be.instanceOf(edgeUtils.CdnApiError);
-      expect(err.status).to.equal(401);
+      await expect(
+        edgeUtils.callCdnRoutingApi(strategy, cdnConfig, domain, spToken, true, log),
+      ).to.be.rejectedWith(Error, /401/);
     });
 
-    it('throws CdnApiError with the response status on non-401/403 error', async () => {
+    it('throws Error mentioning status on other non-OK CDN responses', async () => {
       fetchStub.resolves({
         ok: false,
         status: 503,
         text: sandbox.stub().resolves('unavailable'),
       });
 
-      const err = await edgeUtils.callCdnRoutingApi(strategy, cdnConfig, domain, spToken, true, log)
-        .catch((e) => e);
-      expect(err).to.be.instanceOf(edgeUtils.CdnApiError);
-      expect(err.status).to.equal(503);
-      expect(err.message).to.include('503');
+      await expect(
+        edgeUtils.callCdnRoutingApi(strategy, cdnConfig, domain, spToken, true, log),
+      ).to.be.rejectedWith(Error, /503/);
     });
 
     it('propagates network errors from fetch', async () => {
@@ -248,6 +254,72 @@ describe('edge-routing-utils', () => {
       await edgeUtils.callCdnRoutingApi(strategy, cdnConfig, domain, spToken, false, log);
 
       expect(JSON.parse(fetchStub.firstCall.args[1].body)).to.deep.equal({ enabled: false });
+    });
+  });
+
+  describe('detectCdnForDomain', () => {
+    let dnsPromises;
+    let edgeUtilsDns;
+
+    beforeEach(async () => {
+      dnsPromises = {
+        resolveCname: sandbox.stub(),
+        resolve4: sandbox.stub(),
+      };
+      edgeUtilsDns = await esmock('../../src/support/edge-routing-utils.js', {
+        dns: { promises: dnsPromises },
+        '@adobe/spacecat-shared-utils': {
+          isObject: (v) => v !== null && typeof v === 'object' && !Array.isArray(v),
+          isValidUrl: (v) => {
+            try {
+              return Boolean(new URL(v));
+            } catch {
+              return false;
+            }
+          },
+          tracingFetch: sandbox.stub(),
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          calculateForwardedHost: sandbox.stub(),
+        },
+      });
+    });
+
+    it('returns null when DNS yields no AEM CS Fastly signals', async () => {
+      dnsPromises.resolveCname.resolves([]);
+      dnsPromises.resolve4.resolves([]);
+      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      expect(result).to.equal(null);
+    });
+
+    it('returns aem-cs-fastly when www host CNAME matches Adobe AEM cloud pattern', async () => {
+      dnsPromises.resolveCname.withArgs('www.example.com').resolves(['origin.example.cdn.adobeaemcloud.com']);
+      dnsPromises.resolveCname.withArgs('example.com').resolves([]);
+      dnsPromises.resolve4.resolves([]);
+      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      expect(result).to.equal(edgeUtilsDns.LOG_SOURCES.AEM_CS_FASTLY);
+    });
+
+    it('returns aem-cs-fastly when A record matches known Fastly IP', async () => {
+      dnsPromises.resolveCname.resolves([]);
+      dnsPromises.resolve4.callsFake(async (host) => (
+        host === 'www.example.com' ? ['146.75.123.10'] : []
+      ));
+      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      expect(result).to.equal(edgeUtilsDns.LOG_SOURCES.AEM_CS_FASTLY);
+    });
+  });
+
+  describe('detectCdnForDomain (integration)', () => {
+    it('returns null when domain stringification throws', async () => {
+      const mod = await import('../../src/support/edge-routing-utils.js');
+      const bad = {
+        toString() {
+          throw new Error('bad domain');
+        },
+      };
+      const result = await mod.detectCdnForDomain(bad);
+      expect(result).to.equal(null);
     });
   });
 });
