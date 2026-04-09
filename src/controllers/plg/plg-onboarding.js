@@ -56,10 +56,9 @@ const PLG_PROFILE_KEY = 'aso_plg';
 const LD_FF_PROJECT_NAME = 'experience-success-studio';
 const LD_API_TOKEN_ENV_VAR = 'LD_EXPERIENCE_SUCCESS_API_TOKEN';
 const LD_AUTO_FIX_FLAGS = [
-  'auto-fix-meta-tags',
-  'cwv-auto-fix',
-  'alt-text-auto-fix',
-  'broken-backlinks-auto-fix',
+  'FF_cwv-auto-fix',
+  'FF_alt-text-auto-fix',
+  'FF_broken-backlinks-auto-fix',
 ];
 
 const REVIEW_REASONS = {
@@ -196,7 +195,7 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
  * @param {string} siteBaseURL - Site base URL.
  * @param {object} log - Logger.
  */
-async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteBaseURL, log) {
+async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
   const flag = await ldClient.getFeatureFlag(LD_FF_PROJECT_NAME, flagKey);
   const rawValue = flag.variations?.[0]?.value;
 
@@ -209,12 +208,12 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteBaseURL, log) {
   const parsed = isStringWrapped ? JSON.parse(rawValue) : rawValue;
 
   const existingSites = parsed[imsOrgId] ?? [];
-  if (existingSites.includes(siteBaseURL)) {
-    log.info(`LaunchDarkly: ${siteBaseURL} already in ${flagKey} for org ${imsOrgId}`);
+  if (existingSites.includes(siteId)) {
+    log.info(`LaunchDarkly: site ${siteId} already in ${flagKey} for org ${imsOrgId}`);
     return;
   }
 
-  const merged = { ...parsed, [imsOrgId]: [...existingSites, siteBaseURL] };
+  const merged = { ...parsed, [imsOrgId]: [...existingSites, siteId] };
   const newValue = isStringWrapped ? JSON.stringify(merged) : merged;
 
   await ldClient.updateVariationValue(
@@ -222,10 +221,10 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteBaseURL, log) {
     flagKey,
     0,
     newValue,
-    `plg-onboarding: enable ${flagKey} for ${imsOrgId} / ${siteBaseURL}`,
+    `plg-onboarding: enable ${flagKey} for ${imsOrgId} / ${siteId}`,
   );
 
-  log.info(`LaunchDarkly: enabled ${flagKey} for org ${imsOrgId}, site ${siteBaseURL}`);
+  log.info(`LaunchDarkly: enabled ${flagKey} for org ${imsOrgId}, site ${siteId}`);
 }
 
 /**
@@ -255,10 +254,10 @@ async function updateLaunchDarklyFlags(site, context) {
     return;
   }
 
-  const siteBaseURL = site.getBaseURL();
+  const siteId = site.getId();
 
   const results = await Promise.allSettled(
-    LD_AUTO_FIX_FLAGS.map((flagKey) => upsertLdFlag(ldClient, flagKey, imsOrgId, siteBaseURL, log)),
+    LD_AUTO_FIX_FLAGS.map((flagKey) => upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log)),
   );
 
   results.forEach((result, i) => {

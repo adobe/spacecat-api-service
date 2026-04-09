@@ -1681,27 +1681,27 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('adds org and site to all 4 auto-fix flags in variation 0', async () => {
+    it('adds org and site to all 3 auto-fix flags in variation 0', async () => {
       ldGetFeatureFlagStub.resolves({ variations: [{ value: {} }] });
 
       const context = buildContext({ domain: TEST_DOMAIN });
       await controller.onboard(context);
 
-      const expectedFlags = ['auto-fix-meta-tags', 'cwv-auto-fix', 'alt-text-auto-fix', 'broken-backlinks-auto-fix'];
+      const expectedFlags = ['FF_cwv-auto-fix', 'FF_alt-text-auto-fix', 'FF_broken-backlinks-auto-fix'];
       expectedFlags.forEach((flagKey) => {
         expect(ldGetFeatureFlagStub).to.have.been.calledWith('experience-success-studio', flagKey);
       });
-      expect(ldUpdateVariationValueStub.callCount).to.equal(4);
-      const metaTagsCall = ldUpdateVariationValueStub.getCalls().find((c) => c.args[1] === 'auto-fix-meta-tags');
-      expect(metaTagsCall).to.exist;
-      expect(metaTagsCall.args[0]).to.equal('experience-success-studio');
-      expect(metaTagsCall.args[2]).to.equal(0);
-      expect(metaTagsCall.args[3]).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
+      expect(ldUpdateVariationValueStub.callCount).to.equal(3);
+      const cwvCall = ldUpdateVariationValueStub.getCalls().find((c) => c.args[1] === 'FF_cwv-auto-fix');
+      expect(cwvCall).to.exist;
+      expect(cwvCall.args[0]).to.equal('experience-success-studio');
+      expect(cwvCall.args[2]).to.equal(0);
+      expect(cwvCall.args[3]).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_SITE_ID] });
     });
 
     it('skips duplicate site already present in variation 0', async () => {
       ldGetFeatureFlagStub.resolves({
-        variations: [{ value: { [TEST_IMS_ORG_ID]: [TEST_BASE_URL] } }],
+        variations: [{ value: { [TEST_IMS_ORG_ID]: [TEST_SITE_ID] } }],
       });
 
       const context = buildContext({ domain: TEST_DOMAIN });
@@ -1760,11 +1760,11 @@ describe('PlgOnboardingController', () => {
       const context = buildContext({ domain: TEST_DOMAIN });
       await controller.onboard(context);
 
-      expect(ldUpdateVariationValueStub.callCount).to.equal(4);
+      expect(ldUpdateVariationValueStub.callCount).to.equal(3);
       ldUpdateVariationValueStub.getCalls().forEach((call) => {
         const newValue = call.args[3];
         expect(typeof newValue).to.equal('string');
-        expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
+        expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_SITE_ID] });
       });
     });
   });
