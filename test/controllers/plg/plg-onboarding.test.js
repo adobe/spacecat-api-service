@@ -1806,6 +1806,19 @@ describe('PlgOnboardingController', () => {
         expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_SITE_ID] });
       });
     });
+
+    it('skips flag and warns when variation 0 contains malformed JSON string', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: 'not-valid-json{{{' }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/malformed JSON/);
+    });
   });
 
   // --- Delivery config writer (CDN + optional redirect params) ---
