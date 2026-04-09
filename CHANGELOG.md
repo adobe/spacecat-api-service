@@ -1,3 +1,10 @@
+## [1.427.1](https://github.com/adobe/spacecat-api-service/compare/v1.427.0...v1.427.1) (2026-04-09)
+
+
+### Bug Fixes
+
+* enforce curly braces and remove eslint-env comments ([#2158](https://github.com/adobe/spacecat-api-service/issues/2158)) ([e6cef44](https://github.com/adobe/spacecat-api-service/commit/e6cef44b71f556fd2f1c5d8670aa63bdfa99512a))
+
 # [1.427.0](https://github.com/adobe/spacecat-api-service/compare/v1.426.0...v1.427.0) (2026-04-09)
 
 
