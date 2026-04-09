@@ -387,8 +387,9 @@ export async function fetchRegionsForConfig(client) {
 
 /**
  * Brands linked to one site: rows in `brand_sites` for this org + site, with embedded `brands`.
+ * @internal Exported for tests
  */
-async function fetchBrandsForOrgSite(client, organizationId, siteFilter) {
+export async function fetchBrandsForOrgSite(client, organizationId, siteFilter) {
   const { data: bsData, error: bsErr } = await client
     .from('brand_sites')
     .select('brand_id, brands(id, name)')
