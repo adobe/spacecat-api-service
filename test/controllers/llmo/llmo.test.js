@@ -4332,6 +4332,45 @@ describe('LlmoController', () => {
   describe('createOrUpdateEdgeConfig', () => {
     let edgeConfigContext;
 
+    const trialEdgeRoutingUtilsForCdnAuth = () => ({
+      probeSiteAndResolveDomain: sinon.stub().resolves('www.example.com'),
+      callCdnRoutingApi: sinon.stub().resolves(),
+      detectCdnForDomain: sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY),
+      getHostnameWithoutWww(url, log) {
+        try {
+          const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+          let hostname = urlObj.hostname.toLowerCase();
+          if (hostname.startsWith('www.')) {
+            hostname = hostname.slice(4);
+          }
+          return hostname;
+        } catch (error) {
+          log.error(`Error getting hostname from URL ${url}: ${error.message}`);
+          throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
+        }
+      },
+      parseEdgeRoutingConfig: (json, cdnType) => {
+        const parsed = JSON.parse(json);
+        const config = parsed[cdnType];
+        if (!config || typeof config !== 'object' || !config.cdnRoutingUrl || !/^https?:\/\//.test(config.cdnRoutingUrl)) {
+          throw new Error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnType}`);
+        }
+        return config;
+      },
+      EDGE_OPTIMIZE_CDN_STRATEGIES: {
+        'aem-cs-fastly': {
+          buildUrl: (cdnConfig, domain) => `${cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '')}/${domain}/edgeoptimize`,
+          buildBody: (enabled) => ({ enabled }),
+          method: 'POST',
+        },
+      },
+      EDGE_OPTIMIZE_CDN_TYPES: ['aem-cs-fastly'],
+      SUPPORTED_EDGE_ROUTING_CDN_TYPES: ['aem-cs-fastly'],
+      OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE: 'optimize-at-edge-enabled-marking',
+      EDGE_OPTIMIZE_MARKING_DELAY_SECONDS: 300,
+      LOG_SOURCES,
+    });
+
     beforeEach(() => {
       mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: false });
       mockConfig.updateEdgeOptimizeConfig = sinon.stub();
@@ -4735,6 +4774,31 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('User does not have access to this site');
     });
 
+    it('returns 403 when user is not an LLMO administrator', async () => {
+      const hasAccessStub = sinon.stub().resolves(true);
+      const isOwnerStub = sinon.stub().resolves(true);
+      const NonAdminController = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: hasAccessStub,
+              hasAdminAccess: () => false,
+              isLLMOAdministrator: () => false,
+              isOwnerOfSite: isOwnerStub,
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const result = await NonAdminController(mockContext)
+        .createOrUpdateEdgeConfig(edgeConfigContext);
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
+      expect(isOwnerStub).to.not.have.been.called;
+    });
+
     it('should handle site not found failure', async () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
@@ -5096,7 +5160,7 @@ describe('LlmoController', () => {
         },
       };
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
@@ -5124,6 +5188,7 @@ describe('LlmoController', () => {
             );
           },
         },
+        '../../../src/support/edge-routing-utils.js': trialEdgeRoutingUtilsForCdnAuth(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
@@ -5164,7 +5229,7 @@ describe('LlmoController', () => {
         },
       };
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
@@ -5192,6 +5257,7 @@ describe('LlmoController', () => {
             );
           },
         },
+        '../../../src/support/edge-routing-utils.js': trialEdgeRoutingUtilsForCdnAuth(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
@@ -5229,7 +5295,7 @@ describe('LlmoController', () => {
         },
       };
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
@@ -5257,6 +5323,7 @@ describe('LlmoController', () => {
             );
           },
         },
+        '../../../src/support/edge-routing-utils.js': trialEdgeRoutingUtilsForCdnAuth(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
@@ -5345,17 +5412,18 @@ describe('LlmoController', () => {
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(400);
         expect((await result.json()).message).to.include('does not match the detected CDN');
-        expect(mockLog.warn).to.have.been.calledWith(
-          sinon.match(/does not match detected CDN/),
+        expect(mockLog.error).to.have.been.calledWith(
+          sinon.match(/Requested cdnType: 'aem-cs-fastly', detected CDN: 'akamai'/),
         );
       });
 
-      it('logs and proceeds when CDN auto-detection returns no match', async () => {
+      it('returns 400 when CDN auto-detection returns no match', async () => {
         detectCdnForDomainStub.resolves(null);
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
-        expect(result.status).to.equal(200);
-        expect(mockLog.info).to.have.been.calledWith(
-          sinon.match(/CDN auto-detection returned no result/),
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('does not match the detected CDN');
+        expect(mockLog.error).to.have.been.calledWith(
+          sinon.match(/Requested cdnType: 'aem-cs-fastly', detected CDN: 'null'/),
         );
       });
 

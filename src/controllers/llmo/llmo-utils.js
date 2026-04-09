@@ -27,8 +27,6 @@ export const CDN_TYPES = {
   COMMERCE_FASTLY: 'commerce-fastly',
 };
 
-export const LLMO_ADMIN_GROUP_NAME = 'LLMO Admin';
-
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
   const data = { ...rawData };

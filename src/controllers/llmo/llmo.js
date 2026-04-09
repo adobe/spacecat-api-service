@@ -1303,12 +1303,9 @@ function LlmoController(ctx) {
           try {
             const hostname = getHostnameWithoutWww(baseURL, log);
             const detectedCdn = await detectCdnForDomain(hostname);
-            if (detectedCdn && detectedCdn !== cdnTypeNormalized) {
-              log.warn(`[edge-optimize-routing-failed] Requested cdnType '${cdnTypeNormalized}' does not match detected CDN '${detectedCdn}' for site ${siteId}`);
+            if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
+              log.error(`[edge-optimize-routing-failed] Requested cdnType: '${cdnTypeNormalized}', detected CDN: '${detectedCdn}'`);
               return badRequest(`Requested CDN type '${cdnTypeNormalized}' does not match the detected CDN for this domain`);
-            }
-            if (!detectedCdn) {
-              log.info(`[edge-optimize-config] CDN auto-detection returned no result for site ${siteId}, proceeding with requested cdnType`);
             }
           } catch (detectError) {
             log.info(`[edge-optimize-config] CDN auto-detection failed for site ${siteId}: ${detectError.message}`);

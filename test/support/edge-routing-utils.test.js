@@ -17,6 +17,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import { CDN_TYPES } from '../../src/controllers/llmo/llmo-utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -139,7 +140,7 @@ describe('edge-routing-utils', () => {
   describe('EDGE_OPTIMIZE_CDN_STRATEGIES AEM_CS_FASTLY', () => {
     it('buildUrl trims trailing slashes and appends domain path', async () => {
       const mod = await import('../../src/support/edge-routing-utils.js');
-      const s = mod.EDGE_OPTIMIZE_CDN_STRATEGIES[mod.LOG_SOURCES.AEM_CS_FASTLY];
+      const s = mod.EDGE_OPTIMIZE_CDN_STRATEGIES[CDN_TYPES.AEM_CS_FASTLY];
       expect(s.buildUrl({ cdnRoutingUrl: 'https://cdn.example.com///' }, 'mysite.com'))
         .to.equal('https://cdn.example.com/mysite.com/edgeoptimize');
       expect(s.buildBody(true)).to.deep.equal({ enabled: true });
@@ -297,7 +298,7 @@ describe('edge-routing-utils', () => {
       dnsPromises.resolveCname.withArgs('example.com').resolves([]);
       dnsPromises.resolve4.resolves([]);
       const result = await edgeUtilsDns.detectCdnForDomain('example.com');
-      expect(result).to.equal(edgeUtilsDns.LOG_SOURCES.AEM_CS_FASTLY);
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
 
     it('returns aem-cs-fastly when A record matches known Fastly IP', async () => {
@@ -306,7 +307,7 @@ describe('edge-routing-utils', () => {
         host === 'www.example.com' ? ['146.75.123.10'] : []
       ));
       const result = await edgeUtilsDns.detectCdnForDomain('example.com');
-      expect(result).to.equal(edgeUtilsDns.LOG_SOURCES.AEM_CS_FASTLY);
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
   });
 

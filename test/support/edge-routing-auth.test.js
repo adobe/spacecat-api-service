@@ -80,12 +80,20 @@ describe('edge-routing-auth', () => {
     it('throws 401 when token exchange fails', async () => {
       getCookieValueStub.returns('ptok');
       exchangePromiseTokenStub.rejects(new Error('ims down'));
+      const ctxLog = { error: sandbox.stub() };
       try {
-        await getImsTokenFromCookie({ pathInfo: { headers: { cookie: 'promiseToken=ptok' } } });
+        await getImsTokenFromCookie({
+          pathInfo: { headers: { cookie: 'promiseToken=ptok' } },
+          log: ctxLog,
+        });
         expect.fail('expected throw');
       } catch (e) {
         expect(e.status).to.equal(401);
         expect(e.message).to.equal('Authentication failed with upstream IMS service');
+        expect(ctxLog.error).to.have.been.calledWith(
+          'Authentication failed with upstream IMS service',
+          sinon.match.instanceOf(Error),
+        );
       }
     });
 
