@@ -219,7 +219,7 @@ describe('PlgOnboardingController', () => {
     // Project
     mockProject = {
       getId: sandbox.stub().returns(TEST_PROJECT_ID),
-      getProjectName: sandbox.stub().returns('experience-success-studio'),
+      getProjectName: sandbox.stub().returns('example.com'),
     };
 
     // PlgOnboarding mock
@@ -967,7 +967,7 @@ describe('PlgOnboardingController', () => {
       await controller.onboard(context);
 
       expect(mockDataAccess.Project.create).to.have.been.calledWith({
-        projectName: 'experience-success-studio',
+        projectName: 'example.com',
         organizationId: TEST_ORG_ID,
       });
       expect(mockSite.setProjectId).to.have.been.calledWith(TEST_PROJECT_ID);

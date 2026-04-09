@@ -39,6 +39,7 @@ import {
 import {
   autoResolveAuthorUrl,
   findDeliveryType,
+  deriveProjectName,
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
@@ -51,7 +52,7 @@ const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.PLG;
 const PLG_PROFILE_KEY = 'aso_plg';
-const PLG_PROJECT_NAME = 'experience-success-studio';
+const LD_FF_PROJECT_NAME = 'experience-success-studio';
 
 const REVIEW_REASONS = {
   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -188,16 +189,18 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
 // eslint-disable-next-line no-unused-vars
 async function updateLaunchDarklyFlags(site, context) {
   // TODO: implement once flag names and LD API details are confirmed
-  context.log.info(`[TODO] LaunchDarkly FF update placeholder for site ${site.getId()}`);
+  // LD FF project: experience-success-studio (LD_FF_PROJECT_NAME)
+  context.log.info(`[TODO] LaunchDarkly FF update placeholder for site ${site.getId()} (LD project: ${LD_FF_PROJECT_NAME})`);
 }
 
-async function createOrFindProject(organizationId, context) {
+async function createOrFindProject(baseURL, organizationId, context) {
   const { dataAccess, log } = context;
   const { Project } = dataAccess;
+  const projectName = deriveProjectName(baseURL);
 
   const existingProject = (
     await Project.allByOrganizationId(organizationId)
-  ).find((p) => p.getProjectName() === PLG_PROJECT_NAME);
+  ).find((p) => p.getProjectName() === projectName);
 
   if (existingProject) {
     log.debug(`Found existing project ${existingProject.getId()}`);
@@ -205,9 +208,9 @@ async function createOrFindProject(organizationId, context) {
   }
 
   const newProject = await Project.create({
-    projectName: PLG_PROJECT_NAME, organizationId,
+    projectName, organizationId,
   });
-  log.info(`Created project ${newProject.getId()} for org ${organizationId}`);
+  log.info(`Created project ${newProject.getId()} for ${baseURL}`);
   return newProject;
 }
 
@@ -538,7 +541,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     }
 
     // Create/assign project
-    const project = await createOrFindProject(organizationId, context);
+    const project = await createOrFindProject(baseURL, organizationId, context);
     if (!site.getProjectId()) {
       site.setProjectId(project.getId());
     }
