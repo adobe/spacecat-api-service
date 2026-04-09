@@ -18,8 +18,8 @@
 /** Upper bound for manual audit target URLs per site (align with ASO UI). */
 export const MAX_MANUAL_AUDIT_TARGET_URLS = 500;
 
-/** Upper bound for moneyPages audit target URLs per site. */
-export const MAX_MONEY_PAGES_AUDIT_TARGET_URLS = 500;
+/** Upper bound for moneyPages audit target URLs per site (align with audit limit). */
+export const MAX_MONEY_PAGES_AUDIT_TARGET_URLS = 1000;
 
 /** Known sources and their maximum URL counts. */
 const AUDIT_TARGET_URL_SOURCE_LIMITS = {
