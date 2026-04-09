@@ -18,6 +18,15 @@
 /** Upper bound for manual audit target URLs per site (align with ASO UI). */
 export const MAX_MANUAL_AUDIT_TARGET_URLS = 500;
 
+/** Upper bound for moneyPages audit target URLs per site. */
+export const MAX_MONEY_PAGES_AUDIT_TARGET_URLS = 500;
+
+/** Known sources and their maximum URL counts. */
+const AUDIT_TARGET_URL_SOURCE_LIMITS = {
+  manual: MAX_MANUAL_AUDIT_TARGET_URLS,
+  moneyPages: MAX_MONEY_PAGES_AUDIT_TARGET_URLS,
+};
+
 /**
  * Compare hostnames as equal if they match after lowercasing and stripping one leading `www.`.
  *
@@ -73,7 +82,45 @@ export function validateAuditTargetUrlString(trimmed, siteHostname) {
 }
 
 /**
- * Validates config.auditTargetURLs after merge (manual list only).
+ * Validates and normalizes a single audit target URL source list.
+ *
+ * @param {unknown} list
+ * @param {string} sourceName
+ * @param {string|null} siteHostname
+ * @param {number} maxCount
+ * @returns {{ ok: true, normalized: object[] } | { ok: false, error: string }}
+ */
+function validateAuditTargetSourceList(list, sourceName, siteHostname, maxCount) {
+  if (!Array.isArray(list)) {
+    return { ok: false, error: `config.auditTargetURLs.${sourceName} must be an array` };
+  }
+  if (list.length > maxCount) {
+    return {
+      ok: false,
+      error: `config.auditTargetURLs.${sourceName} cannot contain more than ${maxCount} URLs`,
+    };
+  }
+  const normalized = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const entry = list[i];
+    if (!entry || typeof entry !== 'object' || typeof entry.url !== 'string') {
+      return {
+        ok: false,
+        error: `config.auditTargetURLs.${sourceName}[${i}] must be an object with a string "url" property`,
+      };
+    }
+    const trimmed = entry.url.trim();
+    const result = validateAuditTargetUrlString(trimmed, siteHostname);
+    if (!result.ok) {
+      return { ok: false, error: `Invalid audit target URL at index ${i}: ${result.error}` };
+    }
+    normalized.push({ url: trimmed });
+  }
+  return { ok: true, normalized };
+}
+
+/**
+ * Validates config.auditTargetURLs after merge (all known sources).
  *
  * @param {unknown} auditTargetURLs
  * @param {string} siteBaseURL
@@ -88,47 +135,35 @@ export function validateAuditTargetURLsConfig(auditTargetURLs, siteBaseURL) {
   }
 
   const siteHostname = siteHostnameFromBaseURL(siteBaseURL);
-  const { manual, ...rest } = auditTargetURLs;
+  const normalizedSources = {};
+  let anySourcePresent = false;
 
-  if (manual === undefined) {
+  for (const [sourceName, maxCount] of Object.entries(AUDIT_TARGET_URL_SOURCE_LIMITS)) {
+    const list = auditTargetURLs[sourceName];
+    if (list === undefined) continue;
+
+    anySourcePresent = true;
+    const result = validateAuditTargetSourceList(list, sourceName, siteHostname, maxCount);
+    if (!result.ok) return { ok: false, error: result.error };
+    normalizedSources[sourceName] = result.normalized;
+  }
+
+  if (!anySourcePresent) {
     return { ok: true };
   }
-  if (!Array.isArray(manual)) {
-    return { ok: false, error: 'config.auditTargetURLs.manual must be an array' };
-  }
-  if (manual.length > MAX_MANUAL_AUDIT_TARGET_URLS) {
-    return {
-      ok: false,
-      error: `config.auditTargetURLs.manual cannot contain more than ${MAX_MANUAL_AUDIT_TARGET_URLS} URLs`,
-    };
-  }
 
-  const normalizedManual = [];
-  for (let i = 0; i < manual.length; i += 1) {
-    const entry = manual[i];
-    if (!entry || typeof entry !== 'object' || typeof entry.url !== 'string') {
-      return {
-        ok: false,
-        error: `config.auditTargetURLs.manual[${i}] must be an object with a string "url" property`,
-      };
-    }
-    const trimmed = entry.url.trim();
-    const result = validateAuditTargetUrlString(trimmed, siteHostname);
-    if (!result.ok) {
-      return { ok: false, error: `Invalid audit target URL at index ${i}: ${result.error}` };
-    }
-    normalizedManual.push({ url: trimmed });
-  }
+  // Preserve any keys not in AUDIT_TARGET_URL_SOURCE_LIMITS (passed through, stripped by schema)
+  const knownKeys = Object.keys(AUDIT_TARGET_URL_SOURCE_LIMITS);
+  const rest = Object.fromEntries(
+    Object.entries(auditTargetURLs).filter(([k]) => !knownKeys.includes(k)),
+  );
 
-  return {
-    ok: true,
-    normalized: { ...rest, manual: normalizedManual },
-  };
+  return { ok: true, normalized: { ...rest, ...normalizedSources } };
 }
 
 /**
  * When `configPatch` includes `auditTargetURLs`, validates `merged.auditTargetURLs` (HTTPS +
- * hostname vs site) and writes normalized `manual` entries back onto `merged`.
+ * hostname vs site) for all known sources and writes normalized entries back onto `merged`.
  *
  * We must consult `configPatch`, not only `merged`: after `{ ...existingConfig, ...patch }`,
  * `merged.auditTargetURLs` is still present if it existed on the site and the client only

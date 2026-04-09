@@ -640,6 +640,12 @@ function SitesController(ctx, log, env) {
         ? Config.toDynamoItem(siteConfig) || {}
         : {};
       const merged = { ...existingConfig, ...requestBody.config };
+      if (requestBody.config?.auditTargetURLs && existingConfig?.auditTargetURLs) {
+        merged.auditTargetURLs = {
+          ...existingConfig.auditTargetURLs,
+          ...requestBody.config.auditTargetURLs,
+        };
+      }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
         site.getBaseURL(),
