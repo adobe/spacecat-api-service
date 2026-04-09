@@ -1638,6 +1638,40 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- ASO enrollment revocation ---
+
+  describe('onboard - ASO enrollment revocation', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('revokes pre-onboarded site enrollment when another site exists under same entitlement', async () => {
+      const OTHER_SITE_ID = 'other-site-uuid';
+      const mockEnrollment = {
+        getId: sandbox.stub().returns('enroll-old'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockEnrollment.remove).to.have.been.calledOnce;
+    });
+
+    it('does not revoke when no other enrollment exists', async () => {
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+    });
+  });
+
   // --- LaunchDarkly feature flag update ---
 
   describe('onboard - LaunchDarkly flag update', () => {
@@ -1683,6 +1717,40 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips LD update when org has no IMS org ID', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('skips LD update when flag has no variations', async () => {
+      ldGetFeatureFlagStub.resolves({ variations: [] });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('handles string-wrapped variation 0 value', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: JSON.stringify({}) }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(ldUpdateVariationValueStub).to.have.been.calledOnce;
+      const newValue = ldUpdateVariationValueStub.firstCall.args[3];
+      expect(typeof newValue).to.equal('string');
+      expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
     });
   });
 
