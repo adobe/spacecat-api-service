@@ -1,3 +1,10 @@
+# [1.427.0](https://github.com/adobe/spacecat-api-service/compare/v1.426.0...v1.427.0) (2026-04-09)
+
+
+### Features
+
+* add preflight-checks endpoint for autofix deploy permission validation ([#2119](https://github.com/adobe/spacecat-api-service/issues/2119)) ([ed28ab3](https://github.com/adobe/spacecat-api-service/commit/ed28ab3463563d3268d69df87240509c61b40813))
+
 # [1.426.0](https://github.com/adobe/spacecat-api-service/compare/v1.425.0...v1.426.0) (2026-04-08)
 
 
