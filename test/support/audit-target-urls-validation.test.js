@@ -17,6 +17,7 @@ import sinon from 'sinon';
 import {
   auditTargetURLsPatchGuard,
   MAX_MANUAL_AUDIT_TARGET_URLS,
+  MAX_MONEY_PAGES_AUDIT_TARGET_URLS,
   normalizeHostnameForAuditTargetMatch,
   siteHostnameFromBaseURL,
   validateAuditTargetUrlString,
@@ -158,6 +159,84 @@ describe('audit-target-urls-validation', () => {
       expect(r.ok).to.equal(true);
       expect(r.normalized.future).to.equal(true);
     });
+
+    it('rejects non-array moneyPages', () => {
+      const r = validateAuditTargetURLsConfig({ moneyPages: {} }, 'https://site1.com');
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.include('moneyPages must be an array');
+    });
+
+    it('rejects moneyPages list longer than MAX_MONEY_PAGES_AUDIT_TARGET_URLS', () => {
+      const moneyPages = Array.from({ length: MAX_MONEY_PAGES_AUDIT_TARGET_URLS + 1 }, (_, i) => ({
+        url: `https://site1.com/m${i}`,
+      }));
+      const r = validateAuditTargetURLsConfig({ moneyPages }, 'https://site1.com');
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.equal(
+        `config.auditTargetURLs.moneyPages cannot contain more than ${MAX_MONEY_PAGES_AUDIT_TARGET_URLS} URLs`,
+      );
+    });
+
+    it('rejects bad entry shape in moneyPages', () => {
+      const r = validateAuditTargetURLsConfig({ moneyPages: [{ url: 42 }] }, 'https://site1.com');
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.include('moneyPages[0] must be an object with a string');
+    });
+
+    it('rejects moneyPages URL with hostname mismatch', () => {
+      const r = validateAuditTargetURLsConfig(
+        { moneyPages: [{ url: 'https://evil.com/money' }] },
+        'https://site1.com',
+      );
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.match(/index 0/);
+      expect(r.error).to.include('site domain (site1.com');
+    });
+
+    it('normalizes trimmed moneyPages URLs', () => {
+      const r = validateAuditTargetURLsConfig(
+        { moneyPages: [{ url: '  https://site1.com/money  ' }] },
+        'https://site1.com',
+      );
+      expect(r.ok).to.equal(true);
+      expect(r.normalized).to.deep.equal({ moneyPages: [{ url: 'https://site1.com/money' }] });
+    });
+
+    it('returns ok with only moneyPages present', () => {
+      const r = validateAuditTargetURLsConfig(
+        { moneyPages: [{ url: 'https://site1.com/m1' }] },
+        'https://site1.com',
+      );
+      expect(r.ok).to.equal(true);
+      expect(r.normalized).to.deep.equal({ moneyPages: [{ url: 'https://site1.com/m1' }] });
+    });
+
+    it('validates and normalizes both manual and moneyPages together', () => {
+      const r = validateAuditTargetURLsConfig(
+        {
+          manual: [{ url: '  https://site1.com/p1  ' }],
+          moneyPages: [{ url: '  https://site1.com/m1  ' }],
+        },
+        'https://site1.com',
+      );
+      expect(r.ok).to.equal(true);
+      expect(r.normalized).to.deep.equal({
+        manual: [{ url: 'https://site1.com/p1' }],
+        moneyPages: [{ url: 'https://site1.com/m1' }],
+      });
+    });
+
+    it('stops at first invalid source when both are present', () => {
+      const r = validateAuditTargetURLsConfig(
+        {
+          manual: [{ url: 'https://evil.com/p1' }],
+          moneyPages: [{ url: 'https://site1.com/m1' }],
+        },
+        'https://site1.com',
+      );
+      expect(r.ok).to.equal(false);
+      expect(r.error).to.match(/index 0/);
+    });
   });
 
   describe('auditTargetURLsPatchGuard', () => {
@@ -200,6 +279,49 @@ describe('audit-target-urls-validation', () => {
       const r = auditTargetURLsPatchGuard(merged, 'https://site1.com', patch, badRequest);
       expect(r).to.deep.equal({ normalized: { manual: [{ url: 'https://site1.com/x' }] } });
       expect(merged.auditTargetURLs.manual[0].url).to.equal('  https://site1.com/x  ');
+    });
+
+    it('validates and normalizes moneyPages source', () => {
+      const merged = { auditTargetURLs: { moneyPages: [{ url: '  https://site1.com/m  ' }] } };
+      const patch = { auditTargetURLs: { moneyPages: [{ url: '  https://site1.com/m  ' }] } };
+      const r = auditTargetURLsPatchGuard(merged, 'https://site1.com', patch, badRequest);
+      expect(r).to.deep.equal({
+        normalized: { moneyPages: [{ url: 'https://site1.com/m' }] },
+      });
+    });
+
+    it('preserves unpatched sources when only one source is in the patch', () => {
+      const merged = {
+        auditTargetURLs: {
+          manual: [{ url: 'https://site1.com/updated' }],
+          moneyPages: [{ url: 'https://site1.com/existing-money' }],
+        },
+      };
+      // client only sent manual; moneyPages was deep-merged in from existing config
+      const patch = { auditTargetURLs: { manual: [{ url: 'https://site1.com/updated' }] } };
+      const r = auditTargetURLsPatchGuard(merged, 'https://site1.com', patch, badRequest);
+      expect(r.normalized).to.deep.equal({
+        manual: [{ url: 'https://site1.com/updated' }],
+        moneyPages: [{ url: 'https://site1.com/existing-money' }],
+      });
+      expect(badRequest.called).to.equal(false);
+    });
+
+    it('does not re-validate existing moneyPages when only manual is patched', () => {
+      // existing moneyPages has an HTTP URL (pre-validation legacy data) — patching manual
+      // must not fail because of it
+      const merged = {
+        auditTargetURLs: {
+          manual: [{ url: 'https://site1.com/new' }],
+          moneyPages: [{ url: 'http://site1.com/old-http' }],
+        },
+      };
+      const patch = { auditTargetURLs: { manual: [{ url: 'https://site1.com/new' }] } };
+      const r = auditTargetURLsPatchGuard(merged, 'https://site1.com', patch, badRequest);
+      expect(r).to.not.have.property('error');
+      expect(r.normalized.manual).to.deep.equal([{ url: 'https://site1.com/new' }]);
+      // legacy moneyPages URL passes through untouched
+      expect(r.normalized.moneyPages).to.deep.equal([{ url: 'http://site1.com/old-http' }]);
     });
   });
 });

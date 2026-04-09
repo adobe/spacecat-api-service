@@ -140,12 +140,14 @@ export function validateAuditTargetURLsConfig(auditTargetURLs, siteBaseURL) {
 
   for (const [sourceName, maxCount] of Object.entries(AUDIT_TARGET_URL_SOURCE_LIMITS)) {
     const list = auditTargetURLs[sourceName];
-    if (list === undefined) continue;
-
-    anySourcePresent = true;
-    const result = validateAuditTargetSourceList(list, sourceName, siteHostname, maxCount);
-    if (!result.ok) return { ok: false, error: result.error };
-    normalizedSources[sourceName] = result.normalized;
+    if (list !== undefined) {
+      anySourcePresent = true;
+      const result = validateAuditTargetSourceList(list, sourceName, siteHostname, maxCount);
+      if (!result.ok) {
+        return { ok: false, error: result.error };
+      }
+      normalizedSources[sourceName] = result.normalized;
+    }
   }
 
   if (!anySourcePresent) {
@@ -162,8 +164,11 @@ export function validateAuditTargetURLsConfig(auditTargetURLs, siteBaseURL) {
 }
 
 /**
- * When `configPatch` includes `auditTargetURLs`, validates `merged.auditTargetURLs` (HTTPS +
- * hostname vs site) for all known sources and writes normalized entries back onto `merged`.
+ * When `configPatch` includes `auditTargetURLs`, validates only the sources the client
+ * explicitly sent (`configPatch.auditTargetURLs`) against HTTPS + hostname rules, then
+ * merges the normalized results over the already-deep-merged `merged.auditTargetURLs`
+ * so that unpatched sources (e.g. existing `moneyPages` when only `manual` was sent)
+ * are preserved without being re-validated against the current site hostname.
  *
  * We must consult `configPatch`, not only `merged`: after `{ ...existingConfig, ...patch }`,
  * `merged.auditTargetURLs` is still present if it existed on the site and the client only
@@ -182,9 +187,14 @@ export function auditTargetURLsPatchGuard(merged, siteBaseURL, configPatch, badR
   if (!Object.prototype.hasOwnProperty.call(configPatch, 'auditTargetURLs')) {
     return null;
   }
-  const v = validateAuditTargetURLsConfig(merged.auditTargetURLs, siteBaseURL);
+  // Validate only the sources the client sent, not pre-existing ones folded in by deep-merge.
+  const v = validateAuditTargetURLsConfig(configPatch.auditTargetURLs, siteBaseURL);
   if (!v.ok) {
     return { error: badRequestFn(v.error) };
   }
-  return v.normalized !== undefined ? { normalized: v.normalized } : {};
+  // Merge validated+normalized patch sources over the existing merged sources so unpatched
+  // sources are preserved in the value returned to the caller.
+  return v.normalized !== undefined
+    ? { normalized: { ...merged.auditTargetURLs, ...v.normalized } }
+    : {};
 }
