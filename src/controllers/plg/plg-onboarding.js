@@ -35,7 +35,6 @@ import {
   enableAudits,
   enableImports,
   triggerAudits,
-  ASO_DEMO_ORG,
 } from '../llmo/llmo-onboarding.js';
 import {
   autoResolveAuthorUrl,
@@ -144,10 +143,6 @@ function isSafeDomain(domain) {
     /\.private\./i,
   ];
   return !blocked.some((pattern) => pattern.test(domain));
-}
-
-function isInternalOrg(orgId, env) {
-  return orgId === env.DEFAULT_ORGANIZATION_ID || orgId === ASO_DEMO_ORG;
 }
 
 async function ensureAsoEntitlement(site, context) {
@@ -300,7 +295,7 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @returns {Promise<object>} PlgOnboarding record
  */
 async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHost }, context) {
-  const { dataAccess, log, env } = context;
+  const { dataAccess, log } = context;
   const { Site, PlgOnboarding, Organization } = dataAccess;
 
   if (!isValidHostname(domain)) {
@@ -422,8 +417,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     if (site) {
       const existingOrgId = site.getOrganizationId();
 
-      if (existingOrgId !== organizationId
-        && !isInternalOrg(existingOrgId, env)) {
+      if (existingOrgId !== organizationId) {
         const existingOrg = await Organization.findById(existingOrgId);
         /* c8 ignore next */
         const existingImsOrgId = existingOrg?.getImsOrgId?.() || existingOrgId;
@@ -435,12 +429,6 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
         onboarding.setSteps(steps);
         await onboarding.save();
         return onboarding;
-      }
-
-      // Move from internal org to customer's org if needed
-      if (existingOrgId !== organizationId) {
-        site.setOrganizationId(organizationId);
-        log.info(`Reassigning site ${site.getId()} from org ${existingOrgId} to ${organizationId}`);
       }
     }
 

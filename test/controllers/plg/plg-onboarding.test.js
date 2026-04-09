@@ -1301,8 +1301,8 @@ describe('PlgOnboardingController', () => {
       expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
 
-    it('returns WAITING_FOR_IP_ALLOWLISTING for existing site and saves org change', async () => {
-      const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
+    it('returns WAITING_FOR_IP_ALLOWLISTING for existing site in same org', async () => {
+      const existingSite = createMockSite({ orgId: TEST_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
       detectBotBlockerStub.resolves({
@@ -1318,8 +1318,6 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus)
         .to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      expect(existingSite.save).to.have.been.called;
     });
 
     it('uses ipsToWhitelist fallback for bot blocker', async () => {
@@ -1406,7 +1404,7 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('reassigns site from DEFAULT_ORGANIZATION_ID to customer org', async () => {
+    it('waitlists when site belongs to DEFAULT_ORGANIZATION_ID', async () => {
       const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1415,11 +1413,13 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(existingSite.setOrganizationId).to.not.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
     });
 
-    it('reassigns site from ASO_DEMO_ORG to customer org', async () => {
+    it('waitlists when site belongs to ASO_DEMO_ORG', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1428,7 +1428,10 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(existingSite.setOrganizationId).to.not.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
     });
   });
 
