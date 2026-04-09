@@ -15,6 +15,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
+import LaunchDarklyClient from '@adobe/spacecat-shared-launchdarkly-client';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import {
@@ -34,7 +35,6 @@ import {
   enableAudits,
   enableImports,
   triggerAudits,
-  ASO_DEMO_ORG,
 } from '../llmo/llmo-onboarding.js';
 import {
   autoResolveAuthorUrl,
@@ -50,8 +50,15 @@ import AccessControlUtil from '../../support/access-control-util.js';
 
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
-const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+const ASO_TIER = EntitlementModel.TIERS.PLG;
 const PLG_PROFILE_KEY = 'aso_plg';
+const LD_FF_PROJECT_NAME = 'experience-success-studio';
+const LD_API_TOKEN_ENV_VAR = 'LD_EXPERIENCE_SUCCESS_API_TOKEN';
+const LD_AUTO_FIX_FLAGS = [
+  'FF_cwv-auto-fix',
+  'FF_alt-text-auto-fix',
+  'FF_broken-backlinks-auto-fix',
+];
 
 const REVIEW_REASONS = {
   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -123,26 +130,132 @@ function isSafeDomain(domain) {
   return !blocked.some((pattern) => pattern.test(domain));
 }
 
-function isInternalOrg(orgId, env) {
-  return orgId === env.DEFAULT_ORGANIZATION_ID || orgId === ASO_DEMO_ORG;
-}
-
 async function ensureAsoEntitlement(site, context) {
   const { log } = context;
+  const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
   try {
-    const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
-    const { entitlement, siteEnrollment } = await tierClient
-      .createEntitlement(ASO_TIER);
-    log.info(`Created ASO entitlement ${entitlement.getId()} and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`);
-    return { entitlement, siteEnrollment };
+    const result = await tierClient.createEntitlement(ASO_TIER);
+    log.info(`ASO entitlement ${result.entitlement.getId()} and enrollment ${result.siteEnrollment?.getId()} ensured for site ${site.getId()}`);
+    return result;
   } catch (error) {
-    if (error.message?.includes('already exists')
-      || error.message?.includes('Already enrolled')) {
-      log.info(`ASO entitlement already exists for site ${site.getId()}`);
-      return null;
+    if (error.message?.includes('already exists') || error.message?.includes('Already enrolled')) {
+      log.info(`ASO entitlement already exists for site ${site.getId()}, fetching existing`);
+      return tierClient.checkValidEntitlement();
     }
     throw error;
   }
+}
+
+/**
+ * Revokes the ASO site enrollment for any other site under the same entitlement.
+ * Used to enforce one active PLG enrollment per org when upgrading from PRE_ONBOARD.
+ * @param {object} site - The newly enrolled site.
+ * @param {object} entitlement - The ASO entitlement for the org.
+ * @param {object} context - Request context.
+ */
+async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
+  const { dataAccess, log } = context;
+  const { SiteEnrollment } = dataAccess;
+
+  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  const toRevoke = enrollments.filter((e) => e.getSiteId() !== site.getId());
+
+  await Promise.all(toRevoke.map((e) => {
+    log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${e.getSiteId()}`);
+    return e.remove();
+  }));
+}
+
+/**
+ * Upserts a single LaunchDarkly flag's variation 0 to include the org + site.
+ * Variation 0 value is a JSON object: { [imsOrgId]: [siteIds] }.
+ *
+ * NOTE: This function performs a read-modify-write on the flag variation without
+ * locking. Two concurrent onboardings could overwrite each other's addition. The
+ * idempotent check makes this self-healing on retry (re-running onboarding will
+ * re-add a lost entry), but a missed write will not be detected automatically.
+ * @param {object} ldClient - LaunchDarklyClient instance.
+ * @param {string} flagKey - Flag key.
+ * @param {string} imsOrgId - IMS org ID.
+ * @param {string} siteId - Site ID.
+ * @param {object} log - Logger.
+ */
+async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
+  const flag = await ldClient.getFeatureFlag(LD_FF_PROJECT_NAME, flagKey);
+  const rawValue = flag.variations?.[0]?.value;
+
+  if (rawValue === undefined) {
+    log.warn(`LaunchDarkly flag ${flagKey} has no variations`);
+    return;
+  }
+
+  const isStringWrapped = typeof rawValue === 'string';
+  let parsed;
+  try {
+    parsed = isStringWrapped ? JSON.parse(rawValue) : rawValue;
+  } catch (e) {
+    log.warn(`LaunchDarkly flag ${flagKey} has malformed JSON in variation 0, skipping: ${e.message}`);
+    return;
+  }
+
+  const existingSites = parsed[imsOrgId] ?? [];
+  if (existingSites.includes(siteId)) {
+    log.info(`LaunchDarkly: site ${siteId} already in ${flagKey} for org ${imsOrgId}`);
+    return;
+  }
+
+  const merged = { ...parsed, [imsOrgId]: [...existingSites, siteId] };
+  const newValue = isStringWrapped ? JSON.stringify(merged) : merged;
+
+  await ldClient.updateVariationValue(
+    LD_FF_PROJECT_NAME,
+    flagKey,
+    0,
+    newValue,
+    `plg-onboarding: enable ${flagKey} for ${imsOrgId} / ${siteId}`,
+  );
+
+  log.info(`LaunchDarkly: enabled ${flagKey} for org ${imsOrgId}, site ${siteId}`);
+}
+
+/**
+ * Enables all PLG auto-fix LaunchDarkly feature flags for the given site's org.
+ * Uses the experience-success-studio project token (LD_EXPERIENCE_SUCCESS_API_TOKEN).
+ * Each flag update is non-fatal — onboarding continues even if one fails.
+ * @param {object} site - The onboarded site.
+ * @param {object} context - Request context.
+ */
+async function updateLaunchDarklyFlags(site, context) {
+  const { log, env } = context;
+
+  const apiToken = env[LD_API_TOKEN_ENV_VAR];
+  if (!apiToken) {
+    log.warn(`Cannot update LaunchDarkly flags: ${LD_API_TOKEN_ENV_VAR} is not set`);
+    return;
+  }
+
+  const ldClient = new LaunchDarklyClient({ apiToken }, log);
+
+  const imsOrgId = (await context.dataAccess.Organization.findById(
+    site.getOrganizationId(),
+  ))?.getImsOrgId();
+
+  if (!imsOrgId) {
+    log.warn(`Cannot update LaunchDarkly flags: no IMS org ID for site ${site.getId()}`);
+    return;
+  }
+
+  const siteId = site.getId();
+
+  const results = await Promise.allSettled(
+    LD_AUTO_FIX_FLAGS.map((flagKey) => upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log)),
+  );
+
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      log.error(`Failed to update LaunchDarkly flag ${LD_AUTO_FIX_FLAGS[i]}: ${result.reason?.message}`);
+    }
+  });
 }
 
 async function createOrFindProject(baseURL, organizationId, context) {
@@ -181,7 +294,7 @@ async function createOrFindProject(baseURL, organizationId, context) {
 async function performAsoPlgOnboarding({
   domain, imsOrgId, presetDeliveryType, presetAuthorUrl,
 }, context) {
-  const { dataAccess, log, env } = context;
+  const { dataAccess, log } = context;
   const {
     Site, PlgOnboarding, Organization,
   } = dataAccess;
@@ -249,7 +362,9 @@ async function performAsoPlgOnboarding({
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
     const site = await Site.findById(onboarding.getSiteId());
     if (site) {
-      await ensureAsoEntitlement(site, context);
+      const { entitlement } = await ensureAsoEntitlement(site, context);
+      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+      await updateLaunchDarklyFlags(site, context);
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setSteps(steps);
@@ -301,8 +416,7 @@ async function performAsoPlgOnboarding({
     if (site) {
       const existingOrgId = site.getOrganizationId();
 
-      if (existingOrgId !== organizationId
-        && !isInternalOrg(existingOrgId, env)) {
+      if (existingOrgId !== organizationId) {
         const existingOrg = await Organization.findById(existingOrgId);
         /* c8 ignore next */
         const existingImsOrgId = existingOrg?.getImsOrgId?.() || existingOrgId;
@@ -325,12 +439,6 @@ async function performAsoPlgOnboarding({
         onboarding.setSteps(steps);
         await onboarding.save();
         return onboarding;
-      }
-
-      // Move from internal org to customer's org if needed
-      if (existingOrgId !== organizationId) {
-        site.setOrganizationId(organizationId);
-        log.info(`Reassigning site ${site.getId()} from org ${existingOrgId} to ${organizationId}`);
       }
     }
 
@@ -582,8 +690,11 @@ async function performAsoPlgOnboarding({
       log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
-    // Step 9: Add ASO entitlement
-    await ensureAsoEntitlement(site, context);
+    // Step 9: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
+    const { entitlement } = await ensureAsoEntitlement(site, context);
+    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+    await updateLaunchDarklyFlags(site, context);
+
     steps.entitlementCreated = true;
 
     // Step 10: Trigger audit runs
@@ -656,8 +767,8 @@ function PlgOnboardingController(ctx) {
     // Admins can onboard on behalf of any IMS org — imsOrgId must be explicitly provided
     let imsOrgId;
     if (isAdmin) {
-      if (!hasText(requestedImsOrgId)) {
-        return badRequest('imsOrgId is required when onboarding as admin');
+      if (!hasText(requestedImsOrgId) || !isValidIMSOrgId(requestedImsOrgId)) {
+        return badRequest('Valid imsOrgId is required when onboarding as admin');
       }
       imsOrgId = requestedImsOrgId;
     } else {

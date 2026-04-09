@@ -36,7 +36,6 @@ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
-
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -1925,7 +1924,13 @@ export const CUSTOMER_VISIBLE_TIERS = [
   EntitlementModel.TIERS.PLG,
 ];
 
-export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
+export const filterSitesForProductCode = async (
+  context,
+  organization,
+  sites,
+  productCode,
+  accessControlUtil,
+) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
   const { SiteEnrollment } = context.dataAccess;
   const tierClient = TierClient.createForOrg(context, organization, productCode);
@@ -1935,8 +1940,9 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
     return [];
   }
 
-  // PLG and any future internal tiers are not customer-visible
-  if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+  // PRE_ONBOARD and any future internal tiers are not customer-visible if user is not an admin
+  if (!accessControlUtil?.hasAdminAccess()
+    && !CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
     return [];
   }
 

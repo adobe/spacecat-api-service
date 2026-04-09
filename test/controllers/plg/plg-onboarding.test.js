@@ -52,6 +52,9 @@ describe('PlgOnboardingController', () => {
   let triggerBrandProfileAgentStub;
   let tierClientCreateForSiteStub;
   let tierClientCreateEntitlementStub;
+  let ldGetFeatureFlagStub;
+  let ldUpdateVariationValueStub;
+  let ldCreateFromStub;
   let configToDynamoItemStub;
 
   // Mock objects
@@ -191,6 +194,16 @@ describe('PlgOnboardingController', () => {
     // Brand profile
     triggerBrandProfileAgentStub = sandbox.stub().resolves('exec-123');
 
+    // LaunchDarkly
+    ldGetFeatureFlagStub = sandbox.stub().resolves({
+      variations: [{ value: {} }],
+    });
+    ldUpdateVariationValueStub = sandbox.stub().resolves({});
+    ldCreateFromStub = sandbox.stub().returns({
+      getFeatureFlag: ldGetFeatureFlagStub,
+      updateVariationValue: ldUpdateVariationValueStub,
+    });
+
     // TierClient
     tierClientCreateEntitlementStub = sandbox.stub().resolves({
       entitlement: { getId: () => 'ent-1' },
@@ -198,6 +211,10 @@ describe('PlgOnboardingController', () => {
     });
     tierClientCreateForSiteStub = sandbox.stub().resolves({
       createEntitlement: tierClientCreateEntitlementStub,
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: { getId: () => 'ent-1' },
+        siteEnrollment: { getId: () => 'enroll-1' },
+      }),
     });
 
     // Config
@@ -252,6 +269,9 @@ describe('PlgOnboardingController', () => {
         allByImsOrgId: sandbox.stub().resolves([]),
         all: sandbox.stub().resolves([]),
       },
+      SiteEnrollment: {
+        allByEntitlementId: sandbox.stub().resolves([]),
+      },
     };
 
     mockLog = {
@@ -263,6 +283,7 @@ describe('PlgOnboardingController', () => {
 
     mockEnv = {
       DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID,
+      LD_EXPERIENCE_SUCCESS_API_TOKEN: 'test-ld-token',
     };
 
     PlgOnboardingController = (await esmock(
@@ -284,6 +305,9 @@ describe('PlgOnboardingController', () => {
           notFound: (msg) => ({ status: 404, value: msg }),
           ok: (data) => ({ status: 200, value: data }),
         },
+        '@adobe/spacecat-shared-launchdarkly-client': {
+          default: ldCreateFromStub,
+        },
         '@adobe/spacecat-shared-rum-api-client': {
           default: {
             createFrom: sandbox.stub().returns({
@@ -300,7 +324,7 @@ describe('PlgOnboardingController', () => {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
             PRODUCT_CODES: { ASO: 'aso_optimizer' },
-            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
           },
         },
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -498,6 +522,9 @@ describe('PlgOnboardingController', () => {
               }),
             },
           },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
           },
@@ -507,7 +534,7 @@ describe('PlgOnboardingController', () => {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -568,14 +595,14 @@ describe('PlgOnboardingController', () => {
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await adminController.onboard(context);
       expect(res.status).to.equal(400);
-      expect(res.value).to.equal('imsOrgId is required when onboarding as admin');
+      expect(res.value).to.equal('Valid imsOrgId is required when onboarding as admin');
     });
 
     it('returns 400 when imsOrgId is empty string in admin onboard call', async () => {
       const context = buildContext({ domain: TEST_DOMAIN, imsOrgId: '' });
       const res = await adminController.onboard(context);
       expect(res.status).to.equal(400);
-      expect(res.value).to.equal('imsOrgId is required when onboarding as admin');
+      expect(res.value).to.equal('Valid imsOrgId is required when onboarding as admin');
     });
 
     it('onboards successfully when admin provides imsOrgId', async () => {
@@ -1276,8 +1303,8 @@ describe('PlgOnboardingController', () => {
       expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
 
-    it('returns WAITING_FOR_IP_ALLOWLISTING for existing site and saves org change', async () => {
-      const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
+    it('returns WAITING_FOR_IP_ALLOWLISTING for existing site in same org', async () => {
+      const existingSite = createMockSite({ orgId: TEST_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
       detectBotBlockerStub.resolves({
@@ -1293,8 +1320,6 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus)
         .to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      expect(existingSite.save).to.have.been.called;
     });
 
     it('uses ipsToWhitelist fallback for bot blocker', async () => {
@@ -1381,7 +1406,7 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('reassigns site from DEFAULT_ORGANIZATION_ID to customer org', async () => {
+    it('waitlists when site belongs to DEFAULT_ORGANIZATION_ID', async () => {
       const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1390,11 +1415,13 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(existingSite.setOrganizationId).to.not.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
     });
 
-    it('reassigns site from ASO_DEMO_ORG to customer org', async () => {
+    it('waitlists when site belongs to ASO_DEMO_ORG', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1403,7 +1430,10 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(existingSite.setOrganizationId).to.not.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
     });
   });
 
@@ -1647,6 +1677,185 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- ASO enrollment revocation ---
+
+  describe('onboard - ASO enrollment revocation', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('revokes pre-onboarded site enrollment when another site exists under same entitlement', async () => {
+      const OTHER_SITE_ID = 'other-site-uuid';
+      const mockEnrollment = {
+        getId: sandbox.stub().returns('enroll-old'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockEnrollment.remove).to.have.been.calledOnce;
+    });
+
+    it('revokes all other enrollments when multiple exist under same entitlement', async () => {
+      const mockEnrollment1 = {
+        getId: sandbox.stub().returns('enroll-old-1'),
+        getSiteId: sandbox.stub().returns('other-site-1'),
+        remove: sandbox.stub().resolves(),
+      };
+      const mockEnrollment2 = {
+        getId: sandbox.stub().returns('enroll-old-2'),
+        getSiteId: sandbox.stub().returns('other-site-2'),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment1, mockEnrollment2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockEnrollment1.remove).to.have.been.calledOnce;
+      expect(mockEnrollment2.remove).to.have.been.calledOnce;
+    });
+
+    it('does not revoke when no other enrollment exists', async () => {
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns error status when enrollment removal fails', async () => {
+      const mockEnrollment = {
+        getId: sandbox.stub().returns('enroll-old'),
+        getSiteId: sandbox.stub().returns('other-site-uuid'),
+        remove: sandbox.stub().rejects(new Error('DB remove failed')),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(500);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
+    });
+  });
+
+  // --- LaunchDarkly feature flag update ---
+
+  describe('onboard - LaunchDarkly flag update', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('adds org and site to all 3 auto-fix flags in variation 0', async () => {
+      ldGetFeatureFlagStub.resolves({ variations: [{ value: {} }] });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      const expectedFlags = ['FF_cwv-auto-fix', 'FF_alt-text-auto-fix', 'FF_broken-backlinks-auto-fix'];
+      expectedFlags.forEach((flagKey) => {
+        expect(ldGetFeatureFlagStub).to.have.been.calledWith('experience-success-studio', flagKey);
+      });
+      expect(ldUpdateVariationValueStub.callCount).to.equal(3);
+      const cwvCall = ldUpdateVariationValueStub.getCalls().find((c) => c.args[1] === 'FF_cwv-auto-fix');
+      expect(cwvCall).to.exist;
+      expect(cwvCall.args[0]).to.equal('experience-success-studio');
+      expect(cwvCall.args[2]).to.equal(0);
+      expect(cwvCall.args[3]).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_SITE_ID] });
+    });
+
+    it('skips duplicate site already present in variation 0', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: { [TEST_IMS_ORG_ID]: [TEST_SITE_ID] } }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('continues onboarding when LD flag update fails', async () => {
+      ldGetFeatureFlagStub.rejects(new Error('LD service unavailable'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips LD update when LD_EXPERIENCE_SUCCESS_API_TOKEN is not set', async () => {
+      const context = {
+        ...buildContext({ domain: TEST_DOMAIN }),
+        env: { DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID },
+      };
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldGetFeatureFlagStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/LD_EXPERIENCE_SUCCESS_API_TOKEN/);
+    });
+
+    it('skips LD update when org has no IMS org ID', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('skips LD update when flag has no variations', async () => {
+      ldGetFeatureFlagStub.resolves({ variations: [] });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('handles string-wrapped variation 0 value', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: JSON.stringify({}) }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(ldUpdateVariationValueStub.callCount).to.equal(3);
+      ldUpdateVariationValueStub.getCalls().forEach((call) => {
+        const newValue = call.args[3];
+        expect(typeof newValue).to.equal('string');
+        expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_SITE_ID] });
+      });
+    });
+
+    it('skips flag and warns when variation 0 contains malformed JSON string', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: 'not-valid-json{{{' }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/malformed JSON/);
+    });
+  });
+
   // --- Delivery config writer (CDN + optional redirect params) ---
 
   describe('onboard - delivery config writer', () => {
@@ -1863,6 +2072,9 @@ describe('PlgOnboardingController', () => {
           entitlementCreated: true,
         }),
       );
+      // Revocation and LD flag steps must run in the fast path
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
+      expect(ldGetFeatureFlagStub).to.have.been.called;
       // Should NOT run full onboarding steps
       expect(createOrFindOrganizationStub).to.not.have.been.called;
       expect(detectBotBlockerStub).to.not.have.been.called;
@@ -2078,6 +2290,9 @@ describe('PlgOnboardingController', () => {
               }),
             },
           },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
           },
@@ -2087,7 +2302,7 @@ describe('PlgOnboardingController', () => {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -2453,6 +2668,9 @@ describe('PlgOnboardingController', () => {
               }),
             },
           },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
           },
@@ -2462,7 +2680,7 @@ describe('PlgOnboardingController', () => {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -2544,6 +2762,9 @@ describe('PlgOnboardingController', () => {
                 }),
               },
             },
+            '@adobe/spacecat-shared-launchdarkly-client': {
+              default: ldCreateFromStub,
+            },
             '@adobe/spacecat-shared-tier-client': {
               default: { createForSite: sandbox.stub() },
             },
@@ -2551,7 +2772,7 @@ describe('PlgOnboardingController', () => {
               Config: { toDynamoItem: sandbox.stub() },
             },
             '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-              Entitlement: { PRODUCT_CODES: { ASO: 'aso_optimizer' }, TIERS: { FREE_TRIAL: 'FREE_TRIAL' } },
+              Entitlement: { PRODUCT_CODES: { ASO: 'aso_optimizer' }, TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' } },
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
