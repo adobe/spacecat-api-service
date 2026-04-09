@@ -265,10 +265,10 @@ Config:
       $ref: '#/EdgeOptimizeConfig'
     auditTargetURLs:
       description: Optional. Custom audit target URLs grouped by source (manual, moneyPages).
-      $ref: '#/AuditTargetURLsConfig'
-AuditTargetURLsConfig:
+      $ref: '#/AuditTargetURLs'
+AuditTargetURLs:
   type: object
-  description: Custom audit target URLs grouped by source. Each source is validated independently — HTTPS only, hostname must match the site base URL.
+  description: Custom audit target URLs grouped by source. HTTPS only, hostname must match the site base URL.
   properties:
     manual:
       description: Manually curated list of URLs to include in audits. Maximum 500 entries.
@@ -277,16 +277,17 @@ AuditTargetURLsConfig:
       items:
         $ref: '#/AuditTargetURL'
     moneyPages:
-      description: High-value pages identified for auditing (e.g. by the audit worker). Maximum 1000 entries.
+      description: Revenue generating pages. Maximum 1000 entries.
       type: array
       maxItems: 1000
       items:
         $ref: '#/AuditTargetURL'
-  additionalProperties: false
+  additionalProperties: true
 AuditTargetURL:
   type: object
   required:
     - url
+  additionalProperties: false
   properties:
     url:
       type: string
