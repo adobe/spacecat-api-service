@@ -433,8 +433,6 @@ export default function getRouteHandlers(
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
     'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
-    'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions-from-config': llmoMysticatController.getFilterDimensionsFromConfig,
-    'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions-from-config': llmoMysticatController.getFilterDimensionsFromConfig,
     'GET /org/:spaceCatId/brands/all/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': llmoMysticatController.getBrandPresenceWeeks,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview': llmoMysticatController.getSentimentOverview,

@@ -268,7 +268,6 @@ describe('getRouteHandlers', () => {
 
   const mockLlmoMysticatController = {
     getFilterDimensions: () => null,
-    getFilterDimensionsFromConfig: () => null,
     getAgenticTrafficGlobal: () => null,
     postAgenticTrafficGlobal: () => null,
   };
@@ -581,8 +580,6 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
-      'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions-from-config',
-      'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions-from-config',
       'GET /org/:spaceCatId/brands/all/brand-presence/weeks',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks',
       'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview',

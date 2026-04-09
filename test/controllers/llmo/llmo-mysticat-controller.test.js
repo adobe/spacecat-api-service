@@ -99,7 +99,6 @@ describe('LlmoMysticatController', () => {
     const controller = LlmoMysticatController(mockContext);
 
     expect(controller.getFilterDimensions).to.be.a('function');
-    expect(controller.getFilterDimensionsFromConfig).to.be.a('function');
     expect(controller.getAgenticTrafficGlobal).to.be.a('function');
     expect(controller.postAgenticTrafficGlobal).to.be.a('function');
   });
@@ -107,15 +106,6 @@ describe('LlmoMysticatController', () => {
   it('getFilterDimensions validates org and returns data', async () => {
     const controller = LlmoMysticatController(mockContext);
     const result = await controller.getFilterDimensions(mockContext);
-
-    expect(mockContext.dataAccess.Organization.findById)
-      .to.have.been.calledWith(mockContext.params.spaceCatId);
-    expect(result.status).to.equal(200);
-  });
-
-  it('getFilterDimensionsFromConfig validates org and returns data', async () => {
-    const controller = LlmoMysticatController(mockContext);
-    const result = await controller.getFilterDimensionsFromConfig(mockContext);
 
     expect(mockContext.dataAccess.Organization.findById)
       .to.have.been.calledWith(mockContext.params.spaceCatId);
