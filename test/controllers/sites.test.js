@@ -3435,6 +3435,79 @@ describe('Sites Controller', () => {
     expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
   });
 
+  describe('auditTargetURLs validation', () => {
+    it('returns bad request when manual URL hostname does not match site base URL', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({ slack: { channel: '#x' } }));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://example.com/path1' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('Invalid audit target URL at index 0:');
+      expect(err.message).to.include('site domain (site1.com, with or without www.)');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('accepts manual URLs on the site hostname', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://site1.com/path1' }, { url: 'https://site1.com/path2' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual).to.deep.equal([
+        { url: 'https://site1.com/path1' },
+        { url: 'https://site1.com/path2' },
+      ]);
+    });
+
+    it('does not validate auditTargetURLs when key is omitted from config patch', async () => {
+      const site = sites[0];
+      const existingConfig = Config({
+        auditTargetURLs: { manual: [{ url: 'https://wrong.example/' }] },
+      });
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { slack: { channel: '#only' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual[0].url).to.equal('https://wrong.example/');
+    });
+  });
+
   it('allows removing a config key by explicitly setting it to null', async () => {
     const site = sites[0];
     const existingConfig = Config({
