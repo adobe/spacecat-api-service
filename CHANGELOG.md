@@ -1,3 +1,11 @@
+## [1.427.2](https://github.com/adobe/spacecat-api-service/compare/v1.427.1...v1.427.2) (2026-04-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2162](https://github.com/adobe/spacecat-api-service/issues/2162)) ([fe15dba](https://github.com/adobe/spacecat-api-service/commit/fe15dba7c92247c0b51e4729342103c9addd5982))
+* remove dead skip-upload-artifacts config ([#2164](https://github.com/adobe/spacecat-api-service/issues/2164)) ([e4f02ec](https://github.com/adobe/spacecat-api-service/commit/e4f02ec9e4d61ed45c8a684754349b9d8776077c))
+
 ## [1.427.1](https://github.com/adobe/spacecat-api-service/compare/v1.427.0...v1.427.1) (2026-04-09)
 
 
