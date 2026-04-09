@@ -48,7 +48,9 @@ export const applyFilters = (rawData, filterFields) => {
     const filteredArray = array.filter((item) => {
       const itemMatchesFilter = Object.entries(filterFields).every(([attr, value]) => {
         const itemValue = item[attr];
-        if (itemValue == null) return false;
+        if (itemValue == null) {
+          return false;
+        }
         return String(itemValue).toLowerCase() === String(value).toLowerCase();
       });
       return itemMatchesFilter;
@@ -211,9 +213,15 @@ export const applySort = (rawData, sortConfig) => {
       const bValue = b[field];
 
       // Handle null/undefined values - push to end
-      if (aValue == null && bValue == null) return 0;
-      if (aValue == null) return 1;
-      if (bValue == null) return -1;
+      if (aValue == null && bValue == null) {
+        return 0;
+      }
+      if (aValue == null) {
+        return 1;
+      }
+      if (bValue == null) {
+        return -1;
+      }
 
       // Try numeric comparison first
       const aNum = Number(aValue);

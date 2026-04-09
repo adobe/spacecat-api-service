@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Experiment } from '@adobe/spacecat-shared-data-access';
 import ExperimentSchema from '@adobe/spacecat-shared-data-access/src/models/experiment/experiment.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';

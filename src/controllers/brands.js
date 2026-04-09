@@ -123,7 +123,9 @@ function BrandsController(ctx, log, env) {
    */
   function getQueryParams(context) {
     const rawQueryString = context.invocation?.event?.rawQueryString;
-    if (!rawQueryString) return {};
+    if (!rawQueryString) {
+      return {};
+    }
 
     const params = {};
     rawQueryString.split('&').forEach((param) => {
@@ -255,9 +257,15 @@ function BrandsController(ctx, log, env) {
     } = getQueryParams(context);
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
 
       const limitNum = Number(limit);
       if (limit !== undefined && (Number.isNaN(limitNum) || limitNum < 1 || limitNum > 5000)) {
@@ -265,18 +273,24 @@ function BrandsController(ctx, log, env) {
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const result = await listPrompts({
         organizationId: spaceCatId,
@@ -305,24 +319,38 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, brandId, promptId } = context.params || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
-      if (!hasText(promptId)) return badRequest('Prompt ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (!hasText(promptId)) {
+        return badRequest('Prompt ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const prompt = await getPromptById({
         organizationId: spaceCatId,
@@ -331,7 +359,9 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
       });
 
-      if (!prompt) return notFound(`Prompt not found: ${promptId}`);
+      if (!prompt) {
+        return notFound(`Prompt not found: ${promptId}`);
+      }
       return ok(prompt);
     } catch (error) {
       log.error(`Error getting prompt ${promptId}:`, error);
@@ -344,26 +374,42 @@ function BrandsController(ctx, log, env) {
     const prompts = context.data;
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
-      if (!Array.isArray(prompts) || prompts.length === 0) return badRequest('Prompts array required (min 1, max 3000)');
-      if (prompts.length > 3000) return badRequest('Maximum 3000 prompts per request');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (!Array.isArray(prompts) || prompts.length === 0) {
+        return badRequest('Prompts array required (min 1, max 3000)');
+      }
+      if (prompts.length > 3000) {
+        return badRequest('Maximum 3000 prompts per request');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const { created, updated, prompts: outPrompts } = await upsertPrompts({
         organizationId: spaceCatId,
@@ -385,25 +431,39 @@ function BrandsController(ctx, log, env) {
     const updates = context.data || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
-      if (!hasText(promptId)) return badRequest('Prompt ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (!hasText(promptId)) {
+        return badRequest('Prompt ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const prompt = await updatePromptById({
         organizationId: spaceCatId,
@@ -414,7 +474,9 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!prompt) return notFound(`Prompt not found: ${promptId}`);
+      if (!prompt) {
+        return notFound(`Prompt not found: ${promptId}`);
+      }
       return ok(prompt);
     } catch (error) {
       log.error(`Error updating prompt ${promptId}:`, error);
@@ -426,25 +488,39 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, brandId, promptId } = context.params || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
-      if (!hasText(promptId)) return badRequest('Prompt ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+      if (!hasText(promptId)) {
+        return badRequest('Prompt ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const deleted = await deletePromptById({
         organizationId: spaceCatId,
@@ -454,7 +530,9 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!deleted) return notFound(`Prompt not found: ${promptId}`);
+      if (!deleted) {
+        return notFound(`Prompt not found: ${promptId}`);
+      }
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
@@ -467,30 +545,44 @@ function BrandsController(ctx, log, env) {
     const body = context.data || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
 
       const { promptIds } = body;
       if (!Array.isArray(promptIds) || promptIds.length === 0) {
         return badRequest('promptIds array required (min 1, max 100)');
       }
-      if (promptIds.length > 100) return badRequest('Maximum 100 prompt IDs per request');
+      if (promptIds.length > 100) {
+        return badRequest('Maximum 100 prompt IDs per request');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const result = await bulkDeletePrompts({
         organizationId: spaceCatId,
@@ -513,26 +605,40 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, brandId } = context.params || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const brand = await getBrandById(spaceCatId, brandUuid, postgrestClient);
-      if (!brand) return notFound(`Brand not found: ${brandId}`);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       return ok(brand);
     } catch (error) {
@@ -546,17 +652,25 @@ function BrandsController(ctx, log, env) {
     const { status } = getQueryParams(context);
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const brands = await listBrands(spaceCatId, postgrestClient, { status });
@@ -572,17 +686,25 @@ function BrandsController(ctx, log, env) {
     const { status } = getQueryParams(context);
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       // eslint-disable-next-line max-len
@@ -601,19 +723,31 @@ function BrandsController(ctx, log, env) {
     const categoryData = context.data;
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!isNonEmptyObject(categoryData)) return badRequest('Category data is required');
-      if (!hasText(categoryData.name)) return badRequest('Category name is required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!isNonEmptyObject(categoryData)) {
+        return badRequest('Category data is required');
+      }
+      if (!hasText(categoryData.name)) {
+        return badRequest('Category name is required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
@@ -637,18 +771,28 @@ function BrandsController(ctx, log, env) {
     const updates = context.data || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(categoryId)) return badRequest('Category ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(categoryId)) {
+        return badRequest('Category ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
@@ -661,7 +805,9 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!updated) return notFound(`Category not found: ${categoryId}`);
+      if (!updated) {
+        return notFound(`Category not found: ${categoryId}`);
+      }
       return ok(updated);
     } catch (error) {
       log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
@@ -673,18 +819,28 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, categoryId } = context.params || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(categoryId)) return badRequest('Category ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(categoryId)) {
+        return badRequest('Category ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
@@ -696,7 +852,9 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!deleted) return notFound(`Category not found: ${categoryId}`);
+      if (!deleted) {
+        return notFound(`Category not found: ${categoryId}`);
+      }
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
@@ -711,17 +869,25 @@ function BrandsController(ctx, log, env) {
     const { status, brandId } = getQueryParams(context);
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const topics = await listTopics({
@@ -739,19 +905,31 @@ function BrandsController(ctx, log, env) {
     const topicData = context.data;
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!isNonEmptyObject(topicData)) return badRequest('Topic data is required');
-      if (!hasText(topicData.name)) return badRequest('Topic name is required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!isNonEmptyObject(topicData)) {
+        return badRequest('Topic data is required');
+      }
+      if (!hasText(topicData.name)) {
+        return badRequest('Topic name is required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
@@ -775,18 +953,28 @@ function BrandsController(ctx, log, env) {
     const updates = context.data || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(topicId)) return badRequest('Topic ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(topicId)) {
+        return badRequest('Topic ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
@@ -799,7 +987,9 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!updated) return notFound(`Topic not found: ${topicId}`);
+      if (!updated) {
+        return notFound(`Topic not found: ${topicId}`);
+      }
       return ok(updated);
     } catch (error) {
       log.error(`Error updating topic ${topicId} for organization ${spaceCatId}:`, error);
@@ -811,18 +1001,28 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, topicId } = context.params || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(topicId)) return badRequest('Topic ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(topicId)) {
+        return badRequest('Topic ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
@@ -834,7 +1034,9 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!deleted) return notFound(`Topic not found: ${topicId}`);
+      if (!deleted) {
+        return notFound(`Topic not found: ${topicId}`);
+      }
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
@@ -849,19 +1051,31 @@ function BrandsController(ctx, log, env) {
     const brandData = context.data;
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!isNonEmptyObject(brandData)) return badRequest('Brand data is required');
-      if (!hasText(brandData.name)) return badRequest('Brand name is required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!isNonEmptyObject(brandData)) {
+        return badRequest('Brand data is required');
+      }
+      if (!hasText(brandData.name)) {
+        return badRequest('Brand name is required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
@@ -885,24 +1099,36 @@ function BrandsController(ctx, log, env) {
     const updates = context.data || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       const updated = await updateBrand({
         organizationId: spaceCatId,
@@ -912,7 +1138,9 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!updated) return notFound(`Brand not found: ${brandId}`);
+      if (!updated) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
       return ok(updated);
     } catch (error) {
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
@@ -924,29 +1152,43 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, brandId } = context.params || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
-      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
+      if (unavailable) {
+        return unavailable;
+      }
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
       const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
-      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
 
       // eslint-disable-next-line max-len
       const deleted = await deleteBrand(spaceCatId, brandUuid, postgrestClient, updatedBy);
 
-      if (!deleted) return notFound(`Brand not found: ${brandId}`);
+      if (!deleted) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
@@ -958,11 +1200,17 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, siteId } = context.params || {};
 
     try {
-      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
-      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization;
+      if (organization.status) {
+        return organization;
+      }
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
@@ -972,7 +1220,9 @@ function BrandsController(ctx, log, env) {
       }
 
       const site = await Site.findById(siteId);
-      if (!site) return notFound(`Site not found: ${siteId}`);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
+      }
       if (site.getOrganizationId() !== spaceCatId) {
         return forbidden('Site does not belong to this organization');
       }

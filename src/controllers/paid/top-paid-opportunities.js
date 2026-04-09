@@ -93,7 +93,9 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
       categorizedOpportunities.set(
         category,
         opportunities.filter((opportunity) => {
-          if (failedOpportunityIds.has(opportunity.id)) return false;
+          if (failedOpportunityIds.has(opportunity.id)) {
+            return false;
+          }
           const cached = suggestionsByOpportunityId.get(opportunity.id);
           return cached && !cached.hasPendingValidation;
         }),

@@ -39,7 +39,9 @@ import {
  */
 function getQueryParams(context) {
   const rawQueryString = context.invocation?.event?.rawQueryString;
-  if (!rawQueryString) return {};
+  if (!rawQueryString) {
+    return {};
+  }
   const params = {};
   rawQueryString.split('&').forEach((param) => {
     const [key, value] = param.split('=');
@@ -59,8 +61,12 @@ function getQueryParams(context) {
 function resolveUpdatedBy(context) {
   const authInfo = context.attributes?.authInfo;
   const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
-  if (profile?.user_id) return String(profile.user_id);
-  if (profile?.sub) return String(profile.sub);
+  if (profile?.user_id) {
+    return String(profile.user_id);
+  }
+  if (profile?.sub) {
+    return String(profile.sub);
+  }
   return 'spacecat-api-service';
 }
 
@@ -128,7 +134,9 @@ function FeatureFlagsController(ctx) {
 
   const listByOrganization = async (context) => {
     const unavailable = requirePostgrest(context);
-    if (unavailable) return unavailable;
+    if (unavailable) {
+      return unavailable;
+    }
 
     const { organizationId } = context.params;
     if (!isValidUUID(organizationId)) {
@@ -168,7 +176,9 @@ function FeatureFlagsController(ctx) {
       return forbidden('Only admins can set organization feature flags');
     }
     const unavailable = requirePostgrest(context);
-    if (unavailable) return unavailable;
+    if (unavailable) {
+      return unavailable;
+    }
 
     const target = parseWriteTarget(context);
     if (!('pathProductNorm' in target)) {

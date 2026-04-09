@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 /* eslint-disable max-classes-per-file */
 
 import { expect, use } from 'chai';
@@ -78,7 +77,9 @@ function createMockSite(siteId = 's-1', baseURL = 'https://example.com') {
     enableImport: (type) => importsState.push({ type, enabled: true }),
     disableImport: (type) => {
       const idx = importsState.findIndex((i) => i.type === type);
-      if (idx >= 0) importsState.splice(idx, 1);
+      if (idx >= 0) {
+        importsState.splice(idx, 1);
+      }
     },
   };
   return {
@@ -1750,7 +1751,9 @@ describe('ephemeral-run-service', () => {
         const prefix = cmd?.input?.Prefix ?? '';
         const match = prefix.match(/week=(\d+)/);
         const weekNum = match ? parseInt(match[1], 10) : -1;
-        if (weekNum === weeks[0].week) return Promise.resolve({ Contents: [{ Key: 'data.parquet' }] });
+        if (weekNum === weeks[0].week) {
+          return Promise.resolve({ Contents: [{ Key: 'data.parquet' }] });
+        }
         return Promise.resolve({});
       });
 
@@ -1783,7 +1786,9 @@ describe('ephemeral-run-service', () => {
         const prefix = cmd?.input?.Prefix ?? '';
         const match = prefix.match(/week=(\d+)/);
         const weekNum = match ? parseInt(match[1], 10) : -1;
-        if (presentWeeks.includes(weekNum)) return Promise.resolve({ Contents: [{ Key: 'data.parquet' }] });
+        if (presentWeeks.includes(weekNum)) {
+          return Promise.resolve({ Contents: [{ Key: 'data.parquet' }] });
+        }
         return Promise.resolve({});
       });
 

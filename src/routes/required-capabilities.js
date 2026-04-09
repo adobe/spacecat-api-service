@@ -80,6 +80,10 @@ export const INTERNAL_ROUTES = [
   'POST /plg/onboard',
   'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
+  'PATCH /plg/onboard/:onboardingId',
+  'POST /plg/records',
+  'PATCH /plg/records/:plgOnboardingId',
+  'DELETE /plg/records/:plgOnboardingId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
@@ -109,6 +113,9 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/contact-sales-leads',
   'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
   'PATCH /contact-sales-leads/:contactSalesLeadId',
+
+  // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
+  'POST /sites/:siteId/autofix-checks',
 
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
@@ -206,12 +213,6 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': 'brand:read',
-  'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-prompts': 'organization:read',
-  'POST /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
-  'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
   'GET /organizations/:organizationId/projects': 'project:read',
   'GET /organizations/:organizationId/projects/:projectId/sites': 'site:read',
   'GET /organizations/:organizationId/by-project-name/:projectName/sites': 'site:read',
