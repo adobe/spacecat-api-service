@@ -112,7 +112,7 @@ function validateAuditTargetSourceList(list, sourceName, siteHostname, maxCount)
     const trimmed = entry.url.trim();
     const result = validateAuditTargetUrlString(trimmed, siteHostname);
     if (!result.ok) {
-      return { ok: false, error: `Invalid audit target URL at ${sourceName}[${i}]: ${result.error}` };
+      return { ok: false, error: `Invalid audit target URL at ${sourceName}[${i}] (${trimmed}): ${result.error}` };
     }
     normalized.push({ url: trimmed });
   }

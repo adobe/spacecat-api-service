@@ -263,6 +263,36 @@ Config:
     edgeOptimizeConfig:
       description: Optional. The edge optimize configuration for the site.
       $ref: '#/EdgeOptimizeConfig'
+    auditTargetURLs:
+      description: Optional. Custom audit target URLs grouped by source (manual, moneyPages).
+      $ref: '#/AuditTargetURLsConfig'
+AuditTargetURLsConfig:
+  type: object
+  description: Custom audit target URLs grouped by source. Each source is validated independently — HTTPS only, hostname must match the site base URL.
+  properties:
+    manual:
+      description: Manually curated list of URLs to include in audits. Maximum 500 entries.
+      type: array
+      maxItems: 500
+      items:
+        $ref: '#/AuditTargetURL'
+    moneyPages:
+      description: High-value pages identified for auditing (e.g. by the audit worker). Maximum 1000 entries.
+      type: array
+      maxItems: 1000
+      items:
+        $ref: '#/AuditTargetURL'
+  additionalProperties: false
+AuditTargetURL:
+  type: object
+  required:
+    - url
+  properties:
+    url:
+      type: string
+      format: uri
+      description: The URL to audit. Must use HTTPS and hostname must match the site base URL (www prefix is treated as equivalent).
+      example: 'https://example.com/high-value-page'
 EdgeOptimizeConfig:
   type: object
   description: Edge optimize configuration for a site
