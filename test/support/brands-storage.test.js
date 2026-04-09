@@ -621,6 +621,44 @@ describe('brands-storage', () => {
       ]);
     });
 
+    it('uses first type when multiple URLs share same base with different types', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{
+          site_id: 'site-uuid-1',
+          paths: ['/', '/fr'],
+          type: 'base',
+          sites: { base_url: 'https://adobe.com' },
+        }],
+      });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://adobe.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://adobe.com', type: 'base' },
+            { value: 'https://adobe.com/fr', type: 'localized' },
+          ],
+        },
+        postgrestClient,
+      });
+
+      // First type ('base') wins — 'localized' does not overwrite
+      expect(result.urls).to.deep.equal([
+        { value: 'https://adobe.com', type: 'base' },
+        { value: 'https://adobe.com/fr' },
+      ]);
+    });
+
     it('throws when brand_sites upsert fails during syncBrandSites', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },

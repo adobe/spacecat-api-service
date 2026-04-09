@@ -156,7 +156,9 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
         pathsByBase.set(normalizedBase, []);
       }
       pathsByBase.get(normalizedBase).push(path || '/');
-      if (typeof u === 'object' && hasText(u?.type)) {
+      // First URL with a type wins for a given base URL — prevents silent overwrite
+      // when multiple paths under the same domain carry different types.
+      if (typeof u === 'object' && hasText(u?.type) && !typeByBase.has(normalizedBase)) {
         typeByBase.set(normalizedBase, u.type);
       }
     });
