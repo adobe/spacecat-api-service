@@ -167,6 +167,50 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
 }
 
 /**
+ * Revokes all ASO site enrollments for a given onboarding record.
+ * Called when transitioning an ONBOARDED domain to INACTIVE.
+ * @param {object} onboarding - The PlgOnboarding record being offboarded.
+ * @param {object} context - Request context.
+ */
+async function revokeOnboardedSiteEnrollments(onboarding, context) {
+  const { dataAccess, log } = context;
+  const { Site } = dataAccess;
+
+  const siteId = onboarding.getSiteId();
+  if (!siteId) {
+    log.info(`No site linked to onboarding ${onboarding.getId()}, skipping enrollment revocation`);
+    return;
+  }
+
+  const site = await Site.findById(siteId);
+  if (!site) {
+    log.warn(`Site ${siteId} not found for onboarding ${onboarding.getId()}, skipping enrollment revocation`);
+    return;
+  }
+
+  const enrollments = await site.getSiteEnrollments();
+  if (!enrollments || enrollments.length === 0) {
+    log.info(`No enrollments to revoke for site ${siteId}`);
+    return;
+  }
+
+  const entitlements = await Promise.all(enrollments.map((e) => e.getEntitlement()));
+  const asoEnrollments = enrollments.filter(
+    (_, i) => entitlements[i]?.getProductCode() === ASO_PRODUCT_CODE,
+  );
+
+  if (asoEnrollments.length === 0) {
+    log.info(`No ASO enrollments to revoke for site ${siteId}`);
+    return;
+  }
+
+  await Promise.all(asoEnrollments.map((enrollment) => {
+    log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId}`);
+    return enrollment.remove();
+  }));
+}
+
+/**
  * Upserts a single LaunchDarkly flag's variation 0 to include the org + site.
  * Variation 0 value is a JSON object: { [imsOrgId]: [siteIds] }.
  *
@@ -1022,6 +1066,7 @@ function PlgOnboardingController(ctx) {
               justification: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
             }]);
             await oldOnboarded.save();
+            await revokeOnboardedSiteEnrollments(oldOnboarded, context);
             log.info(`Offboarded old domain ${oldOnboarded.getDomain()} for IMS org ${imsOrgId}`);
           }
           // Re-run PLG flow for the current domain
@@ -1094,7 +1139,13 @@ function PlgOnboardingController(ctx) {
               return badRequest(`Cannot move domain ${domain} — it is already set up with active products in org '${existingOrg?.getName?.() || existingOrgId}'.`);
             }
             const currentOrgId = onboarding.getOrganizationId();
+            const currentImsOrgId = onboarding.getImsOrgId();
             site.setOrganizationId(currentOrgId);
+            /* c8 ignore next */
+            const existingDeliveryConfig = site.getDeliveryConfig() || {};
+            if (existingDeliveryConfig.imsOrgId) {
+              site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
+            }
             await site.save();
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             const result = await performAsoPlgOnboarding(
