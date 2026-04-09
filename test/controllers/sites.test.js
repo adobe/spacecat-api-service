@@ -4857,7 +4857,8 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via organizationId path', async () => {
+    it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
@@ -4877,7 +4878,31 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via imsOrg path', async () => {
+    it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via imsOrg path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
       context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
 
@@ -4889,6 +4914,71 @@ describe('Sites Controller', () => {
           },
           enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
           site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 200 for PRE_ONBOARD-tier site via imsOrg path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'entitlement-pre-onboard',
+            getTier: () => 'PRE_ONBOARD',
+          },
+          enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for admin when organizationId path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: null,
+          enrollment: null,
+          site: null,
         }),
       };
       TierClient.createForOrg.returns(mockTierClient);

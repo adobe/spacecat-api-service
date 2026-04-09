@@ -238,7 +238,8 @@ function OrganizationsController(ctx, env) {
             uniqueTargetOrgIds.map(async (targetOrgId, i) => {
               const entitlement = entitlementResults[i];
               if (entitlement) {
-                // PLG and any future internal tiers are not customer-visible
+                // PRE_ONBOARD and any future internal tiers
+                // are not customer-visible and not allowed for delegation
                 if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
                   return;
                 }
@@ -275,6 +276,7 @@ function OrganizationsController(ctx, env) {
       organization,
       ownSites,
       productCode,
+      accessControlUtil,
     );
 
     return ok([...filteredSites, ...delegatedSites].map((site) => SiteDto.toJSON(site)));
