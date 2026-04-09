@@ -1,3 +1,15 @@
+# [1.429.0](https://github.com/adobe/spacecat-api-service/compare/v1.428.0...v1.429.0) (2026-04-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2166](https://github.com/adobe/spacecat-api-service/issues/2166)) ([d9f82e6](https://github.com/adobe/spacecat-api-service/commit/d9f82e6bd9f2e44a75581891baa88dbc4aa95113))
+
+
+### Features
+
+* **SITES-42930:** exchange promise token and support Secrets Manager auth in beta preflight endpoint ([#2160](https://github.com/adobe/spacecat-api-service/issues/2160)) ([07e439d](https://github.com/adobe/spacecat-api-service/commit/07e439d4160543a899d550e09acf14384f16c783))
+
 # [1.428.0](https://github.com/adobe/spacecat-api-service/compare/v1.427.2...v1.428.0) (2026-04-09)
 
 
