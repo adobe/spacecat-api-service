@@ -94,6 +94,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
+ * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -145,6 +146,7 @@ export default function getRouteHandlers(
   featureFlagsController,
   pageRelationshipsController,
   ephemeralRunController,
+  autofixChecksController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -547,6 +549,9 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
     'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
     'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
+
+    // Autofix checks (permission/capability validation before autofix deploy)
+    'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
   };
 
   // Initialization of static and dynamic routes
