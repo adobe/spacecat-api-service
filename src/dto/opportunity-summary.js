@@ -66,13 +66,25 @@ export const OpportunitySummaryDto = {
       if (!isSiteWideOpportunity) {
         suggestions.forEach((suggestion) => {
           const data = suggestion.getData();
-          if (!data) return; // Skip if data is null/undefined
+          if (!data) {
+            return; // Skip if data is null/undefined
+          }
           // Handle different URL field names in suggestion data
-          if (data.url_from) urls.add(data.url_from);
-          if (data.url_to) urls.add(data.url_to);
-          if (data.urlFrom) urls.add(data.urlFrom);
-          if (data.urlTo) urls.add(data.urlTo);
-          if (data.url) urls.add(data.url);
+          if (data.url_from) {
+            urls.add(data.url_from);
+          }
+          if (data.url_to) {
+            urls.add(data.url_to);
+          }
+          if (data.urlFrom) {
+            urls.add(data.urlFrom);
+          }
+          if (data.urlTo) {
+            urls.add(data.urlTo);
+          }
+          if (data.url) {
+            urls.add(data.url);
+          }
           // Handle no-cta-above-the-fold contentFix structure
           if (data.contentFix?.page_patch?.original_page_url) {
             urls.add(data.contentFix.page_patch.original_page_url);
@@ -87,7 +99,9 @@ export const OpportunitySummaryDto = {
         // Otherwise, aggregate page views from rank (which often represents traffic)
         suggestions.forEach((suggestion) => {
           const data = suggestion.getData();
-          if (!data) return; // Skip if data is null/undefined
+          if (!data) {
+            return; // Skip if data is null/undefined
+          }
           const rank = suggestion.getRank();
           if (rank && typeof rank === 'number') {
             totalPageViews += rank;

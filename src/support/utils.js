@@ -36,7 +36,6 @@ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
-
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -217,7 +216,11 @@ export const sendAutofixMessage = async (
   variations,
   action,
   customData,
-  { url, precheckOnly } = {},
+  {
+    url,
+    precheckOnly,
+    relationshipContext,
+  } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
@@ -226,6 +229,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   url,
+  ...(isObject(relationshipContext) && { relationshipContext }),
   ...(customData && { customData }),
   ...(precheckOnly === true && { precheckOnly: true }),
 });
@@ -604,10 +608,14 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
   try {
     if (requestContext) {
       const clientType = requestContext.pathInfo?.headers?.['x-client-type'];
-      if (clientType !== 'sites-optimizer-ui') return false;
+      if (clientType !== 'sites-optimizer-ui') {
+        return false;
+      }
     }
     const { Configuration, Entitlement } = context.dataAccess || {};
-    if (!Configuration) return false;
+    if (!Configuration) {
+      return false;
+    }
     const configuration = await Configuration.findLatest();
     if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
       return false;
@@ -617,14 +625,16 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
     }
 
     const organizationId = site.getOrganizationId();
-    if (!Entitlement || !organizationId) return false;
+    if (!Entitlement || !organizationId) {
+      return false;
+    }
 
     const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
       organizationId,
       EntitlementModel.PRODUCT_CODES.ASO,
     );
 
-    return entitlement?.getTier() === EntitlementModel.TIERS.FREE_TRIAL;
+    return entitlement?.getTier() === EntitlementModel.TIERS.PLG;
   } catch (err) {
     context.log?.error?.('Error checking audit summit-plg for site:', err);
     return false;
@@ -709,7 +719,9 @@ export async function exchangePromiseToken(context, promiseToken) {
  */
 export function getCookieValue(context, name) {
   const cookieString = context.pathInfo?.headers?.cookie || '';
-  if (!cookieString) return null;
+  if (!cookieString) {
+    return null;
+  }
 
   const cookies = cookieString.split(';');
   for (const cookie of cookies) {
@@ -1178,16 +1190,17 @@ export async function queueIdentifyRedirectsAudit(
       return { ok: false, error: ':x: Server misconfiguration: missing SQS client.' };
     }
 
+    // check site to see either authoringType or deliveryType is CS/CW
+    // return an error if the site fails the check here
+    // done for direct identify/update-redirects call, as onboarding will perform its own pre-check
     const authoringType = site.getAuthoringType();
     const deliveryType = site.getDeliveryType();
-    // check either authoringType or deliveryType is CS/CW
     if (![
       SiteModel.AUTHORING_TYPES.CS, // cs
       SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
     ].includes(authoringType)
-    && ![
-      SiteModel.DELIVERY_TYPES.AEM_CS, // aem_cs
-    ].includes(deliveryType)) {
+    && deliveryType !== SiteModel.DELIVERY_TYPES.AEM_CS
+    ) {
       return {
         ok: false,
         error: ':warning: identify-redirects currently supports AEM CS/CW only. '
@@ -1197,6 +1210,7 @@ export async function queueIdentifyRedirectsAudit(
 
     const deliveryConfig = site.getDeliveryConfig?.() || {};
     const { programId, environmentId } = deliveryConfig;
+    // Hard failure if programId or environmentId is missing here.
     if (!hasText(programId) || !hasText(environmentId)) {
       return { ok: false, error: ':x: This site is missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId` required for Splunk queries.' };
     }
@@ -1226,6 +1240,41 @@ export async function queueIdentifyRedirectsAudit(
     log.error(error);
     throw error;
   }
+}
+
+/**
+ * Checks if a site is valid for redirects.
+ * @param {Site} site - The site to check.
+ * @returns {Object} - An object with validForRedirects and skipMessage properties.
+ */
+export function validateSiteForRedirects(site) {
+  const authoringType = site.getAuthoringType();
+  const deliveryType = site.getDeliveryType();
+  const deliveryConfig = site.getDeliveryConfig?.() || {};
+  const baseURL = site.getBaseURL();
+  let { programId, environmentId } = deliveryConfig;
+  const siteId = site.getId();
+  let validForRedirects = true;
+  let skipMessage = '';
+
+  if (![
+    SiteModel.AUTHORING_TYPES.CS, // cs
+    SiteModel.AUTHORING_TYPES.CS_CW, // cs/crosswalk
+  ].includes(authoringType)
+  && deliveryType !== SiteModel.DELIVERY_TYPES.AEM_CS // aem_cs
+  ) {
+    validForRedirects = false;
+    skipMessage = `the site ${baseURL}/${siteId} is not valid for redirects because authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`;
+  } else if (!hasText(programId) || !hasText(environmentId)) {
+    validForRedirects = false;
+    programId = undefined;
+    environmentId = undefined;
+    skipMessage = `the site ${baseURL}/${siteId} is not valid for redirects because environmentID and/or programID is missing.`;
+  }
+
+  return {
+    validForRedirects, skipMessage, programId, environmentId,
+  };
 }
 
 /*
@@ -1330,39 +1379,28 @@ export async function queueDeliveryConfigWriter(
     }
 
     const siteId = site.getId();
-    const authoringType = site.getAuthoringType();
-    const deliveryType = site.getDeliveryType();
-
-    const validForRedirects = [
-      SiteModel.AUTHORING_TYPES.CS,
-      SiteModel.AUTHORING_TYPES.CS_CW,
-    ].includes(authoringType) || [
-      SiteModel.DELIVERY_TYPES.AEM_CS,
-    ].includes(deliveryType);
-
     let redirectParams = {};
+
+    // update-redirects is optional for onboarding, skip if the site is not eligible
+    const {
+      validForRedirects, skipMessage, programId, environmentId,
+    } = validateSiteForRedirects(site);
     if (validForRedirects) {
-      const deliveryConfig = site.getDeliveryConfig?.() || {};
-      const { programId, environmentId } = deliveryConfig;
-      if (!hasText(programId) || !hasText(environmentId)) {
-        log.info(`[delivery-config-writer] Site ${siteId} missing programId/environmentId; skipping redirect identification.`);
-      } else {
-        redirectParams = {
-          programId: String(programId),
-          environmentId: String(environmentId),
-          minutes,
-          updateRedirects,
-        };
-      }
+      redirectParams = {
+        programId: String(programId),
+        environmentId: String(environmentId),
+        minutes,
+        updateRedirects,
+      };
     } else {
       log.info(
-        `[delivery-config-writer] Site ${siteId} not valid for redirect identification`
-        + ` (authoringType=${authoringType}, deliveryType=${deliveryType}); CDN detection only.`,
+        `[delivery-config-writer] ${skipMessage}; CDN detection only.`,
       );
     }
 
     const hasRedirectParams = Object.keys(redirectParams).length > 0;
 
+    // CDN detection is always run for onboarding
     const payload = {
       type: 'delivery-config-writer',
       siteId,
@@ -1655,6 +1693,8 @@ export const onboardSingleSite = async (
       });
     }
 
+    // Persist onboard start time so onboard-status can detect stale audit records.
+    // Computed once and reused in the task context below.
     const onboardStartTime = Date.now();
     siteConfig.updateOnboardConfig({
       lastProfile: profileName.toLowerCase(),
@@ -1683,6 +1723,7 @@ export const onboardSingleSite = async (
       },
       context,
     );
+
     if (!deliveryConfigResult.ok) {
       reportLine.errors = deliveryConfigResult.error;
       reportLine.status = 'Failed';
@@ -1771,7 +1812,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
-        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
+        onboardStartTime, // Same timestamp persisted to site config as lastStartTime
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
@@ -1873,16 +1914,23 @@ export const onboardSingleSite = async (
  */
 /**
  * Allow-list of entitlement tiers that are visible to customers via the API.
- * Any tier not in this list (e.g. PLG) is treated as internal-only.
+ * Any tier not in this list (e.g. PRE_ONBOARD) is treated as internal-only.
  * Adding a new tier here explicitly opts it into customer visibility.
  * @type {string[]}
  */
 export const CUSTOMER_VISIBLE_TIERS = [
   EntitlementModel.TIERS.FREE_TRIAL,
   EntitlementModel.TIERS.PAID,
+  EntitlementModel.TIERS.PLG,
 ];
 
-export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
+export const filterSitesForProductCode = async (
+  context,
+  organization,
+  sites,
+  productCode,
+  accessControlUtil,
+) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
   const { SiteEnrollment } = context.dataAccess;
   const tierClient = TierClient.createForOrg(context, organization, productCode);
@@ -1892,8 +1940,9 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
     return [];
   }
 
-  // PLG and any future internal tiers are not customer-visible
-  if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+  // PRE_ONBOARD and any future internal tiers are not customer-visible if user is not an admin
+  if (!accessControlUtil?.hasAdminAccess()
+    && !CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
     return [];
   }
 

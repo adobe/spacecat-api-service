@@ -43,6 +43,8 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
   'GET /sites/:siteId/geo-experiments',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+  'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
+  'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -67,6 +69,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
+  'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
@@ -74,7 +77,12 @@ export const INTERNAL_ROUTES = [
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
+  'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
+  'PATCH /plg/onboard/:onboardingId',
+  'POST /plg/records',
+  'PATCH /plg/records/:plgOnboardingId',
+  'DELETE /plg/records/:plgOnboardingId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
@@ -105,6 +113,9 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
   'PATCH /contact-sales-leads/:contactSalesLeadId',
 
+  // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
+  'POST /sites/:siteId/autofix-checks',
+
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
   'GET /consumers/by-client-id/:clientId',
@@ -112,6 +123,10 @@ export const INTERNAL_ROUTES = [
   'POST /consumers/register',
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
+
+  // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
+  'POST /ephemeral-run/batch',
+  'GET /ephemeral-run/batch/:batchId/status',
 ];
 
 /**
@@ -181,6 +196,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/market-tracking-trends': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/market-tracking-trends': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/competitor-summary': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/competitor-summary': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
@@ -195,12 +212,6 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': 'brand:read',
-  'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-prompts': 'organization:read',
-  'POST /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
-  'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
   'GET /organizations/:organizationId/projects': 'project:read',
   'GET /organizations/:organizationId/projects/:projectId/sites': 'site:read',
   'GET /organizations/:organizationId/by-project-name/:projectName/sites': 'site:read',
@@ -353,6 +364,9 @@ const routeRequiredCapabilities = {
 
   // Graph
   'POST /sites/:siteId/graph': 'site:write',
+
+  // Page Relationships
+  'POST /sites/:siteId/page-relationships/search': 'site:read',
 
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',

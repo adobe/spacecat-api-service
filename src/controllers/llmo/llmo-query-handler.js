@@ -123,7 +123,7 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+      log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
       throw new Error(`External API returned ${response.status}: ${response.statusText}`);
     }
 
@@ -147,7 +147,7 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      log.error(`Request timeout after ${TIMEOUT_MS}ms for file: ${filePath}`);
+      log.debug(`Request timeout after ${TIMEOUT_MS}ms for file: ${filePath}`);
       throw new Error(`Request timeout after ${TIMEOUT_MS}ms`);
     }
     throw error;
@@ -209,7 +209,7 @@ const fetchAndProcessMultipleFiles = async (context, llmoConfig, files, queryPar
           data,
         };
       } catch (error) {
-        log.error(`Error fetching and processing file ${filePath}: ${error.message}`);
+        log.debug(`Error fetching and processing file ${filePath}: ${error.message}`);
         return {
           path: filePath,
           status: 'error',

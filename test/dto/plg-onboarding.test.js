@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import { PlgOnboardingDto } from '../../src/dto/plg-onboarding.js';
 
@@ -29,6 +27,7 @@ describe('PlgOnboardingDto', () => {
       getError: () => null,
       getBotBlocker: () => null,
       getWaitlistReason: () => null,
+      getReviews: () => null,
       getCompletedAt: () => '2026-03-09T15:00:00.000Z',
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
@@ -48,6 +47,7 @@ describe('PlgOnboardingDto', () => {
       error: null,
       botBlocker: null,
       waitlistReason: null,
+      reviews: null,
       completedAt: '2026-03-09T15:00:00.000Z',
       createdAt: '2026-03-09T12:00:00.000Z',
       updatedAt: '2026-03-09T15:00:00.000Z',
@@ -71,6 +71,7 @@ describe('PlgOnboardingDto', () => {
         userAgent: 'SpaceCat/1.0',
       }),
       getWaitlistReason: () => null,
+      getReviews: () => null,
       getCompletedAt: () => null,
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T12:05:00.000Z',

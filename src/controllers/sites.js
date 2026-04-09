@@ -45,6 +45,7 @@ import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
@@ -639,6 +640,18 @@ function SitesController(ctx, log, env) {
         ? Config.toDynamoItem(siteConfig) || {}
         : {};
       const merged = { ...existingConfig, ...requestBody.config };
+      const auditTargetURLsResult = auditTargetURLsPatchGuard(
+        merged,
+        site.getBaseURL(),
+        requestBody.config,
+        badRequest,
+      );
+      if (auditTargetURLsResult?.error) {
+        return auditTargetURLsResult.error;
+      }
+      if (auditTargetURLsResult?.normalized !== undefined) {
+        merged.auditTargetURLs = auditTargetURLsResult.normalized;
+      }
       site.setConfig(merged);
       updates = true;
     }
@@ -828,7 +841,7 @@ function SitesController(ctx, log, env) {
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
+      log.debug(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
     // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
@@ -1060,11 +1073,15 @@ function SitesController(ctx, log, env) {
     if (from || to) {
       if (from) {
         fromDate = new Date(from);
-        if (Number.isNaN(fromDate.getTime())) return badRequest('Invalid from date');
+        if (Number.isNaN(fromDate.getTime())) {
+          return badRequest('Invalid from date');
+        }
       }
       if (to) {
         toDate = new Date(to);
-        if (Number.isNaN(toDate.getTime())) return badRequest('Invalid to date');
+        if (Number.isNaN(toDate.getTime())) {
+          return badRequest('Invalid to date');
+        }
       }
     } else if (period && period !== 'all') {
       const days = CITABILITY_PERIOD_MS[period];
@@ -1189,7 +1206,8 @@ function SitesController(ctx, log, env) {
           const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();
 
-          if (enrolledSite && CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier())) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
@@ -1207,7 +1225,8 @@ function SitesController(ctx, log, env) {
           const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();
 
-          if (enrolledSite && CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier())) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),

@@ -68,6 +68,7 @@ export default class AccessControlUtil {
     this.context = context;
     // Always assign the log property
     this.log = log;
+    this._lastAccessWasDelegated = false;
   }
 
   isAccessTypeJWT() {
@@ -96,12 +97,26 @@ export default class AccessControlUtil {
     return this.authInfo.isS2SAdmin();
   }
 
+  /**
+   * Returns true if the authenticated user holds the LLMO administrator role
+   * AND the last {@link hasAccess} check did not resolve via a delegation grant.
+   *
+   * **Ordering contract**: {@link hasAccess} must be called before this method
+   * whenever delegation-aware behaviour is required. Without a prior `hasAccess()`
+   * call the delegation flag defaults to `false` (non-delegated) and the raw JWT
+   * claim is returned unchecked — meaning a delegated user would incorrectly be
+   * treated as an LLMO administrator on the target org's sites.
+   *
+   * @returns {boolean}
+   */
   isLLMOAdministrator() {
-    return this.authInfo.isLLMOAdministrator();
+    return this.authInfo.isLLMOAdministrator() && !this._lastAccessWasDelegated;
   }
 
   canManageImsOrgAccess() {
-    if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) return false;
+    if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) {
+      return false;
+    }
     return this.authInfo.isAdmin();
   }
 
@@ -152,6 +167,7 @@ export default class AccessControlUtil {
   }
 
   async hasAccess(entity, subService = '', productCode = '') {
+    this._lastAccessWasDelegated = false;
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
@@ -247,6 +263,8 @@ export default class AccessControlUtil {
       }
     }
 
+    this._lastAccessWasDelegated = isDelegatedAccess;
+
     if (hasOrgAccess && productCode.length > 0) {
       let org;
       let site;
@@ -259,7 +277,9 @@ export default class AccessControlUtil {
       await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
-      if (isDelegatedAccess) return hasOrgAccess; // productCode scoping replaces subService check
+      if (isDelegatedAccess) {
+        return hasOrgAccess; // productCode scoping replaces subService check
+      }
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }
     return hasOrgAccess;

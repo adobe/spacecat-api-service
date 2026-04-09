@@ -164,6 +164,8 @@ describe('Suggestions Controller', () => {
     'deploySuggestionToEdge',
     'listGeoExperiments',
     'getGeoExperiment',
+    'patchGeoExperiment',
+    'deleteGeoExperiment',
     'rollbackSuggestionFromEdge',
     'previewSuggestions',
     'fetchFromEdge',
@@ -492,7 +494,7 @@ describe('Suggestions Controller', () => {
         create: sandbox.stub(),
         findById: sandbox.stub().resolves({
           getId: () => 'dep-exp-001',
-          getStatus: () => 'pre_analysis_submitted',
+          getStatus: () => 'pre_analysis_started',
           getPreScheduleId: () => 'batch-pre-001',
           getPostScheduleId: () => null,
           getError: () => null,
@@ -3584,6 +3586,66 @@ describe('Suggestions Controller', () => {
       sandbox.restore();
     });
 
+    it('proceeds with autofix when summit-plg is enabled and all suggestions are granted', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+        notGrantedIds: [],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`, `grant-${SUGGESTION_IDS[2]}`],
+      });
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+    });
+
+    it('does not check grant status when summit-plg is disabled for autofix', async () => {
+      const controllerPlgDisabled = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => ({ promise_token: 'token', expires_in: 14399, token_type: 'promise_token' }),
+          getIsSummitPlgEnabled: async () => false,
+        },
+      });
+      const ctrl = controllerPlgDisabled({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resetHistory();
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await ctrl.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.not.have.been.called;
+    });
+
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
@@ -3641,6 +3703,28 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('returns forbidden when summit-plg is enabled and suggestions are not granted for autofix', async () => {
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0]],
+        notGrantedIds: [SUGGESTION_IDS[2]],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`],
+      });
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.include('not granted');
+      expect(body.message).to.include(SUGGESTION_IDS[2]);
+      expect(body.message).to.not.include(SUGGESTION_IDS[0]);
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
@@ -4295,6 +4379,579 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion must be in NEW or PENDING_VALIDATION status for auto-fix');
+    });
+
+    it('groups by relationshipContext.fixTargetPageId when fixTargetGroups is provided for a groupable type', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+              relationshipContext: {
+                fixTargetPageId: '/content/my-site/en/target-page',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('relationshipContext');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
+      expect(sqsPayload.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[2]]);
+    });
+
+    it('forwards relationshipContext and cancelInheritance to SQS when provided', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/my-site/en/target-page',
+                cancelInheritance: true,
+                fixTargetMode: 'source',
+                appliedOnPagePath:
+                  '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('relationshipContext');
+      expect(sqsPayload.relationshipContext).to.deep.equal({
+        fixTargetPageId: '/content/my-site/en/target-page',
+        cancelInheritance: true,
+        fixTargetMode: 'source',
+        appliedOnPagePath:
+          '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+      });
+    });
+
+    it('returns 400 when fixTargetGroups has invalid structure', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [{
+            suggestionIds: [],
+            relationshipContext: { fixTargetPageId: '/content/page' },
+          }],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Each fixTargetGroup must have a non-empty suggestionIds array');
+    });
+
+    it('returns 400 when fixTargetGroups is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: 'not-an-array',
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'fixTargetGroups must be an array');
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.fixTargetPageId is empty', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: '' },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext is missing', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup must have a relationshipContext object',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.cancelInheritance is not boolean', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/page',
+                cancelInheritance: 'true',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.cancelInheritance must be a boolean',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.appliedOnPagePath is empty', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/page',
+                appliedOnPagePath: '',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.appliedOnPagePath must be a non-empty string',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.fixTargetMode is invalid', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/page',
+                fixTargetMode: 'invalid-mode',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"',
+      );
+    });
+
+    it('ignores fixTargetGroups for non-groupable opportunity type', async () => {
+      opportunity.getType = sandbox.stub().returns('broken-backlinks');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-id' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.not.have.property('relationshipContext');
+    });
+
+    it('sends multiple SQS messages for multiple fixTargetGroups', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-A' },
+            },
+            {
+              suggestionIds: [SUGGESTION_IDS[2]],
+              relationshipContext: { fixTargetPageId: 'source-page-B' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const pageIds = payloads.map((p) => p.relationshipContext?.fixTargetPageId);
+      expect(pageIds).to.include.members(
+        ['source-page-A', 'source-page-B'],
+      );
+
+      const suggIdsA = payloads.find(
+        (p) => p.relationshipContext?.fixTargetPageId === 'source-page-A',
+      ).suggestionIds;
+      expect(suggIdsA).to.deep.equal([SUGGESTION_IDS[0]]);
+
+      const suggIdsB = payloads.find(
+        (p) => p.relationshipContext?.fixTargetPageId === 'source-page-B',
+      ).suggestionIds;
+      expect(suggIdsB).to.deep.equal([SUGGESTION_IDS[2]]);
+    });
+
+    it('falls back to URL grouping for suggestions not covered by fixTargetGroups', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const suggA = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggB = {
+        ...suggs[2],
+        data: { ...suggs[2].data, url: 'https://example.com/page-b' },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggA), mockSuggestionEntity(suggB)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggA, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggB, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+
+      const sourceGroupPayload = payloads.find(
+        (p) => p.relationshipContext?.fixTargetPageId === 'source-page-1',
+      );
+      expect(sourceGroupPayload).to.exist;
+      expect(sourceGroupPayload.suggestionIds).to.deep.equal(
+        [SUGGESTION_IDS[0]],
+      );
+
+      const urlFallbackPayload = payloads.find(
+        (p) => !p.relationshipContext,
+      );
+      expect(urlFallbackPayload).to.exist;
+      expect(urlFallbackPayload.suggestionIds).to.deep.equal(
+        [SUGGESTION_IDS[2]],
+      );
+      expect(urlFallbackPayload.url).to.equal(
+        'https://example.com/page-b',
+      );
+    });
+
+    it('resolves uncovered suggestion URL via recommendations pageUrl when url is absent', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggUncovered = {
+        ...suggs[2],
+        data: { recommendations: [{ pageUrl: 'https://example.com/rec-url' }] },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggUncovered)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggUncovered, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const urlFallback = payloads.find((p) => !p.relationshipContext);
+      expect(urlFallback).to.exist;
+      expect(urlFallback.url).to.equal('https://example.com/rec-url');
+    });
+
+    it('resolves uncovered suggestion URL via urlFrom when url and url_from are absent', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggUncovered = {
+        ...suggs[2],
+        data: { urlFrom: 'https://example.com/urlFrom-fallback' },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggUncovered)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggUncovered, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const urlFallback = payloads.find((p) => !p.relationshipContext);
+      expect(urlFallback).to.exist;
+      expect(urlFallback.url).to.equal('https://example.com/urlFrom-fallback');
+    });
+
+    it('resolves uncovered suggestion URL via opportunityData.page as last resort', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      opportunity.getData = sandbox.stub().returns({ page: 'https://example.com/opp-page' });
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggUncovered = {
+        ...suggs[2],
+        data: {},
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggUncovered)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggUncovered, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const urlFallback = payloads.find((p) => !p.relationshipContext);
+      expect(urlFallback).to.exist;
+      expect(urlFallback.url).to.equal('https://example.com/opp-page');
+    });
+
+    it('skips uncovered suggestion when no URL can be resolved', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      opportunity.getData = sandbox.stub().returns({});
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggNoUrl = {
+        ...suggs[2],
+        data: {},
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggNoUrl)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggNoUrl, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload.relationshipContext?.fixTargetPageId).to.equal('source-page-1');
     });
   });
 
@@ -5049,6 +5706,27 @@ describe('Suggestions Controller', () => {
     let edgeSuggestions;
     let mockDrsClient;
     const JOB_ID = 'c3a7b5e2-1234-4abc-9def-567890abcdef';
+    const asyncExperimentEnv = {
+      AWS_ENV: 'dev',
+      EXPERIMENT_SCHEDULE_CONFIG: JSON.stringify({
+        onsite_opportunity_deployment: {
+          default: {
+            pre: {
+              cronExpression: '0 9 * * *',
+              expiryMs: 604800000,
+              platforms: ['openai_web_search'],
+              providerIds: ['openai_web_search'],
+            },
+            post: {
+              cronExpression: '0 10 * * *',
+              expiryMs: 604800000,
+              platforms: ['openai_web_search'],
+              providerIds: ['openai_web_search'],
+            },
+          },
+        },
+      }),
+    };
 
     beforeEach(() => {
       context.pathInfo = { headers: { prefer: 'respond-async' } };
@@ -5145,7 +5823,7 @@ describe('Suggestions Controller', () => {
           jobType: 'geo-experiment',
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
-          deployStatus: 'pre_analysis_submitted',
+          deployStatus: 'pre_analysis_started',
           preExperimentBatchId: 'batch-pre-001',
         }),
       });
@@ -5176,13 +5854,52 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.metadata.failed).to.equal(1);
       expect(body.suggestions[0].message).to.include('No prompts found');
+    });
+
+    it('returns 207 with failure when pre phase has no cronExpression or expiryMs in env', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: {},
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('Missing required environment variables');
+    });
+
+    it('returns 207 with failure when pre phase has cronExpression but no expiryMs', async () => {
+      const envMissingExpiry = {
+        EXPERIMENT_SCHEDULE_CONFIG: JSON.stringify({
+          onsite_opportunity_deployment: {
+            default: {
+              pre: {
+                cronExpression: '0 9 * * *',
+              },
+            },
+          },
+        }),
+      };
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: envMissingExpiry,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('Missing required environment variables');
     });
 
     it('returns badRequest for invalid siteId', async () => {
@@ -5343,7 +6060,7 @@ describe('Suggestions Controller', () => {
         pathInfo: { headers: { prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5359,7 +6076,7 @@ describe('Suggestions Controller', () => {
         pathInfo: { headers: { prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5458,7 +6175,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
       expect(response.status).to.equal(207);
       const body = await response.json();
@@ -5654,14 +6371,13 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
       const body = await response.json();
-      expect(body.jobId).to.equal(JOB_ID);
       expect(body.geoExperimentStatus).to.equal('GENERATING_BASELINE');
-      expect(body.geoExperimentPhase).to.equal('pre_analysis_submitted');
+      expect(body.geoExperimentPhase).to.equal('pre_analysis_started');
       expect(body.prePhaseScheduleId).to.equal('sched-pre-001');
       expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       expect(body.metadata.success).to.equal(2);
@@ -5674,7 +6390,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(mockDrsClient.createExperimentSchedule).to.have.been.calledOnce;
@@ -5683,61 +6399,27 @@ describe('Suggestions Controller', () => {
       expect(callArgs.experimentPhase).to.equal('pre');
     });
 
-    it('creates AsyncJob with correct metadata', async () => {
+    it('creates GeoExperiment with correct metadata', async () => {
       await suggestionsController.deploySuggestionToEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
-      expect(mockSuggestionDataAccess.AsyncJob.create).to.have.been.calledOnce;
-      const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
-      expect(createArg.status).to.equal('IN_PROGRESS');
-      expect(createArg.metadata.jobType).to.equal('geo-experiment');
-      expect(createArg.metadata.siteId).to.equal(SITE_ID);
-      expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
-      expect(createArg.metadata.opportunityId).to.be.undefined;
-      expect(createArg.metadata.suggestionIds).to.be.undefined;
+      expect(mockSuggestionDataAccess.AsyncJob.create).to.not.have.been.called;
       expect(mockSuggestionDataAccess.GeoExperiment.create).to.have.been.calledOnce;
 
       const depExpCreateArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
       expect(depExpCreateArg.siteId).to.equal(SITE_ID);
       expect(depExpCreateArg.opportunityId).to.equal(OPPORTUNITY_ID);
       expect(depExpCreateArg.status).to.equal('GENERATING_BASELINE');
-      expect(depExpCreateArg.phase).to.equal('pre_analysis_submitted');
+      expect(depExpCreateArg.phase).to.equal('pre_analysis_started');
       expect(depExpCreateArg.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
       const geoEntity = await mockSuggestionDataAccess.GeoExperiment.create.firstCall.returnValue;
       expect(geoEntity.setPreScheduleId).to.have.been.calledWith('sched-pre-001');
     });
 
-    it('returns 207 with failure and removes GeoExperiment when AsyncJob creation fails', async () => {
-      const removeStubFn = sandbox.stub().resolves();
-      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => {
-        const id = payload.geoExperimentId;
-        return {
-          getId: () => id,
-          setPreScheduleId: sandbox.stub(),
-          setStatus: sandbox.stub(),
-          setUpdatedBy: sandbox.stub(),
-          save: sandbox.stub().resolves(),
-          remove: removeStubFn,
-        };
-      });
-      mockSuggestionDataAccess.AsyncJob.create.rejects(new Error('job create failed'));
-
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
-      });
-
-      expect(response.status).to.equal(207);
-      const body = await response.json();
-      expect(body.suggestions[0].message).to.include('job create failed');
-      expect(removeStubFn).to.have.been.calledOnce;
-    });
 
     it('returns 500 when GeoExperiment save fails after DRS schedule is created', async () => {
       const removeStubFn = sandbox.stub().resolves();
@@ -5757,7 +6439,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5774,7 +6456,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5790,7 +6472,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5804,7 +6486,7 @@ describe('Suggestions Controller', () => {
         pathInfo: { headers: { prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5818,7 +6500,7 @@ describe('Suggestions Controller', () => {
         pathInfo: { headers: { Prefer: 'respond-async' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5832,7 +6514,7 @@ describe('Suggestions Controller', () => {
         pathInfo: { headers: { prefer: 'RESPOND-ASYNC' } },
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5849,15 +6531,13 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
       const body = await response.json();
       expect(body.prePhaseScheduleId).to.equal('sched-pre-flat-001');
-
-      const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
-      expect(createArg.metadata.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
+      expect(body.geoExperimentId).to.be.a('string').and.match(/^[0-9a-f-]{36}$/);
     });
 
     it('updates valid suggestions with deploy metadata', async () => {
@@ -5865,7 +6545,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(edgeSuggestions[0].setData).to.have.been.calledOnce;
@@ -5885,7 +6565,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(edgeSuggestions[0].setUpdatedBy.calledWith('owner@example.com')).to.equal(true);
@@ -5898,7 +6578,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(edgeSuggestions[0].setUpdatedBy.calledWith('geo-experiment')).to.equal(true);
@@ -5910,7 +6590,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0], notFoundId] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5929,7 +6609,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -5956,7 +6636,7 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        env: { AWS_ENV: 'dev' },
+        env: asyncExperimentEnv,
       });
 
       expect(response.status).to.equal(207);
@@ -6839,6 +7519,23 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(context.log.error.calledWithMatch('Error deploying to edge')).to.equal(true);
     });
+
+    it('enforces hasAccess → isLLMOAdministrator → isOwnerOfSite call order', async () => {
+      const isLLMOAdminStub = AccessControlUtil.prototype.isLLMOAdministrator;
+      const isOwnerStub = AccessControlUtil.prototype.isOwnerOfSite;
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      isOwnerStub.resolves(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+    });
   });
 
   describe('listGeoExperiments', () => {
@@ -6894,7 +7591,7 @@ describe('Suggestions Controller', () => {
         getCreatedAt: () => '2026-01-01T00:00:00.000Z',
         getUpdatedAt: () => '2026-01-01T00:00:00.000Z',
       });
-      const exp1 = makeExp('exp-id-1', 'Exp 1', 'GENERATING_BASELINE', 'pre_analysis_submitted');
+      const exp1 = makeExp('exp-id-1', 'Exp 1', 'GENERATING_BASELINE', 'pre_analysis_started');
       const exp2 = makeExp('exp-id-2', 'Exp 2', 'COMPLETED', 'post_analysis_done');
       mockSuggestionDataAccess.GeoExperiment.allBySiteId = sandbox.stub().resolves({
         data: [exp1, exp2],
@@ -6955,7 +7652,7 @@ describe('Suggestions Controller', () => {
         getType: () => 'onsite_opportunity_deployment',
         getName: () => 'Test Experiment',
         getStatus: () => 'GENERATING_BASELINE',
-        getPhase: () => 'pre_analysis_submitted',
+        getPhase: () => 'pre_analysis_started',
         getPreScheduleId: () => 'sched-pre-001',
         getPostScheduleId: () => undefined,
         getSuggestionIds: () => [SUGGESTION_IDS[0]],
@@ -7075,6 +7772,313 @@ describe('Suggestions Controller', () => {
   });
 
 
+
+  describe('patchGeoExperiment', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    let mockGeoExperiment;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockGeoExperiment = {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => SITE_ID,
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'onsite_opportunity_deployment',
+        getName: () => 'Test Experiment',
+        getStatus: () => 'GENERATING_BASELINE',
+        getPhase: () => 'pre_analysis_started',
+        getPreScheduleId: () => null,
+        getPostScheduleId: () => null,
+        getSuggestionIds: () => [],
+        getPromptsCount: () => 0,
+        getPromptsLocation: () => null,
+        getMetadata: () => null,
+        getError: () => null,
+        getStartTime: () => null,
+        getEndTime: () => null,
+        getUpdatedBy: () => 'test',
+        getCreatedAt: () => '2026-01-01T00:00:00.000Z',
+        getUpdatedAt: () => '2026-01-01T00:00:00.000Z',
+        setName: sandbox.stub(),
+        setStatus: sandbox.stub(),
+        setPhase: sandbox.stub(),
+        setType: sandbox.stub(),
+        setPreScheduleId: sandbox.stub(),
+        setPostScheduleId: sandbox.stub(),
+        setSuggestionIds: sandbox.stub(),
+        setPromptsCount: sandbox.stub(),
+        setPromptsLocation: sandbox.stub(),
+        setStartTime: sandbox.stub(),
+        setEndTime: sandbox.stub(),
+        setMetadata: sandbox.stub(),
+        setError: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolvesThis(),
+      };
+
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
+    });
+
+    it('returns 400 for invalid siteId', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: 'bad', geoExperimentId: GEO_EXP_ID },
+        data: { name: 'New Name' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+        data: { name: 'New Name' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when request body is missing', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: null,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when site not found', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+        data: { name: 'New Name' },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { name: 'New Name' },
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 404 when GeoExperiment not found', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { name: 'New Name' },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when GeoExperiment belongs to another site', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
+        ...mockGeoExperiment,
+        getSiteId: () => 'other-site-id',
+      });
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { name: 'New Name' },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 400 when no patchable fields are provided', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { unknownField: 'value' },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockGeoExperiment.save.called).to.be.false;
+    });
+
+    it('patches name and saves', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { name: 'Updated Name' },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setName.calledWith('Updated Name')).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
+    it('patches status and saves', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { status: 'FAILED' },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setStatus.calledWith('FAILED')).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
+    it('patches metadata and saves', async () => {
+      const metadata = { key: 'value' };
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { metadata },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setMetadata.calledWith(metadata)).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
+    it('patches all optional geo experiment fields in one request', async () => {
+      const suggestionIds = [SUGGESTION_IDS[0]];
+      const errorPayload = { code: 'E_TEST' };
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: {
+          phase: 'post_analysis_done',
+          type: 'onsite_opportunity_deployment',
+          preScheduleId: 'sched-pre-xyz',
+          postScheduleId: 'sched-post-xyz',
+          suggestionIds,
+          promptsCount: 7,
+          promptsLocation: 'geo-experiments/bucket/key.json',
+          startTime: '2026-01-01T00:00:00.000Z',
+          endTime: '2026-06-01T00:00:00.000Z',
+          error: errorPayload,
+        },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setPhase.calledWith('post_analysis_done')).to.be.true;
+      expect(mockGeoExperiment.setType.calledWith('onsite_opportunity_deployment')).to.be.true;
+      expect(mockGeoExperiment.setPreScheduleId.calledWith('sched-pre-xyz')).to.be.true;
+      expect(mockGeoExperiment.setPostScheduleId.calledWith('sched-post-xyz')).to.be.true;
+      expect(mockGeoExperiment.setSuggestionIds.calledWith(suggestionIds)).to.be.true;
+      expect(mockGeoExperiment.setPromptsCount.calledWith(7)).to.be.true;
+      expect(mockGeoExperiment.setPromptsLocation.calledWith('geo-experiments/bucket/key.json')).to.be.true;
+      expect(mockGeoExperiment.setStartTime.calledWith('2026-01-01T00:00:00.000Z')).to.be.true;
+      expect(mockGeoExperiment.setEndTime.calledWith('2026-06-01T00:00:00.000Z')).to.be.true;
+      expect(mockGeoExperiment.setError.calledWith(errorPayload)).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
+    it('applies name patch even when value matches current name', async () => {
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { name: 'Test Experiment' },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setName.calledWith('Test Experiment')).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
+    it('sets updatedBy from profile email', async () => {
+      await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { status: 'FAILED' },
+      });
+      expect(mockGeoExperiment.setUpdatedBy.calledWith(context.attributes.authInfo.profile.email))
+        .to.be.true;
+    });
+
+    it('uses fallback updatedBy when profile email is missing', async () => {
+      context.attributes.authInfo.profile = null;
+      await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { status: 'FAILED' },
+      });
+      expect(mockGeoExperiment.setUpdatedBy.calledWith('geo-experiment')).to.be.true;
+    });
+  });
+
+  describe('deleteGeoExperiment', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    let mockGeoExperiment;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockGeoExperiment = {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => SITE_ID,
+        remove: sandbox.stub().resolves(),
+      };
+
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
+    });
+
+    it('returns 400 for invalid siteId', async () => {
+      const response = await suggestionsController.deleteGeoExperiment({
+        ...context,
+        params: { siteId: 'bad', geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.deleteGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when site not found', async () => {
+      const response = await suggestionsController.deleteGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.deleteGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 404 when GeoExperiment not found', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.deleteGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when GeoExperiment belongs to another site', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
+        ...mockGeoExperiment,
+        getSiteId: () => 'other-site-id',
+      });
+      const response = await suggestionsController.deleteGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('removes entity and returns 204 on success', async () => {
+      const response = await suggestionsController.deleteGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(204);
+      expect(mockGeoExperiment.remove).to.have.been.calledOnce;
+    });
+  });
 
   describe('rollbackSuggestionFromEdge (Tokowaka Rollback)', () => {
     let s3ClientSendStub;
@@ -7617,6 +8621,23 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body.message).to.equal('User does not have access to rollback edge optimize fixes for this site');
+    });
+
+    it('enforces hasAccess → isLLMOAdministrator → isOwnerOfSite call order', async () => {
+      const isLLMOAdminStub = AccessControlUtil.prototype.isLLMOAdministrator;
+      const isOwnerStub = AccessControlUtil.prototype.isOwnerOfSite;
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      isOwnerStub.resolves(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
     });
   });
 
