@@ -142,13 +142,13 @@ describe('audit-target-urls-validation', () => {
       expect(r.error).to.include('must be an object with a string');
     });
 
-    it('returns index-scoped error for valid shape but failing URL rules', () => {
+    it('returns source-and-index-scoped error for valid shape but failing URL rules', () => {
       const r = validateAuditTargetURLsConfig(
         { manual: [{ url: 'https://evil.com/' }] },
         'https://site1.com',
       );
       expect(r.ok).to.equal(false);
-      expect(r.error).to.match(/index 0/);
+      expect(r.error).to.match(/manual\[0\]/);
     });
 
     it('preserves unknown keys alongside manual', () => {
@@ -189,7 +189,7 @@ describe('audit-target-urls-validation', () => {
         'https://site1.com',
       );
       expect(r.ok).to.equal(false);
-      expect(r.error).to.match(/index 0/);
+      expect(r.error).to.match(/moneyPages\[0\]/);
       expect(r.error).to.include('site domain (site1.com');
     });
 
@@ -235,7 +235,7 @@ describe('audit-target-urls-validation', () => {
         'https://site1.com',
       );
       expect(r.ok).to.equal(false);
-      expect(r.error).to.match(/index 0/);
+      expect(r.error).to.match(/manual\[0\]/);
     });
   });
 

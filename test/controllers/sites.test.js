@@ -3456,7 +3456,7 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(400);
       const err = await response.json();
-      expect(err.message).to.include('Invalid audit target URL at index 0:');
+      expect(err.message).to.include('Invalid audit target URL at manual[0]:');
       expect(err.message).to.include('site domain (site1.com, with or without www.)');
       expect(site.setConfig).to.have.not.been.called;
     });
