@@ -56,7 +56,7 @@ describe('content-api-access handler', () => {
           tracingFetch: fetchStub,
         },
         '@adobe/spacecat-shared-data-access': {
-          Site: { DELIVERY_TYPES: { AEM_CS: 'aem_cs' } },
+          Site: { DELIVERY_TYPES: { AEM_CS: 'aem_cs', AEM_AMS: 'aem_ams' } },
         },
       },
     );
@@ -68,13 +68,24 @@ describe('content-api-access handler', () => {
     fetchStub.reset();
   });
 
-  it('returns SKIPPED for non-AEM CS sites (Edge Delivery)', async () => {
+  it('returns SKIPPED for non-AEM CS/AMS sites (Edge Delivery)', async () => {
     const site = { getDeliveryType: () => 'aem_edge', getDeliveryConfig: () => ({}) };
     const result = await contentApiAccessHandler(site, mockContext, loggerStub);
 
     expect(result.type).to.equal('content-api-access');
     expect(result.status).to.equal('SKIPPED');
+    expect(result.message).to.include('AEM CS and AEM AMS');
     expect(fetchStub).to.not.have.been.called;
+  });
+
+  it('runs the probe for AEM AMS sites', async () => {
+    const site = { getDeliveryType: () => 'aem_ams', getDeliveryConfig: () => ({ authorURL }) };
+    fetchStub.resolves({ status: 200 });
+
+    const result = await contentApiAccessHandler(site, mockContext, loggerStub);
+
+    expect(result.status).to.equal('PASSED');
+    expect(fetchStub).to.have.been.calledOnce;
   });
 
   it('returns FAILED when site has no authorURL', async () => {

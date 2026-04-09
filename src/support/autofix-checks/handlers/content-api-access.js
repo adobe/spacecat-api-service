@@ -70,13 +70,15 @@ async function probeUrl(url, authorization) {
  * @param {Object} log        - Logger
  * @returns {Promise<{type: string, status: string, message: string}>}
  */
+const SUPPORTED_DELIVERY_TYPES = [Site.DELIVERY_TYPES.AEM_CS, Site.DELIVERY_TYPES.AEM_AMS];
+
 export default async function contentApiAccessHandler(site, context, log) {
-  // Only supported for AEM CS — other delivery types use different deploy mechanisms
-  if (site.getDeliveryType() !== Site.DELIVERY_TYPES.AEM_CS) {
+  // Only supported for AEM CS and AEM AMS — other delivery types use different deploy mechanisms
+  if (!SUPPORTED_DELIVERY_TYPES.includes(site.getDeliveryType())) {
     return {
       type: CHECK_TYPE,
       status: 'SKIPPED',
-      message: 'Content API check is only applicable to AEM CS sites',
+      message: 'Content API check is only applicable to AEM CS and AEM AMS sites',
     };
   }
 
