@@ -148,6 +148,8 @@ export function auditTargetURLsPatchGuard(merged, siteBaseURL, configPatch, badR
     return null;
   }
   const v = validateAuditTargetURLsConfig(merged.auditTargetURLs, siteBaseURL);
-  if (!v.ok) return { error: badRequestFn(v.error) };
+  if (!v.ok) {
+    return { error: badRequestFn(v.error) };
+  }
   return v.normalized !== undefined ? { normalized: v.normalized } : {};
 }

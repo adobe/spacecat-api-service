@@ -646,7 +646,9 @@ function SitesController(ctx, log, env) {
         requestBody.config,
         badRequest,
       );
-      if (auditTargetURLsResult?.error) return auditTargetURLsResult.error;
+      if (auditTargetURLsResult?.error) {
+        return auditTargetURLsResult.error;
+      }
       if (auditTargetURLsResult?.normalized !== undefined) {
         merged.auditTargetURLs = auditTargetURLsResult.normalized;
       }
@@ -1071,11 +1073,15 @@ function SitesController(ctx, log, env) {
     if (from || to) {
       if (from) {
         fromDate = new Date(from);
-        if (Number.isNaN(fromDate.getTime())) return badRequest('Invalid from date');
+        if (Number.isNaN(fromDate.getTime())) {
+          return badRequest('Invalid from date');
+        }
       }
       if (to) {
         toDate = new Date(to);
-        if (Number.isNaN(toDate.getTime())) return badRequest('Invalid to date');
+        if (Number.isNaN(toDate.getTime())) {
+          return badRequest('Invalid to date');
+        }
       }
     } else if (period && period !== 'all') {
       const days = CITABILITY_PERIOD_MS[period];

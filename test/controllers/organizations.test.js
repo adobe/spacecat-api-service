@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Organization, Site, Project } from '@adobe/spacecat-shared-data-access';
 import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 
@@ -970,8 +968,12 @@ describe('Organizations Controller', () => {
       //   OWN_ENT_ID  → from filterSitesForProductCode (own-org enrollment check)
       //   TARGET_ENT_ID → from delegation check (target org's enrollment for the delegated site)
       mockDataAccess.SiteEnrollment.allByEntitlementId = sinon.stub().callsFake((entId) => {
-        if (entId === OWN_ENT_ID) return Promise.resolve([{ getSiteId: () => 'site1' }]);
-        if (entId === TARGET_ENT_ID) return Promise.resolve([{ getSiteId: () => 'delegated-site-1' }]);
+        if (entId === OWN_ENT_ID) {
+          return Promise.resolve([{ getSiteId: () => 'site1' }]);
+        }
+        if (entId === TARGET_ENT_ID) {
+          return Promise.resolve([{ getSiteId: () => 'delegated-site-1' }]);
+        }
         return Promise.resolve([]);
       });
 
@@ -1004,7 +1006,9 @@ describe('Organizations Controller', () => {
     it('excludes delegated site not enrolled under target org entitlement', async () => {
       // Target org has an entitlement but the site is not enrolled under it
       mockDataAccess.SiteEnrollment.allByEntitlementId = sinon.stub().callsFake((entId) => {
-        if (entId === OWN_ENT_ID) return Promise.resolve([{ getSiteId: () => 'site1' }]);
+        if (entId === OWN_ENT_ID) {
+          return Promise.resolve([{ getSiteId: () => 'site1' }]);
+        }
         return Promise.resolve([]); // TARGET_ENT_ID → no enrollment for delegated-site-1
       });
       mockDataAccess.Organization.findById.resolves(organizations[0]);

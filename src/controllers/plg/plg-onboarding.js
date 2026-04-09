@@ -229,7 +229,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     } catch (createError) {
       // Handle race condition: concurrent request may have created the record
       onboarding = await PlgOnboarding.findByImsOrgIdAndDomain(imsOrgId, domain);
-      if (!onboarding) throw createError;
+      if (!onboarding) {
+        throw createError;
+      }
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
@@ -336,7 +338,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     // Step 4: Bot blocker check
     const botBlockerResult = await detectBotBlocker({ baseUrl: baseURL });
     if (!botBlockerResult.crawlable) {
-      if (site) await site.save();
+      if (site) {
+        await site.save();
+      }
 
       // eslint-disable-next-line id-match
       const botBlockerInfo = {
@@ -492,8 +496,12 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
         }
       } catch (error) {
         log.warn(`Locale detection failed for ${baseURL}: ${error.message}`);
-        if (!site.getLanguage()) site.setLanguage('en');
-        if (!site.getRegion()) site.setRegion('US');
+        if (!site.getLanguage()) {
+          site.setLanguage('en');
+        }
+        if (!site.getRegion()) {
+          site.setRegion('US');
+        }
       }
     }
 

@@ -211,7 +211,9 @@ function LlmoOpportunitiesController(ctx) {
       const fetchForSite = async (siteId) => {
         try {
           const site = await Site.findById(siteId);
-          if (!site) return [];
+          if (!site) {
+            return [];
+          }
 
           const opportunities = await Opportunity.allBySiteId(siteId);
           return opportunities
