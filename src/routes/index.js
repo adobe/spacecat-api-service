@@ -93,6 +93,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
+ * @param {Object} toolsController - The tools controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -145,6 +146,7 @@ export default function getRouteHandlers(
   contactSalesLeadsController,
   featureFlagsController,
   pageRelationshipsController,
+  toolsController,
   ephemeralRunController,
   autofixChecksController,
 ) {
@@ -349,6 +351,7 @@ export default function getRouteHandlers(
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
+    'POST /tools/resolve-config': toolsController.resolveConfig,
     'POST /tools/api-keys': apiKeyController.createApiKey,
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,

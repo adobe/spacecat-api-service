@@ -412,6 +412,10 @@ describe('getRouteHandlers', () => {
     search: sinon.stub(),
   };
 
+  const mockToolsController = {
+    resolveConfig: sinon.stub(),
+  };
+
   const mockEphemeralRunController = {
     batchRun: () => null,
     batchStatus: () => null,
@@ -470,6 +474,7 @@ describe('getRouteHandlers', () => {
       mockContactSalesLeadsController,
       mockFeatureFlagsController,
       mockPageRelationshipsController,
+      mockToolsController,
       mockEphemeralRunController,
       mockAutofixChecksController,
     );
@@ -495,6 +500,7 @@ describe('getRouteHandlers', () => {
       'GET /trigger',
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
+      'POST /tools/resolve-config',
       'POST /tools/api-keys',
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
@@ -527,6 +533,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /sites.csv']).to.equal(mockSitesController.getAllAsCsv);
     expect(staticRoutes['GET /sites.xlsx']).to.equal(mockSitesController.getAllAsExcel);
     expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
+    expect(staticRoutes['POST /tools/resolve-config']).to.equal(mockToolsController.resolveConfig);
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);

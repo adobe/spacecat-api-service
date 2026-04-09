@@ -97,6 +97,7 @@ import AutofixChecksController from './controllers/autofix-checks.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
+import ToolsController from './controllers/tools.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -233,6 +234,7 @@ async function run(request, context) {
     const featureFlagsController = FeatureFlagsController(context);
     const autofixChecksController = AutofixChecksController(context);
     const pageRelationshipsController = PageRelationshipsController(context);
+    const toolsController = ToolsController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -282,6 +284,7 @@ async function run(request, context) {
       contactSalesLeadsController,
       featureFlagsController,
       pageRelationshipsController,
+      toolsController,
       ephemeralRunController,
       autofixChecksController,
     );
