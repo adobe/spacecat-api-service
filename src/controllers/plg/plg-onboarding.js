@@ -54,7 +54,13 @@ const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.PLG;
 const PLG_PROFILE_KEY = 'aso_plg';
 const LD_FF_PROJECT_NAME = 'experience-success-studio';
-const LD_AUTO_FIX_META_TAGS_FLAG = 'auto-fix-meta-tags';
+const LD_API_TOKEN_ENV_VAR = 'LD_EXPERIENCE_SUCCESS_API_TOKEN';
+const LD_AUTO_FIX_FLAGS = [
+  'auto-fix-meta-tags',
+  'cwv-auto-fix',
+  'alt-text-auto-fix',
+  'broken-backlinks-auto-fix',
+];
 
 const REVIEW_REASONS = {
   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
@@ -182,22 +188,63 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
 }
 
 /**
- * TODO: Update LaunchDarkly feature flags for the PLG tier transition.
- * Called after a site is successfully enrolled in the PLG tier.
- * Flag names and API details to be provided by the team.
- * @param {object} site - The onboarded site.
- * @param {object} context - Request context.
+ * Upserts a single LaunchDarkly flag's variation 0 to include the org + site.
+ * Variation 0 value is a JSON object: { [imsOrgId]: [siteBaseURLs] }.
+ * @param {object} ldClient - LaunchDarklyClient instance.
+ * @param {string} flagKey - Flag key.
+ * @param {string} imsOrgId - IMS org ID.
+ * @param {string} siteBaseURL - Site base URL.
+ * @param {object} log - Logger.
  */
+async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteBaseURL, log) {
+  const flag = await ldClient.getFeatureFlag(LD_FF_PROJECT_NAME, flagKey);
+  const rawValue = flag.variations?.[0]?.value;
+
+  if (rawValue === undefined) {
+    log.warn(`LaunchDarkly flag ${flagKey} has no variations`);
+    return;
+  }
+
+  const isStringWrapped = typeof rawValue === 'string';
+  const parsed = isStringWrapped ? JSON.parse(rawValue) : rawValue;
+
+  const existingSites = parsed[imsOrgId] ?? [];
+  if (existingSites.includes(siteBaseURL)) {
+    log.info(`LaunchDarkly: ${siteBaseURL} already in ${flagKey} for org ${imsOrgId}`);
+    return;
+  }
+
+  const merged = { ...parsed, [imsOrgId]: [...existingSites, siteBaseURL] };
+  const newValue = isStringWrapped ? JSON.stringify(merged) : merged;
+
+  await ldClient.updateVariationValue(
+    LD_FF_PROJECT_NAME,
+    flagKey,
+    0,
+    newValue,
+    `plg-onboarding: enable ${flagKey} for ${imsOrgId} / ${siteBaseURL}`,
+  );
+
+  log.info(`LaunchDarkly: enabled ${flagKey} for org ${imsOrgId}, site ${siteBaseURL}`);
+}
+
 /**
- * Enables the `auto-fix-meta-tags` LaunchDarkly feature flag for the given site's org.
- * Variation 0 of the flag holds a JSON object mapping IMS org IDs to site base URL arrays.
- * This function adds the org + site URL to that variation (upsert semantics).
+ * Enables all PLG auto-fix LaunchDarkly feature flags for the given site's org.
+ * Uses the experience-success-studio project token (LD_EXPERIENCE_SUCCESS_API_TOKEN).
+ * Each flag update is non-fatal — onboarding continues even if one fails.
  * @param {object} site - The onboarded site.
  * @param {object} context - Request context.
  */
 async function updateLaunchDarklyFlags(site, context) {
-  const { log } = context;
-  const ldClient = LaunchDarklyClient.createFrom(context);
+  const { log, env } = context;
+
+  const apiToken = env[LD_API_TOKEN_ENV_VAR];
+  if (!apiToken) {
+    log.warn(`Cannot update LaunchDarkly flags: ${LD_API_TOKEN_ENV_VAR} is not set`);
+    return;
+  }
+
+  const ldClient = new LaunchDarklyClient({ apiToken }, log);
 
   const imsOrgId = (await context.dataAccess.Organization.findById(
     await site.getOrganizationId(),
@@ -210,39 +257,15 @@ async function updateLaunchDarklyFlags(site, context) {
 
   const siteBaseURL = site.getBaseURL();
 
-  try {
-    const flag = await ldClient.getFeatureFlag(LD_FF_PROJECT_NAME, LD_AUTO_FIX_META_TAGS_FLAG);
-    const rawValue = flag.variations?.[0]?.value;
+  const results = await Promise.allSettled(
+    LD_AUTO_FIX_FLAGS.map((flagKey) => upsertLdFlag(ldClient, flagKey, imsOrgId, siteBaseURL, log)),
+  );
 
-    if (rawValue === undefined) {
-      log.warn(`LaunchDarkly flag ${LD_AUTO_FIX_META_TAGS_FLAG} has no variations`);
-      return;
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      log.error(`Failed to update LaunchDarkly flag ${LD_AUTO_FIX_FLAGS[i]}: ${result.reason?.message}`);
     }
-
-    const isStringWrapped = typeof rawValue === 'string';
-    const parsed = isStringWrapped ? JSON.parse(rawValue) : rawValue;
-
-    const existingSites = parsed[imsOrgId] ?? [];
-    if (existingSites.includes(siteBaseURL)) {
-      log.info(`LaunchDarkly: ${siteBaseURL} already in ${LD_AUTO_FIX_META_TAGS_FLAG} for org ${imsOrgId}`);
-      return;
-    }
-
-    const merged = { ...parsed, [imsOrgId]: [...existingSites, siteBaseURL] };
-    const newValue = isStringWrapped ? JSON.stringify(merged) : merged;
-
-    await ldClient.updateVariationValue(
-      LD_FF_PROJECT_NAME,
-      LD_AUTO_FIX_META_TAGS_FLAG,
-      0,
-      newValue,
-      `plg-onboarding: enable auto-fix-meta-tags for ${imsOrgId} / ${siteBaseURL}`,
-    );
-
-    log.info(`LaunchDarkly: enabled ${LD_AUTO_FIX_META_TAGS_FLAG} for org ${imsOrgId}, site ${siteBaseURL}`);
-  } catch (error) {
-    log.error(`Failed to update LaunchDarkly flag ${LD_AUTO_FIX_META_TAGS_FLAG}: ${error.message}`);
-  }
+  });
 }
 
 async function createOrFindProject(baseURL, organizationId, context) {
@@ -656,6 +679,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     const { entitlement } = await ensureAsoEntitlement(site, context);
     await revokePreOnboardedSiteEnrollment(site, entitlement, context);
     await updateLaunchDarklyFlags(site, context);
+
     steps.entitlementCreated = true;
 
     // Step 10: Trigger audit runs

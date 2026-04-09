@@ -281,6 +281,7 @@ describe('PlgOnboardingController', () => {
 
     mockEnv = {
       DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID,
+      LD_EXPERIENCE_SUCCESS_API_TOKEN: 'test-ld-token',
     };
 
     PlgOnboardingController = (await esmock(
@@ -303,7 +304,7 @@ describe('PlgOnboardingController', () => {
           ok: (data) => ({ status: 200, value: data }),
         },
         '@adobe/spacecat-shared-launchdarkly-client': {
-          default: { createFrom: ldCreateFromStub },
+          default: ldCreateFromStub,
         },
         '@adobe/spacecat-shared-rum-api-client': {
           default: {
@@ -520,7 +521,7 @@ describe('PlgOnboardingController', () => {
             },
           },
           '@adobe/spacecat-shared-launchdarkly-client': {
-            default: { createFrom: ldCreateFromStub },
+            default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
@@ -1680,22 +1681,22 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('adds org and site to auto-fix-meta-tags flag variation 0', async () => {
+    it('adds org and site to all 4 auto-fix flags in variation 0', async () => {
       ldGetFeatureFlagStub.resolves({ variations: [{ value: {} }] });
 
       const context = buildContext({ domain: TEST_DOMAIN });
       await controller.onboard(context);
 
-      expect(ldGetFeatureFlagStub).to.have.been.calledWith(
-        'experience-success-studio',
-        'auto-fix-meta-tags',
-      );
-      expect(ldUpdateVariationValueStub).to.have.been.calledOnce;
-      const [projectKey, flagKey, varIndex, newValue] = ldUpdateVariationValueStub.firstCall.args;
-      expect(projectKey).to.equal('experience-success-studio');
-      expect(flagKey).to.equal('auto-fix-meta-tags');
-      expect(varIndex).to.equal(0);
-      expect(newValue).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
+      const expectedFlags = ['auto-fix-meta-tags', 'cwv-auto-fix', 'alt-text-auto-fix', 'broken-backlinks-auto-fix'];
+      expectedFlags.forEach((flagKey) => {
+        expect(ldGetFeatureFlagStub).to.have.been.calledWith('experience-success-studio', flagKey);
+      });
+      expect(ldUpdateVariationValueStub.callCount).to.equal(4);
+      const metaTagsCall = ldUpdateVariationValueStub.getCalls().find((c) => c.args[1] === 'auto-fix-meta-tags');
+      expect(metaTagsCall).to.exist;
+      expect(metaTagsCall.args[0]).to.equal('experience-success-studio');
+      expect(metaTagsCall.args[2]).to.equal(0);
+      expect(metaTagsCall.args[3]).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
     });
 
     it('skips duplicate site already present in variation 0', async () => {
@@ -1717,6 +1718,18 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips LD update when LD_EXPERIENCE_SUCCESS_API_TOKEN is not set', async () => {
+      const context = {
+        ...buildContext({ domain: TEST_DOMAIN }),
+        env: { DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID },
+      };
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldGetFeatureFlagStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/LD_EXPERIENCE_SUCCESS_API_TOKEN/);
     });
 
     it('skips LD update when org has no IMS org ID', async () => {
@@ -1747,10 +1760,12 @@ describe('PlgOnboardingController', () => {
       const context = buildContext({ domain: TEST_DOMAIN });
       await controller.onboard(context);
 
-      expect(ldUpdateVariationValueStub).to.have.been.calledOnce;
-      const newValue = ldUpdateVariationValueStub.firstCall.args[3];
-      expect(typeof newValue).to.equal('string');
-      expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
+      expect(ldUpdateVariationValueStub.callCount).to.equal(4);
+      ldUpdateVariationValueStub.getCalls().forEach((call) => {
+        const newValue = call.args[3];
+        expect(typeof newValue).to.equal('string');
+        expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_BASE_URL] });
+      });
     });
   });
 
@@ -2186,7 +2201,7 @@ describe('PlgOnboardingController', () => {
             },
           },
           '@adobe/spacecat-shared-launchdarkly-client': {
-            default: { createFrom: ldCreateFromStub },
+            default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
@@ -2564,7 +2579,7 @@ describe('PlgOnboardingController', () => {
             },
           },
           '@adobe/spacecat-shared-launchdarkly-client': {
-            default: { createFrom: ldCreateFromStub },
+            default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
@@ -2658,7 +2673,7 @@ describe('PlgOnboardingController', () => {
               },
             },
             '@adobe/spacecat-shared-launchdarkly-client': {
-              default: { createFrom: ldCreateFromStub },
+              default: ldCreateFromStub,
             },
             '@adobe/spacecat-shared-tier-client': {
               default: { createForSite: sandbox.stub() },
