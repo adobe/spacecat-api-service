@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 // Add global fetch polyfill for tests
 import { fetch } from '@adobe/fetch';
 

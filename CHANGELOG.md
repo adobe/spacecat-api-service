@@ -1,3 +1,50 @@
+## [1.427.1](https://github.com/adobe/spacecat-api-service/compare/v1.427.0...v1.427.1) (2026-04-09)
+
+
+### Bug Fixes
+
+* enforce curly braces and remove eslint-env comments ([#2158](https://github.com/adobe/spacecat-api-service/issues/2158)) ([e6cef44](https://github.com/adobe/spacecat-api-service/commit/e6cef44b71f556fd2f1c5d8670aa63bdfa99512a))
+
+# [1.427.0](https://github.com/adobe/spacecat-api-service/compare/v1.426.0...v1.427.0) (2026-04-09)
+
+
+### Features
+
+* add preflight-checks endpoint for autofix deploy permission validation ([#2119](https://github.com/adobe/spacecat-api-service/issues/2119)) ([ed28ab3](https://github.com/adobe/spacecat-api-service/commit/ed28ab3463563d3268d69df87240509c61b40813))
+
+# [1.426.0](https://github.com/adobe/spacecat-api-service/compare/v1.425.0...v1.426.0) (2026-04-08)
+
+
+### Features
+
+* add PATCH /plg/onboard/:onboardingId for waitlist bypass ([#2153](https://github.com/adobe/spacecat-api-service/issues/2153)) ([e9ff730](https://github.com/adobe/spacecat-api-service/commit/e9ff730cfe13c07047a9a4a0c0cfe12bf0078bed))
+
+# [1.425.0](https://github.com/adobe/spacecat-api-service/compare/v1.424.0...v1.425.0) (2026-04-08)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2159](https://github.com/adobe/spacecat-api-service/issues/2159)) ([5bc0f59](https://github.com/adobe/spacecat-api-service/commit/5bc0f59fb6772c007a2992543a84839424e3072e))
+
+
+### Features
+
+* We only need to analyze top 3 pages for PLG customers ([#2120](https://github.com/adobe/spacecat-api-service/issues/2120)) ([8a66638](https://github.com/adobe/spacecat-api-service/commit/8a66638c22a7c1a669520f2ca55e811671b66aea))
+
+# [1.424.0](https://github.com/adobe/spacecat-api-service/compare/v1.423.0...v1.424.0) (2026-04-08)
+
+
+### Features
+
+* Manage a custom list of audit target URLs ([#2142](https://github.com/adobe/spacecat-api-service/issues/2142)) ([6103477](https://github.com/adobe/spacecat-api-service/commit/61034778a9f3e103f589d1f12963f1eb0bfd0fd6))
+
+# [1.423.0](https://github.com/adobe/spacecat-api-service/compare/v1.422.0...v1.423.0) (2026-04-08)
+
+
+### Features
+
+* add admin PLG record management endpoints ([#2155](https://github.com/adobe/spacecat-api-service/issues/2155)) ([db36ea4](https://github.com/adobe/spacecat-api-service/commit/db36ea4eacf8bb1a5ae4930b7a7b8b8939a32f29))
+
 # [1.422.0](https://github.com/adobe/spacecat-api-service/compare/v1.421.3...v1.422.0) (2026-04-08)
 
 

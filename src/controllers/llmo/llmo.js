@@ -154,7 +154,9 @@ function LlmoController(ctx) {
     const { env } = context;
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
@@ -252,7 +254,9 @@ function LlmoController(ctx) {
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
@@ -385,7 +389,9 @@ function LlmoController(ctx) {
       log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
 
       // Use 'llmo-global' folder
       const sheetURL = `llmo-global/${configName}.json`;
@@ -440,7 +446,9 @@ function LlmoController(ctx) {
     try {
       // Validate site and LLMO access
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
 
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
@@ -479,7 +487,9 @@ function LlmoController(ctx) {
     try {
       // hasAccess() must precede isLLMOAdministrator() for delegation-aware checks
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
 
       if (!accessControlUtil.isLLMOAdministrator()) {
         return forbidden('Only LLMO administrators can update the LLMO config');
@@ -577,7 +587,9 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
   const getLlmoQuestions = async (context) => {
     const siteValidation = await getSiteAndValidateLlmo(context);
-    if (siteValidation.status) return siteValidation;
+    if (siteValidation.status) {
+      return siteValidation;
+    }
     const { llmoConfig } = siteValidation;
     return ok(llmoConfig.questions || {});
   };
@@ -587,7 +599,9 @@ function LlmoController(ctx) {
   const addLlmoQuestion = async (context) => {
     const { log } = context;
     const siteValidation = await getSiteAndValidateLlmo(context);
-    if (siteValidation.status) return siteValidation;
+    if (siteValidation.status) {
+      return siteValidation;
+    }
 
     if (!accessControlUtil.isLLMOAdministrator()) {
       return forbidden('Only LLMO administrators can add questions');
@@ -634,7 +648,9 @@ function LlmoController(ctx) {
     const { log } = context;
     const { questionKey } = context.params;
     const siteValidation = await getSiteAndValidateLlmo(context);
-    if (siteValidation.status) return siteValidation;
+    if (siteValidation.status) {
+      return siteValidation;
+    }
 
     if (!accessControlUtil.isLLMOAdministrator()) {
       return forbidden('Only LLMO administrators can remove questions');
@@ -658,7 +674,9 @@ function LlmoController(ctx) {
     const { questionKey } = context.params;
     const { data } = context;
     const siteValidation = await getSiteAndValidateLlmo(context);
-    if (siteValidation.status) return siteValidation;
+    if (siteValidation.status) {
+      return siteValidation;
+    }
 
     if (!accessControlUtil.isLLMOAdministrator()) {
       return forbidden('Only LLMO administrators can update questions');
@@ -680,7 +698,9 @@ function LlmoController(ctx) {
   const getLlmoCustomerIntent = async (context) => {
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
@@ -694,7 +714,9 @@ function LlmoController(ctx) {
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
 
       if (!accessControlUtil.isLLMOAdministrator()) {
         return forbidden('Only LLMO administrators can add customer intent');
@@ -745,7 +767,9 @@ function LlmoController(ctx) {
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
@@ -770,7 +794,9 @@ function LlmoController(ctx) {
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
@@ -804,7 +830,9 @@ function LlmoController(ctx) {
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { site, config } = siteValidation;
 
       if (!accessControlUtil.isLLMOAdministrator()) {
@@ -836,7 +864,9 @@ function LlmoController(ctx) {
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { site, config } = siteValidation;
 
       if (!accessControlUtil.isLLMOAdministrator()) {
@@ -1016,7 +1046,9 @@ function LlmoController(ctx) {
 
       // Validate site and LLMO access
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { site, config } = siteValidation;
 
       // Perform the complete offboarding process
@@ -1043,7 +1075,9 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { llmoConfig } = siteValidation;
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
@@ -1060,7 +1094,9 @@ function LlmoController(ctx) {
     try {
       // Validate site and LLMO access
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
 
       // Delegate to the rationale handler for the actual processing
       return await handleLlmoRationale(context);
@@ -1077,7 +1113,9 @@ function LlmoController(ctx) {
     try {
       // Validate site and LLMO access
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
 
       // Delegate to the brand claims handler for the actual processing
       return await handleBrandClaims(context);
@@ -1093,7 +1131,9 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
 
       return await handler(context);
     } catch (error) {
@@ -1627,7 +1667,9 @@ function LlmoController(ctx) {
 
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) return siteValidation;
+      if (siteValidation.status) {
+        return siteValidation;
+      }
       const { site, config } = siteValidation;
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
       const tags = config.getLlmoConfig().tags || [];

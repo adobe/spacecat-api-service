@@ -98,14 +98,20 @@ async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerNa
 export const strCompare = (a, b) => (a || '').localeCompare(b || '');
 
 function shouldApplyFilter(value) {
-  if (value == null) return false;
-  if (typeof value === 'string' && SKIP_VALUES.has(value.trim())) return false;
+  if (value == null) {
+    return false;
+  }
+  if (typeof value === 'string' && SKIP_VALUES.has(value.trim())) {
+    return false;
+  }
   return hasText(String(value));
 }
 
 /** @internal Exported for testing */
 export function resolveModelFromRequest(model) {
-  if (!hasText(model)) return DEFAULT_MODEL;
+  if (!hasText(model)) {
+    return DEFAULT_MODEL;
+  }
   const trimmed = String(model).trim();
   const alias = MODEL_QUERY_ALIASES.get(trimmed.toLowerCase());
   return alias ?? trimmed;
@@ -141,7 +147,9 @@ export function toFilterOption(id, label) {
  */
 function parseTopicIds(q) {
   const raw = q.topicIds;
-  if (raw == null) return [];
+  if (raw == null) {
+    return [];
+  }
   let arr;
   if (Array.isArray(raw)) {
     arr = raw;
@@ -228,8 +236,12 @@ function buildFilterDimensionsRpcParams(organizationId, params, defaults, filter
     p_end_date: endDate,
     p_model: params.model,
   };
-  if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
-  if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
+  if (filterByBrandId) {
+    rpcParams.p_brand_id = filterByBrandId;
+  }
+  if (shouldApplyFilter(params.siteId)) {
+    rpcParams.p_site_id = params.siteId;
+  }
   if (shouldApplyFilter(params.categoryId)) {
     if (isValidUUID(params.categoryId)) {
       rpcParams.p_category_id = params.categoryId;
@@ -237,9 +249,15 @@ function buildFilterDimensionsRpcParams(organizationId, params, defaults, filter
       rpcParams.p_category_name = params.categoryId;
     }
   }
-  if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
-  if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
-  if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
+  if (params.topicIds?.length > 0) {
+    rpcParams.p_topic_ids = params.topicIds;
+  }
+  if (shouldApplyFilter(params.regionCode)) {
+    rpcParams.p_region_code = params.regionCode;
+  }
+  if (shouldApplyFilter(params.origin)) {
+    rpcParams.p_origin = params.origin;
+  }
   return rpcParams;
 }
 
@@ -277,7 +295,9 @@ export function normalizeFilterDimensionsStatsFromRpc(dims) {
  * @internal Exported for testing early-return paths
  */
 export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
-  if (!shouldApplyFilter(siteId)) return true;
+  if (!shouldApplyFilter(siteId)) {
+    return true;
+  }
   const { data, error } = await client
     .from('sites')
     .select('id')
@@ -779,7 +799,9 @@ export function splitDateRangeIntoWeeksBackward(
 
 function parseIsoWeek(weekStr) {
   const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
-  if (!match) return { weekNumber: 0, year: 0 };
+  if (!match) {
+    return { weekNumber: 0, year: 0 };
+  }
   return {
     year: Number.parseInt(match[1], 10),
     weekNumber: Number.parseInt(match[2], 10),
@@ -795,7 +817,9 @@ function parseIsoWeek(weekStr) {
  */
 export function getWeekDateRange(isoWeek) {
   const { year, weekNumber: week } = parseIsoWeek(isoWeek);
-  if (!year || week < 1 || week > 53) return null;
+  if (!year || week < 1 || week > 53) {
+    return null;
+  }
   const jan4 = new Date(Date.UTC(year, 0, 4));
   const dayOfWeek = jan4.getUTCDay();
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
@@ -848,10 +872,14 @@ export function dateToIsoWeek(dateStr) {
  * @internal Exported for testing
  */
 export function generateIsoWeekRange(minDate, maxDate) {
-  if (!minDate || !maxDate) return [];
+  if (!minDate || !maxDate) {
+    return [];
+  }
   const minRange = getWeekDateRange(dateToIsoWeek(minDate));
   const maxRange = getWeekDateRange(dateToIsoWeek(maxDate));
-  if (!minRange || !maxRange) return [];
+  if (!minRange || !maxRange) {
+    return [];
+  }
 
   const result = [];
   let currentMs = new Date(`${minRange.startDate}T00:00:00Z`).getTime();
@@ -1002,7 +1030,9 @@ async function callCompetitorSummaryRpc(client, organizationId, params, defaults
 export function reshapeMarketTrackingRows(rows) {
   const weekMap = new Map();
   rows.forEach((r) => {
-    if (!r.week_str) return;
+    if (!r.week_str) {
+      return;
+    }
     if (!weekMap.has(r.week_str)) {
       weekMap.set(r.week_str, {
         week: r.week_str,
@@ -1197,7 +1227,9 @@ export function aggregateSentimentByWeek(rows) {
     const entry = weekMap.get(week);
 
     const key = buildPromptKey(row);
-    if (entry.seenKeys.has(key)) return;
+    if (entry.seenKeys.has(key)) {
+      return;
+    }
     entry.seenKeys.add(key);
 
     entry.totalPrompts += 1;
@@ -1271,16 +1303,26 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
         .lte('execution_date', endDate)
         .eq('model', model);
 
-      if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
-      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
+      }
+      if (filterByBrandId) {
+        q = q.eq('brand_id', filterByBrandId);
+      }
       if (shouldApplyFilter(params.categoryId)) {
         q = isValidUUID(params.categoryId)
           ? q.eq('category_id', params.categoryId)
           : q.eq('category_name', params.categoryId);
       }
-      if (params.topicIds?.length > 0) q = q.in('topic_id', params.topicIds);
-      if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
-      if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+      if (params.topicIds?.length > 0) {
+        q = q.in('topic_id', params.topicIds);
+      }
+      if (shouldApplyFilter(params.regionCode)) {
+        q = q.eq('region_code', params.regionCode);
+      }
+      if (shouldApplyFilter(params.origin)) {
+        q = q.ilike('origin', params.origin);
+      }
 
       const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
 
@@ -1338,11 +1380,19 @@ export function buildTopicPromptKey(row) {
  * @returns {string} 'High', 'Medium', 'Low', or 'N/A'
  */
 function volumeToCategory(volumeSum, volumeCount) {
-  if (volumeCount === 0) return 'N/A';
+  if (volumeCount === 0) {
+    return 'N/A';
+  }
   const avg = volumeSum / volumeCount;
-  if (avg <= -25) return 'High';
-  if (avg <= -15) return 'Medium';
-  if (avg < 0) return 'Low';
+  if (avg <= -25) {
+    return 'High';
+  }
+  if (avg <= -15) {
+    return 'Medium';
+  }
+  if (avg < 0) {
+    return 'Low';
+  }
   return 'N/A';
 }
 
@@ -1391,12 +1441,18 @@ export function aggregateTopicData(rows) {
     }
 
     // Count mentions/citations from EVERY execution row
-    if (row.mentions === true || row.mentions === 'true') agg.totalMentions += 1;
-    if (row.citations === true || row.citations === 'true') agg.totalCitations += 1;
+    if (row.mentions === true || row.mentions === 'true') {
+      agg.totalMentions += 1;
+    }
+    if (row.citations === true || row.citations === 'true') {
+      agg.totalCitations += 1;
+    }
 
     if (Array.isArray(row.brand_presence_sources)) {
       row.brand_presence_sources.forEach((s) => {
-        if (s.url_id) agg.uniqueSourceUrlIds.add(s.url_id);
+        if (s.url_id) {
+          agg.uniqueSourceUrlIds.add(s.url_id);
+        }
       });
     }
 
@@ -1477,8 +1533,12 @@ export function buildPromptDetails(rows) {
       existing.latestRow = row;
     }
     const entry = promptMap.get(key);
-    if (row.mentions === true || row.mentions === 'true') entry.totalMentions += 1;
-    if (row.citations === true || row.citations === 'true') entry.totalCitations += 1;
+    if (row.mentions === true || row.mentions === 'true') {
+      entry.totalMentions += 1;
+    }
+    if (row.citations === true || row.citations === 'true') {
+      entry.totalCitations += 1;
+    }
   });
 
   return [...promptMap.values()].map(({ latestRow: r, totalMentions, totalCitations }) => {
@@ -1775,7 +1835,9 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       if (shouldApplyFilter(params.siteId)) {
         q = q.eq('site_id', params.siteId);
       }
-      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (filterByBrandId) {
+        q = q.eq('brand_id', filterByBrandId);
+      }
       if (shouldApplyFilter(params.categoryId)) {
         q = isValidUUID(params.categoryId)
           ? q.eq('category_id', params.categoryId)
@@ -1907,8 +1969,12 @@ export function aggregateWeeklyDetailStats(rows) {
       agg.positionCount += 1;
     }
 
-    if (row.mentions === true || row.mentions === 'true') agg.mentionCount += 1;
-    if (row.citations === true || row.citations === 'true') agg.citationCount += 1;
+    if (row.mentions === true || row.mentions === 'true') {
+      agg.mentionCount += 1;
+    }
+    if (row.citations === true || row.citations === 'true') {
+      agg.citationCount += 1;
+    }
 
     const vol = row.volume != null ? Number(row.volume) : NaN;
     if (!Number.isNaN(vol)) {
@@ -1955,7 +2021,9 @@ export function aggregateDetailSources(sourceRows) {
 
   sourceRows.forEach((row) => {
     const url = row.url || '';
-    if (!url) return;
+    if (!url) {
+      return;
+    }
     if (!sourceMap.has(url)) {
       sourceMap.set(url, {
         url,
@@ -1968,7 +2036,9 @@ export function aggregateDetailSources(sourceRows) {
     }
     const s = sourceMap.get(url);
     s.citationCount += 1;
-    if (row.execution_date) s.weeks.add(weekFromExecDate(row.execution_date));
+    if (row.execution_date) {
+      s.weeks.add(weekFromExecDate(row.execution_date));
+    }
     if (row.prompt) {
       s.prompts.set(row.prompt, (s.prompts.get(row.prompt) || 0) + 1);
     }
@@ -2001,10 +2071,18 @@ function buildDetailExecQuery(client, organizationId, params, defaults, filterBy
     .lte('execution_date', endDate)
     .eq('model', model);
 
-  if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
-  if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
-  if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
-  if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+  if (shouldApplyFilter(params.siteId)) {
+    q = q.eq('site_id', params.siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(params.regionCode)) {
+    q = q.eq('region_code', params.regionCode);
+  }
+  if (shouldApplyFilter(params.origin)) {
+    q = q.ilike('origin', params.origin);
+  }
 
   return q;
 }
@@ -2014,7 +2092,9 @@ function buildDetailExecQuery(client, organizationId, params, defaults, filterBy
  * Uses chunked IN filters to stay within PostgREST limits.
  */
 async function fetchSourcesForExecutions(client, organizationId, execIds, startDate, endDate) {
-  if (!execIds.length) return [];
+  if (!execIds.length) {
+    return [];
+  }
 
   const chunks = [];
   for (let i = 0; i < execIds.length; i += IN_FILTER_CHUNK_SIZE) {
@@ -2296,8 +2376,12 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
         } else if (sentiment === 'negative') {
           sentCount += 1;
         }
-        if (r.mentions === true || r.mentions === 'true') mentionTotal += 1;
-        if (r.citations === true || r.citations === 'true') citationTotal += 1;
+        if (r.mentions === true || r.mentions === 'true') {
+          mentionTotal += 1;
+        }
+        if (r.citations === true || r.citations === 'true') {
+          citationTotal += 1;
+        }
       });
 
       const avgVisibility = visCount > 0
@@ -2378,14 +2462,24 @@ const DEFAULT_MAX_COMPETITORS = 5; // max competitors the RPC returns from the D
  * @internal Exported for testing
  */
 export function volumeToPopularity(volume, avgPositiveVolume) {
-  if (volume === -30) return 'High';
-  if (volume === -20) return 'Medium';
-  if (volume === -10) return 'Low';
+  if (volume === -30) {
+    return 'High';
+  }
+  if (volume === -20) {
+    return 'Medium';
+  }
+  if (volume === -10) {
+    return 'Low';
+  }
   if (volume > 0 && avgPositiveVolume > 0) {
     const low = avgPositiveVolume * 0.33;
     const med = avgPositiveVolume * 0.66;
-    if (volume <= low) return 'Low';
-    if (volume <= med) return 'Medium';
+    if (volume <= low) {
+      return 'Low';
+    }
+    if (volume <= med) {
+      return 'Medium';
+    }
     return 'High';
   }
   return 'Low';
@@ -2418,15 +2512,23 @@ async function fetchConfiguredCompetitorNames(client, organizationId, filterByBr
     .from('competitors')
     .select('name, aliases')
     .eq('organization_id', organizationId);
-  if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
   const { data, error } = await q.limit(QUERY_LIMIT);
-  if (error || !data) return new Set();
+  if (error || !data) {
+    return new Set();
+  }
   const names = new Set();
   data.forEach((c) => {
-    if (c.name) names.add(c.name.toLowerCase().trim());
+    if (c.name) {
+      names.add(c.name.toLowerCase().trim());
+    }
     if (Array.isArray(c.aliases)) {
       c.aliases.forEach((a) => {
-        if (a) names.add(a.toLowerCase().trim());
+        if (a) {
+          names.add(a.toLowerCase().trim());
+        }
       });
     }
   });
@@ -2461,7 +2563,9 @@ export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
   // Compute average positive volume for legacy percentile bucketing
   const positiveVolumes = [];
   topicMap.forEach((m) => {
-    if (m.volume > 0) positiveVolumes.push(m.volume);
+    if (m.volume > 0) {
+      positiveVolumes.push(m.volume);
+    }
   });
   const avgPositiveVolume = positiveVolumes.length > 0
     ? positiveVolumes.reduce((s, v) => s + v, 0) / positiveVolumes.length
@@ -2503,7 +2607,9 @@ export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
 
     allEntities.sort((a, b) => {
       const diff = b.shareOfVoice - a.shareOfVoice;
-      if (diff !== 0) return diff;
+      if (diff !== 0) {
+        return diff;
+      }
       return Number(b.isBrand) - Number(a.isBrand);
     });
 
@@ -2562,7 +2668,9 @@ export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
   };
   shareOfVoiceData.sort((a, b) => {
     const pDiff = getPriorityValue(b.popularity) - getPriorityValue(a.popularity);
-    if (pDiff !== 0) return pDiff;
+    if (pDiff !== 0) {
+      return pDiff;
+    }
     return (b.shareOfVoice || 0) - (a.shareOfVoice || 0);
   });
 
@@ -2617,7 +2725,9 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
           .select('name')
           .eq('id', filterByBrandId)
           .limit(1);
-        if (brandData?.[0]?.name) brandName = brandData[0].name;
+        if (brandData?.[0]?.name) {
+          brandName = brandData[0].name;
+        }
       }
 
       const shareOfVoiceData = aggregateShareOfVoice(
@@ -2772,16 +2882,26 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         p_type: type,
       };
 
-      if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
-      if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
+      if (filterByBrandId) {
+        rpcParams.p_brand_id = filterByBrandId;
+      }
+      if (shouldApplyFilter(params.siteId)) {
+        rpcParams.p_site_id = params.siteId;
+      }
       if (shouldApplyFilter(params.categoryId)) {
         rpcParams.p_category_id = isValidUUID(params.categoryId)
           ? params.categoryId
           : undefined;
       }
-      if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
-      if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
-      if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
+      if (shouldApplyFilter(params.origin)) {
+        rpcParams.p_origin = params.origin;
+      }
+      if (shouldApplyFilter(params.regionCode)) {
+        rpcParams.p_region_code = params.regionCode;
+      }
+      if (params.topicIds?.length > 0) {
+        rpcParams.p_topic_ids = params.topicIds;
+      }
 
       const { data, error } = await client.rpc('rpc_sentiment_movers', rpcParams);
 
@@ -2814,7 +2934,9 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
 
 function parseShowTrends(q) {
   const v = q?.showTrends ?? q?.show_trends;
-  if (v === true || v === 1) return true;
+  if (v === true || v === 1) {
+    return true;
+  }
   if (typeof v === 'string') {
     const s = v.toLowerCase().trim();
     return s === 'true' || s === '1';

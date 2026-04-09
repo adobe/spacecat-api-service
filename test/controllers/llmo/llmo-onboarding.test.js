@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -245,8 +244,12 @@ describe('LLMO Onboarding Functions', () => {
 
     if (mockTracingFetch || mockComposeBaseURL) {
       deps['@adobe/spacecat-shared-utils'] = {};
-      if (mockTracingFetch) deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
-      if (mockComposeBaseURL) deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+      if (mockTracingFetch) {
+        deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
+      }
+      if (mockComposeBaseURL) {
+        deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+      }
     }
 
     if (mockDrsClient) {
@@ -3759,7 +3762,9 @@ describe('LLMO Onboarding Functions', () => {
       const mockSite = { getId: () => 'site123' };
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub().callsFake((audit) => {
-          if (audit === 'fail') throw new Error('fail error');
+          if (audit === 'fail') {
+            throw new Error('fail error');
+          }
         }),
         save: sinon.stub().resolves(),
       };
@@ -3781,7 +3786,9 @@ describe('LLMO Onboarding Functions', () => {
       const mockSiteConfig = {
         getImports: () => [],
         enableImport: sinon.stub().callsFake((type) => {
-          if (type === 'fail') throw new Error('fail error');
+          if (type === 'fail') {
+            throw new Error('fail error');
+          }
         }),
       };
       const mockSay = sinon.stub();
