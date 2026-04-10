@@ -1461,19 +1461,21 @@ describe('LLMO Onboarding Functions', () => {
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
       };
 
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        updateLlmoDetectedCdn: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+        getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'Tech-savvy professionals' } }),
+      };
+
       const mockSite = {
         getId: sinon.stub().returns('site123'),
-        getConfig: sinon.stub().returns({
-          updateLlmoBrand: sinon.stub(),
-          updateLlmoDataFolder: sinon.stub(),
-          getImports: sinon.stub().returns([]),
-          enableImport: sinon.stub(),
-          getFetchConfig: sinon.stub().returns({}),
-          updateFetchConfig: sinon.stub(),
-          getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'Tech-savvy professionals' } }),
-        }),
+        getConfig: sinon.stub().returns(mockSiteConfig),
         setConfig: sinon.stub(),
-        setDetectedCdn: sinon.stub(),
         save: sinon.stub().resolves(),
       };
 
@@ -1541,7 +1543,7 @@ describe('LLMO Onboarding Functions', () => {
       }, context);
 
       expect(result.detectedCdn).to.equal('aem-cs-fastly');
-      expect(mockSite.setDetectedCdn).to.have.been.calledWith('aem-cs-fastly');
+      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('aem-cs-fastly');
       expect(mockDetectCdnForDomain).to.have.been.calledWith('example.com');
     });
 

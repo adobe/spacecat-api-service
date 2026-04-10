@@ -56,8 +56,6 @@ export const SiteDto = {
     ...(site.getCode() && { code: site.getCode() }),
     ...(audit && { audits: [AuditDto.toAbbreviatedJSON(audit)] }),
     updatedBy: site.getUpdatedBy(),
-    /* c8 ignore next */
-    detectedCdn: site.getDetectedCdn?.() ?? null,
   }),
 
   /**

@@ -545,12 +545,6 @@ Site:
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
-    detectedCdn:
-      description: CDN provider detected via DNS during onboarding
-      type:
-        - string
-        - 'null'
-      example: 'aem-cs-fastly'
     deliveryConfig:
       description: The delivery configuration of the site
       $ref: '#/DeliveryConfig'

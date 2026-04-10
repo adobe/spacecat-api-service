@@ -1278,7 +1278,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname);
     if (detectedCdn) {
-      site.setDetectedCdn?.(detectedCdn);
+      siteConfig.updateLlmoDetectedCdn?.(detectedCdn);
       log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
       say(`:mag: Detected CDN: ${detectedCdn}`);
     } else {
