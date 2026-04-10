@@ -32,7 +32,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
@@ -45,7 +45,6 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectCdnForDomain,
-  getHostnameWithoutWww,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromCookie, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1301,7 +1300,10 @@ function LlmoController(ctx) {
         } else {
           // Verify the requested CDN type matches the domain's actual CDN via DNS
           try {
-            const hostname = getHostnameWithoutWww(baseURL, log);
+            // overwrite base url
+            const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+            const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
+            const hostname = calculateForwardedHost(effectiveBaseUrl, log);
             const detectedCdn = await detectCdnForDomain(hostname);
             if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
               log.error(`[edge-optimize-routing-failed] Requested cdnType: '${cdnTypeNormalized}', detected CDN: '${detectedCdn}'`);
@@ -1386,7 +1388,7 @@ function LlmoController(ctx) {
             clientSecret: env.IMS_EDGE_CLIENT_SECRET,
             scope: env.IMS_EDGE_SCOPE,
           }, log);
-          const spTokenData = await imsEdgeClient.getServiceAccessTokenOrgScopedV3(imsOrgId);
+          const spTokenData = await imsEdgeClient.getServicePrincipalAccessToken(imsOrgId);
           spToken = spTokenData.access_token;
           log.info(`[edge-optimize-routing] Service Principal token obtained for site ${siteId}`);
         } catch (tokenError) {

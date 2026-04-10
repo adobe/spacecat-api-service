@@ -127,6 +127,19 @@ describe('LlmoController', () => {
     }),
   };
 
+  // llmo imports getEffectiveBaseURL from tokowaka-client; the published package may not
+  // re-export it yet — tests must supply it on the esmocked module.
+  const mockTokowakaGetEffectiveBaseURL = (siteOrBaseUrl) => {
+    if (typeof siteOrBaseUrl === 'string') {
+      return siteOrBaseUrl.startsWith('http') ? siteOrBaseUrl : `https://${siteOrBaseUrl}`;
+    }
+    const overrideBaseURL = siteOrBaseUrl.getConfig?.()?.getFetchConfig?.()?.overrideBaseURL;
+    if (overrideBaseURL && /^https?:\/\//.test(overrideBaseURL)) {
+      return overrideBaseURL;
+    }
+    return siteOrBaseUrl.getBaseURL();
+  };
+
   // Common mocks needed for all esmock instances
   const getCommonMocks = () => ({
     '@adobe/spacecat-shared-tokowaka-client': {
@@ -148,6 +161,7 @@ describe('LlmoController', () => {
           throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
         }
       },
+      getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
     },
   });
 
@@ -222,7 +236,7 @@ describe('LlmoController', () => {
       },
       '@adobe/spacecat-shared-ims-client': {
         ImsClient: function MockImsClient() {
-          this.getServiceAccessTokenOrgScopedV3 = (...args) => (
+          this.getServicePrincipalAccessToken = (...args) => (
             getServicePrincipalTokenStub(...args)
           );
         },
@@ -271,6 +285,7 @@ describe('LlmoController', () => {
             throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
           }
         },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -338,6 +353,7 @@ describe('LlmoController', () => {
             throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
           }
         },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -366,6 +382,22 @@ describe('LlmoController', () => {
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
+      '@adobe/spacecat-shared-tokowaka-client': {
+        default: {
+          createFrom: () => mockTokowakaClient,
+        },
+        calculateForwardedHost: (url) => {
+          try {
+            const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+            const h = u.hostname;
+            const dots = (h.match(/\./g) || []).length;
+            return dots === 1 ? `www.${h}` : h;
+          } catch (e) {
+            throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+          }
+        },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+      },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
       },
@@ -389,6 +421,22 @@ describe('LlmoController', () => {
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '@adobe/spacecat-shared-tokowaka-client': {
+        default: {
+          createFrom: () => mockTokowakaClient,
+        },
+        calculateForwardedHost: (url) => {
+          try {
+            const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+            const h = u.hostname;
+            const dots = (h.match(/\./g) || []).length;
+            return dots === 1 ? `www.${h}` : h;
+          } catch (e) {
+            throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+          }
+        },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -4968,6 +5016,7 @@ describe('LlmoController', () => {
               throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
             }
           },
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -5075,6 +5124,7 @@ describe('LlmoController', () => {
               throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
             }
           },
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -5168,6 +5218,7 @@ describe('LlmoController', () => {
         '@adobe/spacecat-shared-tokowaka-client': {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({}),
@@ -5183,7 +5234,7 @@ describe('LlmoController', () => {
         },
         '@adobe/spacecat-shared-ims-client': {
           ImsClient: function MockImsClient() {
-            this.getServiceAccessTokenOrgScopedV3 = (...args) => (
+            this.getServicePrincipalAccessToken = (...args) => (
               getServicePrincipalTokenStub(...args)
             );
           },
@@ -5237,6 +5288,7 @@ describe('LlmoController', () => {
         '@adobe/spacecat-shared-tokowaka-client': {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({}),
@@ -5252,7 +5304,7 @@ describe('LlmoController', () => {
         },
         '@adobe/spacecat-shared-ims-client': {
           ImsClient: function MockImsClient() {
-            this.getServiceAccessTokenOrgScopedV3 = (...args) => (
+            this.getServicePrincipalAccessToken = (...args) => (
               getServicePrincipalTokenStub(...args)
             );
           },
@@ -5303,6 +5355,7 @@ describe('LlmoController', () => {
         '@adobe/spacecat-shared-tokowaka-client': {
           default: { createFrom: () => mockTokowakaClient },
           calculateForwardedHost: (url) => new URL(url).hostname,
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({}),
@@ -5318,7 +5371,7 @@ describe('LlmoController', () => {
         },
         '@adobe/spacecat-shared-ims-client': {
           ImsClient: function MockImsClient() {
-            this.getServiceAccessTokenOrgScopedV3 = (...args) => (
+            this.getServicePrincipalAccessToken = (...args) => (
               getServicePrincipalTokenStub(...args)
             );
           },
@@ -5769,6 +5822,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
 
@@ -6686,6 +6740,7 @@ describe('LlmoController', () => {
           '@adobe/spacecat-shared-tokowaka-client': {
             default: { createFrom: () => mockTokowakaClient },
             calculateForwardedHost: () => 'www.example.com',
+            getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
           },
           '../../../src/utils/slack/base.js': {
             postSlackMessage: sinon.stub(),
@@ -6740,6 +6795,7 @@ describe('LlmoController', () => {
           '@adobe/spacecat-shared-tokowaka-client': {
             default: { createFrom: () => mockTokowakaClient },
             calculateForwardedHost: () => 'www.example.com',
+            getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
           },
           '../../../src/utils/slack/base.js': {
             postSlackMessage: sinon.stub(),

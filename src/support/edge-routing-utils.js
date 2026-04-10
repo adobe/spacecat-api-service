@@ -174,8 +174,6 @@ export async function callCdnRoutingApi(
 
 const AEM_CS_FASTLY_CNAME_PATTERNS = [
   'cdn.adobeaemcloud.com',
-  'adobeaemcloud.com',
-  'fastly.net',
 ];
 const AEM_CS_FASTLY_IPS = new Set([
   '146.75.123.10',
@@ -213,7 +211,7 @@ async function checkHost(host) {
  */
 export async function detectCdnForDomain(domain) {
   try {
-    return await checkHost(`www.${domain}`) ?? await checkHost(domain);
+    return await checkHost(domain);
   } catch (err) {
     // DNS errors are treated as undetected — never break callers
     /* eslint-disable-next-line no-console -- no logger in this util; surface for ops debugging */

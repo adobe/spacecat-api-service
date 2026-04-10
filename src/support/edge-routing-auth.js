@@ -29,12 +29,14 @@ export const LLMO_ADMIN_GROUP_NAME = 'LLMO Admin';
  * @throws {Error} With a `status` property (400 or 401) on failure.
  */
 export async function getImsTokenFromCookie(context) {
-  const promiseToken = getCookieValue(context, 'promiseToken');
-  if (!hasText(promiseToken)) {
+  const rawPromiseToken = getCookieValue(context, 'promiseToken');
+  if (!hasText(rawPromiseToken)) {
     const err = new Error('promiseToken cookie is required for CDN routing');
     err.status = 400;
     throw err;
   }
+
+  const promiseToken = decodeURIComponent(rawPromiseToken);
 
   try {
     return await exchangePromiseToken(context, promiseToken);
@@ -130,7 +132,6 @@ export async function authorizeEdgeCdnRouting(context, {
       err.status = 403;
       throw err;
     }
-
     let isGroupMember = false;
     try {
       const orgs = await context.imsClient.getImsUserOrganizations(imsUserToken);

@@ -293,9 +293,8 @@ describe('edge-routing-utils', () => {
       expect(result).to.equal(null);
     });
 
-    it('returns aem-cs-fastly when www host CNAME matches Adobe AEM cloud pattern', async () => {
-      dnsPromises.resolveCname.withArgs('www.example.com').resolves(['origin.example.cdn.adobeaemcloud.com']);
-      dnsPromises.resolveCname.withArgs('example.com').resolves([]);
+    it('returns aem-cs-fastly when host CNAME matches Adobe AEM cloud pattern', async () => {
+      dnsPromises.resolveCname.withArgs('example.com').resolves(['origin.example.cdn.adobeaemcloud.com']);
       dnsPromises.resolve4.resolves([]);
       const result = await edgeUtilsDns.detectCdnForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
@@ -303,9 +302,7 @@ describe('edge-routing-utils', () => {
 
     it('returns aem-cs-fastly when A record matches known Fastly IP', async () => {
       dnsPromises.resolveCname.resolves([]);
-      dnsPromises.resolve4.callsFake(async (host) => (
-        host === 'www.example.com' ? ['146.75.123.10'] : []
-      ));
+      dnsPromises.resolve4.withArgs('example.com').resolves(['146.75.123.10']);
       const result = await edgeUtilsDns.detectCdnForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
