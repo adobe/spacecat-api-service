@@ -190,105 +190,6 @@ function defaultDateRange() {
 }
 
 /**
- * Same filters as rpc_brand_presence_filter_dimensions / filter-dimensions RPC; used only to
- * collect distinct site_id rows for page_intents when a brand scope is applied without siteId.
- */
-function buildExecutionsSiteIdsQuery(client, organizationId, params, defaults, filterByBrandId) {
-  const startDate = params.startDate || defaults.startDate;
-  const endDate = params.endDate || defaults.endDate;
-  const {
-    model, categoryId, topicIds, regionCode, origin,
-  } = params;
-
-  let q = client
-    .from('brand_presence_executions')
-    .select('site_id')
-    .eq('organization_id', organizationId)
-    .gte('execution_date', startDate)
-    .lte('execution_date', endDate)
-    .eq('model', model);
-
-  if (filterByBrandId) {
-    q = q.eq('brand_id', filterByBrandId);
-  }
-  if (shouldApplyFilter(categoryId)) {
-    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
-  }
-  if (topicIds?.length > 0) {
-    q = q.in('topic_id', topicIds);
-  }
-  if (shouldApplyFilter(regionCode)) {
-    q = q.eq('region_code', regionCode);
-  }
-  if (shouldApplyFilter(origin)) {
-    q = q.ilike('origin', origin);
-  }
-
-  return q.limit(QUERY_LIMIT);
-}
-
-function buildFilterDimensionsRpcParams(organizationId, params, defaults, filterByBrandId) {
-  const startDate = params.startDate || defaults.startDate;
-  const endDate = params.endDate || defaults.endDate;
-  const rpcParams = {
-    p_organization_id: organizationId,
-    p_start_date: startDate,
-    p_end_date: endDate,
-    p_model: params.model,
-  };
-  if (filterByBrandId) {
-    rpcParams.p_brand_id = filterByBrandId;
-  }
-  if (shouldApplyFilter(params.siteId)) {
-    rpcParams.p_site_id = params.siteId;
-  }
-  if (shouldApplyFilter(params.categoryId)) {
-    if (isValidUUID(params.categoryId)) {
-      rpcParams.p_category_id = params.categoryId;
-    } else {
-      rpcParams.p_category_name = params.categoryId;
-    }
-  }
-  if (params.topicIds?.length > 0) {
-    rpcParams.p_topic_ids = params.topicIds;
-  }
-  if (shouldApplyFilter(params.regionCode)) {
-    rpcParams.p_region_code = params.regionCode;
-  }
-  if (shouldApplyFilter(params.origin)) {
-    rpcParams.p_origin = params.origin;
-  }
-  return rpcParams;
-}
-
-/**
- * Normalizes RPC `stats` for the filter-dimensions HTTP response.
- * Safe when the function omits `stats` or fields (e.g. older DB migration): each missing or
- * non-finite value becomes 0. Non-plain objects (arrays, null stats) are treated as absent.
- * @param {Record<string, unknown>|null|undefined} dims - Parsed RPC JSON body
- * @returns {{ total_execution_count: number, distinct_prompt_count: number,
- *   empty_answer_execution_count: number }}
- */
-export function normalizeFilterDimensionsStatsFromRpc(dims) {
-  const hasPlainStats = dims != null
-    && typeof dims === 'object'
-    && dims.stats != null
-    && typeof dims.stats === 'object'
-    && !Array.isArray(dims.stats);
-  const raw = hasPlainStats ? dims.stats : {};
-  const totalExecutionCount = Number(raw.total_execution_count);
-  const distinctPromptCount = Number(raw.distinct_prompt_count);
-  const emptyAnswerExecutionCount = Number(raw.empty_answer_execution_count);
-  return {
-    total_execution_count: Number.isFinite(totalExecutionCount) ? totalExecutionCount : 0,
-    distinct_prompt_count: Number.isFinite(distinctPromptCount) ? distinctPromptCount : 0,
-    empty_answer_execution_count: Number.isFinite(emptyAnswerExecutionCount)
-      ? emptyAnswerExecutionCount
-      : 0,
-  };
-}
-
-/**
  * Validates that the given site belongs to the organization.
  * Used to prevent cross-tenant access when siteId is used in page_intents query.
  * @returns {Promise<boolean>} true if site exists in org, false otherwise
@@ -307,26 +208,11 @@ export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
   return !error && data?.length === 1;
 }
 
-/** @internal Exported for testing sites-query path coverage */
-export async function resolveSiteIds(client, organizationId, siteId, filterByBrandId, rows) {
-  if (shouldApplyFilter(siteId)) {
-    return [siteId];
-  }
-  if (filterByBrandId) {
-    return [...new Set(rows.map((r) => r.site_id).filter(Boolean))];
-  }
-  const { data: sitesData, error: sitesError } = await client
-    .from('sites')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .limit(QUERY_LIMIT);
-  if (!sitesError && sitesData?.length) {
-    return sitesData.map((s) => s.id).filter(Boolean);
-  }
-  return [];
-}
-
-async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
+/**
+ * Distinct page intent values for filter dropdowns (same semantics as filter-dimensions).
+ * @internal Exported for tests.
+ */
+export async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
   if (shouldApplyFilter(siteId)) {
     const { data: piData, error: piError } = await client
       .from('page_intents')
@@ -369,6 +255,393 @@ async function fetchPageIntents(client, organizationId, siteId, filterByBrandId,
     return sorted.map((p) => toFilterOption(p, p));
   }
   return [];
+}
+
+/** Hardcoded origin options for filter-dimensions (category_origin values). */
+const CONFIG_FILTER_ORIGINS = Object.freeze([
+  toFilterOption('human', 'human'),
+  toFilterOption('ai', 'ai'),
+]);
+
+/**
+ * Optional query param only: siteId / site_id.
+ * @param {Object} context
+ * @returns {{ siteId: string|undefined }}
+ */
+function parseFilterDimensionsSiteQuery(context) {
+  const q = context.data || {};
+  return {
+    siteId: q.siteId || q.site_id,
+  };
+}
+
+/**
+ * True if the brand is tied to the site via legacy `brands.site_id` or `brand_sites` (M2M).
+ * When `preloadedBrandSiteId` is passed (including `null`), skips the initial `brands` lookup — use
+ * when the caller already selected `site_id` on the same brand row.
+ * @param {string|null|undefined} [preloadedBrandSiteId] - Known brands.site_id, else query DB
+ * @internal Exported for tests
+ */
+export async function brandLinkedToSite(
+  client,
+  organizationId,
+  brandId,
+  siteId,
+  preloadedBrandSiteId,
+) {
+  let legacySiteId = preloadedBrandSiteId;
+  if (legacySiteId === undefined) {
+    const { data: rows, error } = await client
+      .from('brands')
+      .select('site_id')
+      .eq('id', brandId)
+      .eq('organization_id', organizationId)
+      .limit(1);
+    if (error || !rows?.length) {
+      return false;
+    }
+    legacySiteId = rows[0].site_id;
+  }
+  if (legacySiteId === siteId) {
+    return true;
+  }
+  const { data: links } = await client
+    .from('brand_sites')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandId)
+    .eq('site_id', siteId)
+    .limit(1);
+  return !!(links?.length);
+}
+
+/**
+ * Resolves site_id for page_intents for a brand: prefer `brands.site_id`,
+ * else first matching `brand_sites` row.
+ */
+async function resolveBrandPrimarySiteId(client, organizationId, brandId) {
+  const { data: bRows, error } = await client
+    .from('brands')
+    .select('site_id')
+    .eq('id', brandId)
+    .eq('organization_id', organizationId)
+    .limit(1);
+  if (error || !bRows?.length) {
+    return null;
+  }
+  if (bRows[0].site_id) {
+    return bRows[0].site_id;
+  }
+  const { data: bsRows } = await client
+    .from('brand_sites')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandId)
+    .limit(1);
+  return bsRows?.[0]?.site_id ?? null;
+}
+
+/**
+ * Resolves site_id list for page_intents when using config-based dimensions (no execution query).
+ * @internal Exported for tests
+ */
+export async function resolveSiteIdsForConfigPageIntents(
+  client,
+  organizationId,
+  siteId,
+  filterByBrandId,
+) {
+  if (shouldApplyFilter(siteId)) {
+    return [siteId];
+  }
+  if (filterByBrandId) {
+    const sid = await resolveBrandPrimarySiteId(client, organizationId, filterByBrandId);
+    if (!sid) {
+      return [];
+    }
+    const siteBelongs = await validateSiteBelongsToOrg(client, organizationId, sid);
+    return siteBelongs ? [sid] : [];
+  }
+  return [];
+}
+
+/**
+ * @internal Exported for tests
+ */
+export async function fetchRegionsForConfig(client) {
+  const { data, error } = await client
+    .from('regions')
+    .select('code, name')
+    .order('name', { ascending: true });
+  if (error || !data?.length) {
+    return [];
+  }
+  return data.map((r) => toFilterOption(r.code, r.name));
+}
+
+/**
+ * Brands linked to one site: rows in `brand_sites` for this org + site, with embedded `brands`.
+ * @internal Exported for tests
+ */
+export async function fetchBrandsForOrgSite(client, organizationId, siteFilter) {
+  const { data: bsData, error: bsErr } = await client
+    .from('brand_sites')
+    .select('brand_id, brands(id, name)')
+    .eq('organization_id', organizationId)
+    .eq('site_id', siteFilter)
+    .limit(QUERY_LIMIT);
+  if (bsErr || !bsData?.length) {
+    return [];
+  }
+  const byId = new Map();
+  bsData.forEach((row) => {
+    const br = row.brands;
+    if (br?.id && br?.name) {
+      byId.set(String(br.id), toFilterOption(String(br.id), br.name));
+    }
+  });
+  const opts = [...byId.values()];
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Brands scoped by org (`organization_id`), optional site filter, optional single brand path.
+ * With a site filter, brands are listed from `brand_sites` only (see `fetchBrandsForOrgSite`).
+ * @internal Exported for tests
+ */
+export async function fetchBrandsForConfig(client, organizationId, siteFilter, filterByBrandId) {
+  if (filterByBrandId) {
+    const { data, error } = await client
+      .from('brands')
+      .select('id, name, site_id')
+      .eq('id', filterByBrandId)
+      .eq('organization_id', organizationId)
+      .limit(1);
+    if (error || !data?.length) {
+      return [];
+    }
+    const b = data[0];
+    if (shouldApplyFilter(siteFilter)) {
+      const linked = await brandLinkedToSite(
+        client,
+        organizationId,
+        filterByBrandId,
+        siteFilter,
+        b.site_id,
+      );
+      if (!linked) {
+        return [];
+      }
+    }
+    return [toFilterOption(String(b.id), b.name)];
+  }
+  if (shouldApplyFilter(siteFilter)) {
+    return fetchBrandsForOrgSite(client, organizationId, siteFilter);
+  }
+  const { data, error } = await client
+    .from('brands')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) {
+    return [];
+  }
+  const opts = data.map((b) => toFilterOption(String(b.id), b.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Org-scoped categories (active / pending).
+ * @internal Exported for tests
+ */
+export async function fetchCategoriesForConfig(client, organizationId) {
+  const { data, error } = await client
+    .from('categories')
+    .select('category_id, name')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) {
+    return [];
+  }
+  const opts = data.map((c) => toFilterOption(c.category_id, c.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Topics for org, optionally scoped to brand_ids from config brands (includes brand_id NULL).
+ * @internal Exported for tests
+ */
+export async function fetchTopicsForConfig(client, organizationId, brandOptions) {
+  const brandIdSet = new Set(
+    brandOptions.map((b) => b.id).filter((id) => hasText(id)),
+  );
+  const { data, error } = await client
+    .from('topics')
+    .select('id, name, brand_id')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) {
+    return [];
+  }
+  const filtered = data.filter((t) => !t.brand_id || brandIdSet.has(String(t.brand_id)));
+  const opts = filtered.map((t) => toFilterOption(String(t.id), t.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+const PROMPT_STATUS_FOR_CONFIG_STATS = ['pending', 'active'];
+
+/**
+ * Counts `prompts` rows for the same brand scope as filter-dimensions dimensions.
+ * @internal Exported for tests
+ */
+export async function fetchDistinctPromptCountForConfig(
+  client,
+  organizationId,
+  filterByBrandId,
+  brandOptions,
+) {
+  if (filterByBrandId) {
+    const { count, error } = await client
+      .from('prompts')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
+      .eq('brand_id', filterByBrandId)
+      .in('status', PROMPT_STATUS_FOR_CONFIG_STATS);
+    if (error) {
+      return 0;
+    }
+    return Number.isFinite(Number(count)) ? Number(count) : 0;
+  }
+  const brandIds = brandOptions.map((b) => b.id).filter((id) => hasText(id));
+  if (brandIds.length === 0) {
+    return 0;
+  }
+  const chunks = [];
+  for (let i = 0; i < brandIds.length; i += IN_FILTER_CHUNK_SIZE) {
+    chunks.push(brandIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
+  }
+  const rows = await Promise.all(chunks.map((chunk) => client
+    .from('prompts')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .in('brand_id', chunk)
+    .in('status', PROMPT_STATUS_FOR_CONFIG_STATS)));
+  let total = 0;
+  for (const { count, error } of rows) {
+    if (error) {
+      return 0;
+    }
+    total += Number.isFinite(Number(count)) ? Number(count) : 0;
+  }
+  return total;
+}
+
+/**
+ * Stats for filter-dimensions: prompt count from `prompts`;
+ * execution fields reserved (0) until wired to executions.
+ * @internal Exported for tests
+ */
+export async function fetchFilterDimensionsStats(
+  client,
+  organizationId,
+  filterByBrandId,
+  brandOptions,
+) {
+  const distinctPromptCount = await fetchDistinctPromptCountForConfig(
+    client,
+    organizationId,
+    filterByBrandId,
+    brandOptions,
+  );
+  return {
+    distinct_prompt_count: distinctPromptCount,
+    total_execution_count: 0,
+    empty_answer_execution_count: 0,
+  };
+}
+
+/**
+ * Creates the getFilterDimensions handler.
+ * Returns dimension option lists from reference tables (`regions`, `brands`, `categories`,
+ * `topics`), fixed origin options, `distinct_prompt_count` from `prompts`, placeholder execution
+ * counts (0) until wired to executions, and `page_intents` from a separate query.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'filter-dimensions',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const { siteId: siteFilter } = parseFilterDimensionsSiteQuery(ctx);
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (filterByBrandId && !isValidUUID(filterByBrandId)) {
+        return badRequest('Brand id must be a valid UUID');
+      }
+
+      if (shouldApplyFilter(siteFilter)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const [regions, brandOptions, categories] = await Promise.all([
+        fetchRegionsForConfig(client),
+        fetchBrandsForConfig(client, organizationId, siteFilter, filterByBrandId),
+        fetchCategoriesForConfig(client, organizationId),
+      ]);
+
+      if (filterByBrandId && brandOptions.length === 0) {
+        return forbidden('Brand not found or not accessible for this organization');
+      }
+
+      const [topics, stats] = await Promise.all([
+        fetchTopicsForConfig(client, organizationId, brandOptions),
+        fetchFilterDimensionsStats(
+          client,
+          organizationId,
+          filterByBrandId,
+          brandOptions,
+        ),
+      ]);
+      const origins = [...CONFIG_FILTER_ORIGINS];
+
+      const siteIdsForPageIntents = await resolveSiteIdsForConfigPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+      );
+      const pageIntents = await fetchPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+        siteIdsForPageIntents,
+      );
+
+      return ok({
+        brands: brandOptions,
+        categories,
+        topics,
+        origins,
+        regions,
+        stats,
+        page_intents: pageIntents,
+      });
+    },
+  );
 }
 
 function parseWeeksParams(context) {
@@ -2369,100 +2642,6 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
       );
 
       return ok({ shareOfVoiceData });
-    },
-  );
-}
-
-/**
- * Creates the getFilterDimensions handler.
- * Returns dimension option lists from `rpc_brand_presence_filter_dimensions`, plus `stats`
- * (total_execution_count, distinct_prompt_count, empty_answer_execution_count) from the same RPC,
- * and `page_intents` from a separate query.
- * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
- */
-export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
-  return (context) => withBrandPresenceAuth(
-    context,
-    getOrgAndValidateAccess,
-    'filter-dimensions',
-    async (ctx, client) => {
-      const { spaceCatId, brandId } = ctx.params;
-      const params = parseFilterDimensionsParams(ctx);
-      params.model = resolveModelFromRequest(params.model);
-
-      const defaults = defaultDateRange();
-      const organizationId = spaceCatId;
-      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-      const siteFilter = params.siteId;
-
-      if (shouldApplyFilter(siteFilter)) {
-        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
-        if (!siteBelongsToOrg) {
-          return forbidden('Site does not belong to the organization');
-        }
-      }
-
-      const rpcParams = buildFilterDimensionsRpcParams(
-        organizationId,
-        params,
-        defaults,
-        filterByBrandId,
-      );
-      const { data: rpcData, error: rpcError } = await client.rpc(
-        'rpc_brand_presence_filter_dimensions',
-        rpcParams,
-      );
-
-      if (rpcError) {
-        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${rpcError.message}`);
-        return badRequest(rpcError.message);
-      }
-
-      const dims = rpcData && typeof rpcData === 'object' ? rpcData : {};
-      const brands = Array.isArray(dims.brands) ? dims.brands : [];
-      const categories = Array.isArray(dims.categories) ? dims.categories : [];
-      const topics = Array.isArray(dims.topics) ? dims.topics : [];
-      const origins = Array.isArray(dims.origins) ? dims.origins : [];
-      const regions = Array.isArray(dims.regions) ? dims.regions : [];
-      const stats = normalizeFilterDimensionsStatsFromRpc(dims);
-
-      let rowsForSiteIds = [];
-      if (filterByBrandId && !shouldApplyFilter(siteFilter)) {
-        const siteQ = buildExecutionsSiteIdsQuery(
-          client,
-          organizationId,
-          params,
-          defaults,
-          filterByBrandId,
-        );
-        const { data: siteRows, error: siteErr } = await siteQ;
-        if (siteErr) {
-          ctx.log.error(`Brand presence filter-dimensions site-id query error: ${siteErr.message}`);
-          return badRequest(siteErr.message);
-        }
-        rowsForSiteIds = siteRows || [];
-      }
-
-      const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
-        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rowsForSiteIds)
-        : [];
-      const pageIntents = await fetchPageIntents(
-        client,
-        organizationId,
-        siteFilter,
-        filterByBrandId,
-        siteIds,
-      );
-
-      return ok({
-        brands,
-        categories,
-        topics,
-        origins,
-        regions,
-        stats,
-        page_intents: pageIntents,
-      });
     },
   );
 }
