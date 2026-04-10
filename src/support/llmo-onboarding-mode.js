@@ -24,7 +24,7 @@ export const LLMO_ONBOARDING_MODE_V2 = 'v2';
  *
  * TEMPORARY — remove once all v1 customers have been migrated to v2.
  */
-export const LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT = 1743465600000;
+export const LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT = Date.UTC(2026, 3, 1);
 
 export function normalizeLlmoOnboardingMode(mode) {
   return mode === LLMO_ONBOARDING_MODE_V2 ? LLMO_ONBOARDING_MODE_V2 : LLMO_ONBOARDING_MODE_V1;

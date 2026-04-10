@@ -132,6 +132,11 @@ describe('llmo-onboarding-mode', () => {
   // ── resolveBrandalfCutoffMs ───────────────────────────────────────────────
 
   describe('resolveBrandalfCutoffMs', () => {
+    it('pins LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT to 2026-04-01T00:00:00Z', () => {
+      // Guards against an off-by-one-year regression on the hard-coded fallback.
+      expect(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT).to.equal(Date.UTC(2026, 3, 1));
+    });
+
     it('returns the default when env var is not set', () => {
       expect(resolveBrandalfCutoffMs({ env: {} })).to.equal(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT);
     });
