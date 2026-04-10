@@ -349,27 +349,15 @@ export async function upsertBrand({
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
-  // Validate baseSiteId uniqueness within the organization if provided.
-  if (hasText(brand.baseSiteId)) {
-    const { data: existing } = await postgrestClient
-      .from('brands')
-      .select('id')
-      .eq('organization_id', organizationId)
-      .eq('site_id', brand.baseSiteId)
-      .neq('status', 'deleted')
-      .maybeSingle();
-
-    if (existing) {
-      const err = new Error('This site is already the primary URL for another brand');
-      err.status = 409;
-      throw err;
-    }
-  }
+  // A brand cannot be active without a base site ID.
+  const status = (!hasText(brand.baseSiteId) && (brand.status || 'active') === 'active')
+    ? 'pending'
+    : (brand.status || 'active');
 
   const row = {
     organization_id: organizationId,
     name: brand.name,
-    status: brand.status || 'active',
+    status,
     origin: brand.origin || 'human',
     description: brand.description || null,
     vertical: brand.vertical || null,
@@ -392,6 +380,11 @@ export async function upsertBrand({
     .single();
 
   if (error) {
+    if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
+      const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
     throw new Error(`Failed to upsert brand: ${error.message}`);
   }
 
@@ -452,6 +445,7 @@ export async function updateBrand({
   }
 
   // baseSiteId is immutable once set — only allow setting from NULL.
+  // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
   if (hasText(updates.baseSiteId)) {
     const { data: current } = await postgrestClient
       .from('brands')
@@ -460,20 +454,6 @@ export async function updateBrand({
       .maybeSingle();
 
     if (!current?.site_id) {
-      // Validate uniqueness before setting.
-      const { data: existing } = await postgrestClient
-        .from('brands')
-        .select('id')
-        .eq('organization_id', organizationId)
-        .eq('site_id', updates.baseSiteId)
-        .neq('status', 'deleted')
-        .maybeSingle();
-
-      if (existing) {
-        const err = new Error('This site is already the primary URL for another brand');
-        err.status = 409;
-        throw err;
-      }
       patch.site_id = updates.baseSiteId;
     }
     // If site_id is already set, silently ignore the update (immutable).
@@ -497,6 +477,11 @@ export async function updateBrand({
     .maybeSingle();
 
   if (error) {
+    if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
+      const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
     throw new Error(`Failed to update brand: ${error.message}`);
   }
   if (!data) {

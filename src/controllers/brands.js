@@ -1080,11 +1080,6 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      // A brand cannot be active without a base site ID.
-      if (!hasText(brandData.baseSiteId)) {
-        brandData.status = 'pending';
-      }
-
       const created = await upsertBrand({
         organizationId: spaceCatId,
         brand: brandData,
