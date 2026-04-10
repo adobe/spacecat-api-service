@@ -1,4 +1,4 @@
-# LLMO v1 / v2 (Brandalf) Onboarding Consistency Safeguard
+# LLMO v1 / v2 (Brandalf) Onboarding Mode Resolution
 
 **Jira:** [LLMO-4176](https://jira.corp.adobe.com/browse/LLMO-4176)
 **Epic:** [LLMO-4054 — Brandalf GA (Brandalf v1 fast follows)](https://jira.corp.adobe.com/browse/LLMO-4054)
@@ -7,204 +7,231 @@
 ## Problem
 
 We currently have no safeguard preventing customers from being onboarded into both
-v1 and v2 (Brandalf) flows within the same organization. This can lead to an
-inconsistent state where an org has some sites onboarded with v1 and others with
-v2, which is hard to recover from.
+v1 and v2 (Brandalf) flows within the same organization. Today the v1 vs v2
+decision is made purely from the org-level `brandalf` feature flag — so a
+pre-existing v1 customer that later gets `brandalf=true` (or a new site
+onboarded after the flag is flipped) ends up with a mix of v1 and v2 sites in
+one org, which is hard to recover from.
 
-The risk arises because:
+We want a **simple, deterministic rule** that decides v1 vs v2 at onboarding
+time based on whether the customer existed before Brandalf GA, without
+requiring any new admin guardrails on the feature-flag endpoints.
 
-1. An org is onboarded with `brandalf` unset → all its sites are v1, each with an
-   `llmoConfig`.
-2. Someone flips `brandalf=true` on the org via the admin feature-flag endpoint.
-3. The next site onboarded for that org goes through the v2 branch in
-   `performLlmoOnboarding` → mixed v1/v2 in one org.
+## The rule
 
-The same can happen in reverse if `brandalf` is later set back to `false`/`null`.
+At onboarding time, when `performLlmoOnboarding` resolves the mode for an org:
 
-This document captures the temporary safeguard agreed in the Slack discussion
-between Iryna Lagno and Igor Grubic, and lays out the implementation plan.
+```
+if org has FF brandalf == true:
+    → v2
+else if org has any sites onboarded before 2026-04-01:
+    → v1   (legacy customer — keep them on v1)
+else:
+    → v2   (new customer — default to v2)
+```
 
-## Goals
+In words:
 
-- **Block** any action that would create or extend a mixed v1/v2 organization.
-- **Detect** organizations that are already in a mixed state, so they can be
-  remediated manually.
-- **Reuse** the existing data model — no new per-site marker, no migration.
+- **Legacy customers** (any site in the org was onboarded before the Brandalf GA
+  cutoff of 2026-04-01) stay on **v1** unless an operator has explicitly opted
+  them in by setting `brandalf=true`.
+- **Brand-new customers** (no sites in the org predate the cutoff) go to **v2**
+  by default.
+- The `brandalf` feature flag remains an explicit override that always wins.
 
-## Non-goals
+The cutoff date `2026-04-01` is encoded as a constant
+(`LLMO_BRANDALF_GA_DATE`) so it can be tweaked without hunting through the
+codebase.
 
-- Automatically migrating v1 sites to v2 (or vice versa).
-- Removing the `brandalf` feature flag — it remains the source of truth for which
-  flow an org uses.
-- Any UI changes.
+### Why this works
 
-## Background — how the flows work today
+- It's a single check inside `resolveLlmoOnboardingMode`, with no second
+  endpoint to guard.
+- It is **idempotent**: re-running onboarding for the same org always picks the
+  same mode.
+- It does not depend on per-site markers — `Site.allByOrganizationId` plus
+  `site.getCreatedAt()` is enough.
+- It is **automatically consistent** for an org's lifetime: once the org has at
+  least one pre-cutoff site, every subsequent onboarding for that org returns
+  v1 (unless `brandalf=true` is set), so the org can never drift into a mixed
+  state via the onboarding flow.
+- Existing v2 customers (onboarded after the cutoff) are unaffected — they have
+  no pre-cutoff sites, so the new branch is a no-op for them.
+
+### What it does **not** do
+
+- It does **not** retroactively migrate v1 sites to v2.
+- It does **not** prevent an admin from setting `brandalf=true` on a legacy
+  org. If they do, the next onboarding will go to v2 — this is the intentional
+  opt-in path. (We accept the residual risk: an admin who sets the flag is
+  responsible for the outcome.)
+- It does **not** add a flag-flip guard on
+  `PUT/DELETE /organizations/:id/feature-flags/LLMO/brandalf`. The original
+  plan had one; we are dropping it in favor of the simpler rule above.
+
+## Background — how the flow works today
 
 There is **only one onboarding entry point**:
 [`performLlmoOnboarding`](../../src/controllers/llmo/llmo-onboarding.js) is called
 from both `POST /llmo/onboard` and the Slack `/onboard-llmo` flow. The v1 vs v2
 decision is made early in that function by
 [`resolveLlmoOnboardingMode`](../../src/support/llmo-onboarding-mode.js), which
-reads the `brandalf` row in the `feature_flags` table:
+today reads only the `brandalf` row in the `feature_flags` table:
 
 - `brandalf = true`  → mode `v2`
 - `brandalf = false` → mode `v1`
-- row missing       → mode falls back to `LLMO_ONBOARDING_DEFAULT_VERSION` (v1)
+- row missing       → mode falls back to `LLMO_ONBOARDING_DEFAULT_VERSION`
 
-The `brandalf` flag itself is written from two places today:
+The change in this plan is to add a third input to that function: the
+`createdAt` timestamps of the org's existing sites.
 
-1. `performLlmoOnboarding` itself, after a successful v2 onboarding
-   ([llmo-onboarding.js](../../src/controllers/llmo/llmo-onboarding.js)) — this
-   path is internally consistent.
-2. The admin endpoints
-   [`PUT /organizations/:organizationId/feature-flags/:product/:flagName`](../../src/controllers/feature-flags.js)
-   and the corresponding `DELETE` (which sets the value to `false`). Both go
-   through `persistFlag` and are admin-only. **This is the path that can create
-   inconsistency**, because it is decoupled from any check on the org's existing
-   sites.
+## Design
 
-### Identifying v1 vs v2 sites
+### Helper — `hasPreBrandalfSites`
 
-We do **not** need a per-site marker. The rule we will enforce is:
-
-> All onboarded sites within an org must agree with the org-level `brandalf` flag.
-
-A site is considered "LLMO-onboarded" iff
-`site.getConfig().getLlmoConfig()` is present (this matches existing usage in
-[`llmo.js`](../../src/controllers/llmo/llmo.js)). The current value of the
-org-level `brandalf` flag tells us which flow those sites belong to.
-
-## Design — two coordinated guards
-
-We add **two guards** that share a single helper module, plus a read-only
-monitoring script.
-
-```
-┌────────────────────────────────┐        ┌──────────────────────────────────┐
-│ POST /llmo/onboard             │        │ PUT/DELETE /organizations/:id/   │
-│ (HTTP + Slack)                 │        │   feature-flags/LLMO/brandalf    │
-│                                │        │                                  │
-│ performLlmoOnboarding()        │        │ persistFlag()                    │
-│   ├── resolveLlmoOnboardingMode│        │   ├── parseWriteTarget           │
-│   ├── assertLlmoOnboarding-    │◀──┐  ┌▶│   ├── checkBrandalfFlagFlip-     │
-│   │   Consistency()  ★ NEW     │   │  │ │   │   Safety() ★ NEW            │
-│   └── createOrFindSite ...     │   │  │ │   └── upsertFeatureFlag         │
-└────────────────────────────────┘   │  │ └──────────────────────────────────┘
-                                     │  │
-                              ┌──────┴──┴──────┐
-                              │ src/support/   │
-                              │   llmo-onboard │
-                              │   ing-         │
-                              │   consistency  │
-                              │   .js  ★ NEW   │
-                              └────────────────┘
-```
-
-### Helper module — `src/support/llmo-onboarding-consistency.js` (new)
+New helper, exported from `src/support/llmo-onboarding-mode.js`:
 
 ```js
-import { readBrandalfFlagOverride, LLMO_ONBOARDING_MODE_V1, LLMO_ONBOARDING_MODE_V2 } from './llmo-onboarding-mode.js';
-
-export class LlmoOnboardingConsistencyError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'LlmoOnboardingConsistencyError';
-  }
-}
+export const LLMO_BRANDALF_GA_DATE = new Date('2026-04-01T00:00:00Z');
 
 /**
- * Returns the set of sites in the org that have already been LLMO-onboarded
- * (i.e. carry an llmoConfig on their site config).
+ * Returns true if the organization has any site whose createdAt is strictly
+ * before LLMO_BRANDALF_GA_DATE. Treats missing/invalid createdAt as "not
+ * pre-cutoff" to avoid false positives.
  */
-export async function getLlmoOnboardedSites(organizationId, context) { /* ... */ }
-
-/**
- * Throws LlmoOnboardingConsistencyError if onboarding `mode` would create or
- * extend a mixed v1/v2 organization.
- *
- * - mode === 'v2' and org has v1-onboarded sites → throw
- * - mode === 'v1' and brandalf=true and org has v2-onboarded sites → throw
- * - otherwise no-op
- */
-export async function assertLlmoOnboardingConsistency({
-  organizationId, mode, context,
-}) { /* ... */ }
-
-/**
- * Returns null if it is safe to set the LLMO/brandalf flag to `nextValue` for
- * `organizationId`, or { message } describing the conflict otherwise.
- *
- * Safe cases:
- *   - org has no LLMO-onboarded sites (any value is fine)
- *   - currentMode === nextMode (no-op flip)
- */
-export async function checkBrandalfFlagFlipSafety({
-  organizationId, nextValue, context,
-}) { /* ... */ }
-```
-
-### Guard 1 — onboarding-time consistency
-
-In [`src/controllers/llmo/llmo-onboarding.js`](../../src/controllers/llmo/llmo-onboarding.js),
-inside `performLlmoOnboarding`, immediately after `resolveLlmoOnboardingMode`
-and **before** any side effects (site creation, entitlement, SharePoint copy,
-etc.):
-
-```js
-const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
-
-await assertLlmoOnboardingConsistency({
-  organizationId: organization.getId(),
-  mode: onboardingMode,
-  context,
-});
-
-// Create site
-site = await createOrFindSite(...);
-```
-
-In [`src/controllers/llmo/llmo.js`](../../src/controllers/llmo/llmo.js)
-`onboardCustomer` wraps `performLlmoOnboarding`. Map
-`LlmoOnboardingConsistencyError` to a `409 Conflict` with a sanitized message
-(via the existing `cleanupHeaderValue` pattern). The Slack handler in
-[`src/support/slack/commands/llmo-onboard.js`](../../src/support/slack/commands/llmo-onboard.js)
-should `say(...)` the same error text rather than crashing.
-
-### Guard 2 — flag-flip consistency
-
-In [`src/controllers/feature-flags.js`](../../src/controllers/feature-flags.js)
-`persistFlag`, after the org lookup and **before** `upsertFeatureFlag`:
-
-```js
-import { LLMO_BRANDALF_FLAG, LLMO_FEATURE_FLAG_PRODUCT } from '../support/llmo-onboarding-mode.js';
-import { checkBrandalfFlagFlipSafety } from '../support/llmo-onboarding-consistency.js';
-
-// LLMO/brandalf has special semantics: flipping it must not create
-// orgs that contain a mix of v1 and v2 LLMO sites.
-if (
-  pathProductNorm === LLMO_FEATURE_FLAG_PRODUCT
-  && flagName === LLMO_BRANDALF_FLAG
-) {
-  const conflict = await checkBrandalfFlagFlipSafety({
-    organizationId,
-    nextValue: value,            // true for PUT, false for DELETE
-    context,
+export async function hasPreBrandalfSites(organizationId, context) {
+  const { Site } = context.dataAccess;
+  const sites = await Site.allByOrganizationId(organizationId);
+  return sites.some((s) => {
+    const createdAt = s.getCreatedAt?.();
+    if (!createdAt) return false;
+    const ts = createdAt instanceof Date ? createdAt : new Date(createdAt);
+    return !Number.isNaN(ts.getTime()) && ts < LLMO_BRANDALF_GA_DATE;
   });
-  if (conflict) {
-    return createResponse({ message: conflict.message }, 409);
-  }
 }
 ```
 
-This makes `performLlmoOnboarding` the only writer that can create a v2 org from
-scratch, and ensures any later flip is rejected when it would cause drift.
+### Updated `resolveLlmoOnboardingMode`
 
-### Monitoring / discovery script
+```js
+export async function resolveLlmoOnboardingMode(organizationId, context) {
+  const { log = console } = context || {};
+  const postgrestClient = context?.dataAccess?.services?.postgrestClient;
 
-Goal from the Slack thread: *"need to do monitoring to check if there is orgs
-which have sites onboarded with v1 and v2"*.
+  // 1. Explicit override always wins.
+  try {
+    const override = await readBrandalfFlagOverride(organizationId, postgrestClient);
+    if (override === true)  return LLMO_ONBOARDING_MODE_V2;
+    if (override === false) return LLMO_ONBOARDING_MODE_V1;
+  } catch (error) {
+    log.warn(
+      `Failed to resolve brandalf feature flag for organization ${organizationId}: ${error.message}`,
+    );
+  }
 
-Add a one-shot script (under `src/scripts/` or `test/it/test_script/`) that:
+  // 2. Legacy customers (any site predates the GA cutoff) stay on v1.
+  try {
+    if (await hasPreBrandalfSites(organizationId, context)) {
+      return LLMO_ONBOARDING_MODE_V1;
+    }
+  } catch (error) {
+    log.warn(
+      `Failed to check pre-Brandalf sites for organization ${organizationId}: ${error.message}`,
+    );
+  }
+
+  // 3. Default for new customers.
+  const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
+  const defaultMode = normalizeLlmoOnboardingMode(configuredDefault);
+  if (configuredDefault && configuredDefault !== defaultMode) {
+    log.warn(
+      `Invalid LLMO_ONBOARDING_DEFAULT_VERSION "${configuredDefault}", falling back to ${defaultMode}`,
+    );
+  }
+  return defaultMode;
+}
+```
+
+No changes to `performLlmoOnboarding` itself, no changes to the
+feature-flags controller, no new error type — the rule is entirely contained in
+mode resolution.
+
+### Flow diagram
+
+```
+performLlmoOnboarding
+        │
+        ▼
+resolveLlmoOnboardingMode
+        │
+        ▼
+┌────────────────────────┐
+│ brandalf flag set?     │
+└────────────────────────┘
+   │ true        │ false / null
+   ▼             ▼
+  v2     ┌────────────────────────────┐
+         │ org has any site created   │
+         │ before 2026-04-01?         │
+         └────────────────────────────┘
+            │ yes       │ no
+            ▼           ▼
+            v1          v2 (default)
+```
+
+## Tests
+
+### Unit tests — `test/support/llmo-onboarding-mode.test.js`
+
+Add to the existing file:
+
+- `resolveLlmoOnboardingMode`
+  - `brandalf=true` → `v2` regardless of site history (existing test).
+  - `brandalf=false` → `v1` regardless of site history (existing test).
+  - `brandalf` row missing, org has a site with `createdAt = 2026-03-31` → `v1`.
+  - `brandalf` row missing, org has a site with `createdAt = 2026-04-01` → `v2`
+    (cutoff is exclusive — `<`, not `<=`).
+  - `brandalf` row missing, org has a site with `createdAt = 2026-05-01` → `v2`.
+  - `brandalf` row missing, org has no sites → `v2` (default).
+  - `brandalf` row missing, org has multiple sites, one of which is pre-cutoff
+    → `v1`.
+  - Site with missing/invalid `createdAt` does not trip the legacy branch.
+  - `Site.allByOrganizationId` throws → falls back to default, logs warning,
+    does not throw out of `resolveLlmoOnboardingMode`.
+
+- `hasPreBrandalfSites` (focused tests)
+  - returns `false` for an org with no sites.
+  - returns `true` when at least one site predates the cutoff.
+  - returns `false` when all sites are at or after the cutoff.
+  - returns `false` for sites with `null`/`undefined`/invalid `createdAt`.
+
+### Integration tests — `test/it/`
+
+Add to `test/it/shared/tests/llmo-onboarding.js` /
+`test/it/postgres/llmo-onboarding.test.js`:
+
+- Seed an org with one site `created_at = 2026-03-15`, no `brandalf` flag
+  row. `POST /llmo/onboard` for a new site → site is created via the **v1**
+  branch (assert no v2 customer-config row was written, no Brandalf job
+  triggered).
+- Seed an org with one site `created_at = 2026-05-15`, no `brandalf` flag
+  row. `POST /llmo/onboard` → **v2** branch (assert v2 customer-config row
+  exists, `brandalf=true` is set on the org by the onboarding flow as today).
+- Seed an org with one site `created_at = 2026-03-15` **and** `brandalf=true`
+  → onboarding still goes through **v2** (explicit override wins).
+- Seed a brand-new org with no sites → onboarding goes through **v2**
+  (default).
+
+Add seed data under `test/it/postgres/seed-data/` and register in
+`postgres/seed.js` per the project conventions.
+
+## Monitoring
+
+Goal from the original Slack thread: *"need to do monitoring to check if there
+is orgs which have sites onboarded with v1 and v2"*. Still in scope.
+
+Add a one-shot read-only script (under `src/scripts/` or
+`test/it/test_script/`) that:
 
 1. Lists all organizations.
 2. For each, reads the current `brandalf` flag via `readBrandalfFlagOverride`.
@@ -212,111 +239,54 @@ Add a one-shot script (under `src/scripts/` or `test/it/test_script/`) that:
 4. Cross-references with the v2 customer-config table populated by
    `ensureInitialCustomerConfigV2`. A site that has an `llmoConfig` but **no**
    corresponding v2 customer-config row is treated as v1.
-5. Reports orgs where the set is mixed, plus orgs whose `brandalf` flag
-   disagrees with the majority of their sites.
+5. Reports orgs where the set is mixed.
 
-Output is a CSV/JSON file for manual remediation. The script is **read-only** —
-no automatic fixes.
-
-## Tests
-
-### Unit tests
-
-`test/support/llmo-onboarding-consistency.test.js` (new):
-
-- `assertLlmoOnboardingConsistency`
-  - v2 mode, org with no sites → no throw.
-  - v2 mode, org with a site that has `llmoConfig` → throws.
-  - v2 mode, org with a site that has no `llmoConfig` → no throw.
-  - v1 mode, `brandalf=true`, org has sites with `llmoConfig` → throws.
-  - v1 mode, `brandalf=null`, org has sites with `llmoConfig` → no throw
-    (steady-state v1).
-- `checkBrandalfFlagFlipSafety`
-  - org with no onboarded sites → returns `null` for both `true` and `false`.
-  - no-op flip (current === next) → returns `null`.
-  - `nextValue=true` on org with v1 sites → returns conflict.
-  - `nextValue=false` on org with v2 sites → returns conflict.
-
-`test/controllers/llmo/llmo-onboarding.test.js`:
-
-- `performLlmoOnboarding` rejects with `LlmoOnboardingConsistencyError` before
-  any side effects when guard fires (assert `Site.create`, `enableAudits`,
-  SharePoint copy, etc. were never called via sinon spies).
-- Existing happy-path tests continue to pass.
-
-`test/controllers/feature-flags.test.js`:
-
-- `PUT .../LLMO/brandalf` on org with no sites → 200.
-- `PUT .../LLMO/brandalf` on org with onboarded v1 sites → 409,
-  `upsertFeatureFlag` never called.
-- `DELETE .../LLMO/brandalf` on org currently `brandalf=true` with onboarded v2
-  sites → 409.
-- `PUT .../LLMO/brandalf` on org already `brandalf=true` (no-op flip) → 200
-  even if it has sites.
-- `PUT .../ASO/some_flag` is unaffected by the new guard.
-- `PUT .../LLMO/some_other_flag` is unaffected (only `brandalf` is special).
-
-### Integration tests
-
-- `test/it/shared/tests/llmo-onboarding.js` /
-  `test/it/postgres/llmo-onboarding.test.js`:
-  - Seed an org with one v1-onboarded site, attempt v2 onboarding via
-    `POST /llmo/onboard` → expect 409.
-  - Seed an org with `brandalf=true` and a v2-onboarded site, attempt
-    onboarding while temporarily clearing the flag → expect 409.
-  - Seed a clean org → onboarding succeeds (regression).
-
-- `test/it/shared/tests/feature-flags.js` (add if missing):
-  - Seed org with one v1 site, `PUT .../LLMO/brandalf` → expect 409.
-  - Seed clean org, `PUT .../LLMO/brandalf` → expect 200, then
-    `POST /llmo/onboard` → expect v2 flow.
-
-Add seed data under `test/it/postgres/seed-data/` and register in
-`postgres/seed.js` per the project conventions.
+Output is a CSV/JSON file for manual remediation. The script is **read-only**.
 
 ## OpenAPI
 
-Update `docs/openapi/paths/` for the affected endpoints to document the new
-`409` response:
-
-- `POST /llmo/onboard`
-- `PUT /organizations/{organizationId}/feature-flags/{product}/{flagName}`
-- `DELETE /organizations/{organizationId}/feature-flags/{product}/{flagName}`
-
-Run `npm run docs:lint && npm run docs:build` before opening the PR.
-
-## Summary of guards
-
-| Guard | Location | Triggers when |
-|---|---|---|
-| Onboarding-time consistency | `performLlmoOnboarding` (after `resolveLlmoOnboardingMode`, before any side effects) | `mode === v2` and org has v1 sites; or `mode === v1` and org has v2 sites with `brandalf=true` |
-| Flag-flip consistency | `persistFlag` (only for `LLMO/brandalf`) | Flipping the flag would change the org's "current mode" while it has onboarded sites |
-| Monitoring script | new, read-only | Detects existing inconsistent orgs for manual remediation |
+No OpenAPI changes are required for the rule itself — the request/response
+shapes of `POST /llmo/onboard` and the feature-flags endpoints are unchanged.
 
 ## Open questions
 
-1. **Status code preference**: `409 Conflict` (semantically correct) vs
-   `400 Bad Request` (matches existing `badRequest()` usage in
-   `llmo.js`). Plan defaults to `409`.
-2. **Should the guard ever be bypassable?** E.g. an admin override header for
-   operators who *intentionally* want to migrate an org. Plan defaults to
-   "no bypass" — operators have to off-board sites first.
-3. **Rollout**: feature-flag the guard itself? Probably not necessary — the
-   only effect is rejecting requests that would corrupt state, which is what
-   we want.
+1. **Cutoff date.** Plan uses `2026-04-01T00:00:00Z`. Confirm this matches the
+   actual Brandalf GA date.
+2. **Cutoff inclusivity.** Plan treats it as **exclusive** (`createdAt <
+   2026-04-01` ⇒ legacy). A site created exactly at midnight UTC on
+   2026-04-01 is treated as a v2 customer. Confirm.
+3. **Configurability.** Should `LLMO_BRANDALF_GA_DATE` be an env var
+   (`LLMO_BRANDALF_GA_DATE`) so we can change it without a deploy? Plan
+   defaults to a hard-coded constant for simplicity; happy to switch to env.
+4. **Existing inconsistent orgs.** The monitoring script will list them; the
+   plan does not auto-remediate. Is that the right call?
 
 ## Implementation order
 
-1. Add `src/support/llmo-onboarding-consistency.js` with helpers + unit tests.
-2. Wire `assertLlmoOnboardingConsistency` into `performLlmoOnboarding`,
-   propagate the error through `onboardCustomer` and the Slack handler, and
-   add unit + integration tests.
-3. Wire `checkBrandalfFlagFlipSafety` into `persistFlag`, add controller-level
-   and integration tests.
-4. Add monitoring script and run it once against stage to confirm the format.
-5. Update OpenAPI specs and run `npm run docs:lint && npm run docs:build`.
-6. Open PR with title:
-   `feat(LLMO-4176): block onboarding when it would mix v1 and v2 LLMO sites in one org`,
-   linking back to LLMO-4176 and the parent epic LLMO-4054, explicitly calling
-   out that this is a **temporary safeguard** until a longer-term migration
-   story is in place.
+1. Add `LLMO_BRANDALF_GA_DATE` constant + `hasPreBrandalfSites` helper to
+   `src/support/llmo-onboarding-mode.js`, and update
+   `resolveLlmoOnboardingMode` to use it.
+2. Extend `test/support/llmo-onboarding-mode.test.js` with the new cases.
+3. Add integration tests in `test/it/` with seed data covering the four
+   scenarios above.
+4. Add the monitoring script and run it once against stage to confirm output
+   format.
+5. Open PR with title:
+   `feat(LLMO-4176): default legacy LLMO orgs to v1 onboarding by createdAt`,
+   linking back to LLMO-4176 and the parent epic LLMO-4054.
+
+## Changes vs the previous version of this plan
+
+The earlier draft of this document proposed two coordinated guards (an
+onboarding-time consistency check **and** a flag-flip guard on the
+feature-flags controller) plus a new helper module
+`llmo-onboarding-consistency.js`. That has been **dropped** in favor of the
+single rule above. Reasons:
+
+- Simpler: one function, one branch, no new module, no new error type, no new
+  HTTP response codes to document.
+- Equivalent in practice for the cases that matter: legacy customers stay on
+  v1 by default; new customers go to v2 by default; the explicit `brandalf`
+  override still works for both directions.
+- Avoids hard-blocking the admin feature-flag endpoints, which keeps the
+  operational escape hatch intact.
