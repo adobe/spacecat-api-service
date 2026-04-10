@@ -16,7 +16,7 @@ import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
-import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import AhrefsAPIClient from '@adobe/mysticat-shared-seo-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
@@ -935,7 +935,7 @@ function toggleWWW(url) {
  */
 async function testAhrefsTopPages(url, ahrefsClient, log) {
   try {
-    const { result } = await ahrefsClient.getTopPages(url, 1);
+    const { result } = await ahrefsClient.getTopPages(url, { limit: 1 });
     const hasData = isNonEmptyArray(result?.pages);
     log.debug(`Ahrefs top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
     return hasData;

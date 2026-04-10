@@ -25,7 +25,7 @@ export const createMockAhrefsClient = (responses = {}) => {
 
   Object.entries(responses).forEach(([url, pages]) => {
     mockClient.getTopPages
-      .withArgs(url, 1)
+      .withArgs(url, { limit: 1 })
       .resolves({ result: { pages } });
   });
 
@@ -38,7 +38,7 @@ export const createMockAhrefsClient = (responses = {}) => {
  * @returns {Promise<Object>} Mocked module
  */
 export const setupDetermineOverrideBaseURLTest = async (mockAhrefsClient) => esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
-  '@adobe/spacecat-shared-ahrefs-client': {
+  '@adobe/mysticat-shared-seo-client': {
     default: {
       createFrom: sinon.stub().returns(mockAhrefsClient),
     },

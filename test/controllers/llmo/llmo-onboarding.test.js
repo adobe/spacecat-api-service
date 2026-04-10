@@ -2395,10 +2395,10 @@ describe('LLMO Onboarding Functions', () => {
       };
       // Base URL fails, www variant succeeds
       mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
+        .withArgs('https://example.com', { limit: 1 })
         .resolves({ result: { pages: [] } });
       mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
+        .withArgs('https://www.example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -2425,7 +2425,7 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
               createFrom: sinon.stub().returns(mockAhrefsClient),
             },
@@ -2521,10 +2521,10 @@ describe('LLMO Onboarding Functions', () => {
       };
       // Both URLs succeed, so no overrideBaseURL should be set
       mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
+        .withArgs('https://example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://example.com/page1' }] } });
       mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
+        .withArgs('https://www.example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -2551,7 +2551,7 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
               createFrom: sinon.stub().returns(mockAhrefsClient),
             },
@@ -2656,7 +2656,7 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
               createFrom: sinon.stub().returns(mockAhrefsClient),
             },
@@ -3665,7 +3665,7 @@ describe('LLMO Onboarding Functions', () => {
       const { determineOverrideBaseURL } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
               createFrom: sinon.stub().returns(mockAhrefsClient),
             },
