@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { generateKeyPair, exportSPKI, SignJWT } from 'jose';
 import { Request } from '@adobe/fetch';

@@ -170,9 +170,15 @@ const sendFile = async (slackContext, file, filename, title = '', initialComment
   const targetChannel = channels || channelId;
 
   const getFileSize = (fileObj) => {
-    if (Buffer.isBuffer(fileObj)) return fileObj.length;
-    if (fileObj.size !== undefined) return fileObj.size;
-    if (fileObj.byteLength !== undefined) return fileObj.byteLength;
+    if (Buffer.isBuffer(fileObj)) {
+      return fileObj.length;
+    }
+    if (fileObj.size !== undefined) {
+      return fileObj.size;
+    }
+    if (fileObj.byteLength !== undefined) {
+      return fileObj.byteLength;
+    }
     throw new Error('Cannot determine file size for upload. Please provide file size.');
   };
 
@@ -355,9 +361,15 @@ const fetchFile = async (file, token) => {
   const responseData = await response.arrayBuffer();
   const responseBuffer = Buffer.from(responseData);
 
-  if (response.status === 401) throw new Error('Authentication failed: Invalid Slack token.');
-  if (response.status === 403) throw new Error('Access denied: Missing files:read permission.');
-  if (response.status === 404) throw new Error(`File not found at: ${fileUrl}.`);
+  if (response.status === 401) {
+    throw new Error('Authentication failed: Invalid Slack token.');
+  }
+  if (response.status === 403) {
+    throw new Error('Access denied: Missing files:read permission.');
+  }
+  if (response.status === 404) {
+    throw new Error(`File not found at: ${fileUrl}.`);
+  }
 
   if (!responseBuffer || responseBuffer.length === 0) {
     throw new Error('File download resulted in empty or invalid data.');

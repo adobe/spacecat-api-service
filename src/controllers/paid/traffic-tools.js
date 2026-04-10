@@ -105,9 +105,15 @@ function calculatePredominantTraffic(trafficDetails, predominantTrafficPct) {
   const { paid = 0, earned = 0, owned = 0 } = trafficDetails;
 
   // Check if any single traffic type meets or exceeds the threshold
-  if (paid >= predominantTrafficPct) return 'paid';
-  if (earned >= predominantTrafficPct) return 'earned';
-  if (owned >= predominantTrafficPct) return 'owned';
+  if (paid >= predominantTrafficPct) {
+    return 'paid';
+  }
+  if (earned >= predominantTrafficPct) {
+    return 'earned';
+  }
+  if (owned >= predominantTrafficPct) {
+    return 'owned';
+  }
 
   return 'mixed';
 }

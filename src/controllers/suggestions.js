@@ -32,6 +32,10 @@ import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } fr
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
+import {
+  getScheduleParams,
+  buildExperimentMetadata,
+} from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
@@ -46,14 +50,6 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
-
-const GEO_EXPERIMENT_SCHEDULE = Object.freeze({
-  PRE_CRON_EXPRESSION: '0 * * * *', // hourly (fires immediately via triggerImmediately: true)
-  // 5 minutes — only needs to live long enough for the immediate trigger
-  PRE_EXPIRY_MS: 14 * 60 * 60 * 1000, // 14 hours
-  PLATFORMS: ['chatgpt_free', 'perplexity'],
-  PROVIDER_IDS: ['brightdata', 'openai_web_search'],
-});
 
 /**
  * Suggestions controller.
@@ -93,7 +89,9 @@ function SuggestionsController(ctx, sqs, env) {
    * @throws {Error} If view is invalid.
    */
   const validateView = (view) => {
-    if (!view) return 'full';
+    if (!view) {
+      return 'full';
+    }
     if (!SUGGESTION_VIEWS.includes(view)) {
       throw new Error(`Invalid view. Must be one of: ${SUGGESTION_VIEWS.join(', ')}`);
     }
@@ -120,9 +118,13 @@ function SuggestionsController(ctx, sqs, env) {
    * @throws {Error} If any status value is invalid.
    */
   const validateStatuses = (statusParam) => {
-    if (!statusParam) return [];
+    if (!statusParam) {
+      return [];
+    }
     const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
-    if (statuses.length === 0) return [];
+    if (statuses.length === 0) {
+      return [];
+    }
 
     const validStatuses = Object.values(SuggestionModel.STATUSES);
     const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
@@ -187,7 +189,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, AsyncJob, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -243,7 +245,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     let statuses;
     try {
@@ -320,7 +324,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -381,7 +387,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -435,7 +443,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -497,7 +507,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { view, error: viewError } = getValidatedView(viewParam);
-    if (viewError) return viewError;
+    if (viewError) {
+      return viewError;
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -1047,9 +1059,13 @@ function SuggestionsController(ctx, sqs, env) {
         }
         if (isObject(p) && p !== null) {
           const { pageUrl, imageUrls } = p;
-          if (typeof pageUrl !== 'string' || !isValidUrl(pageUrl)) return true;
+          if (typeof pageUrl !== 'string' || !isValidUrl(pageUrl)) {
+            return true;
+          }
           if (imageUrls !== undefined) {
-            if (!isArray(imageUrls)) return true;
+            if (!isArray(imageUrls)) {
+              return true;
+            }
             return imageUrls.some((u) => typeof u !== 'string' || !isValidUrl(u));
           }
           return false;
@@ -1080,6 +1096,14 @@ function SuggestionsController(ctx, sqs, env) {
     }
     if (variations && !isArray(variations)) {
       return badRequest('variations must be an array');
+    }
+
+    // Block auto-deploy on non-granted suggestions for summit-plg users
+    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+      const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
+      if (notGrantedIds.length > 0) {
+        return forbidden(`The following suggestions are not granted: ${notGrantedIds.join(', ')}`);
+      }
     }
 
     const configuration = await Configuration.findLatest();
@@ -1151,8 +1175,12 @@ function SuggestionsController(ctx, sqs, env) {
         if (isNonEmptyArray(uncoveredSuggestions)) {
           const uncoveredByUrl = uncoveredSuggestions.reduce((acc, suggestion) => {
             const url = getSuggestionUrl(suggestion.getData(), opportunity);
-            if (!url) return acc;
-            if (!acc[url]) acc[url] = [];
+            if (!url) {
+              return acc;
+            }
+            if (!acc[url]) {
+              acc[url] = [];
+            }
             acc[url].push(suggestion);
             return acc;
           }, {});
@@ -1163,7 +1191,9 @@ function SuggestionsController(ctx, sqs, env) {
       } else {
         const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
           const url = getSuggestionUrl(suggestion.getData(), opportunity);
-          if (!url) return acc;
+          if (!url) {
+            return acc;
+          }
 
           if (!acc[url]) {
             acc[url] = [];
@@ -1696,6 +1726,16 @@ function SuggestionsController(ctx, sqs, env) {
 
       let geoExperiment = null;
       try {
+        const preScheduleParams = getScheduleParams(
+          context,
+          GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+          opportunity.getType(),
+          'pre',
+        );
+        if (!preScheduleParams.cronExpression || !preScheduleParams.expiryMs) {
+          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
+          throw new Error('Missing required environment variables');
+        }
         const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
         let promptSources;
         if (domainWideSuggestions.length > 0) {
@@ -1742,11 +1782,14 @@ function SuggestionsController(ctx, sqs, env) {
           promptsCount: prompts.length,
           promptsLocation: promptsS3Key,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
           suggestionIds: validSuggestionIds,
-          metadata: {
-            urls,
-          },
+          metadata: buildExperimentMetadata(
+            context,
+            { urls },
+            GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
+            opportunity.getType(),
+          ),
           updatedBy: profile?.email || 'geo-experiment',
         });
 
@@ -1754,7 +1797,7 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('GeoExperiment was not created');
         }
 
-        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_SUBMITTED`);
+        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
 
         let preScheduleId;
         try {
@@ -1763,10 +1806,10 @@ function SuggestionsController(ctx, sqs, env) {
             siteId,
             experimentId: geoExperimentId,
             experimentPhase: EXPERIMENT_PHASES.PRE,
-            cronExpression: GEO_EXPERIMENT_SCHEDULE.PRE_CRON_EXPRESSION,
-            expiresAt: new Date(Date.now() + GEO_EXPERIMENT_SCHEDULE.PRE_EXPIRY_MS).toISOString(),
-            platforms: GEO_EXPERIMENT_SCHEDULE.PLATFORMS,
-            providerIds: GEO_EXPERIMENT_SCHEDULE.PROVIDER_IDS,
+            cronExpression: preScheduleParams.cronExpression,
+            expiresAt: new Date(Date.now() + preScheduleParams.expiryMs).toISOString(),
+            platforms: preScheduleParams.platforms,
+            providerIds: preScheduleParams.providerIds,
             triggerImmediately: true,
             enableBrandPresence: true,
             metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
@@ -1787,20 +1830,6 @@ function SuggestionsController(ctx, sqs, env) {
         } catch (updateError) {
           context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
           throw updateError;
-        }
-        let job;
-        try {
-          job = await AsyncJob.create({
-            status: 'IN_PROGRESS',
-            metadata: {
-              jobType: 'geo-experiment',
-              siteId,
-              geoExperimentId,
-            },
-          });
-        } catch (jobError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, AsyncJob creation failed: ${jobError.message}`, jobError);
-          throw jobError;
         }
         const validSuggestionEntities = [
           ...validSuggestions,
@@ -1842,10 +1871,9 @@ function SuggestionsController(ctx, sqs, env) {
             success: validSuggestionIds.length,
             failed: failedSuggestions.length,
           },
-          jobId: job.getId(),
           geoExperimentId,
           geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_SUBMITTED,
+          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
           prePhaseScheduleId: preScheduleId,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
@@ -1859,8 +1887,26 @@ function SuggestionsController(ctx, sqs, env) {
           } catch (removeError) {
             context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
-          /* c8 ignore stop */
         }
+        const allSuggestionEntities = [
+          ...validSuggestions,
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+        ];
+        await Promise.allSettled(
+          allSuggestionEntities
+            .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
+            .map(async (s) => {
+              try {
+                const { edgeOptimizeStatus: _, ...rest } = s.getData();
+                s.setData(rest);
+                s.setUpdatedBy(profile?.email || 'geo-experiment');
+                await s.save();
+              } catch (unblockError) {
+                context.log.error(`[edge-geo-exp-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
+              }
+            }),
+        );
+        /* c8 ignore stop */
         const errorResponse = {
           suggestions: suggestionIds.map((id, index) => ({
             uuid: id,
@@ -1976,11 +2022,17 @@ function SuggestionsController(ctx, sqs, env) {
   const getGeoExperiment = async (context) => {
     const { siteId, geoExperimentId } = context.params;
 
-    if (!isValidUUID(siteId)) return badRequest('Site ID required');
-    if (!isValidUUID(geoExperimentId)) return badRequest('GeoExperiment ID required');
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
 
     const site = await Site.findById(siteId);
-    if (!site) return notFound('Site not found');
+    if (!site) {
+      return notFound('Site not found');
+    }
 
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
@@ -2011,6 +2063,104 @@ function SuggestionsController(ctx, sqs, env) {
       ...GeoExperimentDto.toJSON(geoExperiment),
       prompts,
     });
+  };
+
+  /**
+   * Patches a geo experiment. All fields are patchable except
+   * createdAt, updatedAt, and updatedBy (managed automatically).
+   */
+  const patchGeoExperiment = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const requestBody = context.data;
+    if (!isObject(requestBody)) {
+      return badRequest('Request body required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const PATCHABLE_FIELDS = [
+      { key: 'name', setter: 'setName' },
+      { key: 'status', setter: 'setStatus' },
+      { key: 'phase', setter: 'setPhase' },
+      { key: 'type', setter: 'setType' },
+      { key: 'preScheduleId', setter: 'setPreScheduleId' },
+      { key: 'postScheduleId', setter: 'setPostScheduleId' },
+      { key: 'suggestionIds', setter: 'setSuggestionIds' },
+      { key: 'promptsCount', setter: 'setPromptsCount' },
+      { key: 'promptsLocation', setter: 'setPromptsLocation' },
+      { key: 'startTime', setter: 'setStartTime' },
+      { key: 'endTime', setter: 'setEndTime' },
+      { key: 'metadata', setter: 'setMetadata' },
+      { key: 'error', setter: 'setError' },
+    ];
+
+    let updates = false;
+    for (const { key, setter } of PATCHABLE_FIELDS) {
+      if (requestBody[key] !== undefined) {
+        geoExperiment[setter](requestBody[key]);
+        updates = true;
+      }
+    }
+
+    if (!updates) {
+      return badRequest('No valid fields to update');
+    }
+
+    geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
+    const updated = await geoExperiment.save();
+    return ok(GeoExperimentDto.toJSON(updated));
+  };
+
+  /**
+   * Deletes a geo experiment.
+   */
+  const deleteGeoExperiment = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    await geoExperiment.remove();
+    return noContent();
   };
 
   const rollbackSuggestionFromEdge = async (context) => {
@@ -2384,12 +2534,51 @@ function SuggestionsController(ctx, sqs, env) {
     }
   };
 
+  /**
+   * Revokes a suggestion grant by grant ID.
+   * @param {Object} context - Request context.
+   * @returns {Promise<Response>} 204 on success, 404 if not found.
+   */
+  const revokeGrant = async (context) => {
+    const siteId = context.params?.siteId;
+    const grantId = context.params?.grantId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(grantId)) {
+      return badRequest('Grant ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    try {
+      const result = await SuggestionGrant.revokeSuggestionGrant(grantId);
+      if (!result.success) {
+        return notFound('Grant not found');
+      }
+      return noContent();
+    } catch (e) {
+      context.log.error(`Error revoking suggestion grant ${grantId}`, e);
+      return createResponse({ message: 'Error revoking grant' }, 500);
+    }
+  };
+
   return {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
     listGeoExperiments,
     getGeoExperiment,
+    patchGeoExperiment,
+    deleteGeoExperiment,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,
@@ -2402,6 +2591,7 @@ function SuggestionsController(ctx, sqs, env) {
     patchSuggestion,
     patchSuggestionsStatus,
     removeSuggestion,
+    revokeGrant,
   };
 }
 
