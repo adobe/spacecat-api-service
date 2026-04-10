@@ -1,3 +1,11 @@
+# [1.430.0](https://github.com/adobe/spacecat-api-service/compare/v1.429.0...v1.430.0) (2026-04-09)
+
+
+### Features
+
+* **plg:** PLG tier, ASO enrollment revocation, FF ([#2161](https://github.com/adobe/spacecat-api-service/issues/2161)) ([2925253](https://github.com/adobe/spacecat-api-service/commit/29252533c438458645152ab29e4754b57d9f2dac))
+* update filter dimensions API to get data from config ([#2163](https://github.com/adobe/spacecat-api-service/issues/2163)) ([ef793b7](https://github.com/adobe/spacecat-api-service/commit/ef793b78fd7de3db61ccde645abef38553af2af1))
+
 # [1.429.0](https://github.com/adobe/spacecat-api-service/compare/v1.428.0...v1.429.0) (2026-04-09)
 
 
