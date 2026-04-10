@@ -1282,7 +1282,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
       say(`:mag: Detected CDN: ${detectedCdn}`);
     } else {
-      log.info(`No CDN auto-detected for site ${site.getId()}`);
+      log.info(`CDN detection inconclusive for site ${site.getId()}`);
     }
 
     // update the site config object

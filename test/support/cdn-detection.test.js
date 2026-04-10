@@ -78,15 +78,15 @@ describe('cdn-detection', () => {
     }
   });
 
-  it('returns null when domain does not match Fastly CNAME or IPs', async () => {
+  it('returns other when domain does not match Fastly CNAME or IPs', async () => {
     dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
     dnsStubs.resolve4.resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.be.null;
+    expect(result).to.equal('other');
   });
 
-  it('returns null when DNS resolveCname throws', async () => {
+  it('returns null when DNS resolveCname throws for both hosts', async () => {
     dnsStubs.resolveCname.rejects(new Error('DNS error'));
     dnsStubs.resolve4.resolves([]);
 
@@ -102,7 +102,42 @@ describe('cdn-detection', () => {
     expect(result).to.be.null;
   });
 
-  it('returns null when an unexpected error occurs in the loop', async () => {
+  it('returns other when resolveCname returns empty and resolve4 returns non-matching IPs', async () => {
+    dnsStubs.resolveCname.resolves([]);
+    dnsStubs.resolve4.resolves(['1.2.3.4']);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.equal('other');
+  });
+
+  it('returns aem-cs-fastly when www DNS fails but bare domain CNAME matches', async () => {
+    dnsStubs.resolveCname.withArgs('www.example.com').rejects(new Error('ENOTFOUND'));
+    dnsStubs.resolveCname.withArgs('example.com').resolves(['cdn.adobeaemcloud.com.']);
+    dnsStubs.resolve4.resolves([]);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.equal('aem-cs-fastly');
+  });
+
+  it('returns null when www returns other but bare DNS fails', async () => {
+    dnsStubs.resolveCname.withArgs('www.example.com').resolves(['other-cdn.example.net.']);
+    dnsStubs.resolve4.withArgs('www.example.com').resolves(['1.2.3.4']);
+    dnsStubs.resolveCname.withArgs('example.com').rejects(new Error('ENOTFOUND'));
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.be.null;
+  });
+
+  it('returns null when www DNS fails and bare returns other', async () => {
+    dnsStubs.resolveCname.withArgs('www.example.com').rejects(new Error('ENOTFOUND'));
+    dnsStubs.resolveCname.withArgs('example.com').resolves(['other-cdn.example.net.']);
+    dnsStubs.resolve4.withArgs('example.com').resolves(['1.2.3.4']);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.be.null;
+  });
+
+  it('returns null when an unexpected error occurs in checkHost', async () => {
     dnsStubs.resolveCname.resolves(null);
     dnsStubs.resolve4.resolves([]);
 

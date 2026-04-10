@@ -118,6 +118,17 @@ describe('ConfigDto', () => {
       });
     });
 
+    it('includes detectedCdn other in toListJSON', () => {
+      sinon.stub(Config, 'toDynamoItem').returns({
+        llmo: { dataFolder: '/data', brand: 'Test', detectedCdn: 'other' },
+      });
+
+      const result = ConfigDto.toListJSON({ some: 'config' });
+      expect(result).to.deep.equal({
+        llmo: { dataFolder: '/data', brand: 'Test', detectedCdn: 'other' },
+      });
+    });
+
     it('includes full edgeOptimizeConfig when present', () => {
       sinon.stub(Config, 'toDynamoItem').returns({
         edgeOptimizeConfig: { opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },

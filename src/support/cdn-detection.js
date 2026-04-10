@@ -21,36 +21,57 @@ const AEM_CS_FASTLY_IPS = new Set([
 ]);
 
 /**
- * Detects whether a domain is using AEM Cloud Service Managed CDN (Fastly)
- * by checking DNS CNAME and A records.
+ * Checks whether a single host resolves to AEM CS Fastly via CNAME or A records.
  *
- * Returns 'aem-cs-fastly' if the domain resolves to the known CS Fastly
- * CNAME or IP addresses, otherwise returns null.
+ * Returns:
+ *  - 'aem-cs-fastly' when DNS matches known Fastly CNAME / IPs
+ *  - 'other'          when DNS resolved but nothing matched
+ *  - null             when a DNS lookup failed (inconclusive)
  *
- * Never throws — DNS failures are treated as undetected.
- *
- * @param {string} domain - Hostname to check (e.g. 'example.com')
- * @returns {Promise<string|null>} CDN identifier or null
+ * @param {string} host - Hostname to check
+ * @returns {Promise<string|null>}
  */
 async function checkHost(host) {
-  const cnames = await dns.resolveCname(host).catch(() => []);
+  const cnames = await dns.resolveCname(host).catch(() => null);
+  if (cnames === null) return null;
   if (cnames.some((c) => c.includes(AEM_CS_FASTLY_CNAME))) {
     return 'aem-cs-fastly';
   }
 
-  const ips = await dns.resolve4(host).catch(() => []);
+  const ips = await dns.resolve4(host).catch(() => null);
+  if (ips === null) return null;
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
     return 'aem-cs-fastly';
   }
 
-  return null;
+  return 'other';
 }
 
+/**
+ * Detects the CDN for a domain by probing www.{domain} then {domain}.
+ *
+ * Returns:
+ *  - 'aem-cs-fastly' — DNS matched known AEM CS Fastly signatures
+ *  - 'other'          — DNS resolved for both hosts but neither matched
+ *  - null             — at least one DNS lookup failed; result is inconclusive
+ *
+ * Never throws.
+ *
+ * @param {string} domain - bare domain (e.g. 'example.com')
+ * @returns {Promise<string|null>}
+ */
 export async function detectCdnForDomain(domain) {
   try {
-    return await checkHost(`www.${domain}`) ?? await checkHost(domain);
+    const wwwResult = await checkHost(`www.${domain}`);
+    if (wwwResult === 'aem-cs-fastly') return 'aem-cs-fastly';
+
+    const bareResult = await checkHost(domain);
+    if (bareResult === 'aem-cs-fastly') return 'aem-cs-fastly';
+
+    if (wwwResult === null || bareResult === null) return null;
+
+    return 'other';
   } catch {
-    // DNS errors are treated as undetected — never break callers
+    return null;
   }
-  return null;
 }
