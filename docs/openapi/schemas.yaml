@@ -6931,6 +6931,37 @@ Token:
     - createdAt
     - updatedAt
 
+SuggestionGrant:
+  type: object
+  description: A record that a suggestion was granted against a token
+  properties:
+    id:
+      $ref: '#/Id'
+    grantId:
+      $ref: '#/Id'
+      description: Identifier shared by all suggestions in the same grant group
+    suggestionId:
+      $ref: '#/Id'
+      description: The suggestion that was granted
+    siteId:
+      $ref: '#/Id'
+    tokenId:
+      $ref: '#/Id'
+    tokenType:
+      type: string
+      description: Token type key, e.g. `grant_cwv`, `grant_broken_backlinks`
+      example: grant_cwv
+    grantedAt:
+      $ref: '#/DateTime'
+  required:
+    - id
+    - grantId
+    - suggestionId
+    - siteId
+    - tokenId
+    - tokenType
+    - grantedAt
+
 PresignedUrlResponse:
   type: object
   description: A short-lived presigned S3 URL and its expiry time
