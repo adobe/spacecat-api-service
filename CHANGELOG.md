@@ -1,3 +1,10 @@
+# [1.432.0](https://github.com/adobe/spacecat-api-service/compare/v1.431.0...v1.432.0) (2026-04-10)
+
+
+### Features
+
+* AEMCS fastly Edge Routing Automation ([#2127](https://github.com/adobe/spacecat-api-service/issues/2127)) ([56be44e](https://github.com/adobe/spacecat-api-service/commit/56be44ecc64920fa9a717f9d14001316983214d1))
+
 # [1.431.0](https://github.com/adobe/spacecat-api-service/compare/v1.430.0...v1.431.0) (2026-04-10)
 
 
