@@ -315,12 +315,7 @@ async function hasActivePlgWork(siteId, dataAccess, log) {
       return true;
     }
 
-    // Also block displacement if any PLG opportunity has been audited (lastAuditedAt set)
-    // and has no suggestions — the audit completed and suggestions were resolved, so the
-    // site has been actively used.
-    return plgOpportunities.some(
-      (o, i) => o.getLastAuditedAt() && suggestionLists[i].length === 0,
-    );
+    return false;
   } catch (error) {
     log.warn(`Failed to check PLG suggestions for site ${siteId}: ${error.message}`);
     return true; // conservative: do not displace if check fails

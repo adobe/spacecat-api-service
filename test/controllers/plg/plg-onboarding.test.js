@@ -1749,42 +1749,7 @@ describe('PlgOnboardingController', () => {
         .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
     });
 
-    it('waitlists new domain when already-onboarded site has completed audit with no suggestions', async () => {
-      const OLD_SITE_ID = 'old-site-uuid';
-      const onboardedRecord = createMockOnboarding({
-        id: 'other-onboarding-id',
-        domain: 'other-domain.com',
-        status: 'ONBOARDED',
-        siteId: OLD_SITE_ID,
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-
-      // Opportunity has lastAuditedAt set and no suggestions — audit completed with all
-      // suggestions resolved, so this site has been actively used and should not be displaced.
-      const mockOpportunity = {
-        getId: sandbox.stub().returns('oppty-1'),
-        getType: sandbox.stub().returns('broken-backlinks'),
-        getLastAuditedAt: sandbox.stub().returns('2026-04-01T10:00:00.000Z'),
-      };
-      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([]); // empty — suggestions resolved
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      // Old domain is NOT displaced
-      expect(onboardedRecord.setStatus).not.to.have.been.called;
-      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
-
-      // New domain is waitlisted
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
-    });
-
-    it('displaces already-onboarded domain when opportunity has no lastAuditedAt and no suggestions', async () => {
+    it('displaces already-onboarded domain when audit completed with no open suggestions', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
 
@@ -1797,14 +1762,14 @@ describe('PlgOnboardingController', () => {
       });
       mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
 
-      // Opportunity exists but lastAuditedAt is null — audit never ran, safe to displace
+      // Audit ran (lastAuditedAt set) but no open suggestions — nothing left to protect
       const mockOpportunity = {
         getId: sandbox.stub().returns('oppty-1'),
         getType: sandbox.stub().returns('cwv'),
-        getLastAuditedAt: sandbox.stub().returns(null),
+        getLastAuditedAt: sandbox.stub().returns('2026-04-01T10:00:00.000Z'),
       };
       mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([]); // no suggestions
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([]);
 
       mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
 
