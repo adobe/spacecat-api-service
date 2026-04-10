@@ -12,7 +12,7 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
+import { ImsPromiseClient, ImsClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
 import {
   hasText,
@@ -706,6 +706,22 @@ export async function exchangePromiseToken(context, promiseToken) {
     promiseToken,
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   )).access_token;
+  return accessToken;
+}
+
+/**
+ * Obtains an IMS Service Principal (client_credentials) access token for the
+ * LLMO backend service. Uses the IMS v3 token endpoint.
+ *
+ * Required env vars: IMS_HOST, IMS_CLIENT_ID, IMS_CLIENT_CODE, IMS_CLIENT_SECRET
+ *
+ * @param {Object} context - The request context (provides env + log).
+ * @returns {Promise<string>} The IMS access token string.
+ * @throws {Error} If env vars are missing or the IMS call fails.
+ */
+export async function getServicePrincipalToken(context) {
+  const imsClient = ImsClient.createFrom(context);
+  const { access_token: accessToken } = await imsClient.getServiceAccessTokenV3();
   return accessToken;
 }
 

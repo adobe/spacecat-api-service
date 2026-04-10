@@ -34,7 +34,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
-import { exchangePromiseToken } from '../../support/utils.js';
+import { exchangePromiseToken, getServicePrincipalToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
@@ -1614,12 +1614,19 @@ function LlmoController(ctx) {
 
     let imsUserToken;
     try {
-      log.debug(`Getting IMS user token for site ${siteId}`);
-      imsUserToken = await exchangePromiseToken(context, promiseToken);
-      log.info('IMS user token obtained successfully');
-    } catch (tokenError) {
-      log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
-      return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
+      log.debug(`Getting IMS service principal token for site ${siteId}`);
+      imsUserToken = await getServicePrincipalToken(context);
+      log.info('IMS service principal token obtained successfully');
+    } catch (spTokenError) {
+      log.warn(`Service principal token unavailable for site ${siteId}: ${spTokenError.message}; falling back to promise token`);
+      try {
+        log.debug(`Getting IMS user token for site ${siteId}`);
+        imsUserToken = await exchangePromiseToken(context, promiseToken);
+        log.info('IMS user token obtained successfully (fallback)');
+      } catch (tokenError) {
+        log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
+        return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
+      }
     }
 
     try {
