@@ -150,18 +150,16 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
     );
   }
 
-  // Default for new customers (and the safe fallback if the site lookup failed).
-  const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
-  const defaultMode = normalizeLlmoOnboardingMode(configuredDefault)
-    || LLMO_ONBOARDING_MODE_V2;
-  if (configuredDefault && configuredDefault !== defaultMode) {
-    log.warn(
-      `Invalid LLMO_ONBOARDING_DEFAULT_VERSION "${configuredDefault}", falling back to ${defaultMode}`,
-    );
-  }
-  return defaultMode;
+  // New customers (and the safe fallback if the site lookup failed) go to v2.
+  return LLMO_ONBOARDING_MODE_V2;
 }
 ```
+
+`LLMO_ONBOARDING_DEFAULT_VERSION` and `normalizeLlmoOnboardingMode` are
+**removed** from this code path — the new rule has only two outcomes (`v1`
+for legacy customers, `v2` for everyone else), so there is no longer a
+configurable default. Any references to `LLMO_ONBOARDING_DEFAULT_VERSION` in
+env files / Lambda config should be cleaned up as part of this change.
 
 The existing `readBrandalfFlagOverride` helper is no longer called from
 `resolveLlmoOnboardingMode`. It can stay in the file (still used by the
