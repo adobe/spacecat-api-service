@@ -1607,6 +1607,13 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const suggestionIds = [...new Set(rawSuggestionIds)];
 
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const invalidIds = suggestionIds.filter((id) => !UUID_REGEX.test(id));
+    if (invalidIds.length > 0) {
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, invalid suggestionIds: ${invalidIds.join(', ')}`);
+      return badRequest(`suggestionIds must be valid UUIDs. Invalid: ${invalidIds.join(', ')}`);
+    }
+
     // No productCode is passed to hasAccess(); the delegation block is not entered.
     // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
