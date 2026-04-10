@@ -15,6 +15,12 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
 
+function dnsError(code) {
+  const err = new Error(code);
+  err.code = code;
+  return err;
+}
+
 describe('cdn-detection', () => {
   let sandbox;
   let detectCdnForDomain;
@@ -86,19 +92,43 @@ describe('cdn-detection', () => {
     expect(result).to.equal('other');
   });
 
-  it('returns null when DNS resolveCname throws for both hosts', async () => {
-    dnsStubs.resolveCname.rejects(new Error('DNS error'));
+  it('returns other when no CNAME records exist (ENODATA) but A records have non-matching IPs', async () => {
+    dnsStubs.resolveCname.rejects(dnsError('ENODATA'));
+    dnsStubs.resolve4.resolves(['1.2.3.4']);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.equal('other');
+  });
+
+  it('returns aem-cs-fastly when no CNAME records exist (ENODATA) but A records match Fastly IP', async () => {
+    dnsStubs.resolveCname.rejects(dnsError('ENODATA'));
+    dnsStubs.resolve4.resolves(['151.101.195.10']);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.equal('aem-cs-fastly');
+  });
+
+  it('returns other when domain does not exist (ENOTFOUND) for all lookups', async () => {
+    dnsStubs.resolveCname.rejects(dnsError('ENOTFOUND'));
+    dnsStubs.resolve4.rejects(dnsError('ENOTFOUND'));
+
+    const result = await detectCdnForDomain('nonexistent.example.com');
+    expect(result).to.equal('other');
+  });
+
+  it('returns null when DNS server fails (SERVFAIL) for resolveCname on both hosts', async () => {
+    dnsStubs.resolveCname.rejects(dnsError('SERVFAIL'));
     dnsStubs.resolve4.resolves([]);
 
     const result = await detectCdnForDomain('example.com');
     expect(result).to.be.null;
   });
 
-  it('returns null when all DNS calls reject', async () => {
-    dnsStubs.resolveCname.rejects(new Error('ENOTFOUND'));
-    dnsStubs.resolve4.rejects(new Error('ENOTFOUND'));
+  it('returns null when all DNS calls fail with SERVFAIL', async () => {
+    dnsStubs.resolveCname.rejects(dnsError('SERVFAIL'));
+    dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
 
-    const result = await detectCdnForDomain('nonexistent.example.com');
+    const result = await detectCdnForDomain('example.com');
     expect(result).to.be.null;
   });
 
@@ -111,7 +141,7 @@ describe('cdn-detection', () => {
   });
 
   it('returns aem-cs-fastly when www DNS fails but bare domain CNAME matches', async () => {
-    dnsStubs.resolveCname.withArgs('www.example.com').rejects(new Error('ENOTFOUND'));
+    dnsStubs.resolveCname.withArgs('www.example.com').rejects(dnsError('SERVFAIL'));
     dnsStubs.resolveCname.withArgs('example.com').resolves(['cdn.adobeaemcloud.com.']);
     dnsStubs.resolve4.resolves([]);
 
@@ -122,14 +152,14 @@ describe('cdn-detection', () => {
   it('returns null when www returns other but bare DNS fails', async () => {
     dnsStubs.resolveCname.withArgs('www.example.com').resolves(['other-cdn.example.net.']);
     dnsStubs.resolve4.withArgs('www.example.com').resolves(['1.2.3.4']);
-    dnsStubs.resolveCname.withArgs('example.com').rejects(new Error('ENOTFOUND'));
+    dnsStubs.resolveCname.withArgs('example.com').rejects(dnsError('SERVFAIL'));
 
     const result = await detectCdnForDomain('example.com');
     expect(result).to.be.null;
   });
 
   it('returns null when www DNS fails and bare returns other', async () => {
-    dnsStubs.resolveCname.withArgs('www.example.com').rejects(new Error('ENOTFOUND'));
+    dnsStubs.resolveCname.withArgs('www.example.com').rejects(dnsError('SERVFAIL'));
     dnsStubs.resolveCname.withArgs('example.com').resolves(['other-cdn.example.net.']);
     dnsStubs.resolve4.withArgs('example.com').resolves(['1.2.3.4']);
 
@@ -137,9 +167,9 @@ describe('cdn-detection', () => {
     expect(result).to.be.null;
   });
 
-  it('returns null when CNAME resolves but resolve4 fails', async () => {
+  it('returns null when CNAME resolves non-matching but resolve4 fails with SERVFAIL', async () => {
     dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
-    dnsStubs.resolve4.rejects(new Error('SERVFAIL'));
+    dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
 
     const result = await detectCdnForDomain('example.com');
     expect(result).to.be.null;
@@ -148,6 +178,14 @@ describe('cdn-detection', () => {
   it('returns null when an unexpected error occurs in checkHost', async () => {
     dnsStubs.resolveCname.resolves(null);
     dnsStubs.resolve4.resolves([]);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.be.null;
+  });
+
+  it('returns null when CNAME has ENODATA but resolve4 fails with SERVFAIL', async () => {
+    dnsStubs.resolveCname.rejects(dnsError('ENODATA'));
+    dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
 
     const result = await detectCdnForDomain('example.com');
     expect(result).to.be.null;

@@ -20,6 +20,15 @@ const AEM_CS_FASTLY_IPS = new Set([
   '151.101.3.10',
 ]);
 
+// ENODATA = record type doesn't exist; ENOTFOUND = domain doesn't exist (NXDOMAIN).
+// Both are authoritative answers — safe to treat as "no records" and continue.
+const DNS_NO_RECORD_CODES = new Set(['ENODATA', 'ENOTFOUND']);
+
+function catchDnsLookup(err) {
+  if (DNS_NO_RECORD_CODES.has(err.code)) return [];
+  return null;
+}
+
 /**
  * Checks whether a single host resolves to AEM CS Fastly via CNAME or A records.
  *
@@ -32,13 +41,13 @@ const AEM_CS_FASTLY_IPS = new Set([
  * @returns {Promise<string|null>}
  */
 async function checkHost(host) {
-  const cnames = await dns.resolveCname(host).catch(() => null);
+  const cnames = await dns.resolveCname(host).catch(catchDnsLookup);
   if (cnames === null) return null;
   if (cnames.some((c) => c.includes(AEM_CS_FASTLY_CNAME))) {
     return 'aem-cs-fastly';
   }
 
-  const ips = await dns.resolve4(host).catch(() => null);
+  const ips = await dns.resolve4(host).catch(catchDnsLookup);
   if (ips === null) return null;
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
     return 'aem-cs-fastly';
