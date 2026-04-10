@@ -1675,6 +1675,32 @@ describe('PlgOnboardingController', () => {
         .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
     });
 
+    it('waitlists new domain when already-onboarded site has IN_PROGRESS PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      const mockOpportunity = { getId: sandbox.stub().returns('oppty-1'), getType: sandbox.stub().returns('alt-text') };
+      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('IN_PROGRESS') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
     it('conservatively waitlists new domain when suggestion check throws', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const onboardedRecord = createMockOnboarding({
