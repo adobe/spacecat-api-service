@@ -235,6 +235,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId': 'site:read',
   'PATCH /sites/:siteId': 'site:write',
   'PATCH /sites/:siteId/config/cdn-logs': 'site:write',
+  'PATCH /sites/:siteId/page-citability/status': 'site:write',
   'DELETE /sites/:siteId': 'site:write',
   'GET /sites/:siteId/bot-blocker': 'site:read',
   'GET /sites/:siteId/audits': 'audit:read',
