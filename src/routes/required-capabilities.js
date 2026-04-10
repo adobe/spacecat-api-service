@@ -86,7 +86,6 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
-  'POST /sites/:siteId/llmo/edge-optimize-routing',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
@@ -498,6 +497,10 @@ const routeRequiredCapabilities = {
 
   // Tokens
   'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
+  'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
+
+  // Suggestion grants
+  'DELETE /sites/:siteId/suggestions/grants/:grantId': 'suggestion:write',
 };
 
 export default routeRequiredCapabilities;

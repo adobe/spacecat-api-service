@@ -1,3 +1,70 @@
+# [1.434.0](https://github.com/adobe/spacecat-api-service/compare/v1.433.1...v1.434.0) (2026-04-10)
+
+
+### Features
+
+* add suggestion grant revoke and list endpoints (SITES-42990) ([#2179](https://github.com/adobe/spacecat-api-service/issues/2179)) ([5d4bdcd](https://github.com/adobe/spacecat-api-service/commit/5d4bdcd929d8352548926cfd6fefc1dfc8b3245a))
+
+## [1.433.1](https://github.com/adobe/spacecat-api-service/compare/v1.433.0...v1.433.1) (2026-04-10)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2177](https://github.com/adobe/spacecat-api-service/issues/2177)) ([d0346af](https://github.com/adobe/spacecat-api-service/commit/d0346af16ef3091f93206c0e2f385f6034ca9d4e))
+
+# [1.433.0](https://github.com/adobe/spacecat-api-service/compare/v1.432.0...v1.433.0) (2026-04-10)
+
+
+### Features
+
+* **plg:** displace already-onboarded domain when PLG suggestions are empty   ([#2176](https://github.com/adobe/spacecat-api-service/issues/2176)) ([5cfeb41](https://github.com/adobe/spacecat-api-service/commit/5cfeb41919c595b211cdfed0e67aa584ca075d5a))
+
+# [1.432.0](https://github.com/adobe/spacecat-api-service/compare/v1.431.0...v1.432.0) (2026-04-10)
+
+
+### Features
+
+* AEMCS fastly Edge Routing Automation ([#2127](https://github.com/adobe/spacecat-api-service/issues/2127)) ([56be44e](https://github.com/adobe/spacecat-api-service/commit/56be44ecc64920fa9a717f9d14001316983214d1))
+
+# [1.431.0](https://github.com/adobe/spacecat-api-service/compare/v1.430.0...v1.431.0) (2026-04-10)
+
+
+### Bug Fixes
+
+* update waitlisted PLG ([#2170](https://github.com/adobe/spacecat-api-service/issues/2170)) ([264716e](https://github.com/adobe/spacecat-api-service/commit/264716e91e22ecdf4e6f357b7b6d6828929a7547))
+
+
+### Features
+
+* **brands:** persist and return URL type field in brand_sites (LLMO-4058) ([#2149](https://github.com/adobe/spacecat-api-service/issues/2149)) ([9e403d2](https://github.com/adobe/spacecat-api-service/commit/9e403d23ce67af3de63e6efefef4ca1c3b6b7ca0)), closes [adobe-rnd/llmo-data-retrieval-service#1222](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1222)
+
+# [1.430.0](https://github.com/adobe/spacecat-api-service/compare/v1.429.0...v1.430.0) (2026-04-09)
+
+
+### Features
+
+* **plg:** PLG tier, ASO enrollment revocation, FF ([#2161](https://github.com/adobe/spacecat-api-service/issues/2161)) ([2925253](https://github.com/adobe/spacecat-api-service/commit/29252533c438458645152ab29e4754b57d9f2dac))
+* update filter dimensions API to get data from config ([#2163](https://github.com/adobe/spacecat-api-service/issues/2163)) ([ef793b7](https://github.com/adobe/spacecat-api-service/commit/ef793b78fd7de3db61ccde645abef38553af2af1))
+
+# [1.429.0](https://github.com/adobe/spacecat-api-service/compare/v1.428.0...v1.429.0) (2026-04-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2166](https://github.com/adobe/spacecat-api-service/issues/2166)) ([d9f82e6](https://github.com/adobe/spacecat-api-service/commit/d9f82e6bd9f2e44a75581891baa88dbc4aa95113))
+
+
+### Features
+
+* **SITES-42930:** exchange promise token and support Secrets Manager auth in beta preflight endpoint ([#2160](https://github.com/adobe/spacecat-api-service/issues/2160)) ([07e439d](https://github.com/adobe/spacecat-api-service/commit/07e439d4160543a899d550e09acf14384f16c783))
+
+# [1.428.0](https://github.com/adobe/spacecat-api-service/compare/v1.427.2...v1.428.0) (2026-04-09)
+
+
+### Features
+
+* fix/show pre onboard customer to admin ([#2165](https://github.com/adobe/spacecat-api-service/issues/2165)) ([41d9bc2](https://github.com/adobe/spacecat-api-service/commit/41d9bc27f01f21acd8d1b491d865024da6869ba1))
+
 ## [1.427.2](https://github.com/adobe/spacecat-api-service/compare/v1.427.1...v1.427.2) (2026-04-09)
 
 

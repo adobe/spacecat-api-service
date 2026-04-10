@@ -200,7 +200,7 @@ describe('getRouteHandlers', () => {
     getPaidTrafficByPageTypePlatformCampaign: sinon.stub(),
     getPaidTrafficByUrlPageTypeCampaignDevice: sinon.stub(),
     getPaidTrafficByUrlPageTypePlatformCampaignDevice: sinon.stub(),
-    getPaidTrafficPageTypePlatformCampaignDevice: sinon.stub(),
+    getPaidTrafficByPageTypePlatformCampaignDevice: sinon.stub(),
     getPaidTrafficByUrlPageTypeDevice: sinon.stub(),
     getPaidTrafficByUrlPageTypeCampaign: sinon.stub(),
     getPaidTrafficByUrlPageTypePlatform: sinon.stub(),
@@ -311,7 +311,6 @@ describe('getRouteHandlers', () => {
     getEdgeConfig: () => null,
     createOrUpdateStageEdgeConfig: () => null,
     checkEdgeOptimizeStatus: () => null,
-    updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
     getDemoBrandPresence: () => null,
@@ -552,7 +551,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
-    expect(dynamicRoutes).to.have.all.keys(
+    const expectedDynamicRouteKeys = [
       'GET /audits/latest/:auditType',
       'POST /configurations/:version/restore',
       'GET /configurations/:version',
@@ -814,10 +813,9 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
       'POST /sites/:siteId/llmo/edge-optimize-config/stage',
+      'GET /sites/:siteId/llmo/edge-optimize-status',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
-      'GET /sites/:siteId/llmo/edge-optimize-status',
-      'POST /sites/:siteId/llmo/edge-optimize-routing',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
@@ -857,6 +855,8 @@ describe('getRouteHandlers', () => {
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
       'GET /sites/:siteId/tokens/by-type/:tokenType',
+      'GET /sites/:siteId/tokens/:tokenId/grants',
+      'DELETE /sites/:siteId/suggestions/grants/:grantId',
       'GET /plg/onboard/status/:imsOrgId',
       'PATCH /plg/onboard/:onboardingId',
       'PATCH /plg/records/:plgOnboardingId',
@@ -881,7 +881,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/filter-dimensions',
       'GET /sites/:siteId/agentic-traffic/weeks',
       'GET /sites/:siteId/agentic-traffic/movers',
-    );
+    ];
+    expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
@@ -1094,8 +1095,6 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config/stage'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
-    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].handler).to.equal(mockLlmoController.updateEdgeOptimizeCDNRouting);
-    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].handler).to.equal(mockLlmoController.markOpportunitiesReviewed);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
