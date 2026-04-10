@@ -56,10 +56,23 @@ const POSTGREST_QUERY_TIMEOUT_MS = 10000; // 10 seconds
  * @returns {Promise} - Resolves with query result or rejects on timeout
  */
 function withQueryTimeout(queryPromise, timeoutMs = POSTGREST_QUERY_TIMEOUT_MS) {
+  let timer;
   return Promise.race([
-    queryPromise,
+    queryPromise.then(
+      (result) => {
+        clearTimeout(timer);
+        return result;
+      },
+      (err) => {
+        clearTimeout(timer);
+        throw err;
+      },
+    ),
     new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`PostgREST query timed out after ${timeoutMs}ms`)), timeoutMs);
+      timer = setTimeout(
+        () => reject(new Error(`PostgREST query timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
     }),
   ]);
 }
@@ -108,7 +121,15 @@ async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerNa
     return badRequest(error.message);
   }
 
-  return handlerFn(context, Site.postgrestService);
+  try {
+    return await handlerFn(context, Site.postgrestService);
+  } catch (err) {
+    if (err.message?.includes('timed out')) {
+      log.error(`Brand presence ${handlerName} query timeout: ${err.message}`);
+      return badRequest('The request took too long to process. Please try narrowing your date range or filters.');
+    }
+    throw err;
+  }
 }
 
 /** @internal Exported for testing null/undefined fallbacks */
