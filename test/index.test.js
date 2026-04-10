@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Request } from '@adobe/fetch';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
@@ -24,11 +22,41 @@ use(sinonChai);
 
 const s2sAuthWrapperStub = (fn) => fn;
 
-const { main } = await esmock('../src/index.js', {
-  '@adobe/spacecat-shared-http-utils': {
-    s2sAuthWrapper: s2sAuthWrapperStub,
+const tokowakaTestShim = {
+  default: class TokowakaClientStub {
+    static createFrom() {
+      return {};
+    }
   },
-});
+  calculateForwardedHost: (url) => {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+    const h = u.hostname;
+    const dots = (h.match(/\./g) || []).length;
+    return dots === 1 ? `www.${h}` : h;
+  },
+  getEffectiveBaseURL: (siteOrBaseUrl) => {
+    if (typeof siteOrBaseUrl === 'string') {
+      return siteOrBaseUrl.startsWith('http') ? siteOrBaseUrl : `https://${siteOrBaseUrl}`;
+    }
+    const overrideBaseURL = siteOrBaseUrl.getConfig?.()?.getFetchConfig?.()?.overrideBaseURL;
+    if (overrideBaseURL && /^https?:\/\//.test(overrideBaseURL)) {
+      return overrideBaseURL;
+    }
+    return siteOrBaseUrl.getBaseURL?.() ?? '';
+  },
+};
+
+const { main } = await esmock(
+  '../src/index.js',
+  {
+    '@adobe/spacecat-shared-http-utils': {
+      s2sAuthWrapper: s2sAuthWrapperStub,
+    },
+  },
+  {
+    '@adobe/spacecat-shared-tokowaka-client': tokowakaTestShim,
+  },
+);
 
 const baseUrl = 'https://base.spacecat';
 
@@ -217,6 +245,20 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles plgOnboardingId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/plg/records/not-a-uuid';
+
+    request = new Request(`${baseUrl}/plg/records/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('PLG Onboarding Id is invalid. Please provide a valid UUID.');
   });
 
   it('handles organizationId not correctly formated error', async () => {

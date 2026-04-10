@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
@@ -3437,6 +3435,111 @@ describe('Sites Controller', () => {
     expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
   });
 
+  describe('auditTargetURLs validation', () => {
+    it('returns bad request when manual URL hostname does not match site base URL', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({ slack: { channel: '#x' } }));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://example.com/path1' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('Invalid audit target URL at manual[0] (https://example.com/path1):');
+      expect(err.message).to.include('site domain (site1.com, with or without www.)');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('accepts manual URLs on the site hostname', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://site1.com/path1' }, { url: 'https://site1.com/path2' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual).to.deep.equal([
+        { url: 'https://site1.com/path1' },
+        { url: 'https://site1.com/path2' },
+      ]);
+    });
+
+    it('deep-merges auditTargetURLs sub-keys so patching one source preserves others', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      // Stub toDynamoItem so the existing config includes moneyPages regardless of whether
+      // the installed shared package's Joi schema knows about that source yet.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        auditTargetURLs: {
+          manual: [{ url: 'https://site1.com/existing' }],
+          moneyPages: [{ url: 'https://site1.com/money1' }],
+        },
+      });
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://site1.com/updated' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual).to.deep.equal([{ url: 'https://site1.com/updated' }]);
+      expect(merged.auditTargetURLs.moneyPages).to.deep.equal([{ url: 'https://site1.com/money1' }]);
+    });
+
+    it('does not validate auditTargetURLs when key is omitted from config patch', async () => {
+      const site = sites[0];
+      const existingConfig = Config({
+        auditTargetURLs: { manual: [{ url: 'https://wrong.example/' }] },
+      });
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { slack: { channel: '#only' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual[0].url).to.equal('https://wrong.example/');
+    });
+  });
+
   it('allows removing a config key by explicitly setting it to null', async () => {
     const site = sites[0];
     const existingConfig = Config({
@@ -4786,7 +4889,8 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via organizationId path', async () => {
+    it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
@@ -4806,7 +4910,31 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via imsOrg path', async () => {
+    it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via imsOrg path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
       context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
 
@@ -4818,6 +4946,71 @@ describe('Sites Controller', () => {
           },
           enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
           site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 200 for PRE_ONBOARD-tier site via imsOrg path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'entitlement-pre-onboard',
+            getTier: () => 'PRE_ONBOARD',
+          },
+          enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for admin when organizationId path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: null,
+          enrollment: null,
+          site: null,
         }),
       };
       TierClient.createForOrg.returns(mockTierClient);

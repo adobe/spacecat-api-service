@@ -31,6 +31,7 @@ export const PlgOnboardingDto = {
     error: onboarding.getError(),
     botBlocker: onboarding.getBotBlocker(),
     waitlistReason: onboarding.getWaitlistReason(),
+    reviews: onboarding.getReviews(),
     completedAt: onboarding.getCompletedAt(),
     createdAt: onboarding.getCreatedAt(),
     updatedAt: onboarding.getUpdatedAt(),

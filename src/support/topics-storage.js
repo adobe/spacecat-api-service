@@ -40,7 +40,9 @@ function mapDbTopicToV2(row) {
 export async function listTopics({
   organizationId, postgrestClient, status, brandId,
 }) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   let query = postgrestClient
     .from('topics')
@@ -59,7 +61,9 @@ export async function listTopics({
   }
 
   const { data, error } = await query;
-  if (error) throw new Error(`Failed to list topics: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list topics: ${error.message}`);
+  }
 
   return (data || []).map(mapDbTopicToV2);
 }
@@ -77,8 +81,12 @@ export async function listTopics({
 export async function createTopic({
   organizationId, topic, postgrestClient, updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
-  if (!hasText(topic?.name)) throw new Error('Topic name is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (!hasText(topic?.name)) {
+    throw new Error('Topic name is required');
+  }
 
   const topicId = topic.id || topic.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
@@ -98,7 +106,9 @@ export async function createTopic({
     .select()
     .single();
 
-  if (error) throw new Error(`Failed to create topic: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to create topic: ${error.message}`);
+  }
   return mapDbTopicToV2(data);
 }
 
@@ -116,13 +126,23 @@ export async function createTopic({
 export async function updateTopic({
   organizationId, topicId, updates, postgrestClient, updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const patch = { updated_by: updatedBy };
-  if (updates.name !== undefined) patch.name = updates.name;
-  if (updates.description !== undefined) patch.description = updates.description;
-  if (updates.status !== undefined) patch.status = updates.status;
-  if (updates.brandId !== undefined) patch.brand_id = updates.brandId;
+  if (updates.name !== undefined) {
+    patch.name = updates.name;
+  }
+  if (updates.description !== undefined) {
+    patch.description = updates.description;
+  }
+  if (updates.status !== undefined) {
+    patch.status = updates.status;
+  }
+  if (updates.brandId !== undefined) {
+    patch.brand_id = updates.brandId;
+  }
 
   const { data, error } = await postgrestClient
     .from('topics')
@@ -132,8 +152,12 @@ export async function updateTopic({
     .select()
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to update topic: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to update topic: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
   return mapDbTopicToV2(data);
 }
 
@@ -150,7 +174,9 @@ export async function updateTopic({
 export async function deleteTopic({
   organizationId, topicId, postgrestClient, updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const { data, error } = await postgrestClient
     .from('topics')
@@ -160,6 +186,8 @@ export async function deleteTopic({
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to delete topic: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to delete topic: ${error.message}`);
+  }
   return !!data;
 }

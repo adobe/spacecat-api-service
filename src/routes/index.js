@@ -94,6 +94,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
+ * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -145,6 +146,7 @@ export default function getRouteHandlers(
   featureFlagsController,
   pageRelationshipsController,
   ephemeralRunController,
+  autofixChecksController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -414,6 +416,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,
+    'POST /llmo/onboard/update-query-index': llmoController.updateQueryIndex,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
@@ -421,7 +424,6 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
-    'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
@@ -464,6 +466,10 @@ export default function getRouteHandlers(
     'POST /plg/onboard': plgOnboardingController.onboard,
     'GET /plg/sites': plgOnboardingController.getAllOnboardings,
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
+    'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
+    'POST /plg/records': plgOnboardingController.createOnboarding,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
@@ -530,6 +536,10 @@ export default function getRouteHandlers(
 
     // Tokens
     'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
+    'GET /sites/:siteId/tokens/:tokenId/grants': tokensController.getGrants,
+
+    // Suggestion grants
+    'DELETE /sites/:siteId/suggestions/grants/:grantId': suggestionsController.revokeGrant,
 
     // IMS Org Access (cross-org delegation grants)
     'POST /sites/:siteId/ims-org-access': imsOrgAccessController.createGrant,
@@ -542,6 +552,9 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
     'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
     'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
+
+    // Autofix checks (permission/capability validation before autofix deploy)
+    'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
   };
 
   // Initialization of static and dynamic routes

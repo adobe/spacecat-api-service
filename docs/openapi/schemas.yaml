@@ -263,6 +263,37 @@ Config:
     edgeOptimizeConfig:
       description: Optional. The edge optimize configuration for the site.
       $ref: '#/EdgeOptimizeConfig'
+    auditTargetURLs:
+      description: Optional. Custom audit target URLs grouped by source (manual, moneyPages).
+      $ref: '#/AuditTargetURLs'
+AuditTargetURLs:
+  type: object
+  description: Custom audit target URLs grouped by source. HTTPS only, hostname must match the site base URL.
+  properties:
+    manual:
+      description: Manually curated list of URLs to include in audits. Maximum 500 entries.
+      type: array
+      maxItems: 500
+      items:
+        $ref: '#/AuditTargetURL'
+    moneyPages:
+      description: Revenue generating pages. Maximum 1000 entries.
+      type: array
+      maxItems: 1000
+      items:
+        $ref: '#/AuditTargetURL'
+  additionalProperties: true
+AuditTargetURL:
+  type: object
+  required:
+    - url
+  additionalProperties: false
+  properties:
+    url:
+      type: string
+      format: uri
+      description: The URL to audit. Must use HTTPS and hostname must match the site base URL (www prefix is treated as equivalent).
+      example: 'https://example.com/high-value-page'
 EdgeOptimizeConfig:
   type: object
   description: Edge optimize configuration for a site
@@ -6779,6 +6810,7 @@ PlgOnboarding:
         - ERROR
         - WAITING_FOR_IP_ALLOWLISTING
         - WAITLISTED
+        - INACTIVE
       example: "ONBOARDED"
     siteId:
       $ref: '#/Id'
@@ -6851,6 +6883,34 @@ PlgOnboarding:
         - string
         - 'null'
       description: Reason for waitlisting, if applicable
+      example: null
+    reviews:
+      type:
+        - array
+        - 'null'
+      description: Array of ESE review decisions for waitlisted onboardings
+      items:
+        type: object
+        properties:
+          reason:
+            type: string
+            description: The waitlist reason at the time of review
+          decision:
+            type: string
+            enum:
+              - BYPASSED
+              - UPHELD
+            description: "BYPASSED: skip check and resume. UPHELD: block stands."
+          reviewedBy:
+            type: string
+            description: Email of the ESE who made the decision
+          reviewedAt:
+            type: string
+            format: date-time
+            description: Timestamp of the review
+          justification:
+            type: string
+            description: ESE's reason for the decision
       example: null
     completedAt:
       $ref: '#/DateTime'

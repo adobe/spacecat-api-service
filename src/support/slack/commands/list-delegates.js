@@ -72,7 +72,9 @@ function ListDelegatesCommand(context) {
       await Promise.all(orgIds.map(async (id) => {
         try {
           const org = await Organization.findById(id);
-          if (org) orgMap[id] = org.getName() || org.getImsOrgId() || id;
+          if (org) {
+            orgMap[id] = org.getName() || org.getImsOrgId() || id;
+          }
         } catch (err) {
           log.warn(`[ListDelegates] Could not resolve org ${id}`, err);
         }
