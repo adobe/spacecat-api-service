@@ -309,15 +309,27 @@ describe('edge-routing-utils', () => {
   });
 
   describe('detectCdnForDomain (integration)', () => {
+    const badDomain = () => ({
+      toString() {
+        throw new Error('bad domain');
+      },
+    });
+
     it('returns null when domain stringification throws', async () => {
       const mod = await import('../../src/support/edge-routing-utils.js');
-      const bad = {
-        toString() {
-          throw new Error('bad domain');
-        },
-      };
-      const result = await mod.detectCdnForDomain(bad);
+      const result = await mod.detectCdnForDomain(badDomain());
       expect(result).to.equal(null);
+    });
+
+    it('logs and returns null when domain stringification throws and log is provided', async () => {
+      const mod = await import('../../src/support/edge-routing-utils.js');
+      const errLog = { error: sandbox.stub() };
+      const result = await mod.detectCdnForDomain(badDomain(), errLog);
+      expect(result).to.equal(null);
+      expect(errLog.error).to.have.been.calledOnceWith(
+        'detectCdnForDomain error',
+        sinon.match.instanceOf(Error),
+      );
     });
   });
 });

@@ -214,7 +214,7 @@ export async function detectCdnForDomain(domain, log) {
     return await checkHost(domain);
   } catch (err) {
     // DNS errors are treated as undetected — never break callers
-    log.error('detectCdnForDomain error', err);
+    log?.error('detectCdnForDomain error', err);
   }
   return null;
 }
