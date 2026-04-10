@@ -25,7 +25,9 @@ const AEM_CS_FASTLY_IPS = new Set([
 const DNS_NO_RECORD_CODES = new Set(['ENODATA', 'ENOTFOUND']);
 
 function catchDnsLookup(err) {
-  if (DNS_NO_RECORD_CODES.has(err.code)) return [];
+  if (DNS_NO_RECORD_CODES.has(err.code)) {
+    return [];
+  }
   return null;
 }
 
@@ -42,13 +44,17 @@ function catchDnsLookup(err) {
  */
 async function checkHost(host) {
   const cnames = await dns.resolveCname(host).catch(catchDnsLookup);
-  if (cnames === null) return null;
+  if (cnames === null) {
+    return null;
+  }
   if (cnames.some((c) => c.includes(AEM_CS_FASTLY_CNAME))) {
     return 'aem-cs-fastly';
   }
 
   const ips = await dns.resolve4(host).catch(catchDnsLookup);
-  if (ips === null) return null;
+  if (ips === null) {
+    return null;
+  }
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
     return 'aem-cs-fastly';
   }
@@ -72,12 +78,18 @@ async function checkHost(host) {
 export async function detectCdnForDomain(domain) {
   try {
     const wwwResult = await checkHost(`www.${domain}`);
-    if (wwwResult === 'aem-cs-fastly') return 'aem-cs-fastly';
+    if (wwwResult === 'aem-cs-fastly') {
+      return 'aem-cs-fastly';
+    }
 
     const bareResult = await checkHost(domain);
-    if (bareResult === 'aem-cs-fastly') return 'aem-cs-fastly';
+    if (bareResult === 'aem-cs-fastly') {
+      return 'aem-cs-fastly';
+    }
 
-    if (wwwResult === null || bareResult === null) return null;
+    if (wwwResult === null || bareResult === null) {
+      return null;
+    }
 
     return 'other';
     /* c8 ignore next 3 */
