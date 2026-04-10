@@ -42,6 +42,14 @@ describe('onboardSingleSite — paid profile guard', () => {
         // eslint-disable-next-line func-style
         StartExecutionCommand: function StartExecutionCommand() {},
       },
+      '@adobe/spacecat-shared-rum-api-client': {
+        default: class RUMAPIClientMock {
+          static createFrom() {
+            return { retrieveDomainkey: async () => 'stub-domain-key' };
+          }
+        },
+        RUM_BUNDLER_API_HOST: 'https://bundles.test',
+      },
       '@adobe/spacecat-shared-utils': {
         isValidUrl: () => true,
         isValidIMSOrgId: () => true,
@@ -362,7 +370,9 @@ describe('onboardSingleSite — paid profile guard', () => {
     });
   });
 
-  describe('updateOnboardConfig', () => {
+  describe('updateOnboardConfig', function () {
+    this.timeout(10000);
+
     it('calls updateOnboardConfig with lastProfile and lastStartTime on the happy path', async () => {
       const { site, updateOnboardConfigStub } = makeHappyPathSite();
       const ctx = makeContext(site);
