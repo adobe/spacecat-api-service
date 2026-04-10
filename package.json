@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.434.0",
+  "version": "1.434.1",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -77,7 +77,7 @@
     "@adobe/spacecat-shared-athena-client": "1.9.11",
     "@adobe/spacecat-shared-brand-client": "1.1.41",
     "@adobe/spacecat-shared-content-client": "1.8.23",
-    "@adobe/spacecat-shared-data-access": "3.50.1",
+    "@adobe/spacecat-shared-data-access": "3.51.0",
     "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-ims-client": "1.12.6",
     "@adobe/spacecat-shared-drs-client": "1.4.2",
