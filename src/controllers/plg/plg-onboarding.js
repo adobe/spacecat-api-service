@@ -383,6 +383,10 @@ async function performAsoPlgOnboarding({
       if (!onboarding) {
         throw createError;
       }
+      if (onboarding.getStatus() === STATUSES.ONBOARDED) {
+        log.info(`Domain ${domain} was onboarded concurrently for IMS org ${imsOrgId}, returning existing record`);
+        return onboarding;
+      }
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
@@ -1147,6 +1151,9 @@ function PlgOnboardingController(ctx) {
 
           // Handle alternateDomain: retire current domain, onboard a new domain under current org
           if (hasText(siteConfig?.alternateDomain)) {
+            if (!isSafeDomain(siteConfig.alternateDomain)) {
+              return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
+            }
             onboarding.setStatus(STATUSES.INACTIVE);
             await onboarding.save();
             log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);

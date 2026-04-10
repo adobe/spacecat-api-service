@@ -686,6 +686,26 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Idempotency: already onboarded ---
+
+  describe('onboard - already ONBOARDED domain', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('returns existing record without calling Site.create when domain is already ONBOARDED', async () => {
+      const onboardedRecord = createMockOnboarding({ status: 'ONBOARDED' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(onboardedRecord);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+    });
+  });
+
   // --- Race condition handling ---
 
   describe('onboard - race condition on create', () => {
@@ -722,6 +742,21 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(500);
+    });
+
+    it('returns existing record without re-running flow when concurrent create finds ONBOARDED record', async () => {
+      const onboardedRecord = createMockOnboarding({ status: 'ONBOARDED' });
+      mockDataAccess.PlgOnboarding.create.rejects(new Error('unique constraint violation'));
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .onFirstCall().resolves(null)
+        .onSecondCall().resolves(onboardedRecord);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
   });
 
@@ -3491,6 +3526,31 @@ describe('PlgOnboardingController', () => {
 
         expect(res.status).to.equal(400);
         expect(res.value).to.equal('Cannot determine IMS org for the existing site owner');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: returns 400 when alternate domain is invalid', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'localhost' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
       });
 
       it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current domain and onboards alternate domain', async () => {
