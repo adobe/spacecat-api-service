@@ -1669,7 +1669,11 @@ describe('PlgOnboardingController', () => {
       });
       mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
 
-      const mockOpportunity = { getId: sandbox.stub().returns('oppty-1'), getType: sandbox.stub().returns('cwv') };
+      const mockOpportunity = {
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      };
       mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([
         { getStatus: sandbox.stub().returns('NEW') },
@@ -1700,7 +1704,11 @@ describe('PlgOnboardingController', () => {
       });
       mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
 
-      const mockOpportunity = { getId: sandbox.stub().returns('oppty-1'), getType: sandbox.stub().returns('alt-text') };
+      const mockOpportunity = {
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('alt-text'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      };
       mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([
         { getStatus: sandbox.stub().returns('IN_PROGRESS') },
@@ -1739,6 +1747,177 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('waitlists new domain when already-onboarded site has completed audit with no suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      // Opportunity has lastAuditedAt set and no suggestions — audit completed with all
+      // suggestions resolved, so this site has been actively used and should not be displaced.
+      const mockOpportunity = {
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('broken-backlinks'),
+        getLastAuditedAt: sandbox.stub().returns('2026-04-01T10:00:00.000Z'),
+      };
+      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([]); // empty — suggestions resolved
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is NOT displaced
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
+
+      // New domain is waitlisted
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('displaces already-onboarded domain when opportunity has no lastAuditedAt and no suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      // Opportunity exists but lastAuditedAt is null — audit never ran, safe to displace
+      const mockOpportunity = {
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      };
+      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([]); // no suggestions
+
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('displaces already-onboarded domain when displaced site has no organizationId', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: null, // no org ID
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is waitlisted
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.save).to.have.been.called;
+
+      // No enrollment revocation attempted (no org ID)
+      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
+
+      // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('displaces already-onboarded domain when no ASO entitlement found for old org', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+      const NON_ASO_ENT_ID = 'non-aso-ent-id';
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
+
+      // Entitlement exists but is not ASO — no enrollment revocation should happen for old site
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([
+        { getId: sandbox.stub().returns(NON_ASO_ENT_ID), getProductCode: sandbox.stub().returns('other_product') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Displacement proceeds; enrollment for the non-ASO entitlement was never queried
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
+        .not.to.have.been.calledWith(NON_ASO_ENT_ID);
+
+      // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('continues onboarding new domain even when enrollment revocation fails', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
+
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([
+        { getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID), getProductCode: sandbox.stub().returns('aso_optimizer') },
+      ]);
+
+      // Simulate enrollment revocation failure on the first call (displacement),
+      // but succeed on subsequent calls (normal onboarding flow)
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .onFirstCall().rejects(new Error('DB timeout'))
+        .resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      // Displacement still completes — revocation failure is non-fatal
+      expect(res.status).to.equal(200);
+
+      // Old domain is waitlisted
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.save).to.have.been.called;
+
+      // Revocation failure was logged as error
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to revoke ASO enrollment/);
+
+      // New domain is still onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
   });
 
