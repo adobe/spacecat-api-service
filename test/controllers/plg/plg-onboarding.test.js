@@ -269,7 +269,9 @@ describe('PlgOnboardingController', () => {
       },
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
-        allBySiteId: sandbox.stub().resolves([]),
+      },
+      Entitlement: {
+        allByOrganizationId: sandbox.stub().resolves([]),
       },
       Opportunity: {
         allBySiteId: sandbox.stub().resolves([]),
@@ -1610,20 +1612,31 @@ describe('PlgOnboardingController', () => {
 
     it('displaces already-onboarded domain when it has no open PLG suggestions', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
+
       const onboardedRecord = createMockOnboarding({
         id: 'other-onboarding-id',
         domain: 'other-domain.com',
         status: 'ONBOARDED',
         siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
       });
       mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
       mockDataAccess.Opportunity.allBySiteId.resolves([]); // no opportunities → no suggestions
 
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'), // matches mocked PRODUCT_CODES.ASO
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+
       const mockEnrollmentToRevoke = {
         getId: sandbox.stub().returns('enroll-old-1'),
+        getSiteId: sandbox.stub().returns(OLD_SITE_ID),
         remove: sandbox.stub().resolves(),
       };
-      mockDataAccess.SiteEnrollment.allBySiteId.resolves([mockEnrollmentToRevoke]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollmentToRevoke]);
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
@@ -1636,8 +1649,10 @@ describe('PlgOnboardingController', () => {
         .to.have.been.calledWithMatch(/Displaced by new domain/);
       expect(onboardedRecord.save).to.have.been.called;
 
-      // Old site enrollment is revoked
-      expect(mockDataAccess.SiteEnrollment.allBySiteId).to.have.been.calledWith(OLD_SITE_ID);
+      // Only the ASO enrollment is revoked
+      expect(mockDataAccess.Entitlement.allByOrganizationId).to.have.been.calledWith(OLD_ORG_ID);
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
+        .to.have.been.calledWith(ASO_ENTITLEMENT_ID);
       expect(mockEnrollmentToRevoke.remove).to.have.been.called;
 
       // New domain is onboarded
@@ -1667,7 +1682,7 @@ describe('PlgOnboardingController', () => {
 
       // Old domain is NOT displaced
       expect(onboardedRecord.setStatus).not.to.have.been.called;
-      expect(mockDataAccess.SiteEnrollment.allBySiteId).not.to.have.been.called;
+      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
 
       // New domain is waitlisted
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');

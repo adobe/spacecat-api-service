@@ -413,12 +413,25 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
       alreadyOnboarded.setWaitlistReason(`Displaced by new domain ${domain} for IMS org ${imsOrgId}`);
       await alreadyOnboarded.save();
 
-      const { SiteEnrollment } = dataAccess;
-      const oldEnrollments = await SiteEnrollment.allBySiteId(alreadyOnboardedSiteId);
-      await Promise.all(oldEnrollments.map((e) => {
-        log.info(`Revoking enrollment ${e.getId()} for displaced site ${alreadyOnboardedSiteId}`);
-        return e.remove();
-      }));
+      // Only revoke ASO enrollments — leave other product enrollments untouched
+      const { SiteEnrollment, Entitlement } = dataAccess;
+      const oldOrgId = alreadyOnboarded.getOrganizationId();
+      if (oldOrgId) {
+        const entitlements = await Entitlement.allByOrganizationId(oldOrgId);
+        const asoEntitlement = entitlements.find((e) => e.getProductCode() === ASO_PRODUCT_CODE);
+        if (asoEntitlement) {
+          const asoEnrollments = await SiteEnrollment.allByEntitlementId(asoEntitlement.getId());
+          const toRevoke = asoEnrollments.filter((e) => e.getSiteId() === alreadyOnboardedSiteId);
+          await Promise.all(toRevoke.map((e) => {
+            log.info(`Revoking ASO enrollment ${e.getId()} for displaced site ${alreadyOnboardedSiteId}`);
+            return e.remove();
+          }));
+        } else {
+          log.info(`No ASO entitlement found for org ${oldOrgId}, nothing to revoke`);
+        }
+      } else {
+        log.warn(`Cannot revoke ASO enrollment for displaced site ${alreadyOnboardedSiteId}: no org ID on onboarding record`);
+      }
       // Fall through to continue onboarding the new domain
     } else {
       log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
