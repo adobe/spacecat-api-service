@@ -1304,7 +1304,7 @@ function LlmoController(ctx) {
             const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
             const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
             const hostname = calculateForwardedHost(effectiveBaseUrl, log);
-            const detectedCdn = await detectCdnForDomain(hostname);
+            const detectedCdn = await detectCdnForDomain(hostname, log);
             if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
               log.error(`[edge-optimize-routing-failed] Requested cdnType: '${cdnTypeNormalized}', detected CDN: '${detectedCdn}'`);
               return badRequest(`Requested CDN type '${cdnTypeNormalized}' does not match the detected CDN for this domain`);

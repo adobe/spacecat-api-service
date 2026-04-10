@@ -209,13 +209,12 @@ async function checkHost(host) {
  * @param {string} domain - Hostname to check (e.g. 'example.com')
  * @returns {Promise<string|null>} CDN identifier or null
  */
-export async function detectCdnForDomain(domain) {
+export async function detectCdnForDomain(domain, log) {
   try {
     return await checkHost(domain);
   } catch (err) {
     // DNS errors are treated as undetected — never break callers
-    /* eslint-disable-next-line no-console -- no logger in this util; surface for ops debugging */
-    console.error('detectCdnForDomain error', err);
+    log.error('detectCdnForDomain error', err);
   }
   return null;
 }
