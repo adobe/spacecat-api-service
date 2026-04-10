@@ -1,3 +1,10 @@
+# [1.435.0](https://github.com/adobe/spacecat-api-service/compare/v1.434.1...v1.435.0) (2026-04-10)
+
+
+### Features
+
+* **sites:** add enableMoneyPageUrls config flag ([#2182](https://github.com/adobe/spacecat-api-service/issues/2182)) ([e25e952](https://github.com/adobe/spacecat-api-service/commit/e25e9525ee65b4f8d6607aa5592a20dbcce718df))
+
 ## [1.434.1](https://github.com/adobe/spacecat-api-service/compare/v1.434.0...v1.434.1) (2026-04-10)
 
 
