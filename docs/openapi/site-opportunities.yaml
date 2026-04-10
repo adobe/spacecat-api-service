@@ -1557,3 +1557,36 @@ site-opportunity-status:
               $ref: './schemas.yaml#/FixStatusUpdateListResponse'
     security:
       - ims_key: [ ]
+
+site-suggestion-grant-revoke:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/grantId'
+  delete:
+    operationId: revokeSiteOpportunitySuggestionGrant
+    summary: |
+      Revoke a suggestion grant
+    description: |
+      Revokes a suggestion grant by grant ID. Atomically removes all suggestion_grants
+      rows for the given grant and refunds the consumed token back to the site's allocation.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '204':
+        description: Grant successfully revoked
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]

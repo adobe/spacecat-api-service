@@ -522,6 +522,8 @@ paths:
     $ref: './guidelines-api.yaml#/sentiment-config'
   /sites/{siteId}/tokens/by-type/{tokenType}:
     $ref: './tokens-api.yaml#/site-token-by-type'
+  /sites/{siteId}/suggestions/grants/{grantId}:
+    $ref: './site-opportunities.yaml#/site-suggestion-grant-revoke'
   /plg/onboard:
     $ref: './plg-onboarding-api.yaml#/plg-onboard'
   /plg/sites:

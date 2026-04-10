@@ -159,6 +159,13 @@ suggestionId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+grantId:
+  name: grantId
+  description: The suggestion grant ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
 scrapeType:
   name: scrapeType
   description: The type of scrape (forms, site)

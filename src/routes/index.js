@@ -538,6 +538,9 @@ export default function getRouteHandlers(
     // Tokens
     'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
 
+    // Suggestion grants
+    'DELETE /sites/:siteId/suggestions/grants/:grantId': suggestionsController.revokeGrant,
+
     // IMS Org Access (cross-org delegation grants)
     'POST /sites/:siteId/ims-org-access': imsOrgAccessController.createGrant,
     'GET /sites/:siteId/ims-org-access': imsOrgAccessController.listGrants,
