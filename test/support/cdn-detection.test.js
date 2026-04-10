@@ -137,6 +137,14 @@ describe('cdn-detection', () => {
     expect(result).to.be.null;
   });
 
+  it('returns null when CNAME resolves but resolve4 fails', async () => {
+    dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
+    dnsStubs.resolve4.rejects(new Error('SERVFAIL'));
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.be.null;
+  });
+
   it('returns null when an unexpected error occurs in checkHost', async () => {
     dnsStubs.resolveCname.resolves(null);
     dnsStubs.resolve4.resolves([]);
