@@ -244,6 +244,19 @@ describe('llmo-onboarding-mode', () => {
       expect(ctx.log.warn).to.have.been.calledWithMatch(/unparseable createdAt/);
     });
 
+    it('falls back to <unknown> in the warn when site has no getId (null createdAt)', async () => {
+      // Mirrors a partially-hydrated site model that exposes createdAt but not getId.
+      const ctx = makeContext({ sites: [{ getCreatedAt: () => null }] });
+      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/Site <unknown>.*has no createdAt/);
+    });
+
+    it('falls back to <unknown> in the warn when site has no getId (invalid createdAt)', async () => {
+      const ctx = makeContext({ sites: [{ getCreatedAt: () => 'not-a-date' }] });
+      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/Site <unknown>.*unparseable createdAt/);
+    });
+
     it('accepts a Date object for createdAt', async () => {
       const ctx = makeContext({ sites: [makeSite(new Date(CUTOFF - 1))] });
       expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(true);
