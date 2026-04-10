@@ -10090,6 +10090,26 @@ describe('Suggestions Controller', () => {
           default: {
             createFrom: sandbox.stub().returns(tokowakaClientStub),
           },
+          getEffectiveBaseURL: (siteOrBaseUrl) => {
+            if (typeof siteOrBaseUrl === 'string') {
+              return siteOrBaseUrl.startsWith('http') ? siteOrBaseUrl : `https://${siteOrBaseUrl}`;
+            }
+            const overrideBaseURL = siteOrBaseUrl.getConfig?.()?.getFetchConfig?.()?.overrideBaseURL;
+            if (overrideBaseURL && /^https?:\/\//.test(overrideBaseURL)) {
+              return overrideBaseURL;
+            }
+            return siteOrBaseUrl.getBaseURL();
+          },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
         },
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: {

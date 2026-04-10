@@ -302,6 +302,52 @@ async function updateLaunchDarklyFlags(site, context) {
   });
 }
 
+// The PLG opportunity types that are relevant for the displacement check.
+// Must stay in sync with LD_AUTO_FIX_FLAGS above, which enables auto-fix for the same types.
+const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
+
+/**
+ * Returns true if the given site has suggestions that should block displacement.
+ * Blocks displacement if any PLG opportunity (cwv, alt-text, broken-backlinks) has
+ * suggestions in any status except PENDING_VALIDATION or OUTDATED — meaning the customer
+ * has engaged with the suggestions (NEW, IN_PROGRESS, FIXED, SKIPPED, etc.).
+ * Returns true (conservative) on any lookup failure so we never accidentally displace
+ * a site that may still have active work.
+ * @param {string} siteId - The site ID to check.
+ * @param {object} dataAccess - Data access layer.
+ * @param {object} log - Logger.
+ * @returns {Promise<boolean>}
+ */
+async function hasActiveSuggestions(siteId, dataAccess, log) {
+  const { Opportunity, Suggestion } = dataAccess;
+  try {
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    const plgOpportunities = opportunities.filter(
+      (o) => PLG_OPPORTUNITY_TYPES.includes(o.getType()),
+    );
+
+    if (plgOpportunities.length === 0) {
+      return false;
+    }
+
+    const suggestionLists = await Promise.all(
+      plgOpportunities.map((o) => Suggestion.allByOpportunityId(o.getId())),
+    );
+
+    // Block displacement if any PLG opportunity has suggestions the customer engaged with.
+    // PENDING_VALIDATION and OUTDATED are excluded — they indicate stale/unconfirmed work.
+    const IGNORED_STATUSES = new Set(['PENDING_VALIDATION', 'OUTDATED']);
+    return suggestionLists.some(
+      (suggestions) => suggestions.some(
+        (s) => !IGNORED_STATUSES.has(s.getStatus()),
+      ),
+    );
+  } catch (error) {
+    log.warn(`Failed to check PLG suggestions for site ${siteId}: ${error.message}`);
+    return true; // conservative: do not displace if check fails
+  }
+}
+
 async function createOrFindProject(baseURL, organizationId, context) {
   const { dataAccess, log } = context;
   const { Project } = dataAccess;
@@ -395,18 +441,69 @@ async function performAsoPlgOnboarding({
   const alreadyOnboarded = existingRecords
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
   if (alreadyOnboarded) {
-    log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
-    const existingOrgForOnboarded = alreadyOnboarded.getOrganizationId()
-      ? await Organization.findById(alreadyOnboarded.getOrganizationId())
+    // If the existing onboarded site has no active PLG work (no open suggestions, and no
+    // completed audit with resolved suggestions), displace it: waitlist the old domain,
+    // revoke its ASO enrollment, and continue onboarding the new domain.
+    // NOTE: this check-then-act is not atomic. Two concurrent requests for the same IMS org
+    // could both pass this check and both proceed to onboard, temporarily violating the
+    // one-domain-per-org invariant. The invariant self-heals on the next onboarding attempt.
+    const alreadyOnboardedSiteId = alreadyOnboarded.getSiteId();
+    if (!alreadyOnboardedSiteId) {
+      log.info(`IMS org ${imsOrgId}: onboarded domain ${alreadyOnboarded.getDomain()} has no siteId, skipping displacement and waitlisting ${domain}`);
+    }
+    const canDisplace = alreadyOnboardedSiteId
+      && !(await hasActiveSuggestions(alreadyOnboardedSiteId, dataAccess, log));
+
+    if (canDisplace) {
+      log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
+      alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
+      alreadyOnboarded.setWaitlistReason(`Displaced by new domain ${domain} for IMS org ${imsOrgId}`);
+      await alreadyOnboarded.save();
+      // NOTE: the underlying Site record is intentionally left unchanged. The Site model does
+      // not carry PLG lifecycle state — PlgOnboarding is the sole source of truth for whether
+      // a domain is actively enrolled in PLG. Audit scheduling and other downstream systems
+      // should gate on PlgOnboarding status, not the Site record directly.
+
+      // Only revoke ASO enrollments — leave other product enrollments untouched.
+      // Revocation failure is non-fatal: log the error and continue so the new domain
+      // still gets onboarded. Orphaned enrollments can be cleaned up out-of-band.
+      const { SiteEnrollment, Entitlement } = dataAccess;
+      const oldOrgId = alreadyOnboarded.getOrganizationId();
+      if (oldOrgId) {
+        try {
+          const entitlements = await Entitlement.allByOrganizationId(oldOrgId);
+          const asoEntitlement = entitlements.find((e) => e.getProductCode() === ASO_PRODUCT_CODE);
+          if (asoEntitlement) {
+            const asoEnrollments = await SiteEnrollment.allByEntitlementId(asoEntitlement.getId());
+            const toRevoke = asoEnrollments.filter((e) => e.getSiteId() === alreadyOnboardedSiteId);
+            await Promise.all(toRevoke.map((e) => {
+              log.info(`Revoking ASO enrollment ${e.getId()} for displaced site ${alreadyOnboardedSiteId}`);
+              return e.remove();
+            }));
+          } else {
+            log.warn(`No ASO entitlement found for org ${oldOrgId}, nothing to revoke`);
+          }
+        } catch (revokeError) {
+          log.error(`Failed to revoke ASO enrollment for displaced site ${alreadyOnboardedSiteId}: ${revokeError.message}`);
+        }
+      } else {
+        log.warn(`Cannot revoke ASO enrollment for displaced site ${alreadyOnboardedSiteId}: no org ID on onboarding record`);
+      }
+      // Fall through to continue onboarding the new domain
+    } else {
+      const existingOrgForOnboarded = alreadyOnboarded.getOrganizationId()
+        ? await Organization.findById(alreadyOnboarded.getOrganizationId())
+        /* c8 ignore next */
+        : null;
       /* c8 ignore next */
-      : null;
-    /* c8 ignore next */
-    const existingOrgName = existingOrgForOnboarded?.getName?.()
-      || alreadyOnboarded.getOrganizationId();
-    onboarding.setStatus(STATUSES.WAITLISTED);
-    onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
-    await onboarding.save();
-    return onboarding;
+      const existingOrgName = existingOrgForOnboarded?.getName?.()
+        || alreadyOnboarded.getOrganizationId();
+      log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+      onboarding.setStatus(STATUSES.WAITLISTED);
+      onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
+      await onboarding.save();
+      return onboarding;
+    }
   }
 
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
