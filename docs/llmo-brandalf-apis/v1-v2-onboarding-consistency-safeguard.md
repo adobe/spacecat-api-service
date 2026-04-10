@@ -3,6 +3,12 @@
 **Jira:** [LLMO-4176](https://jira.corp.adobe.com/browse/LLMO-4176)
 **Epic:** [LLMO-4054 — Brandalf GA (Brandalf v1 fast follows)](https://jira.corp.adobe.com/browse/LLMO-4054)
 **Status:** Proposal / implementation plan
+**Lifetime:** **Temporary.** This rule is a stop-gap to keep new and legacy
+customers from drifting into a mixed v1/v2 state. It should be **removed once
+all v1 customers have been migrated to v2**, at which point
+`resolveLlmoOnboardingMode` collapses to "always v2" and both
+`LLMO_ONBOARDING_DEFAULT_VERSION` and `LLMO_BRANDALF_GA_CUTOFF_MS` can be
+deleted.
 
 ## Problem
 
@@ -288,12 +294,6 @@ Focused tests for `hasPreBrandalfSites`:
 - returns `false` for sites with `null`/`undefined`/invalid `createdAt`.
 - honors a custom `LLMO_BRANDALF_GA_CUTOFF_MS` from `context.env`.
 
-- `hasPreBrandalfSites` (focused tests)
-  - returns `false` for an org with no sites.
-  - returns `true` when at least one site predates the cutoff.
-  - returns `false` when all sites are at or after the cutoff.
-  - returns `false` for sites with `null`/`undefined`/invalid `createdAt`.
-
 ### Integration tests — `test/it/`
 
 Run with `LLMO_BRANDALF_GA_CUTOFF_MS=1743465600000`
@@ -339,6 +339,35 @@ Output is a CSV/JSON file for manual remediation. The script is **read-only**.
 
 No OpenAPI changes are required for the rule itself — the request/response
 shapes of `POST /llmo/onboard` and the feature-flags endpoints are unchanged.
+
+## Temporary nature & removal plan
+
+This rule is **a temporary stop-gap, not the long-term design.** It exists
+because we still have v1 customers in production and we need to keep them
+on the v1 onboarding path while new customers default to v2. Once **all v1
+customers have been migrated to v2** (tracked separately under the Brandalf
+GA epic), this entire mechanism should be removed.
+
+**When we remove it:**
+
+1. Delete `hasPreBrandalfSites`, `resolveBrandalfCutoffMs`, and the
+   `LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT` constant from
+   `src/support/llmo-onboarding-mode.js`.
+2. Delete the `LLMO_BRANDALF_GA_CUTOFF_MS` env var from dev / stage / prod
+   Lambda configs and from `.env.example`.
+3. Decide whether `LLMO_ONBOARDING_DEFAULT_VERSION` is still useful as a
+   global kill switch; if not, delete it and `normalizeLlmoOnboardingMode`
+   too, and inline `resolveLlmoOnboardingMode` to `() => 'v2'` (or remove
+   the function entirely and have `performLlmoOnboarding` skip the
+   branching).
+4. Drop the unit tests added in this PR (search for
+   `LLMO_BRANDALF_GA_CUTOFF_MS` and `hasPreBrandalfSites`) and the IT
+   scenarios that depend on pre-/post-cutoff `created_at` seed data.
+5. Drop the monitoring script if it is no longer needed.
+
+The point is: **none of the new code added in this PR should outlive the
+v1→v2 migration.** Leaving any of it in place after the migration is
+finished would be dead code that future readers would have to reverse-engineer.
 
 ## Open questions
 

@@ -37,6 +37,10 @@ describe('LLMO Onboarding Functions', () => {
       Site: {
         findByBaseURL: sinon.stub(),
         create: sinon.stub(),
+        // Default: no pre-cutoff sites → mode resolution returns v2 (the default).
+        // Tests that need v1 mode should set LLMO_ONBOARDING_DEFAULT_VERSION='v1'
+        // in context.env to use the global kill switch.
+        allByOrganizationId: sinon.stub().resolves([]),
       },
       Organization: {
         findByImsOrgId: sinon.stub(),
@@ -1615,13 +1619,7 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: false }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
-      const eqProduct = sinon.stub().returns({ eq: eqFlag });
-      const eqOrg = sinon.stub().returns({ eq: eqProduct });
-      const select = sinon.stub().returns({ eq: eqOrg });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select });
-
+      // Force v1 mode via the global kill switch — no brandalf flag lookup needed.
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
       mockDataAccess.Site.create.resolves(mockSite);
@@ -1657,7 +1655,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: mockEnv,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
