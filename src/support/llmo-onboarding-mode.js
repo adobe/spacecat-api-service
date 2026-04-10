@@ -26,10 +26,6 @@ export const LLMO_ONBOARDING_MODE_V2 = 'v2';
  */
 export const LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT = Date.UTC(2026, 3, 1);
 
-export function normalizeLlmoOnboardingMode(mode) {
-  return mode === LLMO_ONBOARDING_MODE_V2 ? LLMO_ONBOARDING_MODE_V2 : LLMO_ONBOARDING_MODE_V1;
-}
-
 export async function readBrandalfFlagOverride(organizationId, postgrestClient) {
   if (!organizationId || !postgrestClient?.from) {
     return null;
@@ -70,7 +66,8 @@ export function resolveBrandalfCutoffMs(context) {
 /**
  * Returns true if the organization has any site whose createdAt is strictly before
  * the resolved cutoff. Sites with missing or unparseable createdAt are ignored (not
- * treated as legacy) to avoid false positives.
+ * treated as legacy) to avoid false positives, but logged so monitoring can pick up
+ * data-quality issues — silently swallowing them would bias the safeguard toward v2.
  *
  * TEMPORARY — remove once all v1 customers have been migrated to v2.
  *
@@ -81,16 +78,26 @@ export function resolveBrandalfCutoffMs(context) {
 export async function hasPreBrandalfSites(organizationId, context) {
   const cutoffMs = resolveBrandalfCutoffMs(context);
   const { Site } = context.dataAccess;
+  const log = context?.log;
   const sites = await Site.allByOrganizationId(organizationId);
   return sites.some((s) => {
     const createdAt = s.getCreatedAt?.();
-    if (!createdAt) {
+    if (createdAt === null || createdAt === undefined) {
+      log?.warn?.(
+        `Site ${s.getId?.() ?? '<unknown>'} in org ${organizationId} has no createdAt — skipping legacy check`,
+      );
       return false;
     }
     const ts = createdAt instanceof Date
       ? createdAt.getTime()
       : new Date(createdAt).getTime();
-    return Number.isFinite(ts) && ts < cutoffMs;
+    if (!Number.isFinite(ts)) {
+      log?.warn?.(
+        `Site ${s.getId?.() ?? '<unknown>'} in org ${organizationId} has unparseable createdAt "${createdAt}" — skipping legacy check`,
+      );
+      return false;
+    }
+    return ts < cutoffMs;
   });
 }
 
@@ -101,7 +108,10 @@ export async function hasPreBrandalfSites(organizationId, context) {
  *  1. If LLMO_ONBOARDING_DEFAULT_VERSION is explicitly set to 'v1', return v1 immediately
  *     (global kill switch — skips the DB lookup).
  *  2. If the org has any site created before LLMO_BRANDALF_GA_CUTOFF_MS, return v1
- *     (legacy customer protection).
+ *     (legacy customer protection). If that org *also* has `brandalf=true` already
+ *     set, log an error: this means a previously-migrated v2 org is being forced
+ *     back to v1, which leaves the org in a mixed state (v2 flag + new v1 site)
+ *     that needs manual remediation.
  *  3. Otherwise return v2 (new customer default).
  *
  * TEMPORARY — the legacy-customer check (step 2) should be removed once all v1
@@ -131,6 +141,24 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
   // 2. Protect legacy customers: any org with a pre-cutoff site stays on v1.
   try {
     if (await hasPreBrandalfSites(organizationId, context)) {
+      // Detect the regression case: org has a pre-cutoff site but was *already*
+      // migrated to v2 (brandalf flag set). Forcing back to v1 here will leave
+      // a mixed v1/v2 state that the monitoring script needs to flag.
+      // Best-effort — failure to read the flag must not block onboarding.
+      try {
+        const postgrestClient = context?.dataAccess?.services?.postgrestClient;
+        const brandalfEnabled = await readBrandalfFlagOverride(organizationId, postgrestClient);
+        if (brandalfEnabled === true) {
+          log.error(
+            `LLMO mode resolution: organization ${organizationId} has brandalf=true but also a pre-Brandalf-GA site. `
+            + 'Forcing v1 will create a mixed v1/v2 state — manual remediation required.',
+          );
+        }
+      } catch (flagError) {
+        log.warn(
+          `Failed to read brandalf flag for mixed-state check on org ${organizationId}: ${flagError.message}`,
+        );
+      }
       return LLMO_ONBOARDING_MODE_V1;
     }
   } catch (error) {

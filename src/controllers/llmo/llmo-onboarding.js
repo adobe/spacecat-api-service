@@ -1013,6 +1013,12 @@ export async function createOrFindSite(baseURL, organizationId, context, deliver
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
       site.setOrganizationId(organizationId);
+      // Persist the re-parent immediately. resolveLlmoOnboardingMode (called
+      // right after this in performLlmoOnboarding) reads sites by org_id, so
+      // the move must be visible to that query — otherwise a legacy site
+      // re-parented into a brand-new org would be classified as v2 and create
+      // an instant mixed v1/v2 state. (LLMO-4176)
+      await site.save();
     }
 
     return site;
@@ -1259,10 +1265,16 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
-    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
-    // Create site
+    // Create site BEFORE resolving the onboarding mode. createOrFindSite may
+    // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
+    // reads Site.allByOrganizationId, so the re-parent has to be persisted first
+    // (createOrFindSite saves the site in that branch). Otherwise a legacy
+    // pre-cutoff site moved into a brand-new org would be misclassified as v2
+    // and instantly create the mixed state LLMO-4176 was filed to prevent.
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
+
+    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
     log.info(`Created site ${site.getId()} for ${baseURL} using LLMO onboarding mode ${onboardingMode}`);
 

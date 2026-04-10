@@ -18,7 +18,6 @@ import sinonChai from 'sinon-chai';
 import {
   LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT,
   hasPreBrandalfSites,
-  normalizeLlmoOnboardingMode,
   readBrandalfFlagOverride,
   resolveBrandalfCutoffMs,
   resolveLlmoOnboardingMode,
@@ -33,14 +32,43 @@ const BEFORE_CUTOFF = new Date(CUTOFF - 1).toISOString(); // 2026-03-31T23:59:59
 const AT_CUTOFF = new Date(CUTOFF).toISOString(); // 2026-04-01T00:00:00.000Z
 const AFTER_CUTOFF = new Date(CUTOFF + 86400000).toISOString(); // 2026-04-02T00:00:00.000Z
 
-function makeSite(createdAt) {
-  return { getCreatedAt: () => createdAt };
+function makeSite(createdAt, id = 'site-id') {
+  return { getCreatedAt: () => createdAt, getId: () => id };
 }
 
-function makeContext({ sites = [], env = {}, throwOnLookup = false } = {}) {
+/**
+ * Builds a postgrestClient stub whose feature_flags read returns the given value.
+ * Pass `null` to simulate a missing row, `'throw'` to simulate a DB error.
+ */
+function makePostgrestClient(brandalfValue) {
+  if (brandalfValue === undefined) {
+    return undefined;
+  }
+  const maybeSingle = brandalfValue === 'throw'
+    ? sinon.stub().resolves({ data: null, error: { message: 'boom' } })
+    : sinon.stub().resolves({
+      data: brandalfValue === null ? null : { flag_value: brandalfValue },
+      error: null,
+    });
   return {
+    from: sinon.stub().returns({
+      select: sinon.stub().returns({
+        eq: sinon.stub().returns({
+          eq: sinon.stub().returns({
+            eq: sinon.stub().returns({ maybeSingle }),
+          }),
+        }),
+      }),
+    }),
+  };
+}
+
+function makeContext({
+  sites = [], env = {}, throwOnLookup = false, brandalfValue,
+} = {}) {
+  const ctx = {
     env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(CUTOFF), ...env },
-    log: { warn: sinon.stub() },
+    log: { warn: sinon.stub(), error: sinon.stub() },
     dataAccess: {
       Site: {
         allByOrganizationId: throwOnLookup
@@ -49,19 +77,15 @@ function makeContext({ sites = [], env = {}, throwOnLookup = false } = {}) {
       },
     },
   };
+  const postgrestClient = makePostgrestClient(brandalfValue);
+  if (postgrestClient) {
+    ctx.dataAccess.services = { postgrestClient };
+  }
+  return ctx;
 }
 
 describe('llmo-onboarding-mode', () => {
   afterEach(() => sinon.restore());
-
-  // ── normalizeLlmoOnboardingMode ───────────────────────────────────────────
-
-  describe('normalizeLlmoOnboardingMode', () => {
-    it('returns v2 for v2', () => expect(normalizeLlmoOnboardingMode('v2')).to.equal('v2'));
-    it('returns v1 for v1', () => expect(normalizeLlmoOnboardingMode('v1')).to.equal('v1'));
-    it('returns v1 for undefined', () => expect(normalizeLlmoOnboardingMode()).to.equal('v1'));
-    it('returns v1 for invalid values', () => expect(normalizeLlmoOnboardingMode('bogus')).to.equal('v1'));
-  });
 
   // ── readBrandalfFlagOverride ──────────────────────────────────────────────
 
@@ -202,19 +226,22 @@ describe('llmo-onboarding-mode', () => {
       expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(true);
     });
 
-    it('returns false for sites with null createdAt', async () => {
+    it('returns false for sites with null createdAt and warns', async () => {
       const ctx = makeContext({ sites: [makeSite(null)] });
       expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/has no createdAt/);
     });
 
-    it('returns false for sites with undefined createdAt', async () => {
+    it('returns false for sites with undefined createdAt and warns', async () => {
       const ctx = makeContext({ sites: [makeSite(undefined)] });
       expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/has no createdAt/);
     });
 
-    it('returns false for sites with invalid createdAt string', async () => {
+    it('returns false for sites with invalid createdAt string and warns', async () => {
       const ctx = makeContext({ sites: [makeSite('not-a-date')] });
       expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
+      expect(ctx.log.warn).to.have.been.calledWithMatch(/unparseable createdAt/);
     });
 
     it('accepts a Date object for createdAt', async () => {
@@ -321,6 +348,60 @@ describe('llmo-onboarding-mode', () => {
           env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(futureCutoff) },
         });
         expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
+      });
+    });
+
+    describe('mixed-state detection (pre-cutoff site + brandalf=true)', () => {
+      it('logs an error when a v2-migrated org gets forced back to v1', async () => {
+        const ctx = makeContext({
+          sites: [makeSite(BEFORE_CUTOFF)],
+          brandalfValue: true,
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v1');
+        expect(ctx.log.error).to.have.been.calledWithMatch(/mixed v1\/v2 state/);
+      });
+
+      it('does not log an error when brandalf flag is missing', async () => {
+        const ctx = makeContext({
+          sites: [makeSite(BEFORE_CUTOFF)],
+          brandalfValue: null, // row missing
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v1');
+        expect(ctx.log.error).not.to.have.been.called;
+      });
+
+      it('does not log an error when brandalf flag is false', async () => {
+        const ctx = makeContext({
+          sites: [makeSite(BEFORE_CUTOFF)],
+          brandalfValue: false,
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v1');
+        expect(ctx.log.error).not.to.have.been.called;
+      });
+
+      it('still returns v1 and only warns if the brandalf flag read fails', async () => {
+        const ctx = makeContext({
+          sites: [makeSite(BEFORE_CUTOFF)],
+          brandalfValue: 'throw',
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v1');
+        expect(ctx.log.error).not.to.have.been.called;
+        expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read brandalf flag/);
+      });
+
+      it('does not attempt to read the flag for new orgs (v2 path)', async () => {
+        const ctx = makeContext({
+          sites: [makeSite(AFTER_CUTOFF)],
+          brandalfValue: true,
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v2');
+        expect(ctx.dataAccess.services.postgrestClient.from).not.to.have.been.called;
+        expect(ctx.log.error).not.to.have.been.called;
       });
     });
   });

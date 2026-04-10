@@ -54,7 +54,7 @@ In words:
 The cutoff is a **Unix epoch timestamp in milliseconds**, supplied via the
 environment variable `LLMO_BRANDALF_GA_CUTOFF_MS`, so it can be tweaked
 without a code change or full redeployment (Lambda env-var update is enough).
-A reasonable default — e.g. `1743465600000` (`2026-04-01T00:00:00Z`) — is
+A reasonable default — e.g. `1775001600000` (`2026-04-01T00:00:00Z`) — is
 hard-coded as a fallback in case the env var is missing or unparseable, so
 the function never fails closed.
 
@@ -110,7 +110,7 @@ New helper, exported from `src/support/llmo-onboarding-mode.js`:
 // Default fallback: 2026-04-01T00:00:00Z, used if the env var is missing or
 // unparseable. Kept as epoch ms (not a Date) so it round-trips cleanly with
 // the env var.
-export const LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT = 1743465600000;
+export const LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT = 1775001600000;
 
 /**
  * Resolves the GA cutoff (epoch ms) from the environment, falling back to
@@ -157,50 +157,68 @@ export async function hasPreBrandalfSites(organizationId, context) {
 export async function resolveLlmoOnboardingMode(organizationId, context) {
   const { log = console } = context || {};
 
-  // 1. Resolve the environment-level default. v2 if unset, v1 only if
-  //    explicitly configured (kill switch).
+  // 1. Environment-level default. 'v1' is the global kill switch (no DB lookup);
+  //    anything else (including unset) falls through to the per-org check and
+  //    defaults to v2. An unrecognised value is logged and treated as v2.
   const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
-  const defaultMode = normalizeLlmoOnboardingMode(configuredDefault)
-    || LLMO_ONBOARDING_MODE_V2;
-  if (configuredDefault && configuredDefault !== defaultMode) {
+  if (configuredDefault === LLMO_ONBOARDING_MODE_V1) {
+    return LLMO_ONBOARDING_MODE_V1;
+  }
+  if (configuredDefault && configuredDefault !== LLMO_ONBOARDING_MODE_V2) {
     log.warn(
-      `Invalid LLMO_ONBOARDING_DEFAULT_VERSION "${configuredDefault}", falling back to ${defaultMode}`,
+      `Invalid LLMO_ONBOARDING_DEFAULT_VERSION "${configuredDefault}", falling back to ${LLMO_ONBOARDING_MODE_V2}`,
     );
   }
 
-  // 2. If the global default is v1, that wins — no per-org check needed.
-  if (defaultMode === LLMO_ONBOARDING_MODE_V1) {
-    return LLMO_ONBOARDING_MODE_V1;
-  }
-
-  // 3. Default is v2. Protect legacy customers: an org that already has at
-  //    least one site created before the GA cutoff stays on v1.
+  // 2. Protect legacy customers: any org with a pre-cutoff site stays on v1.
+  //    If the org *also* already has brandalf=true, log an error — that's a
+  //    previously-migrated v2 org being forced back to v1, which leaves a
+  //    mixed state requiring manual remediation.
   try {
     if (await hasPreBrandalfSites(organizationId, context)) {
+      try {
+        const postgrestClient = context?.dataAccess?.services?.postgrestClient;
+        const brandalfEnabled = await readBrandalfFlagOverride(organizationId, postgrestClient);
+        if (brandalfEnabled === true) {
+          log.error(
+            `LLMO mode resolution: organization ${organizationId} has brandalf=true but also a pre-Brandalf-GA site. `
+            + 'Forcing v1 will create a mixed v1/v2 state — manual remediation required.',
+          );
+        }
+      } catch (flagError) {
+        log.warn(
+          `Failed to read brandalf flag for mixed-state check on org ${organizationId}: ${flagError.message}`,
+        );
+      }
       return LLMO_ONBOARDING_MODE_V1;
     }
   } catch (error) {
     log.warn(
       `Failed to check pre-Brandalf sites for organization ${organizationId}: ${error.message}`,
     );
-    // On lookup failure we fall through to the configured default (v2). This
-    // is the safer choice for brand-new orgs; the only risk is that a
-    // legacy org with a transient DB error gets v2 — acceptable because the
-    // monitoring script will surface it.
+    // On lookup failure we fall through to v2. This is the safer choice for
+    // brand-new orgs; the only risk is that a legacy org with a transient DB
+    // error gets v2 — acceptable because the monitoring script will surface it.
   }
 
   return LLMO_ONBOARDING_MODE_V2;
 }
 ```
 
-The existing `readBrandalfFlagOverride` helper is no longer called from
-`resolveLlmoOnboardingMode`. It can stay in the file (still used by the
-feature-flags controller and any other readers) but is removed from the mode
-resolution path.
+`readBrandalfFlagOverride` is still used here — but only as a *diagnostic* in
+the v1 branch, never as an input to the decision. The mode is determined
+purely from `Site.allByOrganizationId(...).createdAt`.
 
-No changes to `performLlmoOnboarding` itself, no changes to the
-feature-flags controller, no new error type — the rule is entirely contained
-in mode resolution.
+`performLlmoOnboarding` calls `resolveLlmoOnboardingMode` **after**
+`createOrFindSite`, and `createOrFindSite` persists any cross-org re-parent
+immediately (`await site.save()` in the `setOrganizationId` branch). This
+ordering matters: a legacy site re-parented into a brand-new org must be
+visible to the `Site.allByOrganizationId` query in `hasPreBrandalfSites`,
+otherwise the new org would be classified v2 and instantly enter the mixed
+state this safeguard is meant to prevent. (LLMO-4176)
+
+No changes to the feature-flags controller, no new error type — the rule is
+contained in mode resolution + the controller call ordering.
 
 ### Flow diagram
 
@@ -237,7 +255,7 @@ an input to `resolveLlmoOnboardingMode`.
 
 Unless otherwise stated, tests run with:
 
-- `context.env.LLMO_BRANDALF_GA_CUTOFF_MS = 1743465600000`
+- `context.env.LLMO_BRANDALF_GA_CUTOFF_MS = 1775001600000`
   (`2026-04-01T00:00:00Z`)
 - `context.env.LLMO_ONBOARDING_DEFAULT_VERSION` **unset** (so the default
   resolves to `v2`)
@@ -281,8 +299,8 @@ New cases for `resolveLlmoOnboardingMode`:
 Focused tests for `resolveBrandalfCutoffMs`:
 
 - env var unset → returns the default constant.
-- env var set to a valid numeric string (e.g. `'1743465600000'`) → returns
-  `1743465600000`.
+- env var set to a valid numeric string (e.g. `'1775001600000'`) → returns
+  `1775001600000`.
 - env var set to `0`, a negative number, `'abc'`, or empty string → returns
   the default and logs a warning.
 
@@ -296,7 +314,7 @@ Focused tests for `hasPreBrandalfSites`:
 
 ### Integration tests — `test/it/`
 
-Run with `LLMO_BRANDALF_GA_CUTOFF_MS=1743465600000`
+Run with `LLMO_BRANDALF_GA_CUTOFF_MS=1775001600000`
 (`2026-04-01T00:00:00Z`).
 
 Add to `test/it/shared/tests/llmo-onboarding.js` /
@@ -356,10 +374,9 @@ GA epic), this entire mechanism should be removed.
 2. Delete the `LLMO_BRANDALF_GA_CUTOFF_MS` env var from dev / stage / prod
    Lambda configs and from `.env.example`.
 3. Decide whether `LLMO_ONBOARDING_DEFAULT_VERSION` is still useful as a
-   global kill switch; if not, delete it and `normalizeLlmoOnboardingMode`
-   too, and inline `resolveLlmoOnboardingMode` to `() => 'v2'` (or remove
-   the function entirely and have `performLlmoOnboarding` skip the
-   branching).
+   global kill switch; if not, delete it and inline `resolveLlmoOnboardingMode`
+   to `() => 'v2'` (or remove the function entirely and have
+   `performLlmoOnboarding` skip the branching).
 4. Drop the unit tests added in this PR (search for
    `LLMO_BRANDALF_GA_CUTOFF_MS` and `hasPreBrandalfSites`) and the IT
    scenarios that depend on pre-/post-cutoff `created_at` seed data.
@@ -371,7 +388,7 @@ finished would be dead code that future readers would have to reverse-engineer.
 
 ## Open questions
 
-1. **Default cutoff.** Plan uses a hard-coded fallback of `1743465600000`
+1. **Default cutoff.** Plan uses a hard-coded fallback of `1775001600000`
    (`2026-04-01T00:00:00Z`). The real cutoff will be set per-environment via
    `LLMO_BRANDALF_GA_CUTOFF_MS`. Confirm the default is acceptable for any
    env where the var is missing.
@@ -391,9 +408,9 @@ finished would be dead code that future readers would have to reverse-engineer.
 1. Add `LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT` constant +
    `resolveBrandalfCutoffMs` + `hasPreBrandalfSites` helpers to
    `src/support/llmo-onboarding-mode.js`, and update
-   `resolveLlmoOnboardingMode` to use them. Keep `normalizeLlmoOnboardingMode`
-   and the `LLMO_ONBOARDING_DEFAULT_VERSION` env var as-is — they still drive
-   the global default and the v1 kill switch.
+   `resolveLlmoOnboardingMode` to use them. Keep the
+   `LLMO_ONBOARDING_DEFAULT_VERSION` env var as-is — it still drives the v1
+   kill switch.
 2. Extend `test/support/llmo-onboarding-mode.test.js` with the new cases.
 3. Add integration tests in `test/it/` with seed data covering the four
    scenarios above.

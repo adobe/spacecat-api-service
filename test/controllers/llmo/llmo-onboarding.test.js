@@ -1212,8 +1212,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      // Note: save() is NOT called by createOrFindSite, it's the caller's responsibility
-      expect(mockSite.save).to.not.have.been.called;
+      // LLMO-4176: re-parent must be persisted before resolveLlmoOnboardingMode
+      // queries Site.allByOrganizationId, otherwise a legacy site moved into a
+      // brand-new org would be misclassified as v2.
+      expect(mockSite.save).to.have.been.calledOnce;
     });
 
     it('should not update organization ID when existing site has same organization', async () => {
@@ -1411,6 +1413,13 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         organizationId: 'org123',
       });
+
+      // LLMO-4176 regression guard: resolveLlmoOnboardingMode reads
+      // Site.allByOrganizationId, and that read MUST happen after the site
+      // has been created/re-parented — otherwise a legacy site moved into a
+      // brand-new org gets misclassified as v2.
+      expect(mockDataAccess.Site.allByOrganizationId)
+        .to.have.been.calledAfter(mockDataAccess.Site.findByBaseURL);
 
       // Verify site config was updated
       expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
