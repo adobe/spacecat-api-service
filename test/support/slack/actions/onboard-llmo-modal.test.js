@@ -130,7 +130,11 @@ describe('onboard-llmo-modal', () => {
           maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
         }),
       }),
-      upsert: sinonSandbox.stub().resolves({ error: null }),
+      upsert: sinonSandbox.stub().returns({
+        select: sinonSandbox.stub().returns({
+          single: sinonSandbox.stub().resolves({ data: { flag_value: true }, error: null }),
+        }),
+      }),
     })),
   });
 
