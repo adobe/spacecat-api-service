@@ -1,3 +1,15 @@
+# [1.431.0](https://github.com/adobe/spacecat-api-service/compare/v1.430.0...v1.431.0) (2026-04-10)
+
+
+### Bug Fixes
+
+* update waitlisted PLG ([#2170](https://github.com/adobe/spacecat-api-service/issues/2170)) ([264716e](https://github.com/adobe/spacecat-api-service/commit/264716e91e22ecdf4e6f357b7b6d6828929a7547))
+
+
+### Features
+
+* **brands:** persist and return URL type field in brand_sites (LLMO-4058) ([#2149](https://github.com/adobe/spacecat-api-service/issues/2149)) ([9e403d2](https://github.com/adobe/spacecat-api-service/commit/9e403d23ce67af3de63e6efefef4ca1c3b6b7ca0)), closes [adobe-rnd/llmo-data-retrieval-service#1222](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1222)
+
 # [1.430.0](https://github.com/adobe/spacecat-api-service/compare/v1.429.0...v1.430.0) (2026-04-09)
 
 
