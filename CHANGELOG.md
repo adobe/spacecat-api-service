@@ -1,3 +1,10 @@
+# [1.433.0](https://github.com/adobe/spacecat-api-service/compare/v1.432.0...v1.433.0) (2026-04-10)
+
+
+### Features
+
+* **plg:** displace already-onboarded domain when PLG suggestions are empty   ([#2176](https://github.com/adobe/spacecat-api-service/issues/2176)) ([5cfeb41](https://github.com/adobe/spacecat-api-service/commit/5cfeb41919c595b211cdfed0e67aa584ca075d5a))
+
 # [1.432.0](https://github.com/adobe/spacecat-api-service/compare/v1.431.0...v1.432.0) (2026-04-10)
 
 
