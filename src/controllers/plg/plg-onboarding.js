@@ -167,12 +167,12 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
 }
 
 /**
- * Revokes all ASO site enrollments for a given onboarding record.
+ * Revokes all ASO site enrollments for the site linked to a given onboarding record.
  * Called when transitioning an ONBOARDED domain to INACTIVE.
  * @param {object} onboarding - The PlgOnboarding record being offboarded.
  * @param {object} context - Request context.
  */
-async function revokeOnboardedSiteEnrollments(onboarding, context) {
+async function revokeAsoSiteEnrollments(onboarding, context) {
   const { dataAccess, log } = context;
   const { Site } = dataAccess;
 
@@ -1072,7 +1072,7 @@ function PlgOnboardingController(ctx) {
             }]);
             await oldOnboarded.save();
             try {
-              await revokeOnboardedSiteEnrollments(oldOnboarded, context);
+              await revokeAsoSiteEnrollments(oldOnboarded, context);
             } catch (revokeErr) {
               log.warn(`Failed to revoke enrollments for offboarded domain ${oldOnboarded.getDomain()}: ${revokeErr.message}`);
             }
