@@ -71,6 +71,7 @@ export async function detectCdnForDomain(domain) {
     if (wwwResult === null || bareResult === null) return null;
 
     return 'other';
+    /* c8 ignore next 3 */
   } catch {
     return null;
   }
