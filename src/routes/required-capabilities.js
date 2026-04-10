@@ -484,6 +484,10 @@ const routeRequiredCapabilities = {
 
   // Tokens
   'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
+  'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
+
+  // Suggestion grants
+  'DELETE /sites/:siteId/suggestions/grants/:grantId': 'suggestion:write',
 };
 
 export default routeRequiredCapabilities;

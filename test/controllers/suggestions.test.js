@@ -176,6 +176,7 @@ describe('Suggestions Controller', () => {
     'patchSuggestion',
     'patchSuggestionsStatus',
     'removeSuggestion',
+    'revokeGrant',
   ];
 
   let mockSuggestionDataAccess;
@@ -478,6 +479,7 @@ describe('Suggestions Controller', () => {
         return Promise.resolve({ grantedIds: ids, notGrantedIds: [], grantIds: ids.map((id) => `grant-${id}`) });
       }),
       isSuggestionGranted: sandbox.stub().resolves(true),
+      revokeSuggestionGrant: sandbox.stub().resolves({ success: true, revokedCount: 1 }),
     };
 
     mockSuggestionDataAccess = {
@@ -10133,6 +10135,93 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(log.info.calledWithMatch('tokowaka-edge-optimize-config')).to.be.true;
+    });
+  });
+
+  describe('revokeGrant', () => {
+    const GRANT_ID = 'b1c2d3e4-0000-4000-a000-000000000001';
+
+    it('returns 400 if site ID is missing', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns 400 if grant ID is missing', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Grant ID required');
+    });
+
+    it('returns 400 if grant ID is not a valid UUID', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: 'not-a-uuid' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Grant ID required');
+    });
+
+    it('returns 404 if site is not found', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID_NOT_FOUND, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Site not found');
+    });
+
+    it('returns 403 if user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'User does not belong to the organization');
+    });
+
+    it('returns 204 when grant is successfully revoked', async () => {
+      mockSuggestionGrant.revokeSuggestionGrant.resolves({ success: true, revokedCount: 1 });
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(204);
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnceWith(GRANT_ID);
+    });
+
+    it('returns 404 when grant is not found', async () => {
+      mockSuggestionGrant.revokeSuggestionGrant.resolves({ success: false, reason: 'rpc_no_result' });
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Grant not found');
+    });
+
+    it('returns 500 when the revoke RPC throws', async () => {
+      mockSuggestionGrant.revokeSuggestionGrant.rejects(new Error('RPC failure'));
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Error revoking grant');
     });
   });
 });
