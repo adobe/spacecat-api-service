@@ -90,26 +90,11 @@ function deriveCheckKey(onboarding) {
   return null;
 }
 
-/**
- * Checks whether a specific blocking reason has been bypassed by the most recent review.
- * Only the last review in the array is considered — if a newer bypass was added for a
- * different reason (e.g. DOMAIN_ALREADY_ONBOARDED_IN_ORG after AEM_SITE_CHECK), the
- * earlier bypass is no longer active and the check will run again.
- * @param {Array} reviews - The reviews array from the onboarding record.
- * @param {string} reasonSubstring - Substring to match against the review reason.
- * @returns {boolean} True if the most recent review matches the reason and is BYPASSED.
- */
-function isBypassed(reviews, reasonSubstring) {
-  /* c8 ignore next 3 */
-  const last = (reviews || []).at(-1);
-  return last?.reason?.includes(reasonSubstring) && last?.decision === REVIEW_DECISIONS.BYPASSED;
-}
-
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
 
-// AEM CS publish host pattern: publish-p{programId}-e{environmentId}.adobeaemcloud.(com|net)
-const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.(com|net)$/i;
+// AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
+const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
 
 // RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
 const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
@@ -178,6 +163,50 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
   await Promise.all(toRevoke.map((e) => {
     log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${e.getSiteId()}`);
     return e.remove();
+  }));
+}
+
+/**
+ * Revokes all ASO site enrollments for the site linked to a given onboarding record.
+ * Called when transitioning an ONBOARDED domain to INACTIVE.
+ * @param {object} onboarding - The PlgOnboarding record being offboarded.
+ * @param {object} context - Request context.
+ */
+async function revokeAsoSiteEnrollments(onboarding, context) {
+  const { dataAccess, log } = context;
+  const { Site } = dataAccess;
+
+  const siteId = onboarding.getSiteId();
+  if (!siteId) {
+    log.info(`No site linked to onboarding ${onboarding.getId()}, skipping enrollment revocation`);
+    return;
+  }
+
+  const site = await Site.findById(siteId);
+  if (!site) {
+    log.warn(`Site ${siteId} not found for onboarding ${onboarding.getId()}, skipping enrollment revocation`);
+    return;
+  }
+
+  const enrollments = await site.getSiteEnrollments();
+  if (!enrollments || enrollments.length === 0) {
+    log.info(`No enrollments to revoke for site ${siteId}`);
+    return;
+  }
+
+  const entitlements = await Promise.all(enrollments.map((e) => e.getEntitlement()));
+  const asoEnrollments = enrollments.filter(
+    (_, i) => entitlements[i]?.getProductCode() === ASO_PRODUCT_CODE,
+  );
+
+  if (asoEnrollments.length === 0) {
+    log.info(`No ASO enrollments to revoke for site ${siteId}`);
+    return;
+  }
+
+  await Promise.all(asoEnrollments.map((enrollment) => {
+    log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId}`);
+    return enrollment.remove();
   }));
 }
 
@@ -347,13 +376,18 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @param {object} params
  * @param {string} params.domain - The domain to onboard
  * @param {string} params.imsOrgId - The IMS Organization ID
- * @param {string} [params.rumHost] - Optional pre-provided RUM host (for AEM_SITE_CHECK bypass)
+ * @param {string} [params.presetDeliveryType] - Delivery type override for AEM_SITE_CHECK bypass
+ * @param {string} [params.presetAuthorUrl] - Optional author URL override for AEM CS sites
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
-async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHost }, context) {
+async function performAsoPlgOnboarding({
+  domain, imsOrgId, presetDeliveryType, presetAuthorUrl,
+}, context) {
   const { dataAccess, log } = context;
-  const { Site, PlgOnboarding, Organization } = dataAccess;
+  const {
+    Site, PlgOnboarding, Organization,
+  } = dataAccess;
 
   if (!isValidHostname(domain)) {
     throw Object.assign(
@@ -376,6 +410,10 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
 
   // Create or find existing PlgOnboarding record for this imsOrgId + domain
   let onboarding = await PlgOnboarding.findByImsOrgIdAndDomain(imsOrgId, domain);
+  if (onboarding?.getStatus() === STATUSES.ONBOARDED) {
+    log.info(`Domain ${domain} is already onboarded for IMS org ${imsOrgId}, returning existing record`);
+    return onboarding;
+  }
   if (!onboarding) {
     try {
       onboarding = await PlgOnboarding.create({
@@ -391,11 +429,14 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
       if (!onboarding) {
         throw createError;
       }
+      if (onboarding.getStatus() === STATUSES.ONBOARDED) {
+        log.info(`Domain ${domain} was onboarded concurrently for IMS org ${imsOrgId}, returning existing record`);
+        return onboarding;
+      }
       log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
     }
   }
   // Guard: only one domain per IMS org can be onboarded
-  const reviews = onboarding.getReviews() || [];
   const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
   const alreadyOnboarded = existingRecords
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
@@ -508,8 +549,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
       steps.rumVerified = false;
       log.info(`No RUM data for ${domain}, checking delivery type`);
       cachedDeliveryType = await findDeliveryType(baseURL);
-      if (!isBypassed(reviews, 'is not an AEM site')
-        && cachedDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
+      if (!presetDeliveryType && cachedDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
         log.info(`Domain ${domain} is not an AEM site, moving to waitlist`);
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
@@ -531,8 +571,17 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
         const existingImsOrgId = existingOrg?.getImsOrgId?.() || existingOrgId;
         /* c8 ignore next */
         const existingOrgName = existingOrg?.getName?.() || existingOrgId;
+        let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
+        const siteEnrollments = await site.getSiteEnrollments();
+        if (!siteEnrollments || siteEnrollments.length === 0) {
+          const currentOrgName = organization.getName();
+          waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${currentOrgName}'.`;
+        } else {
+          const currentOrgName = organization.getName();
+          waitlistReason += ` This domain cannot be moved to '${currentOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+        }
         onboarding.setStatus(STATUSES.WAITLISTED);
-        onboarding.setWaitlistReason(`Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId})`);
+        onboarding.setWaitlistReason(waitlistReason);
         onboarding.setSiteId(site.getId());
         onboarding.setSteps(steps);
         await onboarding.save();
@@ -607,29 +656,46 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
       }
     }
 
-    // Step 5c: Auto-resolve author URL and RUM host
-    let rumHost = presetRumHost || null;
-    if (presetRumHost) {
-      // Derive AEM CS delivery config directly from preset rumHost
+    // Step 5c: Set delivery type and author URL
+    let rumHost = null;
+    if (presetDeliveryType) {
+      // AEM_SITE_CHECK bypass: ESE provided delivery type and optional author URL
       /* c8 ignore next */
       const existingDeliveryConfig = site.getDeliveryConfig() || {};
-      if (!existingDeliveryConfig.authorURL) {
-        const csMatch = presetRumHost.match(AEM_CS_PUBLISH_HOST_PATTERN);
-        if (csMatch) {
-          const [, programId, environmentId] = csMatch;
-          const authorURL = `https://author-p${programId}-e${environmentId}.adobeaemcloud.com`;
-          site.setDeliveryConfig({
-            ...existingDeliveryConfig,
-            authorURL,
-            programId,
-            environmentId,
-            preferContentApi: true,
-            imsOrgId,
+      site.setDeliveryType(presetDeliveryType);
+
+      if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_CS && presetAuthorUrl) {
+        // Derive programId and environmentId from AEM CS author URL
+        const csMatch = presetAuthorUrl.match(AEM_CS_AUTHOR_URL_PATTERN);
+        /* c8 ignore next */
+        const [, programId, environmentId] = csMatch || [];
+        site.setDeliveryConfig({
+          ...existingDeliveryConfig,
+          authorURL: presetAuthorUrl,
+          ...(programId && { programId, environmentId, preferContentApi: true }),
+          imsOrgId,
+        });
+        log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
+        steps.authorUrlResolved = true;
+      } else if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE && presetAuthorUrl) {
+        const edsMatch = presetAuthorUrl.match(EDS_HOST_PATTERN);
+        if (edsMatch) {
+          const [, ref, repo, owner, tld] = edsMatch;
+          site.setHlxConfig({
+            hlxVersion: 5,
+            rso: {
+              ref, site: repo, owner, tld,
+            },
           });
-          site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_CS);
-          log.info(`Derived author URL from preset rumHost: ${authorURL}`);
-          steps.authorUrlResolved = true;
+          log.info(`Set EDS hlxConfig from preset author URL: ${presetAuthorUrl}`);
+          steps.hlxConfigSet = true;
         }
+        steps.authorUrlResolved = true;
+      } else if (presetAuthorUrl) {
+        // AEM_AMS or other: set author URL as-is
+        site.setDeliveryConfig({ ...existingDeliveryConfig, authorURL: presetAuthorUrl, imsOrgId });
+        log.info(`Set author URL from preset: ${presetAuthorUrl}`);
+        steps.authorUrlResolved = true;
       }
     } else {
       try {
@@ -1102,6 +1168,11 @@ function PlgOnboardingController(ctx) {
               justification: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
             }]);
             await oldOnboarded.save();
+            try {
+              await revokeAsoSiteEnrollments(oldOnboarded, context);
+            } catch (revokeErr) {
+              log.warn(`Failed to revoke enrollments for offboarded domain ${oldOnboarded.getDomain()}: ${revokeErr.message}`);
+            }
             log.info(`Offboarded old domain ${oldOnboarded.getDomain()} for IMS org ${imsOrgId}`);
           }
           // Re-run PLG flow for the current domain
@@ -1114,29 +1185,49 @@ function PlgOnboardingController(ctx) {
         }
 
         case REVIEW_REASONS.AEM_SITE_CHECK: {
-          // Validate siteConfig — rumHost is always required
-          if (!siteConfig || !hasText(siteConfig.rumHost)) {
-            return badRequest('siteConfig with rumHost is required for AEM_SITE_CHECK bypass');
+          // deliveryType is required; authorUrl is optional
+          if (!siteConfig || !hasText(siteConfig.deliveryType)) {
+            return badRequest('siteConfig with deliveryType is required for AEM_SITE_CHECK bypass');
           }
-          if (!AEM_CS_PUBLISH_HOST_PATTERN.test(siteConfig.rumHost)
-            && !EDS_HOST_PATTERN.test(siteConfig.rumHost)) {
+          const validDeliveryTypes = Object.values(SiteModel.DELIVERY_TYPES)
+            .filter((t) => t !== SiteModel.DELIVERY_TYPES.OTHER);
+          if (!validDeliveryTypes.includes(siteConfig.deliveryType)) {
             return badRequest(
-              'rumHost must be a valid AEM CS publish host (publish-pXXX-eYYY.adobeaemcloud.com) '
-              + 'or EDS host (ref--repo--owner.aem.live / hlx.live)',
+              `deliveryType must be one of: ${validDeliveryTypes.join(', ')}`,
             );
           }
+          if (hasText(siteConfig.authorUrl)) {
+            if (siteConfig.deliveryType === SiteModel.DELIVERY_TYPES.AEM_CS) {
+              if (!/^https?:\/\//i.test(siteConfig.authorUrl)) {
+                siteConfig.authorUrl = `https://${siteConfig.authorUrl}`;
+              }
+              if (!AEM_CS_AUTHOR_URL_PATTERN.test(siteConfig.authorUrl)) {
+                return badRequest(
+                  'authorUrl for AEM_CS must match the pattern: https://author-pXXX-eYYY.adobeaemcloud.com',
+                );
+              }
+            } else if (siteConfig.deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
+              const hostname = siteConfig.authorUrl.replace(/^https?:\/\//i, '').split('/')[0];
+              if (!EDS_HOST_PATTERN.test(hostname)) {
+                return badRequest(
+                  'authorUrl for AEM_EDGE must be a valid EDS host (ref--repo--owner.aem.live or hlx.live)',
+                );
+              }
+              siteConfig.authorUrl = hostname;
+            } else if (!/^https?:\/\//i.test(siteConfig.authorUrl)) {
+              return badRequest('authorUrl must be a valid HTTP(S) URL');
+            }
+          }
 
-          // Re-run PLG flow with pre-set rumHost
-          // Step 5c will derive CS delivery config (authorURL, programId, environmentId)
-          // from rumHost if it matches AEM_CS_PUBLISH_HOST_PATTERN
-          // Steps 5d/5e will derive EDS config (code config, hlxConfig)
-          // from rumHost if it matches EDS_HOST_PATTERN
+          // Re-run PLG flow with pre-set delivery type and optional author URL
           await onboarding.save();
           const result = await performAsoPlgOnboarding(
             {
               domain: onboarding.getDomain(),
               imsOrgId: onboarding.getImsOrgId(),
-              rumHost: siteConfig.rumHost,
+              presetDeliveryType: siteConfig.deliveryType,
+              /* c8 ignore next */
+              presetAuthorUrl: siteConfig.authorUrl || null,
             },
             context,
           );
@@ -1144,7 +1235,6 @@ function PlgOnboardingController(ctx) {
         }
 
         case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED: {
-          // Find the existing org that owns the site
           const domain = onboarding.getDomain();
           const baseURL = onboarding.getBaseURL();
           const site = await Site.findByBaseURL(baseURL);
@@ -1154,8 +1244,52 @@ function PlgOnboardingController(ctx) {
           }
 
           const existingOrgId = site.getOrganizationId();
-          // Derive the IMS org ID for the existing org
           const { Organization } = da;
+
+          // Handle alternateDomain: retire current domain, onboard a new domain under current org
+          if (hasText(siteConfig?.alternateDomain)) {
+            if (!isSafeDomain(siteConfig.alternateDomain)) {
+              return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
+            }
+            onboarding.setStatus(STATUSES.INACTIVE);
+            await onboarding.save();
+            log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
+            const result = await performAsoPlgOnboarding(
+              { domain: siteConfig.alternateDomain, imsOrgId: onboarding.getImsOrgId() },
+              context,
+            );
+            return ok(PlgOnboardingDto.toJSON(result));
+          }
+
+          // Handle moveSite: transfer site from existing org to current org
+          if (siteConfig?.moveSite) {
+            const siteEnrollments = await site.getSiteEnrollments();
+            if (siteEnrollments && siteEnrollments.length > 0) {
+              const existingOrg = await Organization.findById(existingOrgId);
+              /* c8 ignore next */
+              return badRequest(`Cannot move domain ${domain} — it is already set up with active products in org '${existingOrg?.getName?.() || existingOrgId}'.`);
+            }
+            const currentOrgId = onboarding.getOrganizationId();
+            if (!currentOrgId) {
+              return badRequest('Onboarding record has no associated organization');
+            }
+            const currentImsOrgId = onboarding.getImsOrgId();
+            site.setOrganizationId(currentOrgId);
+            /* c8 ignore next */
+            const existingDeliveryConfig = site.getDeliveryConfig() || {};
+            if (existingDeliveryConfig.imsOrgId) {
+              site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
+            }
+            await site.save();
+            log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
+            const result = await performAsoPlgOnboarding(
+              { domain, imsOrgId: onboarding.getImsOrgId() },
+              context,
+            );
+            return ok(PlgOnboardingDto.toJSON(result));
+          }
+
+          // Default bypass: run flow under the existing org that owns the site
           const existingOrg = await Organization.findById(existingOrgId);
           if (!existingOrg || !existingOrg.getImsOrgId()) {
             return badRequest('Cannot determine IMS org for the existing site owner');
@@ -1167,16 +1301,6 @@ function PlgOnboardingController(ctx) {
           onboarding.setStatus(STATUSES.INACTIVE);
           await onboarding.save();
           log.info(`Offboarded onboarding ${onboarding.getId()} for domain ${domain} (belongs to org ${existingImsOrgId})`);
-
-          // Check if PLG onboarding already exists for (domain, existingOrg)
-          const existingPlgOnboarding = await PlgOnboarding
-            .findByImsOrgIdAndDomain(existingImsOrgId, domain);
-          if (existingPlgOnboarding) {
-            return createResponse(
-              { message: 'There is already an onboarding entry for this domain and org' },
-              409,
-            );
-          }
 
           // Run the flow under the existing org — it will create the PlgOnboarding record
           const result = await performAsoPlgOnboarding(

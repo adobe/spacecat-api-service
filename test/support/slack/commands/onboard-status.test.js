@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-env mocha */
+
 import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
