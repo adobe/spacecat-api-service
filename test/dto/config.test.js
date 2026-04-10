@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';

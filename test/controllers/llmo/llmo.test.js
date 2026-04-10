@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -1155,7 +1154,7 @@ describe('LlmoController', () => {
       const result = await controller.queryLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(400);
-      expect(mockLog.error).to.have.been.calledWith(
+      expect(mockLog.debug).to.have.been.calledWith(
         sinon.match(/Failed to fetch data from external endpoint: 500/),
       );
     });
@@ -1556,6 +1555,30 @@ describe('LlmoController', () => {
       await controller.updateLlmoConfig(mockContext);
 
       expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('should trigger llmo-config-db-sync when site is in ALLOWED_SITE_IDS', async () => {
+      mockContext.params.siteId = '00000000-0000-0000-0000-000000000001';
+
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+        TEST_QUEUE_URL,
+        {
+          type: 'llmo-config-db-sync',
+          siteId: '00000000-0000-0000-0000-000000000001',
+          dryRun: false,
+        },
+      );
+    });
+
+    it('should not trigger llmo-config-db-sync when site is not in ALLOWED_SITE_IDS', async () => {
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.not.have.been.calledWith(
+        TEST_QUEUE_URL,
+        sinon.match({ type: 'llmo-config-db-sync' }),
+      );
     });
 
     it('should return bad request when payload is not an object', async () => {
@@ -2652,6 +2675,52 @@ describe('LlmoController', () => {
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
+    it('should pass tempOnboarding when temp-onboarding is true', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const ctxWithTemp = {
+        ...onboardingContext,
+        data: {
+          ...onboardingContext.data,
+          'temp-onboarding': true,
+        },
+      };
+
+      const result = await testController.onboardCustomer(ctxWithTemp);
+
+      expect(result.status).to.equal(200);
+      expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+      expect(performLlmoOnboardingStub.firstCall.args[0].tempOnboarding).to.equal(true);
+    });
+
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
       it(`should return bad request when ${field} is missing`, async () => {
         const contextCopy = { ...onboardingContext, data: { ...onboardingContext.data } };
@@ -2736,6 +2805,44 @@ describe('LlmoController', () => {
       const testController = LlmoControllerOnboard(mockContext);
 
       const result = await testController.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(400);
+      expect(performLlmoOnboardingStub).to.not.have.been.called;
+    });
+
+    it('should return 400 for invalid cadence value', async () => {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: () => 'dev/example-com',
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => `https://${domain}`,
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const invalidCadenceContext = {
+        ...onboardingContext,
+        data: { domain: 'example.com', brandName: 'Test Brand', cadence: 'invalid-value' },
+      };
+
+      const result = await testController.onboardCustomer(invalidCadenceContext);
 
       expect(result.status).to.equal(400);
       expect(performLlmoOnboardingStub).to.not.have.been.called;
@@ -4133,6 +4240,11 @@ describe('LlmoController', () => {
         ...mockContext,
         params: { siteId: TEST_SITE_ID },
         data: { tokowakaEnabled: true },
+        env: {
+          ...mockContext.env,
+          SLACK_LLMO_ALERTS_CHANNEL_ID: undefined,
+          SLACK_BOT_TOKEN: undefined,
+        },
       };
     });
 
@@ -4859,6 +4971,33 @@ describe('LlmoController', () => {
       expect(calledMessage).to.include('• Site: https://www.example.com');
       expect(calledMessage).to.not.include('cc:');
     });
+
+    it('should call hasAccess before isLLMOAdministrator before isOwnerOfSite', async () => {
+      const hasAccessStub = sinon.stub().resolves(true);
+      const isLLMOAdminStub = sinon.stub().returns(true);
+      const isOwnerStub = sinon.stub().resolves(false);
+
+      const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: hasAccessStub,
+              hasAdminAccess: () => false,
+              isLLMOAdministrator: isLLMOAdminStub,
+              isOwnerOfSite: isOwnerStub,
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const result = await OrderedController(mockContext)
+        .createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+    });
   });
 
   describe('createOrUpdateStageEdgeConfig', () => {
@@ -5110,6 +5249,31 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.be.an('array').with.lengthOf(1);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+    });
+
+    it('should call hasAccess before isLLMOAdministrator', async () => {
+      const hasAccessStub = sinon.stub().resolves(true);
+      const isLLMOAdminStub = sinon.stub().returns(false);
+
+      const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: hasAccessStub,
+              hasAdminAccess: () => false,
+              isLLMOAdministrator: isLLMOAdminStub,
+              isOwnerOfSite: sinon.stub().resolves(true),
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const result = await OrderedController(mockContext)
+        .createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(403);
+      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
     });
   });
 
@@ -6226,6 +6390,206 @@ describe('LlmoController', () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.markOpportunitiesReviewed(mockContext);
       expect(result.status).to.equal(404);
+    });
+  });
+
+  describe('updateQueryIndex', () => {
+    let updateQueryIndexController;
+    let appendRowsStub;
+    let previewAndPublishStub;
+
+    before(async () => {
+      appendRowsStub = sinon.stub().resolves();
+      previewAndPublishStub = sinon.stub().resolves();
+
+      const LlmoControllerForQueryIndex = await esmock(
+        '../../../src/controllers/llmo/llmo.js',
+        {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            appendRowsToQueryIndex: (...args) => appendRowsStub(...args),
+            previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
+          },
+          '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: sinon.stub(),
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+            hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          },
+          '../../../src/support/access-control-util.js': {
+            default: createMockAccessControlUtil(true, true, true),
+          },
+          '@adobe/spacecat-shared-tokowaka-client': {
+            default: { createFrom: () => mockTokowakaClient },
+            calculateForwardedHost: () => 'www.example.com',
+          },
+          '../../../src/utils/slack/base.js': {
+            postSlackMessage: sinon.stub(),
+          },
+        },
+      );
+      updateQueryIndexController = LlmoControllerForQueryIndex;
+    });
+
+    beforeEach(() => {
+      appendRowsStub.reset();
+      appendRowsStub.resolves();
+      previewAndPublishStub.reset();
+      previewAndPublishStub.resolves();
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(mockSite);
+    });
+
+    it('should successfully update query-index', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1', 'file2.json'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.message).to.include('updated, previewed, and published');
+      expect(body.entriesAdded).to.equal(2);
+      expect(appendRowsStub).to.have.been.calledOnce;
+      expect(previewAndPublishStub).to.have.been.calledOnce;
+    });
+
+    it('should return forbidden when user is not LLMO administrator', async () => {
+      const LlmoControllerDeniedAdmin = await esmock(
+        '../../../src/controllers/llmo/llmo.js',
+        {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            appendRowsToQueryIndex: sinon.stub(),
+            previewAndPublishQueryIndex: sinon.stub(),
+          },
+          '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: sinon.stub(),
+            composeBaseURL: (d) => `https://${d}`,
+            hasText: (s) => typeof s === 'string' && s.trim().length > 0,
+            isObject: (o) => o !== null && typeof o === 'object' && !Array.isArray(o),
+          },
+          '../../../src/support/access-control-util.js': {
+            default: createMockAccessControlUtil(true, true, false),
+          },
+          '@adobe/spacecat-shared-tokowaka-client': {
+            default: { createFrom: () => mockTokowakaClient },
+            calculateForwardedHost: () => 'www.example.com',
+          },
+          '../../../src/utils/slack/base.js': {
+            postSlackMessage: sinon.stub(),
+          },
+        },
+      );
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = LlmoControllerDeniedAdmin(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return bad request when body is missing', async () => {
+      const ctx = { ...mockContext, data: null };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Request body is required');
+    });
+
+    it('should return bad request when domain is missing', async () => {
+      const ctx = { ...mockContext, data: { fileNames: ['file1'] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('domain is required');
+    });
+
+    it('should return bad request when fileNames is not a non-empty array', async () => {
+      const ctx = { ...mockContext, data: { domain: 'example.com', fileNames: [] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('fileNames must be a non-empty array of strings');
+    });
+
+    it('should return bad request when fileNames contains non-string entries', async () => {
+      const ctx = { ...mockContext, data: { domain: 'example.com', fileNames: ['valid', ''] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a non-empty string');
+    });
+
+    it('should return not found when site does not exist', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'unknown.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('should return bad request when dataFolder is missing from llmo config', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('dataFolder is missing');
+    });
+
+    it('should return internal server error when appendRows throws', async () => {
+      appendRowsStub.rejects(new Error('SharePoint connection failed'));
+      mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('SharePoint connection failed');
+    });
+
+    it('should return internal server error when previewAndPublish throws', async () => {
+      previewAndPublishStub.rejects(new Error('Preview failed: 503 Service Unavailable'));
+      mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('Preview failed');
     });
   });
 });

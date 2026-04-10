@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import {
   Audit, LatestAudit, Site, Organization,
 } from '@adobe/spacecat-shared-data-access';
@@ -640,6 +638,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -680,6 +679,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -721,6 +721,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -765,6 +766,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -849,6 +851,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -894,6 +897,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -937,6 +941,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -979,6 +984,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -1020,6 +1026,7 @@ describe('Audits Controller', () => {
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
         getEdgeOptimizeConfig: () => undefined,
+        getOnboardConfig: () => undefined,
         getBrandProfile: () => ({}),
       });
 
@@ -1087,6 +1094,7 @@ describe('Audits Controller', () => {
           getLlmoConfig: () => ({}),
           getTokowakaConfig: () => ({}),
           getEdgeOptimizeConfig: () => undefined,
+          getOnboardConfig: () => undefined,
           getBrandProfile: () => ({}),
         };
 

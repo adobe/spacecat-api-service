@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
@@ -774,7 +772,7 @@ describe('Sites Controller', () => {
     });
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -1486,17 +1484,17 @@ describe('Sites Controller', () => {
 
   it('get site metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-12T00:00:00Z',
       metric: 'organic-traffic',
       value: 100,
     }, {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -1520,7 +1518,7 @@ describe('Sites Controller', () => {
   });
 
   it('get site metrics by sources returns bad request when siteId is missing', async () => {
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
 
     const result = await sitesController.getSiteMetricsBySource({
@@ -1547,7 +1545,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics by sources returns bad request when metric is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
 
     const result = await sitesController.getSiteMetricsBySource({
       params: { siteId, source },
@@ -1560,7 +1558,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics by source returns not found when site is not found', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     mockDataAccess.Site.findById.resolves(null);
 
@@ -1575,7 +1573,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics for non belonging to the organization', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
@@ -1687,7 +1685,7 @@ describe('Sites Controller', () => {
 
     it('works with different metric types when filterByTop100PageViews=true', async () => {
       const siteId = sites[0].getId();
-      const source = 'ahrefs';
+      const source = 'seo';
       const metric = 'organic-traffic';
 
       const mockMetrics = [
@@ -1908,7 +1906,7 @@ describe('Sites Controller', () => {
 
     it('returns plain array when objectResponseDataKey is not provided (backward compatibility)', async () => {
       const siteId = sites[0].getId();
-      const source = 'ahrefs';
+      const source = 'seo';
       const metric = 'organic-traffic';
 
       const mockMetricsArray = [
@@ -2182,7 +2180,7 @@ describe('Sites Controller', () => {
   });
 
   describe('Metrics filtering by top organic search pages', () => {
-    it('filters metrics by top N organic search pages from Ahrefs', async () => {
+    it('filters metrics by top N organic search pages from SEO data', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2195,7 +2193,7 @@ describe('Sites Controller', () => {
         { url: 'https://example.com/page5', pageviews: 1000, lcp: 1600 },
       ];
 
-      // Mock top pages from Ahrefs
+      // Mock top pages from SEO data
       const mockTopPages = [
         { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
         { getUrl: () => 'https://example.com/page3', getTraffic: () => 8000 },
@@ -2222,11 +2220,11 @@ describe('Sites Controller', () => {
 
       const response = await result.json();
 
-      // Should only include pages that are in top 2 Ahrefs pages (page1, page3)
+      // Should only include pages that are in top 2 SEO pages (page1, page3)
       expect(response).to.have.length(2);
       expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
       expect(response.find((m) => m.url === 'https://example.com/page3')).to.exist;
-      expect(mockSiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(siteId, 'ahrefs', 'global');
+      expect(mockSiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(siteId, 'seo', 'global');
     });
 
     it('handles URL variations with trailing slashes', async () => {
@@ -2529,7 +2527,7 @@ describe('Sites Controller', () => {
       expect(error).to.have.property('message', 'filterByTopOrganicSearchPages must be a positive integer');
     });
 
-    it('returns empty array when no Ahrefs pages found', async () => {
+    it('returns empty array when no SEO pages found', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2558,12 +2556,12 @@ describe('Sites Controller', () => {
 
       const response = await result.json();
 
-      // Should return empty array when user requested filtering but no Ahrefs pages exist
+      // Should return empty array when user requested filtering but no SEO pages exist
       expect(response).to.have.length(0);
       expect(loggerStub.warn).to.have.been.called;
     });
 
-    it('returns internal server error when Ahrefs data fetch fails', async () => {
+    it('returns internal server error when SEO data fetch fails', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2595,7 +2593,7 @@ describe('Sites Controller', () => {
       expect(response.message).to.include('Database error');
     });
 
-    it('returns empty array when no Ahrefs pages match base URL filter', async () => {
+    it('returns empty array when no SEO pages match base URL filter', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2636,7 +2634,7 @@ describe('Sites Controller', () => {
       // Should return empty array when no pages match base URL
       expect(response).to.have.length(0);
       expect(loggerStub.warn).to.have.been.calledWith(
-        sinon.match(/No Ahrefs top pages match base URL/),
+        sinon.match(/No SEO top pages match base URL/),
       );
     });
 
@@ -2852,7 +2850,7 @@ describe('Sites Controller', () => {
         },
       ];
 
-      // But top 3 Ahrefs pages include page2 which has no RUM data
+      // But top 3 SEO pages include page2 which has no RUM data
       const mockTopPages = [
         { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
         { getUrl: () => 'https://example.com/page2', getTraffic: () => 9000 },
@@ -3080,13 +3078,13 @@ describe('Sites Controller', () => {
 
   it('get page metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-12T00:00:00Z',
       metric: 'organic-traffic',
       value: 100,
@@ -3094,7 +3092,7 @@ describe('Sites Controller', () => {
     },
     {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 400,
@@ -3102,7 +3100,7 @@ describe('Sites Controller', () => {
     },
     {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -3140,7 +3138,7 @@ describe('Sites Controller', () => {
   });
 
   it('get page metrics by sources returns bad request when siteId is missing', async () => {
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
@@ -3169,7 +3167,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by sources returns bad request when metric is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
     const result = await sitesController.getPageMetricsBySource({
@@ -3183,7 +3181,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by sources returns bad request when base64PageUrl is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
 
     const result = await sitesController.getPageMetricsBySource({
@@ -3197,7 +3195,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by source returns not found when site is not found', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
@@ -3219,7 +3217,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics for non belonging to the organization', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
@@ -3435,6 +3433,79 @@ describe('Sites Controller', () => {
     expect(mergedConfig.slack).to.deep.equal({ channel: '#updated' });
     expect(mergedConfig.llmo).to.deep.equal({ dataFolder: '/data', brand: 'Test' });
     expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
+  });
+
+  describe('auditTargetURLs validation', () => {
+    it('returns bad request when manual URL hostname does not match site base URL', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({ slack: { channel: '#x' } }));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://example.com/path1' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('Invalid audit target URL at index 0:');
+      expect(err.message).to.include('site domain (site1.com, with or without www.)');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('accepts manual URLs on the site hostname', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://site1.com/path1' }, { url: 'https://site1.com/path2' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual).to.deep.equal([
+        { url: 'https://site1.com/path1' },
+        { url: 'https://site1.com/path2' },
+      ]);
+    });
+
+    it('does not validate auditTargetURLs when key is omitted from config patch', async () => {
+      const site = sites[0];
+      const existingConfig = Config({
+        auditTargetURLs: { manual: [{ url: 'https://wrong.example/' }] },
+      });
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { slack: { channel: '#only' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual[0].url).to.equal('https://wrong.example/');
+    });
   });
 
   it('allows removing a config key by explicitly setting it to null', async () => {
@@ -4322,27 +4393,27 @@ describe('Sites Controller', () => {
       const result = await sitesController.getTopPages({
         params: {
           siteId: SITE_IDS[0],
-          source: 'ahrefs',
+          source: 'seo',
         },
       });
       const response = await result.json();
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'ahrefs');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'seo');
     });
 
     it('retrieves top pages by source and geo for a site', async () => {
       const result = await sitesController.getTopPages({
         params: {
           siteId: SITE_IDS[0],
-          source: 'ahrefs',
+          source: 'seo',
           geo: 'US',
         },
       });
       const response = await result.json();
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'seo', 'US');
     });
   });
 
@@ -4446,15 +4517,15 @@ describe('Sites Controller', () => {
 
       mockTierClientStub = {
         checkValidEntitlement: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         }),
         getFirstEnrollment: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
           enrollment: { getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] },
           site: testSites[0],
         }),
         getAllEnrollment: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
           enrollments: [{ getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] }],
         }),
       };
@@ -4468,7 +4539,7 @@ describe('Sites Controller', () => {
       };
       mockDataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub().resolves({
-          getTier: () => 'FREE_TRIAL',
+          getTier: () => 'PLG',
         }),
       };
     });
@@ -4507,7 +4578,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Site.findById.resolves(testSites[0]);
 
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4526,7 +4597,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4547,7 +4618,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4628,6 +4699,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4665,6 +4737,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4700,6 +4773,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4730,6 +4804,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => 'entitlement-456',
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       const mockTierClient = {
@@ -4752,6 +4827,167 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('organization');
       expect(body.data).to.have.property('site');
       expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via siteId path', async () => {
+      const validSiteId = SITE_IDS[1];
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollments: [{
+          getId: () => 'enrollment-pre-onboard',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via imsOrg path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'entitlement-pre-onboard',
+            getTier: () => 'PRE_ONBOARD',
+          },
+          enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 200 for PRE_ONBOARD-tier site via imsOrg path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'entitlement-pre-onboard',
+            getTier: () => 'PRE_ONBOARD',
+          },
+          enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for admin when organizationId path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: null,
+          enrollment: null,
+          site: null,
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
     });
   });
 

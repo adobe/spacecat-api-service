@@ -35,4 +35,16 @@ export const plgOnboardings = [
     },
     completed_at: '2026-01-20T12:00:00.000Z',
   },
+  {
+    id: 'd2222222-2222-4222-b222-222222222222',
+    ims_org_id: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
+    domain: 'waitlisted-site.example.com',
+    base_url: 'https://www.waitlisted-site.example.com',
+    status: 'WAITLISTED',
+    organization_id: '11111111-1111-4111-b111-111111111111',
+    waitlist_reason: 'Domain site1.example.com is another domain is already onboarded for this IMS org',
+    steps: {
+      orgResolved: true,
+    },
+  },
 ];

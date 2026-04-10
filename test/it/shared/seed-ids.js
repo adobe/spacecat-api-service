@@ -37,6 +37,10 @@ export const SITE_2_BASE_URL = 'https://site2.example.com';
 export const SITE_3_ID = '55555555-5555-4555-9555-555555555555';
 export const SITE_3_BASE_URL = 'https://site3-denied.example.com';
 
+// ── Brands ──
+
+export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
+
 // ── Audits ──
 
 export const AUDIT_TYPE_CWV = 'cwv';
@@ -131,6 +135,8 @@ export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
 export const PLG_ONBOARDING_1_ID = 'd1111111-1111-4111-b111-111111111111';
 export const PLG_ONBOARDING_1_DOMAIN = 'site1.example.com';
+export const PLG_ONBOARDING_2_ID = 'd2222222-2222-4222-b222-222222222222';
+export const PLG_ONBOARDING_2_DOMAIN = 'waitlisted-site.example.com';
 
 // ── ORG_3: Delegate Agency Org ──
 

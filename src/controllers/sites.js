@@ -41,8 +41,11 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled } from '../support/utils.js';
+import {
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
+} from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
@@ -52,7 +55,7 @@ import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
  * @constructor
  */
 
-const AHREFS = 'ahrefs';
+const SEO = 'seo';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
@@ -185,10 +188,10 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   const { SiteTopPage } = dataAccess;
 
   // Fetch Ahrefs pages
-  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'ahrefs', geo);
+  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'seo', geo);
 
   if (!topPages || topPages.length === 0) {
-    log.warn(`No Ahrefs top pages found for site ${siteId}, returning empty result`);
+    log.warn(`No SEO top pages found for site ${siteId}, returning empty result`);
     return [];
   }
 
@@ -198,7 +201,7 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
 
     // If no pages match the base URL after filtering, return empty result
     if (topPages.length === 0) {
-      log.warn(`No Ahrefs top pages match base URL for site ${siteId}, returning empty result`);
+      log.warn(`No SEO top pages match base URL for site ${siteId}, returning empty result`);
       return [];
     }
   }
@@ -637,6 +640,18 @@ function SitesController(ctx, log, env) {
         ? Config.toDynamoItem(siteConfig) || {}
         : {};
       const merged = { ...existingConfig, ...requestBody.config };
+      const auditTargetURLsResult = auditTargetURLsPatchGuard(
+        merged,
+        site.getBaseURL(),
+        requestBody.config,
+        badRequest,
+      );
+      if (auditTargetURLsResult?.error) {
+        return auditTargetURLsResult.error;
+      }
+      if (auditTargetURLsResult?.normalized !== undefined) {
+        merged.auditTargetURLs = auditTargetURLsResult.normalized;
+      }
       site.setConfig(merged);
       updates = true;
     }
@@ -826,7 +841,7 @@ function SitesController(ctx, log, env) {
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
+      log.debug(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
     // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
@@ -872,7 +887,7 @@ function SitesController(ctx, log, env) {
       const [domain, organicTraffic] = await Promise.all([
         resolveWwwUrl(site, context),
         getStoredMetrics(
-          { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+          { siteId, metric: ORGANIC_TRAFFIC, source: SEO },
           context,
         ),
       ]);
@@ -1058,11 +1073,15 @@ function SitesController(ctx, log, env) {
     if (from || to) {
       if (from) {
         fromDate = new Date(from);
-        if (Number.isNaN(fromDate.getTime())) return badRequest('Invalid from date');
+        if (Number.isNaN(fromDate.getTime())) {
+          return badRequest('Invalid from date');
+        }
       }
       if (to) {
         toDate = new Date(to);
-        if (Number.isNaN(toDate.getTime())) return badRequest('Invalid to date');
+        if (Number.isNaN(toDate.getTime())) {
+          return badRequest('Invalid to date');
+        }
       }
     } else if (period && period !== 'all') {
       const days = CITABILITY_PERIOD_MS[period];
@@ -1134,7 +1153,6 @@ function SitesController(ctx, log, env) {
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
     const productCode = pathInfo.headers[X_PRODUCT_HEADER];
-
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }
@@ -1164,7 +1182,9 @@ function SitesController(ctx, log, env) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
 
-              if (entitlement && enrollments?.length) {
+              const tierVisible = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (tierVisible && enrollments?.length) {
                 const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
                 const data = {
                   organization: OrganizationDto.toJSON(organization),
@@ -1183,9 +1203,11 @@ function SitesController(ctx, log, env) {
         organization = await Organization.findById(organizationId);
         if (organization && await accessControlUtil.hasAccess(organization)) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+          const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
+            .getFirstEnrollment();
 
-          if (enrolledSite) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
@@ -1200,9 +1222,11 @@ function SitesController(ctx, log, env) {
         organization = await Organization.findByImsOrgId(imsOrg);
         if (organization && await accessControlUtil.hasAccess(organization)) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+          const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
+            .getFirstEnrollment();
 
-          if (enrolledSite) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),

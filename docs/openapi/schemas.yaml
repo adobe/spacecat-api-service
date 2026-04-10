@@ -1739,7 +1739,7 @@ SiteTopPage:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     url: 'https://example-site.com/foo/bar'
     traffic: 360420000
-    source: 'ahrefs'
+    source: 'seo'
     geo: 'au'
     importedAt: '2024-04-29T15:14:33.653Z'
 SiteTopPageList:
@@ -2167,7 +2167,7 @@ SiteMetric:
       $ref: '#/DateTime'
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-traffic'
     value: 37900
     time: '2024-04-29T00:00:00.000Z'
@@ -2217,7 +2217,7 @@ PageOrganicKeywords:
       type: boolean
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-keywords'
     time: '2024-04-29T00:00:00.000Z'
     url: 'https://example.com/foo/bar'
@@ -2727,6 +2727,7 @@ OpportunityType:
   enum:
     - 'broken-backlinks'
     - 'broken-internal-links'
+    - 'info-gain'
   example: 'broken-backlinks'
 OpportunityOrigin:
   description: |
@@ -2800,6 +2801,9 @@ Opportunity:
       $ref: '#/DateTime'
     updatedAt:
       description: UTC timestamp of when the opportunity was last updated
+      $ref: '#/DateTime'
+    lastAuditedAt:
+      description: UTC timestamp of when the opportunity was last audited
       $ref: '#/DateTime'
   required:
     - id
@@ -5140,6 +5144,63 @@ FeatureFlagList:
   items:
     $ref: '#/FeatureFlag'
 
+AgenticTrafficGlobalWeek:
+  type: object
+  description: Weekly aggregate global agentic traffic row from mysticat `agentic_traffic_global`
+  properties:
+    id:
+      $ref: '#/Id'
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      oneOf:
+        - type: string
+        - type: 'null'
+  required:
+    - id
+    - year
+    - week
+    - hits
+    - createdAt
+    - updatedAt
+
+AgenticTrafficGlobalWeekList:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficGlobalWeek'
+
+AgenticTrafficGlobalWeekUpsert:
+  type: object
+  properties:
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+  required:
+    - year
+    - week
+    - hits
+
 SiteEnrollment:
   type: object
   description: A site enrollment represents a site's participation in a product or service
@@ -6691,7 +6752,6 @@ StageConfigsResponse:
   description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
   items:
     $ref: '#/StageConfigItem'
-
 PlgOnboarding:
   type: object
   description: A PLG ASO onboarding record tracking the lifecycle of a domain onboarding.
@@ -6719,6 +6779,7 @@ PlgOnboarding:
         - ERROR
         - WAITING_FOR_IP_ALLOWLISTING
         - WAITLISTED
+        - INACTIVE
       example: "ONBOARDED"
     siteId:
       $ref: '#/Id'
@@ -6792,12 +6853,83 @@ PlgOnboarding:
         - 'null'
       description: Reason for waitlisting, if applicable
       example: null
+    reviews:
+      type:
+        - array
+        - 'null'
+      description: Array of ESE review decisions for waitlisted onboardings
+      items:
+        type: object
+        properties:
+          reason:
+            type: string
+            description: The waitlist reason at the time of review
+          decision:
+            type: string
+            enum:
+              - BYPASSED
+              - UPHELD
+            description: "BYPASSED: skip check and resume. UPHELD: block stands."
+          reviewedBy:
+            type: string
+            description: Email of the ESE who made the decision
+          reviewedAt:
+            type: string
+            format: date-time
+            description: Timestamp of the review
+          justification:
+            type: string
+            description: ESE's reason for the decision
+      example: null
     completedAt:
       $ref: '#/DateTime'
     createdAt:
       $ref: '#/DateTime'
     updatedAt:
       $ref: '#/DateTime'
+
+Token:
+  type: object
+  description: A token allocation for a site within a billing cycle
+  properties:
+    id:
+      $ref: '#/Id'
+    siteId:
+      $ref: '#/Id'
+    tokenType:
+      type: string
+      description: Token type key, e.g. `grant_cwv`, `grant_broken_backlinks`
+      example: grant_cwv
+    cycle:
+      type: string
+      description: Billing cycle identifier, e.g. `2025-03`
+      example: '2025-03'
+    total:
+      type: integer
+      description: Total tokens allocated for this cycle
+      example: 3
+    used:
+      type: integer
+      description: Tokens consumed so far in this cycle
+      example: 1
+    remaining:
+      type: integer
+      description: Tokens remaining (total - used)
+      example: 2
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+  required:
+    - id
+    - siteId
+    - tokenType
+    - cycle
+    - total
+    - used
+    - remaining
+    - createdAt
+    - updatedAt
 
 PresignedUrlResponse:
   type: object
@@ -6816,3 +6948,528 @@ PresignedUrlResponse:
     - presignedUrl
     - expiresAt
   additionalProperties: false
+
+# ── V2 Brand schemas (PostgREST-backed, /v2/orgs/{spaceCatId}/brands) ──
+
+V2BrandUrl:
+  type: object
+  properties:
+    value:
+      type: string
+      description: Full URL (base URL + optional path)
+      example: 'https://www.example.com/products'
+  required:
+    - value
+
+V2BrandSocialAccount:
+  type: object
+  properties:
+    url:
+      type: string
+      description: Social media account URL
+      example: 'https://twitter.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes this account targets
+      example: ['US', 'DE']
+
+V2BrandEarnedContent:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Name of the earned content source
+      example: 'TechCrunch'
+    url:
+      type: string
+      description: URL of the earned content source
+      example: 'https://techcrunch.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandAlias:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Alias name for the brand
+      example: 'Example Corp'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandCompetitor:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Competitor name
+      example: 'Acme Inc'
+    url:
+      type:
+        - string
+        - 'null'
+      description: Competitor URL
+      example: 'https://www.acme.com'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2Brand:
+  type: object
+  description: A brand managed via the v2 PostgREST-backed API
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Brand UUID
+    name:
+      type: string
+      description: Brand name (unique per organization)
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      description: Brand status
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      description: How the brand was created
+      default: human
+    description:
+      type:
+        - string
+        - 'null'
+      description: Brand description
+    vertical:
+      type:
+        - string
+        - 'null'
+      description: Industry vertical
+    region:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes the brand targets
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+      description: Brand site URLs (derived from brand_sites)
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+    siteIds:
+      type: array
+      items:
+        type: string
+        format: uuid
+      description: IDs of sites linked to this brand (read-only, derived from brand_sites)
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      type:
+        - string
+        - 'null'
+      description: Email of the user who last modified the brand
+  required:
+    - id
+    - name
+    - status
+    - origin
+    - region
+    - urls
+    - socialAccounts
+    - earnedContent
+    - brandAliases
+    - competitors
+    - siteIds
+    - updatedAt
+  example:
+    id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    name: 'Example Brand'
+    status: 'active'
+    origin: 'human'
+    description: 'An example brand'
+    vertical: 'technology'
+    region: ['US', 'DE']
+    urls:
+      - value: 'https://www.example.com'
+      - value: 'https://www.example.com/products'
+    socialAccounts:
+      - url: 'https://twitter.com/example'
+        regions: ['US']
+    earnedContent:
+      - name: 'TechCrunch'
+        url: 'https://techcrunch.com/example'
+        regions: ['US']
+    brandAliases:
+      - name: 'Example Corp'
+        regions: ['US']
+    competitors:
+      - name: 'Acme Inc'
+        url: 'https://www.acme.com'
+        regions: ['US']
+    siteIds: ['b2c3d4e5-6789-01ab-cdef-2345678901ab']
+    updatedAt: '2026-03-15T10:30:00Z'
+    updatedBy: 'user@adobe.com'
+
+V2BrandInput:
+  type: object
+  description: Request body for creating a brand. Upserts on conflict (organization_id, name).
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      description: Brand name (unique per organization, used as upsert key)
+    status:
+      type: string
+      enum: [active, pending]
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      default: human
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandUpdateInput:
+  type: object
+  description: Request body for updating a brand. All fields are optional.
+  properties:
+    name:
+      type: string
+    status:
+      type: string
+      enum: [active, pending]
+    origin:
+      type: string
+      enum: [human, ai]
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandListResponse:
+  type: object
+  description: Response envelope for listing brands
+  required:
+    - brands
+  properties:
+    brands:
+      type: array
+      items:
+        $ref: '#/V2Brand'
+
+V2Topic:
+  type: object
+  description: A topic in the normalized topics table
+  required:
+    - id
+    - uuid
+    - name
+    - status
+  properties:
+    id:
+      type: string
+      description: Topic business key (topic_id)
+      example: 'baseurl-discovery-research-topic'
+    uuid:
+      type: string
+      format: uuid
+      description: UUID primary key (topics.id)
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type:
+        - string
+        - 'null'
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+      description: Topic status
+      example: 'active'
+    brandId:
+      type:
+        - string
+        - 'null'
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    updatedAt:
+      type: string
+      format: date-time
+      description: Last update timestamp
+    updatedBy:
+      type: string
+      description: User or system that last updated the topic
+
+V2TopicInput:
+  type: object
+  description: Request body for creating a topic
+  required:
+    - name
+  properties:
+    id:
+      type: string
+      description: Topic business key. Auto-generated from name if omitted.
+      example: 'baseurl-discovery-research-topic'
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type: string
+      description: Optional topic description
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    status:
+      type: string
+      enum: [active, pending, ignored]
+      default: 'active'
+
+V2TopicUpdateInput:
+  type: object
+  description: Request body for updating a topic (partial update)
+  properties:
+    name:
+      type: string
+      description: Human-readable topic name
+    description:
+      type: string
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID
+
+V2TopicListResponse:
+  type: object
+  description: Response envelope for listing topics
+  required:
+    - topics
+  properties:
+    topics:
+      type: array
+      items:
+        $ref: '#/V2Topic'
+
+PageRelationshipsSearchPage:
+  x-experimental: true
+  type: object
+  required:
+    - pageUrl
+    - key
+  properties:
+    pageUrl:
+      type: string
+      description: Page path or absolute URL to resolve.
+      example: '/us/en/products'
+    suggestionType:
+      type: string
+      description: Suggestion/issue classifier used by the backend to apply relationship checks.
+      example: 'Missing Title'
+    key:
+      type: string
+      description: Caller-provided key used in relationships/errors maps.
+      example: 'row-1'
+
+PageRelationshipChainItem:
+  x-experimental: true
+  type: object
+  description: |
+    A single step in the relationship lineage.
+    Chain items are ordered from the requested page's immediate parent upward through ancestors.
+  required:
+    - pageId
+    - pagePath
+  properties:
+    pageId:
+      type: string
+      description: page identifier for this chain.
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    pagePath:
+      type: string
+      description: Page path for this chain hop.
+      example: '/language-masters/en/adventures'
+    metadata:
+      $ref: '#/PageRelationshipMetadata'
+
+PageRelationshipMetadata:
+  x-experimental: true
+  type: object
+  additionalProperties: true
+  properties:
+    sourceType:
+      oneOf:
+        - type: string
+        - type: "null"
+      description: |
+        Source classification for this chain entry from the relationship provider.
+        Value is provider-defined and intentionally not constrained.
+
+PageRelationship:
+  x-experimental: true
+  type: object
+  required:
+    - pagePath
+    - pageId
+    - chain
+  properties:
+    pagePath:
+      type: string
+      description: Normalized page path or absolute URL for the requested page.
+      example: '/us/en/adventures'
+    pageId:
+      type: string
+      description: Resolved page identifier used by downstream fix operations.
+      example: 'pg-123'
+    chain:
+      type: array
+      description: |
+        Ordered relationship lineage returned by content API.
+        Sequence starts with the immediate parent of the requested page,
+        then grandparent, and so on.
+      items:
+        $ref: '#/PageRelationshipChainItem'
+
+PageRelationshipError:
+  x-experimental: true
+  type: object
+  required:
+    - error
+  properties:
+    error:
+      type: string
+      example: 'Could not determine page ID'
+    detail:
+      type: string
+      example: 'HTTP 404'
+
+PageRelationshipsMapping:
+  x-experimental: true
+  type: object
+  additionalProperties:
+    $ref: '#/PageRelationship'
+
+PageRelationshipsErrorMapping:
+  x-experimental: true
+  type: object
+  additionalProperties:
+    $ref: '#/PageRelationshipError'
+
+PageRelationshipsSearchRequest:
+  x-experimental: true
+  type: object
+  description: |
+    Experimental request schema for the page-relationships proxy endpoint.
+    Used by UI-facing, on-demand relationship lookups backed by AEM Content API.
+  required:
+    - pages
+  properties:
+    pages:
+      type: array
+      items:
+        $ref: '#/PageRelationshipsSearchPage'
+
+PageRelationshipsSearchResponse:
+  x-experimental: true
+  type: object
+  description: |
+    Experimental response schema for the page-relationships proxy endpoint.
+    Returned by the API proxy over AEM Content API relationship lookup results.
+  required:
+    - supported
+    - relationships
+    - errors
+  properties:
+    supported:
+      type: boolean
+      example: true
+    relationships:
+      $ref: '#/PageRelationshipsMapping'
+    errors:
+      $ref: '#/PageRelationshipsErrorMapping'

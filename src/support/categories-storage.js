@@ -19,6 +19,8 @@ function mapDbCategoryToV2(row) {
     name: row.name,
     status: row.status || 'active',
     origin: row.origin || 'human',
+    createdAt: row.created_at,
+    createdBy: row.created_by,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   };
@@ -36,7 +38,9 @@ function mapDbCategoryToV2(row) {
 export async function listCategories({
   organizationId, postgrestClient, status,
 }) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   let query = postgrestClient
     .from('categories')
@@ -51,7 +55,9 @@ export async function listCategories({
   }
 
   const { data, error } = await query;
-  if (error) throw new Error(`Failed to list categories: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list categories: ${error.message}`);
+  }
 
   return (data || []).map(mapDbCategoryToV2);
 }
@@ -69,8 +75,12 @@ export async function listCategories({
 export async function createCategory({
   organizationId, category, postgrestClient, updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
-  if (!hasText(category?.name)) throw new Error('Category name is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (!hasText(category?.name)) {
+    throw new Error('Category name is required');
+  }
 
   const categoryId = category.id || category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
@@ -89,7 +99,9 @@ export async function createCategory({
     .select()
     .single();
 
-  if (error) throw new Error(`Failed to create category: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to create category: ${error.message}`);
+  }
   return mapDbCategoryToV2(data);
 }
 
@@ -107,12 +119,20 @@ export async function createCategory({
 export async function updateCategory({
   organizationId, categoryId, updates, postgrestClient, updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const patch = { updated_by: updatedBy };
-  if (updates.name !== undefined) patch.name = updates.name;
-  if (updates.origin !== undefined) patch.origin = updates.origin;
-  if (updates.status !== undefined) patch.status = updates.status;
+  if (updates.name !== undefined) {
+    patch.name = updates.name;
+  }
+  if (updates.origin !== undefined) {
+    patch.origin = updates.origin;
+  }
+  if (updates.status !== undefined) {
+    patch.status = updates.status;
+  }
 
   const { data, error } = await postgrestClient
     .from('categories')
@@ -122,8 +142,12 @@ export async function updateCategory({
     .select()
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to update category: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to update category: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
   return mapDbCategoryToV2(data);
 }
 
@@ -140,7 +164,9 @@ export async function updateCategory({
 export async function deleteCategory({
   organizationId, categoryId, postgrestClient, updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const { data, error } = await postgrestClient
     .from('categories')
@@ -150,6 +176,8 @@ export async function deleteCategory({
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to delete category: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to delete category: ${error.message}`);
+  }
   return !!data;
 }

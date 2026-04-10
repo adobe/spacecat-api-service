@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -360,6 +359,24 @@ describe('onboard-modal', () => {
 
       expect(profileBlock.element.initial_option.value).to.equal('paid');
       expect(profileBlock.element.initial_option.text.text).to.equal('Paid');
+    });
+
+    it('should include force_onboard_input checkbox block in modal', async () => {
+      const startOnboardingAction = startOnboarding(context);
+
+      await startOnboardingAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+        respond: respondMock,
+      });
+
+      const { blocks } = clientMock.views.open.firstCall.args[0].view;
+      const forceBlock = blocks.find((b) => b.block_id === 'force_onboard_input');
+
+      expect(forceBlock).to.exist;
+      expect(forceBlock.element.type).to.equal('checkboxes');
+      expect(forceBlock.element.options[0].value).to.equal('force');
     });
 
     it('should handle unknown profile value gracefully', async () => {
@@ -1122,6 +1139,78 @@ describe('onboard-modal', () => {
       });
 
       expect(ackMock).to.have.been.called;
+    });
+
+    it('should pass force=true in additionalParams when force onboard checkbox is checked', async () => {
+      let capturedAdditionalParams;
+      const capturingModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({ audits: {}, imports: {} }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().callsFake(
+            async (_url, _ims, _config, _profile, _wait, _slack, _ctx, additionalParams) => {
+              capturedAdditionalParams = additionalParams;
+              return { siteId: 'site123', errors: [] };
+            },
+          ),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true }),
+        },
+      });
+
+      body.view.state.values.force_onboard_input = {
+        force_onboard: {
+          selected_options: [{ value: 'force' }],
+        },
+      };
+
+      const onboardSiteModalAction = capturingModule.onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      expect(capturedAdditionalParams).to.have.property('force', true);
+    });
+
+    it('should not pass force when force onboard checkbox is not checked', async () => {
+      let capturedAdditionalParams;
+      const capturingModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({ audits: {}, imports: {} }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().callsFake(
+            async (_url, _ims, _config, _profile, _wait, _slack, _ctx, additionalParams) => {
+              capturedAdditionalParams = additionalParams;
+              return { siteId: 'site123', errors: [] };
+            },
+          ),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true }),
+        },
+      });
+
+      body.view.state.values.force_onboard_input = {
+        force_onboard: { selected_options: [] },
+      };
+
+      const onboardSiteModalAction = capturingModule.onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      expect(capturedAdditionalParams).to.not.have.property('force');
     });
 
     describe('Bot Protection Detection', () => {

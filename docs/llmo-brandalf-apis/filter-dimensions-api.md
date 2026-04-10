@@ -1,6 +1,8 @@
 # Brand Presence Filter Dimensions API
 
-Returns available filter options (brands, categories, topics, origins, regions, page_intents) for the Brand Presence feature. Used to populate filter dropdowns in the UI. Data is queried from the `brand_presence_executions` table via PostgREST (mysticat-data-service).
+Returns available filter options for the Brand Presence feature: **brands**, **categories**, **topics**, fixed **origins** (`human`, `ai`), **regions** (from the `regions` reference table), **stats** (prompt counts and placeholder execution fields), and **page_intents**.
+
+Dimensions are loaded from **mysticat-data-service** reference data (`regions`, `brands`, `categories`, `topics`) via PostgREST—not from `rpc_brand_presence_filter_dimensions`. **`distinct_prompt_count`** is a count of `prompts` rows for the same org/brand scope; **`total_execution_count`** and **`empty_answer_execution_count`** are reserved and currently returned as **`0`** until wired to executions data.
 
 ---
 
@@ -17,54 +19,36 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 
 ---
 
-## Query Parameters
+## Query parameters
 
-| Parameter | Aliases | Type | Default | Description |
-|-----------|---------|------|---------|-------------|
-| `startDate` | `start_date` | string (YYYY-MM-DD) | 28 days ago | Start of date range |
-| `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
-| `model` | — | enum | `chatgpt-free` | LLM model. Must be one of: `chatgpt-paid`, `chatgpt-free`, `google-ai-overview`, `perplexity`, `google-ai-mode`, `copilot`, `gemini`, `google`, `microsoft`, `mistral`, `anthropic`, `amazon`. Returns 400 if invalid. |
-| `siteId` | `site_id` | string (UUID) | — | Filter by site |
-| `categoryId` | `category_id` | string (UUID or name) | — | Filter by category. If UUID → `category_id`; if not UUID (e.g. "Acrobat") → `category_name` |
-| `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated UUIDs (e.g. `uuid1,uuid2`), or repeated param. Non-UUID values are ignored. Uses `topic_id` column. |
-| `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
-| `origin` | — | string | — | Filter by origin (exact match, case-insensitive; e.g. `human`, `ai`) |
+| Parameter | Aliases | Type | Description |
+|-----------|---------|------|-------------|
+| `siteId` | `site_id` | string (UUID) | Optional. When set, validates the site belongs to the organization and scopes brands (via `brand_sites` and legacy `brands.site_id`), topics, stats, and page intents to that site. |
 
-**Parameters accepted for future schema support** (not yet applied):
-- `user_intent` / `userIntent`
-- `branding` / `promptBranding` / `prompt_branding`
+Other query parameters may be present on shared Brand Presence URLs; **this handler only reads `siteId` / `site_id`**. Date range, model, category, topic, region, and origin filters are **not** applied to these dimension lists (use other Brand Presence APIs for execution-backed analytics).
 
 ---
 
-## Default Values
+## Sample URLs
 
-| Parameter | Default |
-|-----------|---------|
-| `startDate` | 28 days before today |
-| `endDate` | Today |
-| `model` | `chatgpt-free` |
-
----
-
-## Sample URL (All Parameters)
-
+**All brands:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=ai
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions
 ```
 
-**Multiple topicIds (comma-separated):**
+**Single brand:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?topicIds=uuid1,uuid2,uuid3
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions
 ```
 
-**Single brand variant:**
+**With site scope:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt-free&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicIds=0178a3f0-1234-7000-8000-0000000000aa&regionCode=US&origin=ai
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?siteId=c2473d89-e997-458d-a86d-b4096649c12b
 ```
 
 ---
 
-## Response Shape
+## Response shape
 
 ```json
 {
@@ -72,115 +56,69 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d
     { "id": "uuid", "label": "Brand Name" }
   ],
   "categories": [
-    { "id": "Acrobat", "label": "Acrobat" }
+    { "id": "books", "label": "Books" }
   ],
   "topics": [
-    { "id": "0178a3f0-1234-7000-8000-0000000000aa", "label": "combine pdf" }
+    { "id": "0178a3f0-1234-7000-8000-0000000000aa", "label": "Topic A" }
   ],
   "origins": [
+    { "id": "human", "label": "human" },
     { "id": "ai", "label": "ai" }
   ],
   "regions": [
-    { "id": "US", "label": "US" }
+    { "id": "US", "label": "United States" }
   ],
+  "stats": {
+    "total_execution_count": 0,
+    "distinct_prompt_count": 12,
+    "empty_answer_execution_count": 0
+  },
   "page_intents": [
-    { "id": "TRANSACTIONAL", "label": "TRANSACTIONAL" },
-    { "id": "INFORMATIONAL", "label": "INFORMATIONAL" }
+    { "id": "informational", "label": "informational" }
   ]
 }
 ```
 
-**page_intents** — Distinct `page_intent` values from the `page_intents` table. See [Page Intents Scenarios](#page-intents-scenarios) for how site scope is determined.
+| Field | Source |
+|--------|--------|
+| `brands` | Org-wide: `brands` (active/pending). With `siteId`: **`brand_sites`** rows for that org + site, with embedded `brands` (id, name) |
+| `categories` | `categories` (org, active/pending) |
+| `topics` | `topics` filtered by org and optional brand scope |
+| `origins` | Fixed: `human`, `ai` |
+| `regions` | `regions` reference table |
+| `stats.distinct_prompt_count` | Count of `prompts` for org / brand scope |
+| `stats.total_execution_count`, `stats.empty_answer_execution_count` | Placeholder `0` until wired |
+| `page_intents` | Distinct `page_intent` from `page_intents` (see below) |
 
 ---
 
-## Internal Query (PostgREST)
+## Page intents
 
-The API builds a PostgREST query against the `brand_presence_executions` table. Equivalent logic:
+Distinct `page_intent` values are loaded from the `page_intents` table:
 
-```javascript
-// Base query
-client
-  .from('brand_presence_executions')
-  .select('brand_id, brand_name, category_name, topic_id, topics, origin, region_code, site_id')
-  .eq('organization_id', organizationId)
-  .gte('execution_date', startDate)
-  .lte('execution_date', endDate)
-  .eq('model', model)
-
-  // Optional filters (applied when param is provided and not empty)
-  .eq('site_id', siteId)                    // if siteId
-  .eq('brand_id', brandId)                  // if brandId !== 'all' (path param)
-  .eq('category_id', categoryId)            // if categoryId is valid UUID
-  .eq('category_name', categoryId)         // if categoryId is NOT valid UUID (e.g. "Acrobat")
-  .in('topic_id', topicIds)                // if topicIds (array of valid UUIDs; single or multiple)
-  .eq('region_code', regionCode)            // if regionCode
-  .ilike('origin', origin)                  // if origin (exact match, case-insensitive)
-
-  .limit(5000)
-```
-
-**Equivalent PostgREST HTTP request** (example with all filters, including multiple topicIds):
-```
-GET /brand_presence_executions?select=brand_id,brand_name,category_name,topic_id,topics,origin,region_code,site_id&organization_id=eq.44568c3e-efd4-4a7f-8ecd-8caf615f836c&execution_date=gte.2025-09-27&execution_date=lte.2025-09-30&model=eq.google-ai-mode&site_id=eq.c2473d89-e997-458d-a86d-b4096649c12b&category_name=eq.Acrobat&topic_id=in.(uuid1,uuid2)&region_code=eq.US&origin=ilike.ai&limit=5000
-```
-
-**topicIds parsing:** Accepts `topicIds` as a comma-separated string (`uuid1,uuid2`), an array, or a single UUID. Non-UUID values are filtered out. The filter uses `topic_id IN (...)` (PostgREST `topic_id=in.(...)`).
-
-**Response processing:** The API deduplicates and sorts the results to build `brands`, `categories`, `topics`, `origins`, `regions`, and `page_intents` arrays. Each array is an array of `{ id, label }` objects. For `topics`, `id` is the `topic_id` (UUID) and `label` is the denormalized topic name from the `topics` column; only rows with non-null `topic_id` are included.
+- **`siteId` set:** `page_intents` for that site (after org validation).
+- **`brands/all` without `siteId`:** org-wide query via `sites` join (same pattern as before, avoids huge `IN` lists).
+- **`brands/:brandId` without `siteId`:** resolves a primary site from `brands.site_id` or `brand_sites` and queries `page_intents` for that site (or returns an empty list when no site can be resolved).
 
 ---
 
-### Page Intents Query (second query)
-
-After the main query, the API fetches distinct `page_intent` values from the `page_intents` table.
-
-#### Page Intents Scenarios
-
-| Scenario | Path / Params | Query strategy | PostgREST query |
-|----------|---------------|----------------|-----------------|
-| **1. All brands, org only** | `brands/all` + no `siteId` | Org-based join (avoids URL length limits with 100+ sites) | `page_intents` joined with `sites` where `sites.organization_id = orgId` |
-| **2. Specific brandId** | `brands/:brandId` + no `siteId` | Batched `.in()` (chunks of 50 site IDs) | `page_intents` where `site_id` in (distinct sites from executions) |
-| **3. siteId provided** | Any path + `?siteId=xxx` | Single-site filter | `page_intents` where `site_id = siteId` |
-
-**Result:** Page intents are returned for the scoped sites in each case.
-
-```javascript
-// 1. brands/all: org-based join (no URL length limit)
-client
-  .from('page_intents')
-  .select('page_intent,sites!inner(organization_id)')
-  .eq('sites.organization_id', organizationId)
-  .limit(5000)
-
-// 2. specific brand: batched .in() when many sites (chunk size 50)
-for (chunk of siteIds in batches of 50) {
-  client.from('page_intents').select('page_intent').in('site_id', chunk).limit(5000)
-}
-
-// 3. siteId param: single-site filter
-client.from('page_intents').select('page_intent').eq('site_id', siteId).limit(5000)
-```
-
-**page_intents table** (mysticat-data-service): `id`, `site_id`, `url`, `page_intent` (enum: INFORMATIONAL, NAVIGATIONAL, TRANSACTIONAL, COMMERCIAL), `topic`, `created_at`, `updated_at`, `updated_by`
-
----
-
-## Error Responses
+## Error responses
 
 | Status | Condition |
 |--------|-----------|
 | 400 | PostgREST not configured (DATA_SERVICE_PROVIDER ≠ postgres) |
-| 400 | Invalid `model` query parameter (not in llm_model enum) |
+| 400 | `brandId` is not `all` and not a valid UUID |
 | 400 | Organization not found |
-| 400 | PostgREST/PostgreSQL error |
+| 400 | Generic / access validation error |
 | 403 | User does not belong to the organization |
+| 403 | Site does not belong to the organization (`siteId`) |
+| 403 | Single brand not found, not accessible, or not linked to `siteId` when `siteId` is set |
 
 ---
 
 ## Related APIs
 
-- [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks for a given model, optionally filtered by brand or site.
+- [Brand Presence Weeks API](brand-presence-weeks-api.md) — Applicable weeks for a given model, optionally filtered by brand or site.
 - [Brand Presence Sentiment Overview API](sentiment-overview-api.md) — Weekly sentiment percentages
 - [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly mentions, citations, and competitor breakdown
 
@@ -189,3 +127,9 @@ client.from('page_intents').select('page_intent').eq('site_id', siteId).limit(50
 ## Authentication
 
 Requires valid authentication (JWT, IMS, or API key) with access to the organization.
+
+---
+
+## Implementation
+
+Handler: `createFilterDimensionsHandler` in `src/controllers/llmo/llmo-mysticat-controller.js` → `src/controllers/llmo/llmo-brand-presence.js`.
