@@ -429,6 +429,19 @@ export default function getRouteHandlers(
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
 
+    // Agentic Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/agentic-traffic/kpis': llmoMysticatController.getAgenticTrafficKpis,
+    'GET /sites/:siteId/agentic-traffic/kpis-trend': llmoMysticatController.getAgenticTrafficKpisTrend,
+    'GET /sites/:siteId/agentic-traffic/by-region': llmoMysticatController.getAgenticTrafficByRegion,
+    'GET /sites/:siteId/agentic-traffic/by-category': llmoMysticatController.getAgenticTrafficByCategory,
+    'GET /sites/:siteId/agentic-traffic/by-page-type': llmoMysticatController.getAgenticTrafficByPageType,
+    'GET /sites/:siteId/agentic-traffic/by-status': llmoMysticatController.getAgenticTrafficByStatus,
+    'GET /sites/:siteId/agentic-traffic/by-user-agent': llmoMysticatController.getAgenticTrafficByUserAgent,
+    'GET /sites/:siteId/agentic-traffic/by-url': llmoMysticatController.getAgenticTrafficByUrl,
+    'GET /sites/:siteId/agentic-traffic/filter-dimensions': llmoMysticatController.getAgenticTrafficFilterDimensions,
+    'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
+    'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
+
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
     'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
