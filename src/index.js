@@ -152,7 +152,12 @@ class SkipAuthHandler extends AbstractHandler {
     if (context.env?.SKIP_AUTH !== 'true') {
       return null;
     }
-    this.log('SKIP_AUTH is true — injecting mock admin identity', 'info');
+    // Defense-in-depth: refuse to skip auth in a deployed Lambda environment
+    if (context.func?.name || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      this.log('SKIP_AUTH is true but running in Lambda - ignoring', 'warn');
+      return null;
+    }
+    this.log('SKIP_AUTH is true - injecting mock admin identity', 'info');
     return new AuthInfo()
       .withAuthenticated(true)
       .withProfile({
@@ -174,29 +179,8 @@ class SkipAuthHandler extends AbstractHandler {
  * @returns {Response} a response
  */
 async function run(request, context) {
-  const { log, pathInfo, env } = context;
+  const { log, pathInfo } = context;
   const { route, suffix, method } = pathInfo;
-
-  // Add mock authInfo when authentication is skipped
-  /* c8 ignore start */
-  if (env.SKIP_AUTH === 'true' && !context.attributes?.authInfo) {
-    if (!context.attributes) {
-      context.attributes = {};
-    }
-    // Create a mock admin authInfo
-    context.attributes.authInfo = new AuthInfo()
-      .withAuthenticated(true)
-      .withProfile({
-        user_id: 'local-dev-admin',
-        email: 'admin@localhost',
-        is_admin: true,
-        // Empty tenants means hasOrganization will return false, but is_admin bypasses that
-        tenants: [],
-      })
-      .withType('api_key')
-      .withScopes([{ name: 'admin' }]);
-  }
-  /* c8 ignore stop */
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
