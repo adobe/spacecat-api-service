@@ -307,10 +307,10 @@ async function hasActiveSuggestions(siteId, dataAccess, log) {
 
     // Block displacement if any PLG opportunity has suggestions the customer engaged with.
     // PENDING_VALIDATION and OUTDATED are excluded — they indicate stale/unconfirmed work.
-    const IGNORED_STATUSES = ['PENDING_VALIDATION', 'OUTDATED'];
+    const IGNORED_STATUSES = new Set(['PENDING_VALIDATION', 'OUTDATED']);
     return suggestionLists.some(
       (suggestions) => suggestions.some(
-        (s) => !IGNORED_STATUSES.includes(s.getStatus()),
+        (s) => !IGNORED_STATUSES.has(s.getStatus()),
       ),
     );
   } catch (error) {
