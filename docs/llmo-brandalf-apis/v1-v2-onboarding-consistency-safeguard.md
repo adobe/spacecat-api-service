@@ -21,16 +21,27 @@ time based purely on whether the customer existed before Brandalf GA.
 At onboarding time, when `performLlmoOnboarding` resolves the mode for an org:
 
 ```
-if org has any sites onboarded before 2026-04-01:
-    → v1   (legacy customer — keep them on v1)
+defaultMode = normalize(env.LLMO_ONBOARDING_DEFAULT_VERSION) || v2
+
+if defaultMode == v1:
+    → v1                                        # global override: everyone on v1
 else:
-    → v2   (new customer — default to v2)
+    if org has any sites onboarded before LLMO_BRANDALF_GA_CUTOFF_MS:
+        → v1                                    # legacy customer — keep them on v1
+    else:
+        → v2                                    # new customer — default to v2
 ```
 
 In words:
 
-- **Legacy customers** (any site in the org was onboarded before the Brandalf
-  GA cutoff of 2026-04-01) stay on **v1**.
+- The **environment-level default** (`LLMO_ONBOARDING_DEFAULT_VERSION`) is
+  still honored. If it is set to `v1`, every onboarding goes to v1 regardless
+  of the org's history (this is the "kill switch" if v2 has to be disabled
+  globally).
+- If the default is `v2` (the normal state), we still **protect legacy
+  customers**: any org that already has at least one site onboarded before
+  `LLMO_BRANDALF_GA_CUTOFF_MS` is forced onto **v1**, so onboarding a new
+  site for an existing v1 customer never silently switches them to v2.
 - **Brand-new customers** (no sites in the org predate the cutoff, including
   orgs with no sites at all) go to **v2**.
 
@@ -140,6 +151,24 @@ export async function hasPreBrandalfSites(organizationId, context) {
 export async function resolveLlmoOnboardingMode(organizationId, context) {
   const { log = console } = context || {};
 
+  // 1. Resolve the environment-level default. v2 if unset, v1 only if
+  //    explicitly configured (kill switch).
+  const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
+  const defaultMode = normalizeLlmoOnboardingMode(configuredDefault)
+    || LLMO_ONBOARDING_MODE_V2;
+  if (configuredDefault && configuredDefault !== defaultMode) {
+    log.warn(
+      `Invalid LLMO_ONBOARDING_DEFAULT_VERSION "${configuredDefault}", falling back to ${defaultMode}`,
+    );
+  }
+
+  // 2. If the global default is v1, that wins — no per-org check needed.
+  if (defaultMode === LLMO_ONBOARDING_MODE_V1) {
+    return LLMO_ONBOARDING_MODE_V1;
+  }
+
+  // 3. Default is v2. Protect legacy customers: an org that already has at
+  //    least one site created before the GA cutoff stays on v1.
   try {
     if (await hasPreBrandalfSites(organizationId, context)) {
       return LLMO_ONBOARDING_MODE_V1;
@@ -148,18 +177,15 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
     log.warn(
       `Failed to check pre-Brandalf sites for organization ${organizationId}: ${error.message}`,
     );
+    // On lookup failure we fall through to the configured default (v2). This
+    // is the safer choice for brand-new orgs; the only risk is that a
+    // legacy org with a transient DB error gets v2 — acceptable because the
+    // monitoring script will surface it.
   }
 
-  // New customers (and the safe fallback if the site lookup failed) go to v2.
   return LLMO_ONBOARDING_MODE_V2;
 }
 ```
-
-`LLMO_ONBOARDING_DEFAULT_VERSION` and `normalizeLlmoOnboardingMode` are
-**removed** from this code path — the new rule has only two outcomes (`v1`
-for legacy customers, `v2` for everyone else), so there is no longer a
-configurable default. Any references to `LLMO_ONBOARDING_DEFAULT_VERSION` in
-env files / Lambda config should be cleaned up as part of this change.
 
 The existing `readBrandalfFlagOverride` helper is no longer called from
 `resolveLlmoOnboardingMode`. It can stay in the file (still used by the
@@ -180,13 +206,19 @@ resolveLlmoOnboardingMode
         │
         ▼
 ┌──────────────────────────────────┐
-│ org has any site created before  │
-│ LLMO_BRANDALF_GA_CUTOFF_MS?      │
-│ (default 2026-04-01T00:00:00Z)   │
+│ LLMO_ONBOARDING_DEFAULT_VERSION  │
+│ === 'v1' ?                       │
 └──────────────────────────────────┘
-   │ yes       │ no
-   ▼           ▼
-   v1          v2 (default)
+   │ yes        │ no (default → v2)
+   ▼            ▼
+   v1     ┌──────────────────────────────────┐
+          │ org has any site created before  │
+          │ LLMO_BRANDALF_GA_CUTOFF_MS?      │
+          │ (default 2026-04-01T00:00:00Z)   │
+          └──────────────────────────────────┘
+             │ yes        │ no
+             ▼            ▼
+             v1           v2
 ```
 
 ## Tests
@@ -197,16 +229,22 @@ The existing tests in this file are based on `brandalf` flag values driving
 the mode. Those tests need to be **rewritten** because the flag is no longer
 an input to `resolveLlmoOnboardingMode`.
 
-All tests below run with `context.env.LLMO_BRANDALF_GA_CUTOFF_MS =
-1743465600000` (`2026-04-01T00:00:00Z`) unless otherwise stated.
+Unless otherwise stated, tests run with:
+
+- `context.env.LLMO_BRANDALF_GA_CUTOFF_MS = 1743465600000`
+  (`2026-04-01T00:00:00Z`)
+- `context.env.LLMO_ONBOARDING_DEFAULT_VERSION` **unset** (so the default
+  resolves to `v2`)
 
 New cases for `resolveLlmoOnboardingMode`:
+
+**Default v2 (the normal state)**
 
 - Org has a site with `createdAt = 2026-03-31T00:00:00Z` → `v1`.
 - Org has a site with `createdAt = 2026-04-01T00:00:00Z` → `v2` (cutoff is
   exclusive — `<`, not `<=`).
 - Org has a site with `createdAt = 2026-05-01T00:00:00Z` → `v2`.
-- Org has no sites → `v2` (default).
+- Org has no sites → `v2`.
 - Org has multiple sites, one of which is pre-cutoff → `v1`.
 - Org has a `brandalf=true` flag row but no pre-cutoff sites → `v2` (the flag
   is ignored, but the answer happens to match).
@@ -214,11 +252,25 @@ New cases for `resolveLlmoOnboardingMode`:
   flag is ignored — this is the behavior change vs today, document it
   explicitly in the test name).
 - Site with missing/invalid `createdAt` does not trip the legacy branch.
-- `Site.allByOrganizationId` throws → falls back to default, logs warning,
-  does not throw out of `resolveLlmoOnboardingMode`.
+- `Site.allByOrganizationId` throws → falls back to `v2` (the default), logs
+  warning, does not throw out of `resolveLlmoOnboardingMode`.
 - Env override: with `LLMO_BRANDALF_GA_CUTOFF_MS` shifted to a future
   timestamp, an org whose sites would otherwise count as v2 is reclassified
-  as `v1` (proves the env var is honored end-to-end).
+  as `v1` (proves the cutoff env var is honored end-to-end).
+
+**Default v1 (kill switch)**
+
+- `LLMO_ONBOARDING_DEFAULT_VERSION = 'v1'`, org with no sites → `v1`.
+- `LLMO_ONBOARDING_DEFAULT_VERSION = 'v1'`, org with a post-cutoff site →
+  `v1` (kill switch wins over the per-org check).
+- `LLMO_ONBOARDING_DEFAULT_VERSION = 'v1'`, `Site.allByOrganizationId` is
+  **never called** (assert via spy) — the kill-switch path short-circuits
+  before the DB lookup.
+
+**Invalid default**
+
+- `LLMO_ONBOARDING_DEFAULT_VERSION = 'banana'` → falls back to `v2`, logs a
+  warning, then runs the per-org check.
 
 Focused tests for `resolveBrandalfCutoffMs`:
 
@@ -310,7 +362,9 @@ shapes of `POST /llmo/onboard` and the feature-flags endpoints are unchanged.
 1. Add `LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT` constant +
    `resolveBrandalfCutoffMs` + `hasPreBrandalfSites` helpers to
    `src/support/llmo-onboarding-mode.js`, and update
-   `resolveLlmoOnboardingMode` to use them.
+   `resolveLlmoOnboardingMode` to use them. Keep `normalizeLlmoOnboardingMode`
+   and the `LLMO_ONBOARDING_DEFAULT_VERSION` env var as-is — they still drive
+   the global default and the v1 kill switch.
 2. Extend `test/support/llmo-onboarding-mode.test.js` with the new cases.
 3. Add integration tests in `test/it/` with seed data covering the four
    scenarios above.
