@@ -84,7 +84,9 @@ export async function hasPreBrandalfSites(organizationId, context) {
   const sites = await Site.allByOrganizationId(organizationId);
   return sites.some((s) => {
     const createdAt = s.getCreatedAt?.();
-    if (!createdAt) return false;
+    if (!createdAt) {
+      return false;
+    }
     const ts = createdAt instanceof Date
       ? createdAt.getTime()
       : new Date(createdAt).getTime();

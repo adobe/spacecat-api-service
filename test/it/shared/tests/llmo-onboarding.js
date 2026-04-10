@@ -111,7 +111,9 @@ export default function llmoOnboardingTests(getHttpClient, resetData, getPostgre
                   .from('sites')
                   .select('id,created_at')
                   .eq('organization_id', orgId);
-                if (error) throw new Error(error.message);
+                if (error) {
+                  throw new Error(error.message);
+                }
                 return (data || []).map((row) => ({
                   getId: () => row.id,
                   getCreatedAt: () => row.created_at,
