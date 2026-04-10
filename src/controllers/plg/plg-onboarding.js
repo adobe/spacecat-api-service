@@ -364,6 +364,10 @@ async function performAsoPlgOnboarding({
 
   // Create or find existing PlgOnboarding record for this imsOrgId + domain
   let onboarding = await PlgOnboarding.findByImsOrgIdAndDomain(imsOrgId, domain);
+  if (onboarding?.getStatus() === STATUSES.ONBOARDED) {
+    log.info(`Domain ${domain} is already onboarded for IMS org ${imsOrgId}, returning existing record`);
+    return onboarding;
+  }
   if (!onboarding) {
     try {
       onboarding = await PlgOnboarding.create({
@@ -472,10 +476,8 @@ async function performAsoPlgOnboarding({
           const currentOrgName = organization.getName();
           waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${currentOrgName}'.`;
         } else {
-          /* c8 ignore next */
-          const existingOrgLabel = existingOrg?.getName?.() || existingOrgName;
           const currentOrgName = organization.getName();
-          waitlistReason += ` This domain cannot be moved to '${currentOrgName}' — it is already set up with active products in its existing org ('${existingOrgLabel}').`;
+          waitlistReason += ` This domain cannot be moved to '${currentOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
         }
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(waitlistReason);
@@ -575,7 +577,6 @@ async function performAsoPlgOnboarding({
         log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
         steps.authorUrlResolved = true;
       } else if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE && presetAuthorUrl) {
-        // Derive ref, repo, owner, tld from EDS author URL
         const edsMatch = presetAuthorUrl.match(EDS_HOST_PATTERN);
         if (edsMatch) {
           const [, ref, repo, owner, tld] = edsMatch;
@@ -1066,7 +1067,11 @@ function PlgOnboardingController(ctx) {
               justification: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
             }]);
             await oldOnboarded.save();
-            await revokeOnboardedSiteEnrollments(oldOnboarded, context);
+            try {
+              await revokeOnboardedSiteEnrollments(oldOnboarded, context);
+            } catch (revokeErr) {
+              log.warn(`Failed to revoke enrollments for offboarded domain ${oldOnboarded.getDomain()}: ${revokeErr.message}`);
+            }
             log.info(`Offboarded old domain ${oldOnboarded.getDomain()} for IMS org ${imsOrgId}`);
           }
           // Re-run PLG flow for the current domain
@@ -1089,6 +1094,28 @@ function PlgOnboardingController(ctx) {
             return badRequest(
               `deliveryType must be one of: ${validDeliveryTypes.join(', ')}`,
             );
+          }
+          if (hasText(siteConfig.authorUrl)) {
+            if (siteConfig.deliveryType === SiteModel.DELIVERY_TYPES.AEM_CS) {
+              if (!/^https?:\/\//i.test(siteConfig.authorUrl)) {
+                siteConfig.authorUrl = `https://${siteConfig.authorUrl}`;
+              }
+              if (!AEM_CS_AUTHOR_URL_PATTERN.test(siteConfig.authorUrl)) {
+                return badRequest(
+                  'authorUrl for AEM_CS must match the pattern: https://author-pXXX-eYYY.adobeaemcloud.com',
+                );
+              }
+            } else if (siteConfig.deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
+              const hostname = siteConfig.authorUrl.replace(/^https?:\/\//i, '').split('/')[0];
+              if (!EDS_HOST_PATTERN.test(hostname)) {
+                return badRequest(
+                  'authorUrl for AEM_EDGE must be a valid EDS host (ref--repo--owner.aem.live or hlx.live)',
+                );
+              }
+              siteConfig.authorUrl = hostname;
+            } else if (!/^https?:\/\//i.test(siteConfig.authorUrl)) {
+              return badRequest('authorUrl must be a valid HTTP(S) URL');
+            }
           }
 
           // Re-run PLG flow with pre-set delivery type and optional author URL
@@ -1139,6 +1166,9 @@ function PlgOnboardingController(ctx) {
               return badRequest(`Cannot move domain ${domain} — it is already set up with active products in org '${existingOrg?.getName?.() || existingOrgId}'.`);
             }
             const currentOrgId = onboarding.getOrganizationId();
+            if (!currentOrgId) {
+              return badRequest('Onboarding record has no associated organization');
+            }
             const currentImsOrgId = onboarding.getImsOrgId();
             site.setOrganizationId(currentOrgId);
             /* c8 ignore next */
@@ -1167,16 +1197,6 @@ function PlgOnboardingController(ctx) {
           onboarding.setStatus(STATUSES.INACTIVE);
           await onboarding.save();
           log.info(`Offboarded onboarding ${onboarding.getId()} for domain ${domain} (belongs to org ${existingImsOrgId})`);
-
-          // Check if PLG onboarding already exists for (domain, existingOrg)
-          const existingPlgOnboarding = await PlgOnboarding
-            .findByImsOrgIdAndDomain(existingImsOrgId, domain);
-          if (existingPlgOnboarding) {
-            return createResponse(
-              { message: 'There is already an onboarding entry for this domain and org' },
-              409,
-            );
-          }
 
           // Run the flow under the existing org — it will create the PlgOnboarding record
           const result = await performAsoPlgOnboarding(
