@@ -3456,7 +3456,7 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(400);
       const err = await response.json();
-      expect(err.message).to.include('Invalid audit target URL at index 0:');
+      expect(err.message).to.include('Invalid audit target URL at manual[0] (https://example.com/path1):');
       expect(err.message).to.include('site domain (site1.com, with or without www.)');
       expect(site.setConfig).to.have.not.been.called;
     });
@@ -3485,6 +3485,38 @@ describe('Sites Controller', () => {
         { url: 'https://site1.com/path1' },
         { url: 'https://site1.com/path2' },
       ]);
+    });
+
+    it('deep-merges auditTargetURLs sub-keys so patching one source preserves others', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      // Stub toDynamoItem so the existing config includes moneyPages regardless of whether
+      // the installed shared package's Joi schema knows about that source yet.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        auditTargetURLs: {
+          manual: [{ url: 'https://site1.com/existing' }],
+          moneyPages: [{ url: 'https://site1.com/money1' }],
+        },
+      });
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://site1.com/updated' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual).to.deep.equal([{ url: 'https://site1.com/updated' }]);
+      expect(merged.auditTargetURLs.moneyPages).to.deep.equal([{ url: 'https://site1.com/money1' }]);
     });
 
     it('does not validate auditTargetURLs when key is omitted from config patch', async () => {
