@@ -273,6 +273,8 @@ async function updateLaunchDarklyFlags(site, context) {
   });
 }
 
+// The PLG opportunity types that are relevant for the displacement check.
+// Must stay in sync with LD_AUTO_FIX_FLAGS above, which enables auto-fix for the same types.
 const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
 
 /**
@@ -288,7 +290,7 @@ const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
  * @param {object} log - Logger.
  * @returns {Promise<boolean>}
  */
-async function hasOpenPlgSuggestions(siteId, dataAccess, log) {
+async function hasActivePlgWork(siteId, dataAccess, log) {
   const { Opportunity, Suggestion } = dataAccess;
   try {
     const opportunities = await Opportunity.allBySiteId(siteId);
@@ -413,14 +415,21 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     // could both pass this check and both proceed to onboard, temporarily violating the
     // one-domain-per-org invariant. The invariant self-heals on the next onboarding attempt.
     const alreadyOnboardedSiteId = alreadyOnboarded.getSiteId();
+    if (!alreadyOnboardedSiteId) {
+      log.info(`IMS org ${imsOrgId}: onboarded domain ${alreadyOnboarded.getDomain()} has no siteId, skipping displacement and waitlisting ${domain}`);
+    }
     const canDisplace = alreadyOnboardedSiteId
-      && !(await hasOpenPlgSuggestions(alreadyOnboardedSiteId, dataAccess, log));
+      && !(await hasActivePlgWork(alreadyOnboardedSiteId, dataAccess, log));
 
     if (canDisplace) {
       log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
       alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
       alreadyOnboarded.setWaitlistReason(`Displaced by new domain ${domain} for IMS org ${imsOrgId}`);
       await alreadyOnboarded.save();
+      // NOTE: the underlying Site record is intentionally left unchanged. The Site model does
+      // not carry PLG lifecycle state — PlgOnboarding is the sole source of truth for whether
+      // a domain is actively enrolled in PLG. Audit scheduling and other downstream systems
+      // should gate on PlgOnboarding status, not the Site record directly.
 
       // Only revoke ASO enrollments — leave other product enrollments untouched.
       // Revocation failure is non-fatal: log the error and continue so the new domain
@@ -439,7 +448,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
               return e.remove();
             }));
           } else {
-            log.info(`No ASO entitlement found for org ${oldOrgId}, nothing to revoke`);
+            log.warn(`No ASO entitlement found for org ${oldOrgId}, nothing to revoke`);
           }
         } catch (revokeError) {
           log.error(`Failed to revoke ASO enrollment for displaced site ${alreadyOnboardedSiteId}: ${revokeError.message}`);
@@ -449,9 +458,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
       }
       // Fall through to continue onboarding the new domain
     } else {
-      /* c8 ignore next 3 */
       const existingOrgForOnboarded = alreadyOnboarded.getOrganizationId()
         ? await Organization.findById(alreadyOnboarded.getOrganizationId())
+        /* c8 ignore next */
         : null;
       /* c8 ignore next */
       const existingOrgName = existingOrgForOnboarded?.getName?.()

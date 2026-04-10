@@ -1816,6 +1816,33 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
+    it('waitlists new domain when already-onboarded record has no siteId', async () => {
+      // When the onboarded record has no siteId, displacement is skipped entirely
+      // (canDisplace is false because alreadyOnboardedSiteId is falsy). Opportunity
+      // lookup must not be called with a null/undefined siteId.
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: null,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Displacement skipped — Opportunity lookup never called with null siteId
+      expect(mockDataAccess.Opportunity.allBySiteId).not.to.have.been.called;
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+
+      // New domain is waitlisted
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
     it('displaces already-onboarded domain when displaced site has no organizationId', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const onboardedRecord = createMockOnboarding({
