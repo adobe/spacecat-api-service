@@ -290,7 +290,7 @@ const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
  * @param {object} log - Logger.
  * @returns {Promise<boolean>}
  */
-async function hasActivePlgWork(siteId, dataAccess, log) {
+async function hasActiveSuggestions(siteId, dataAccess, log) {
   const { Opportunity, Suggestion } = dataAccess;
   try {
     const opportunities = await Opportunity.allBySiteId(siteId);
@@ -414,7 +414,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
       log.info(`IMS org ${imsOrgId}: onboarded domain ${alreadyOnboarded.getDomain()} has no siteId, skipping displacement and waitlisting ${domain}`);
     }
     const canDisplace = alreadyOnboardedSiteId
-      && !(await hasActivePlgWork(alreadyOnboardedSiteId, dataAccess, log));
+      && !(await hasActiveSuggestions(alreadyOnboardedSiteId, dataAccess, log));
 
     if (canDisplace) {
       log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
