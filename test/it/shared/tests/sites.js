@@ -21,9 +21,17 @@ import {
   SITE_3_BASE_URL,
   SITE_4_ID,
   SITE_4_BASE_URL,
+  SITE_LEGACY_LLMO_ID,
+  SITE_NEW_LLMO_ID,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
 } from '../seed-ids.js';
+
+// LLMO-4176 mode-resolution test sites are seeded with intentionally
+// historical / future created_at values to straddle the Brandalf GA cutoff
+// (2026-04-01). They MUST be excluded from expectSiteListDto, which asserts
+// createdAt is within the last hour.
+const LLMO_FIXTURE_SITE_IDS = new Set([SITE_LEGACY_LLMO_ID, SITE_NEW_LLMO_ID]);
 
 /**
  * Base64-encode a URL for the /sites/by-base-url/:baseURL path parameter.
@@ -86,7 +94,11 @@ export default function siteTests(getHttpClient, resetData) {
         // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
         // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
         expect(res.body).to.be.an('array').with.lengthOf(4);
-        res.body.forEach((s) => expectSiteListDto(s));
+        // Skip the LLMO fixtures in the DTO check — they have intentional
+        // historical/future createdAt values that fail the "recent" assertion.
+        res.body
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
         const ids = res.body.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
         expect(ids).to.include(SITE_4_ID);
