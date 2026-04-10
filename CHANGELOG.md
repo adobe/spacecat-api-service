@@ -1,3 +1,10 @@
+# [1.434.0](https://github.com/adobe/spacecat-api-service/compare/v1.433.1...v1.434.0) (2026-04-10)
+
+
+### Features
+
+* add suggestion grant revoke and list endpoints (SITES-42990) ([#2179](https://github.com/adobe/spacecat-api-service/issues/2179)) ([5d4bdcd](https://github.com/adobe/spacecat-api-service/commit/5d4bdcd929d8352548926cfd6fefc1dfc8b3245a))
+
 ## [1.433.1](https://github.com/adobe/spacecat-api-service/compare/v1.433.0...v1.433.1) (2026-04-10)
 
 
