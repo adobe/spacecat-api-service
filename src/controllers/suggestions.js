@@ -662,7 +662,12 @@ function SuggestionsController(ctx, sqs, env) {
 
       if (data) {
         hasUpdates = true;
-        suggestion.setData(data);
+        const existingData = suggestion.getData() || {};
+        const mergedData = { ...data };
+        if (existingData.edgeDeployed != null) {
+          mergedData.edgeDeployed = existingData.edgeDeployed;
+        }
+        suggestion.setData(mergedData);
       }
 
       if (kpiDeltas) {
