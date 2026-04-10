@@ -29,6 +29,7 @@ import {
   s2sAuthWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
   elevatedSlackClientWrapper,
@@ -133,6 +134,36 @@ function localCORSWrapper(fn) {
 
     return response;
   };
+}
+/* c8 ignore stop */
+
+/* c8 ignore start */
+/**
+ * Auth handler that bypasses authentication when SKIP_AUTH=true.
+ * For local development only — injects a mock admin identity.
+ */
+class SkipAuthHandler extends AbstractHandler {
+  constructor(log) {
+    super('skipAuth', log);
+  }
+
+  // eslint-disable-next-line no-unused-vars,class-methods-use-this
+  async checkAuth(request, context) {
+    if (context.env?.SKIP_AUTH !== 'true') {
+      return null;
+    }
+    this.log('SKIP_AUTH is true — injecting mock admin identity', 'info');
+    return new AuthInfo()
+      .withAuthenticated(true)
+      .withProfile({
+        user_id: 'local-dev-admin',
+        email: 'admin@localhost',
+        is_admin: true,
+        tenants: [],
+      })
+      .withType('api_key')
+      .withScopes([{ name: 'admin' }]);
+  }
 }
 /* c8 ignore stop */
 
@@ -329,7 +360,9 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
 const wrappedMain = wrap(run)
   .with(authWrapper, {
-    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+    authHandlers: [
+      SkipAuthHandler, JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler,
+    ],
   })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
