@@ -1109,6 +1109,36 @@ describe('llmo-brand-presence', () => {
       );
     });
 
+    it('returns badRequest when query times out', async () => {
+      const chainMock = createChainableMock();
+      chainMock.rpc = sinon.stub().rejects(new Error('PostgREST query timed out after 10000ms'));
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('The request took too long to process. Please try narrowing your date range or filters.');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence weeks query timeout: PostgREST query timed out after 10000ms',
+      );
+    });
+
+    it('re-throws non-timeout errors from handler', async () => {
+      const chainMock = createChainableMock();
+      chainMock.rpc = sinon.stub().rejects(new Error('unexpected connection reset'));
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      try {
+        await handler(mockContext);
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err.message).to.equal('unexpected connection reset');
+      }
+    });
+
     it('returns badRequest when RPC returns an error', async () => {
       const rpcError = { message: 'function rpc_brand_presence_execution_date_range does not exist' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
@@ -1841,14 +1871,14 @@ describe('llmo-brand-presence', () => {
       );
     });
 
-    it('uses WEEKS_QUERY_LIMIT (200000) for the query', async () => {
+    it('uses WEEKS_QUERY_LIMIT (5000) for the query', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.limit).to.have.been.calledWith(200000);
+      expect(chainMock.limit).to.have.been.calledWith(5000);
     });
 
     it('selects execution_date, sentiment, prompt, region_code, topics', async () => {
