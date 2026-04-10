@@ -83,8 +83,9 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
         // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
-        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3)
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
+        // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
+        expect(res.body).to.be.an('array').with.lengthOf(4);
         res.body.forEach((s) => expectSiteListDto(s));
         const ids = res.body.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
@@ -212,8 +213,9 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/aem_edge');
         expect(res.status).to.equal(200);
-        // SITE_1, SITE_3, and SITE_4 are aem_edge; SITE_2 is aem_cs
-        expect(res.body).to.be.an('array').with.lengthOf(3);
+        // SITE_1, SITE_3, SITE_4, SITE_LEGACY_LLMO, SITE_NEW_LLMO are aem_edge;
+        // SITE_2 is aem_cs.
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -236,7 +238,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/AEM_EDGE');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -246,7 +248,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/Aem_Edge');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
