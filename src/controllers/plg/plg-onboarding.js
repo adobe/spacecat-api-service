@@ -273,6 +273,45 @@ async function updateLaunchDarklyFlags(site, context) {
   });
 }
 
+const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
+
+/**
+ * Returns true if the given site has any open (NEW or IN_PROGRESS) suggestions
+ * for PLG-relevant opportunity types: cwv, alt-text, broken-backlinks.
+ * Returns true (conservative) on any lookup failure so we never accidentally displace
+ * a site that may still have active work.
+ * @param {string} siteId - The site ID to check.
+ * @param {object} dataAccess - Data access layer.
+ * @param {object} log - Logger.
+ * @returns {Promise<boolean>}
+ */
+async function hasOpenPlgSuggestions(siteId, dataAccess, log) {
+  const { Opportunity, Suggestion } = dataAccess;
+  try {
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    const plgOpportunities = opportunities.filter(
+      (o) => PLG_OPPORTUNITY_TYPES.includes(o.getType()),
+    );
+
+    if (plgOpportunities.length === 0) {
+      return false;
+    }
+
+    const suggestionLists = await Promise.all(
+      plgOpportunities.map((o) => Suggestion.allByOpportunityId(o.getId())),
+    );
+
+    return suggestionLists.some(
+      (suggestions) => suggestions.some(
+        (s) => s.getStatus() === 'NEW' || s.getStatus() === 'IN_PROGRESS',
+      ),
+    );
+  } catch (error) {
+    log.warn(`Failed to check PLG suggestions for site ${siteId}: ${error.message}`);
+    return true; // conservative: do not displace if check fails
+  }
+}
+
 async function createOrFindProject(baseURL, organizationId, context) {
   const { dataAccess, log } = context;
   const { Project } = dataAccess;
@@ -354,7 +393,6 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
   const alreadyOnboarded = existingRecords
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
   if (alreadyOnboarded) {
-    log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
     const existingOrgForOnboarded = alreadyOnboarded.getOrganizationId()
       ? await Organization.findById(alreadyOnboarded.getOrganizationId())
       /* c8 ignore next */
@@ -362,10 +400,33 @@ async function performAsoPlgOnboarding({ domain, imsOrgId, rumHost: presetRumHos
     /* c8 ignore next */
     const existingOrgName = existingOrgForOnboarded?.getName?.()
       || alreadyOnboarded.getOrganizationId();
-    onboarding.setStatus(STATUSES.WAITLISTED);
-    onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
-    await onboarding.save();
-    return onboarding;
+
+    // If the existing onboarded site has no open PLG suggestions for cwv/alt-text/backlinks,
+    // displace it: waitlist the old domain, revoke its enrollment, and continue with the new one.
+    const alreadyOnboardedSiteId = alreadyOnboarded.getSiteId();
+    const canDisplace = alreadyOnboardedSiteId
+      && !(await hasOpenPlgSuggestions(alreadyOnboardedSiteId, dataAccess, log));
+
+    if (canDisplace) {
+      log.info(`IMS org ${imsOrgId}: site ${alreadyOnboardedSiteId} has no open PLG suggestions, displacing domain ${alreadyOnboarded.getDomain()} for new domain ${domain}`);
+      alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
+      alreadyOnboarded.setWaitlistReason(`Displaced by new domain ${domain} for IMS org ${imsOrgId}`);
+      await alreadyOnboarded.save();
+
+      const { SiteEnrollment } = dataAccess;
+      const oldEnrollments = await SiteEnrollment.allBySiteId(alreadyOnboardedSiteId);
+      await Promise.all(oldEnrollments.map((e) => {
+        log.info(`Revoking enrollment ${e.getId()} for displaced site ${alreadyOnboardedSiteId}`);
+        return e.remove();
+      }));
+      // Fall through to continue onboarding the new domain
+    } else {
+      log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+      onboarding.setStatus(STATUSES.WAITLISTED);
+      onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
+      await onboarding.save();
+      return onboarding;
+    }
   }
 
   // Fast path: preonboarded sites just need enrollment + ONBOARDED

@@ -269,6 +269,13 @@ describe('PlgOnboardingController', () => {
       },
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
+        allBySiteId: sandbox.stub().resolves([]),
+      },
+      Opportunity: {
+        allBySiteId: sandbox.stub().resolves([]),
+      },
+      Suggestion: {
+        allByOpportunityId: sandbox.stub().resolves([]),
       },
     };
 
@@ -1599,6 +1606,98 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('displaces already-onboarded domain when it has no open PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no opportunities → no suggestions
+
+      const mockEnrollmentToRevoke = {
+        getId: sandbox.stub().returns('enroll-old-1'),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([mockEnrollmentToRevoke]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is waitlisted with displacement reason
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setWaitlistReason)
+        .to.have.been.calledWithMatch(/Displaced by new domain/);
+      expect(onboardedRecord.save).to.have.been.called;
+
+      // Old site enrollment is revoked
+      expect(mockDataAccess.SiteEnrollment.allBySiteId).to.have.been.calledWith(OLD_SITE_ID);
+      expect(mockEnrollmentToRevoke.remove).to.have.been.called;
+
+      // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('waitlists new domain when already-onboarded site has open PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      const mockOpportunity = { getId: sandbox.stub().returns('oppty-1'), getType: sandbox.stub().returns('cwv') };
+      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('NEW') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is NOT displaced
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.allBySiteId).not.to.have.been.called;
+
+      // New domain is waitlisted
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('conservatively waitlists new domain when suggestion check throws', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.rejects(new Error('DB unavailable'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is NOT displaced
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+
+      // New domain is waitlisted (conservative fallback)
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
     });
   });
 
