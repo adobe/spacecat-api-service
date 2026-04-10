@@ -1659,7 +1659,7 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('waitlists new domain when already-onboarded site has open PLG suggestions', async () => {
+    it('waitlists new domain when already-onboarded site has NEW PLG suggestions', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const onboardedRecord = createMockOnboarding({
         id: 'other-onboarding-id',
@@ -1668,13 +1668,11 @@ describe('PlgOnboardingController', () => {
         siteId: OLD_SITE_ID,
       });
       mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-
-      const mockOpportunity = {
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
         getId: sandbox.stub().returns('oppty-1'),
         getType: sandbox.stub().returns('cwv'),
         getLastAuditedAt: sandbox.stub().returns(null),
-      };
-      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      }]);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([
         { getStatus: sandbox.stub().returns('NEW') },
       ]);
@@ -1683,12 +1681,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-
-      // Old domain is NOT displaced
       expect(onboardedRecord.setStatus).not.to.have.been.called;
-      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
-
-      // New domain is waitlisted
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
@@ -1703,13 +1696,11 @@ describe('PlgOnboardingController', () => {
         siteId: OLD_SITE_ID,
       });
       mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
-
-      const mockOpportunity = {
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
         getId: sandbox.stub().returns('oppty-1'),
         getType: sandbox.stub().returns('alt-text'),
         getLastAuditedAt: sandbox.stub().returns(null),
-      };
-      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      }]);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([
         { getStatus: sandbox.stub().returns('IN_PROGRESS') },
       ]);
@@ -1722,6 +1713,118 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('waitlists new domain when already-onboarded site has FIXED PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('broken-backlinks'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('FIXED') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('waitlists new domain when already-onboarded site has SKIPPED PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('SKIPPED') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('displaces when all PLG suggestions are PENDING_VALIDATION', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('PENDING_VALIDATION') },
+      ]);
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('displaces when all PLG suggestions are OUTDATED', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('OUTDATED') },
+      ]);
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
     it('conservatively waitlists new domain when suggestion check throws', async () => {

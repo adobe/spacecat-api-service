@@ -278,11 +278,10 @@ async function updateLaunchDarklyFlags(site, context) {
 const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
 
 /**
- * Returns true if the given site has active PLG work that should block displacement.
- * Blocks displacement if any PLG opportunity (cwv, alt-text, broken-backlinks) has:
- *   - open suggestions (NEW or IN_PROGRESS), OR
- *   - a completed audit (lastAuditedAt set) with no suggestions — meaning the audit ran
- *     and suggestions were all resolved, indicating the site has been actively used.
+ * Returns true if the given site has suggestions that should block displacement.
+ * Blocks displacement if any PLG opportunity (cwv, alt-text, broken-backlinks) has
+ * suggestions in any status except PENDING_VALIDATION or OUTDATED — meaning the customer
+ * has engaged with the suggestions (NEW, IN_PROGRESS, FIXED, SKIPPED, etc.).
  * Returns true (conservative) on any lookup failure so we never accidentally displace
  * a site that may still have active work.
  * @param {string} siteId - The site ID to check.
@@ -306,16 +305,14 @@ async function hasActiveSuggestions(siteId, dataAccess, log) {
       plgOpportunities.map((o) => Suggestion.allByOpportunityId(o.getId())),
     );
 
-    // Block displacement if any PLG opportunity has open suggestions.
-    if (suggestionLists.some(
+    // Block displacement if any PLG opportunity has suggestions the customer engaged with.
+    // PENDING_VALIDATION and OUTDATED are excluded — they indicate stale/unconfirmed work.
+    const IGNORED_STATUSES = ['PENDING_VALIDATION', 'OUTDATED'];
+    return suggestionLists.some(
       (suggestions) => suggestions.some(
-        (s) => s.getStatus() === 'NEW' || s.getStatus() === 'IN_PROGRESS',
+        (s) => !IGNORED_STATUSES.includes(s.getStatus()),
       ),
-    )) {
-      return true;
-    }
-
-    return false;
+    );
   } catch (error) {
     log.warn(`Failed to check PLG suggestions for site ${siteId}: ${error.message}`);
     return true; // conservative: do not displace if check fails
