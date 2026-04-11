@@ -1,3 +1,10 @@
+## [1.435.1](https://github.com/adobe/spacecat-api-service/compare/v1.435.0...v1.435.1) (2026-04-11)
+
+
+### Bug Fixes
+
+* enhanced logging in the edge-optimize-config flow ([#2184](https://github.com/adobe/spacecat-api-service/issues/2184)) ([a61d48e](https://github.com/adobe/spacecat-api-service/commit/a61d48e562583a08b531145f63fc9f0ba63b51f5))
+
 # [1.435.0](https://github.com/adobe/spacecat-api-service/compare/v1.434.1...v1.435.0) (2026-04-10)
 
 
