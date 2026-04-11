@@ -31,6 +31,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import {
+  ASO_DEMO_ORG,
   createOrFindOrganization,
   enableAudits,
   enableImports,
@@ -88,6 +89,10 @@ function deriveCheckKey(onboarding) {
   }
 
   return null;
+}
+
+function isInternalOrg(orgId, env) {
+  return orgId === env.DEFAULT_ORGANIZATION_ID || orgId === ASO_DEMO_ORG;
 }
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
@@ -384,7 +389,7 @@ async function createOrFindProject(baseURL, organizationId, context) {
 async function performAsoPlgOnboarding({
   domain, imsOrgId, presetDeliveryType, presetAuthorUrl,
 }, context) {
-  const { dataAccess, log } = context;
+  const { dataAccess, env, log } = context;
   const {
     Site, PlgOnboarding, Organization,
   } = dataAccess;
@@ -457,7 +462,7 @@ async function performAsoPlgOnboarding({
     if (canDisplace) {
       log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
       alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
-      alreadyOnboarded.setWaitlistReason(`Displaced by new domain ${domain} for IMS org ${imsOrgId}`);
+      alreadyOnboarded.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`);
       await alreadyOnboarded.save();
       // NOTE: the underlying Site record is intentionally left unchanged. The Site model does
       // not carry PLG lifecycle state — PlgOnboarding is the sole source of truth for whether
@@ -576,6 +581,9 @@ async function performAsoPlgOnboarding({
         if (!siteEnrollments || siteEnrollments.length === 0) {
           const currentOrgName = organization.getName();
           waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${currentOrgName}'.`;
+        } else if (isInternalOrg(existingOrgId, env)) {
+          const currentOrgName = organization.getName();
+          waitlistReason += ` This domain is currently in a demo org '${existingOrgName}'. It can be moved to '${currentOrgName}'.`;
         } else {
           const currentOrgName = organization.getName();
           waitlistReason += ` This domain cannot be moved to '${currentOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
@@ -1073,7 +1081,7 @@ function PlgOnboardingController(ctx) {
    */
   const update = async (context) => {
     const {
-      dataAccess: da, params, data, attributes,
+      dataAccess: da, params, data, attributes, env,
     } = context;
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
@@ -1265,9 +1273,14 @@ function PlgOnboardingController(ctx) {
           if (siteConfig?.moveSite) {
             const siteEnrollments = await site.getSiteEnrollments();
             if (siteEnrollments && siteEnrollments.length > 0) {
-              const existingOrg = await Organization.findById(existingOrgId);
-              /* c8 ignore next */
-              return badRequest(`Cannot move domain ${domain} — it is already set up with active products in org '${existingOrg?.getName?.() || existingOrgId}'.`);
+              if (isInternalOrg(existingOrgId, env)) {
+                log.info(`Site ${site.getId()} is in internal/demo org — revoking all enrollments before move`);
+                await Promise.all(siteEnrollments.map((e) => e.remove()));
+              } else {
+                const existingOrg = await Organization.findById(existingOrgId);
+                /* c8 ignore next */
+                return badRequest(`Cannot move domain ${domain} — it is already set up with active products in org '${existingOrg?.getName?.() || existingOrgId}'.`);
+              }
             }
             const currentOrgId = onboarding.getOrganizationId();
             if (!currentOrgId) {
