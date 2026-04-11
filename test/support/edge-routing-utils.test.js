@@ -87,14 +87,29 @@ describe('edge-routing-utils', () => {
   });
 
   describe('probeSiteAndResolveDomain', () => {
-    it('returns calculated domain on 2xx response', async () => {
-      fetchStub.resolves({ ok: true, status: 200 });
+    it('returns calculated domain on 2xx response with x-edgeoptimize-request-id header', async () => {
+      fetchStub.resolves({
+        ok: true,
+        status: 200,
+        headers: { has: (h) => h === 'x-edgeoptimize-request-id' },
+      });
       calculateForwardedHostStub.returns('example.com');
 
       const domain = await edgeUtils.probeSiteAndResolveDomain('https://example.com', log);
 
       expect(domain).to.equal('example.com');
       expect(calculateForwardedHostStub).to.have.been.calledWith('https://example.com', log);
+    });
+
+    it('throws when 2xx response is missing x-edgeoptimize-request-id header', async () => {
+      fetchStub.resolves({
+        ok: true,
+        status: 200,
+        headers: { has: () => false },
+      });
+
+      await expect(edgeUtils.probeSiteAndResolveDomain('https://example.com', log))
+        .to.be.rejectedWith('missing the x-edgeoptimize-request-id response header');
     });
 
     it('returns calculated domain from Location header on 301 to same root domain', async () => {
