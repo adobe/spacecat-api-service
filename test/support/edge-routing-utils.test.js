@@ -87,14 +87,29 @@ describe('edge-routing-utils', () => {
   });
 
   describe('probeSiteAndResolveDomain', () => {
-    it('returns calculated domain on 2xx response', async () => {
-      fetchStub.resolves({ ok: true, status: 200 });
+    it('returns calculated domain on 2xx response with x-edgeoptimize-request-id header', async () => {
+      fetchStub.resolves({
+        ok: true,
+        status: 200,
+        headers: { has: (h) => h === 'x-edgeoptimize-request-id' },
+      });
       calculateForwardedHostStub.returns('example.com');
 
       const domain = await edgeUtils.probeSiteAndResolveDomain('https://example.com', log);
 
       expect(domain).to.equal('example.com');
       expect(calculateForwardedHostStub).to.have.been.calledWith('https://example.com', log);
+    });
+
+    it('throws when 2xx response is missing x-edgeoptimize-request-id header', async () => {
+      fetchStub.resolves({
+        ok: true,
+        status: 200,
+        headers: { has: () => false },
+      });
+
+      await expect(edgeUtils.probeSiteAndResolveDomain('https://example.com', log))
+        .to.be.rejectedWith('missing the x-edgeoptimize-request-id response header');
     });
 
     it('returns calculated domain from Location header on 301 to same root domain', async () => {
@@ -305,6 +320,17 @@ describe('edge-routing-utils', () => {
       dnsPromises.resolve4.withArgs('example.com').resolves(['146.75.123.10']);
       const result = await edgeUtilsDns.detectCdnForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
+    });
+
+    it('logs CNAME and A-record diagnostics when log is provided (covers log?.info branches)', async () => {
+      const dnsLog = { info: sandbox.stub() };
+      dnsPromises.resolveCname.withArgs('example.com').resolves(['unrelated-cname.example.com']);
+      dnsPromises.resolve4.withArgs('example.com').resolves(['8.8.8.8']);
+      const result = await edgeUtilsDns.detectCdnForDomain('example.com', dnsLog);
+      expect(result).to.equal(null);
+      expect(dnsLog.info).to.have.been.calledThrice;
+      expect(dnsLog.info.secondCall.args[0]).to.include('CNAMES');
+      expect(dnsLog.info.thirdCall.args[0]).to.include('IPs');
     });
   });
 

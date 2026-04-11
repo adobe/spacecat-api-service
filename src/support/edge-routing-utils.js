@@ -39,6 +39,7 @@ export const OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE = 'optimize-at-edge-enabled-m
 export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
 
 const EDGE_OPTIMIZE_USER_AGENT = 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0';
+const UA_ROUTING_HEADER = 'x-edgeoptimize-request-id';
 const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
 
@@ -67,7 +68,9 @@ export function getHostnameWithoutWww(url, log) {
 /**
  * Probes the site URL and resolves the canonical domain for CDN API calls.
  *
- * - 2xx: returns the forwarded host derived from the probe URL.
+ * - 2xx with x-edgeoptimize-request-id header: returns the forwarded host derived from the probe
+ *   URL.
+ * - 2xx without x-edgeoptimize-request-id: throws (default UA routing not yet active).
  * - 301 to the same root domain: returns the forwarded host from the Location header.
  * - 301 to a different root domain: throws.
  * - Any other status: throws.
@@ -86,6 +89,12 @@ export async function probeSiteAndResolveDomain(siteUrl, log) {
   });
 
   if (probeResponse.ok) {
+    if (!probeResponse.headers.has(UA_ROUTING_HEADER)) {
+      throw new Error(
+        `Site ${siteUrl} returned ${probeResponse.status} but is missing the `
+        + `${UA_ROUTING_HEADER} response header — default UA routing is not yet active`,
+      );
+    }
     return calculateForwardedHost(siteUrl, log);
   }
 
@@ -183,17 +192,17 @@ const AEM_CS_FASTLY_IPS = new Set([
   '151.101.107.10',
 ]);
 
-async function checkHost(host) {
+async function checkHost(host, log) {
   const cnames = await dns.resolveCname(host).catch(() => []);
+  log?.info(`[edge-routing-utils] Detected CNAMES for domain ${host}: ${cnames}`);
   if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((pattern) => c.includes(pattern)))) {
     return CDN_TYPES.AEM_CS_FASTLY;
   }
-
   const ips = await dns.resolve4(host).catch(() => []);
+  log?.info(`[edge-routing-utils] Detected IPs for domain ${host}: ${ips}`);
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
     return CDN_TYPES.AEM_CS_FASTLY;
   }
-
   return null;
 }
 
@@ -211,7 +220,8 @@ async function checkHost(host) {
  */
 export async function detectCdnForDomain(domain, log) {
   try {
-    return await checkHost(domain);
+    log?.info(`[edge-routing-utils] Detecting CDN for domain ${domain}`);
+    return await checkHost(domain, log);
   } catch (err) {
     // DNS errors are treated as undetected — never break callers
     log?.error('detectCdnForDomain error', err);

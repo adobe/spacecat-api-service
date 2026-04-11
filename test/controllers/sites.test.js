@@ -3540,6 +3540,72 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('enableMoneyPageUrls config flag', () => {
+    it('allows disabling money page URLs via config patch', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: { enableMoneyPageUrls: false },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.enableMoneyPageUrls).to.equal(false);
+    });
+
+    it('allows re-enabling money page URLs via config patch', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({ enableMoneyPageUrls: false }));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: { enableMoneyPageUrls: true },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.enableMoneyPageUrls).to.equal(true);
+    });
+
+    it('preserves enableMoneyPageUrls when patching other config keys', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      // Stub toDynamoItem so the existing config includes enableMoneyPageUrls regardless
+      // of whether the installed shared package's schema knows about the field yet.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        enableMoneyPageUrls: false,
+        slack: { channel: '#old' },
+      });
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: { slack: { channel: '#updated' } },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.enableMoneyPageUrls).to.equal(false);
+      expect(merged.slack).to.deep.equal({ channel: '#updated' });
+    });
+  });
+
   it('allows removing a config key by explicitly setting it to null', async () => {
     const site = sites[0];
     const existingConfig = Config({
