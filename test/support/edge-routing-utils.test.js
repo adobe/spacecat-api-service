@@ -306,6 +306,17 @@ describe('edge-routing-utils', () => {
       const result = await edgeUtilsDns.detectCdnForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
+
+    it('logs CNAME and A-record diagnostics when log is provided (covers log?.info branches)', async () => {
+      const dnsLog = { info: sandbox.stub() };
+      dnsPromises.resolveCname.withArgs('example.com').resolves(['unrelated-cname.example.com']);
+      dnsPromises.resolve4.withArgs('example.com').resolves(['8.8.8.8']);
+      const result = await edgeUtilsDns.detectCdnForDomain('example.com', dnsLog);
+      expect(result).to.equal(null);
+      expect(dnsLog.info).to.have.been.calledThrice;
+      expect(dnsLog.info.secondCall.args[0]).to.include('CNAMES');
+      expect(dnsLog.info.thirdCall.args[0]).to.include('IPs');
+    });
   });
 
   describe('detectCdnForDomain (integration)', () => {

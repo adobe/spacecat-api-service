@@ -263,6 +263,10 @@ Config:
     edgeOptimizeConfig:
       description: Optional. The edge optimize configuration for the site.
       $ref: '#/EdgeOptimizeConfig'
+    enableMoneyPageUrls:
+      description: Optional. Whether money page URLs are included in audit targets. Defaults to true.
+      type: boolean
+      default: true
     auditTargetURLs:
       description: Optional. Custom audit target URLs grouped by source (manual, moneyPages).
       $ref: '#/AuditTargetURLs'
