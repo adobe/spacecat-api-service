@@ -183,17 +183,17 @@ const AEM_CS_FASTLY_IPS = new Set([
   '151.101.107.10',
 ]);
 
-async function checkHost(host) {
+async function checkHost(host, log) {
   const cnames = await dns.resolveCname(host).catch(() => []);
+  log?.info(`[edge-routing-utils] Detected CNAMES for domain ${host}: ${cnames}`);
   if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((pattern) => c.includes(pattern)))) {
     return CDN_TYPES.AEM_CS_FASTLY;
   }
-
   const ips = await dns.resolve4(host).catch(() => []);
+  log?.info(`[edge-routing-utils] Detected IPs for domain ${host}: ${ips}`);
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
     return CDN_TYPES.AEM_CS_FASTLY;
   }
-
   return null;
 }
 
@@ -211,7 +211,8 @@ async function checkHost(host) {
  */
 export async function detectCdnForDomain(domain, log) {
   try {
-    return await checkHost(domain);
+    log?.info(`[edge-routing-utils] Detecting CDN for domain ${domain}`);
+    return await checkHost(domain, log);
   } catch (err) {
     // DNS errors are treated as undetected — never break callers
     log?.error('detectCdnForDomain error', err);
