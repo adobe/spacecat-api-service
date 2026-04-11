@@ -1,3 +1,10 @@
+# [1.436.0](https://github.com/adobe/spacecat-api-service/compare/v1.435.1...v1.436.0) (2026-04-11)
+
+
+### Features
+
+* **edge-routing:** verify UA routing is active before enabling CDN routing ([#2186](https://github.com/adobe/spacecat-api-service/issues/2186)) ([999738f](https://github.com/adobe/spacecat-api-service/commit/999738f887179e7025ecd5450be183214f5ee228))
+
 ## [1.435.1](https://github.com/adobe/spacecat-api-service/compare/v1.435.0...v1.435.1) (2026-04-11)
 
 
