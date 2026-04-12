@@ -1,3 +1,10 @@
+## [1.436.2](https://github.com/adobe/spacecat-api-service/compare/v1.436.1...v1.436.2) (2026-04-12)
+
+
+### Bug Fixes
+
+* allowlist adobe-aem.map.fastly.net cname for edge routing ([#2190](https://github.com/adobe/spacecat-api-service/issues/2190)) ([731c8ee](https://github.com/adobe/spacecat-api-service/commit/731c8ee7c632d99f0e3aa3a555b18939d05d563a))
+
 ## [1.436.1](https://github.com/adobe/spacecat-api-service/compare/v1.436.0...v1.436.1) (2026-04-11)
 
 
