@@ -183,6 +183,7 @@ export async function callCdnRoutingApi(
 
 const AEM_CS_FASTLY_CNAME_PATTERNS = [
   'cdn.adobeaemcloud.com',
+  'adobe-aem.map.fastly.net',
 ];
 const AEM_CS_FASTLY_IPS = new Set([
   '146.75.123.10',
