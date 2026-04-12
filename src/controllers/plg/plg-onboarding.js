@@ -31,7 +31,6 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import {
-  ASO_DEMO_ORG,
   createOrFindOrganization,
   enableAudits,
   enableImports,
@@ -92,7 +91,8 @@ function deriveCheckKey(onboarding) {
 }
 
 function isInternalOrg(orgId, env) {
-  return orgId === env.DEFAULT_ORGANIZATION_ID || orgId === ASO_DEMO_ORG;
+  const excludedOrgs = (env.ASO_PLG_EXCLUDED_ORGS || '').split(',').map((id) => id.trim()).filter(Boolean);
+  return excludedOrgs.includes(orgId);
 }
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)

@@ -292,6 +292,7 @@ describe('PlgOnboardingController', () => {
 
     mockEnv = {
       DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID,
+      ASO_PLG_EXCLUDED_ORGS: DEMO_ORG_ID,
       LD_EXPERIENCE_SUCCESS_API_TOKEN: 'test-ld-token',
     };
 
@@ -364,7 +365,6 @@ describe('PlgOnboardingController', () => {
           enableAudits: enableAuditsStub,
           enableImports: enableImportsStub,
           triggerAudits: triggerAuditsStub,
-          ASO_DEMO_ORG: DEMO_ORG_ID,
         },
         '../../../src/support/utils.js': {
           autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -574,7 +574,6 @@ describe('PlgOnboardingController', () => {
             enableAudits: enableAuditsStub,
             enableImports: enableImportsStub,
             triggerAudits: triggerAuditsStub,
-            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -1494,6 +1493,21 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/demo org.*can be moved to/);
+    });
+
+    it('treats org as non-internal when ASO_PLG_EXCLUDED_ORGS is not set', async () => {
+      const existingSite = createMockSite({
+        orgId: DEMO_ORG_ID,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = { ...buildContext({ domain: TEST_DOMAIN }), env: {} };
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/cannot be moved/);
     });
   });
 
@@ -2788,7 +2802,6 @@ describe('PlgOnboardingController', () => {
             enableAudits: enableAuditsStub,
             enableImports: enableImportsStub,
             triggerAudits: triggerAuditsStub,
-            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -3175,7 +3188,6 @@ describe('PlgOnboardingController', () => {
             enableAudits: enableAuditsStub,
             enableImports: enableImportsStub,
             triggerAudits: triggerAuditsStub,
-            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -3263,7 +3275,6 @@ describe('PlgOnboardingController', () => {
               enableAudits: sandbox.stub(),
               enableImports: sandbox.stub(),
               triggerAudits: sandbox.stub(),
-              ASO_DEMO_ORG: DEMO_ORG_ID,
             },
             '../../../src/support/utils.js': {
               autoResolveAuthorUrl: sandbox.stub(),
