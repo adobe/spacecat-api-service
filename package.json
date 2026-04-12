@@ -72,7 +72,7 @@
     "@adobe/helix-shared-wrap": "2.0.2",
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.29",
-    "@adobe/mysticat-shared-seo-client": "^1.2.0",
+    "@adobe/mysticat-shared-seo-client": "1.2.0",
     "@adobe/spacecat-helix-content-sdk": "1.4.33",
     "@adobe/spacecat-shared-athena-client": "1.9.11",
     "@adobe/spacecat-shared-brand-client": "1.1.41",
