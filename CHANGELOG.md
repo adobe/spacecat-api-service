@@ -1,3 +1,10 @@
+## [1.436.5](https://github.com/adobe/spacecat-api-service/compare/v1.436.4...v1.436.5) (2026-04-12)
+
+
+### Bug Fixes
+
+* added demo org check ([#2188](https://github.com/adobe/spacecat-api-service/issues/2188)) ([d80cdcb](https://github.com/adobe/spacecat-api-service/commit/d80cdcb74e3c96ae70e1049d92ffe10b337b936e))
+
 ## [1.436.4](https://github.com/adobe/spacecat-api-service/compare/v1.436.3...v1.436.4) (2026-04-12)
 
 
