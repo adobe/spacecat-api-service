@@ -69,8 +69,16 @@ describe('cdn-detection', () => {
     expect(result).to.equal('aem-cs-fastly');
   });
 
-  it('returns aem-cs-fastly for each of the four known Fastly IPs', async () => {
-    const fastlyIPs = ['146.75.123.10', '151.101.195.10', '151.101.67.10', '151.101.3.10'];
+  it('returns aem-cs-fastly when CNAME matches adobe-aem.map.fastly.net', async () => {
+    dnsStubs.resolveCname.withArgs('www.example.com').resolves(['adobe-aem.map.fastly.net']);
+    dnsStubs.resolve4.resolves([]);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.equal('aem-cs-fastly');
+  });
+
+  it('returns aem-cs-fastly for each of the known Fastly IPs', async () => {
+    const fastlyIPs = ['146.75.123.10', '151.101.195.10', '151.101.67.10', '151.101.3.10', '151.101.107.10'];
 
     for (const ip of fastlyIPs) {
       dnsStubs.resolveCname.reset();

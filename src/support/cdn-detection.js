@@ -12,12 +12,17 @@
 
 import { promises as dns } from 'dns';
 
-const AEM_CS_FASTLY_CNAME = 'cdn.adobeaemcloud.com';
+// Keep in sync with AEM_CS_FASTLY_CNAME_PATTERNS / AEM_CS_FASTLY_IPS in edge-routing-utils.js
+const AEM_CS_FASTLY_CNAME_PATTERNS = [
+  'cdn.adobeaemcloud.com',
+  'adobe-aem.map.fastly.net',
+];
 const AEM_CS_FASTLY_IPS = new Set([
   '146.75.123.10',
   '151.101.195.10',
   '151.101.67.10',
   '151.101.3.10',
+  '151.101.107.10',
 ]);
 
 // ENODATA = record type doesn't exist; ENOTFOUND = domain doesn't exist (NXDOMAIN).
@@ -47,7 +52,7 @@ async function checkHost(host) {
   if (cnames === null) {
     return null;
   }
-  if (cnames.some((c) => c.includes(AEM_CS_FASTLY_CNAME))) {
+  if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((p) => c.includes(p)))) {
     return 'aem-cs-fastly';
   }
 
