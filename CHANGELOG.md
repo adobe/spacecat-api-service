@@ -1,3 +1,10 @@
+## [1.436.11](https://github.com/adobe/spacecat-api-service/compare/v1.436.10...v1.436.11) (2026-04-13)
+
+
+### Bug Fixes
+
+* upsert topic_categories when creating a topic with categoryId ([#2195](https://github.com/adobe/spacecat-api-service/issues/2195)) ([5678916](https://github.com/adobe/spacecat-api-service/commit/567891645bb28277dfbd043c383a6bc5b8a635f9)), closes [adobe-rnd/llmo-data-retrieval-service#1303](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1303) [adobe/mysticat-data-service#345](https://github.com/adobe/mysticat-data-service/issues/345)
+
 ## [1.436.10](https://github.com/adobe/spacecat-api-service/compare/v1.436.9...v1.436.10) (2026-04-13)
 
 
