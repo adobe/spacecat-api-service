@@ -680,7 +680,9 @@ async function performAsoPlgOnboarding({
         site.setDeliveryConfig({
           ...existingDeliveryConfig,
           authorURL: presetAuthorUrl,
-          ...(programId && { programId, environmentId, preferContentApi: true }),
+          ...(programId && {
+            programId, environmentId, preferContentApi: true, enableDAMAltTextUpdate: true,
+          }),
           imsOrgId,
         });
         log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
@@ -719,6 +721,7 @@ async function performAsoPlgOnboarding({
             programId: resolvedConfig.programId,
             environmentId: resolvedConfig.environmentId,
             preferContentApi: true,
+            enableDAMAltTextUpdate: true,
             imsOrgId,
           });
           log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
