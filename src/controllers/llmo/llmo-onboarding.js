@@ -1373,6 +1373,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           brand: {
             name: brandName.trim(),
             status: 'active',
+            baseSiteId: site.getId(),
             urls: [{ value: baseURL, type: 'url' }],
             brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
           },
