@@ -674,7 +674,7 @@ describe('llmo-agentic-traffic', () => {
             agent_types: ['Chatbots', 'Research'],
             platforms: ['ChatGPT', 'Perplexity'],
             content_types: ['article', 'product'],
-            user_agents: ['GPTBot', 'PerplexityBot'],
+            user_agents: ['ClaudeBot', 'GPTBot', 'PerplexityBot'],
           }],
           error: null,
         },
@@ -688,6 +688,7 @@ describe('llmo-agentic-traffic', () => {
       expect(body.agentTypes).to.deep.equal(['Chatbots', 'Research']);
       expect(body.platforms).to.deep.equal(['ChatGPT', 'Perplexity']);
       expect(body.contentTypes).to.deep.equal(['article', 'product']);
+      expect(body.userAgents).to.deep.equal(['ClaudeBot', 'GPTBot', 'PerplexityBot']);
     });
 
     it('returns 500 when the RPC fails', async () => {

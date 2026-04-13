@@ -434,6 +434,7 @@ export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAc
           agentTypes: row.agent_types || [],
           platforms: row.platforms || [],
           contentTypes: row.content_types || [],
+          userAgents: row.user_agents || [],
         });
       },
     );
