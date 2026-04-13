@@ -1130,6 +1130,9 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
+      // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
+      delete updates.baseUrl;
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
