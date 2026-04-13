@@ -215,7 +215,7 @@ export function buildInitialCustomerConfigV2({
   brand.baseUrl = primaryUrl;
   brand.updatedAt = timestamp;
   brand.updatedBy = updatedBy;
-  brand.urls = [{ value: primaryUrl, type: 'url' }];
+  brand.urls = [{ value: primaryUrl, type: 'base' }];
   brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
 
   config.customer.customerName = brandName;
@@ -275,7 +275,7 @@ export async function ensureInitialCustomerConfigV2({
       regions: ['gl'],
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
-      urls: [{ value: primaryUrl, type: 'url' }],
+      urls: [{ value: primaryUrl, type: 'base' }],
       brandAliases: [{ name: trimmedName, regions: ['gl'] }],
     });
 
@@ -1375,7 +1375,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
             name: brandName.trim(),
             status: 'active',
             baseSiteId: site.getId(),
-            urls: [{ value: baseURL, type: 'url' }],
+            urls: [{ value: baseURL, type: 'base' }],
             brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
           },
           postgrestClient,
