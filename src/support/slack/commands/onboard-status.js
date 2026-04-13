@@ -139,8 +139,12 @@ Example:
 
       const visibleOpportunities = opportunities.filter((opportunity) => {
         const oppType = opportunity.getType();
-        if (shouldFilter && !expectedOpportunityTypes.includes(oppType)) return false;
-        if (processedTypes.has(oppType)) return false;
+        if (shouldFilter && !expectedOpportunityTypes.includes(oppType)) {
+          return false;
+        }
+        if (processedTypes.has(oppType)) {
+          return false;
+        }
         processedTypes.add(oppType);
         return true;
       });

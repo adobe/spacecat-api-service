@@ -10,14 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
-import { LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
 import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
@@ -84,6 +83,17 @@ describe('LlmoController', () => {
   let fetchWithTimeoutStub;
   let postLlmoAlertStub;
   let postSlackMessageStub;
+  let getServicePrincipalTokenStub;
+  let isUserInImsGroupStub;
+  let getOrgGroupsStub;
+  let getImsUserProfileStub;
+  let getImsUserOrganizationsStub;
+  let probeSiteAndResolveDomainStub;
+  let callCdnRoutingApiStub;
+  let getImsTokenFromCookieStub;
+  let edgeRoutingAuthReal;
+  let detectCdnForDomainStub;
+  let authorizeEdgeCdnRoutingStub;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -111,6 +121,23 @@ describe('LlmoController', () => {
       status: 500,
       json: async () => ({ message }),
     }),
+    unauthorized: (message) => ({
+      status: 401,
+      json: async () => ({ message }),
+    }),
+  };
+
+  // llmo imports getEffectiveBaseURL from tokowaka-client; the published package may not
+  // re-export it yet — tests must supply it on the esmocked module.
+  const mockTokowakaGetEffectiveBaseURL = (siteOrBaseUrl) => {
+    if (typeof siteOrBaseUrl === 'string') {
+      return siteOrBaseUrl.startsWith('http') ? siteOrBaseUrl : `https://${siteOrBaseUrl}`;
+    }
+    const overrideBaseURL = siteOrBaseUrl.getConfig?.()?.getFetchConfig?.()?.overrideBaseURL;
+    if (overrideBaseURL && /^https?:\/\//.test(overrideBaseURL)) {
+      return overrideBaseURL;
+    }
+    return siteOrBaseUrl.getBaseURL();
   };
 
   // Common mocks needed for all esmock instances
@@ -134,6 +161,7 @@ describe('LlmoController', () => {
           throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
         }
       },
+      getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
     },
   });
 
@@ -160,6 +188,13 @@ describe('LlmoController', () => {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
       },
     });
+
+    edgeRoutingAuthReal = await import('../../../src/support/edge-routing-auth.js');
+    getImsTokenFromCookieStub = sinon.stub().resolves('test-ims-user-token');
+    detectCdnForDomainStub = sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY);
+    authorizeEdgeCdnRoutingStub = sinon.stub().callsFake((ctx, params, log) => (
+      edgeRoutingAuthReal.authorizeEdgeCdnRouting(ctx, params, log)
+    ));
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -194,6 +229,17 @@ describe('LlmoController', () => {
       '../../../src/support/utils.js': {
         exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
         fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
+      },
+      '../../../src/support/edge-routing-auth.js': {
+        getImsTokenFromCookie: (...args) => getImsTokenFromCookieStub(...args),
+        authorizeEdgeCdnRouting: (...args) => authorizeEdgeCdnRoutingStub(...args),
+      },
+      '@adobe/spacecat-shared-ims-client': {
+        ImsClient: function MockImsClient() {
+          this.getServicePrincipalAccessToken = (...args) => (
+            getServicePrincipalTokenStub(...args)
+          );
+        },
       },
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
@@ -239,9 +285,48 @@ describe('LlmoController', () => {
             throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
           }
         },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+      '../../../src/support/edge-routing-utils.js': {
+        probeSiteAndResolveDomain: (...args) => probeSiteAndResolveDomainStub(...args),
+        callCdnRoutingApi: (...args) => callCdnRoutingApiStub(...args),
+        detectCdnForDomain: (...args) => detectCdnForDomainStub(...args),
+        getHostnameWithoutWww(url, log) {
+          try {
+            const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+            let hostname = urlObj.hostname.toLowerCase();
+            if (hostname.startsWith('www.')) {
+              hostname = hostname.slice(4);
+            }
+            return hostname;
+          } catch (error) {
+            log.error(`Error getting hostname from URL ${url}: ${error.message}`);
+            throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
+          }
+        },
+        parseEdgeRoutingConfig: (json, cdnType) => {
+          const parsed = JSON.parse(json);
+          const config = parsed[cdnType];
+          if (!config || typeof config !== 'object' || !config.cdnRoutingUrl || !/^https?:\/\//.test(config.cdnRoutingUrl)) {
+            throw new Error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnType}`);
+          }
+          return config;
+        },
+        EDGE_OPTIMIZE_CDN_STRATEGIES: {
+          'aem-cs-fastly': {
+            buildUrl: (cdnConfig, domain) => `${cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '')}/${domain}/edgeoptimize`,
+            buildBody: (enabled) => ({ enabled }),
+            method: 'POST',
+          },
+        },
+        EDGE_OPTIMIZE_CDN_TYPES: ['aem-cs-fastly'],
+        SUPPORTED_EDGE_ROUTING_CDN_TYPES: ['aem-cs-fastly'],
+        OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE: 'optimize-at-edge-enabled-marking',
+        EDGE_OPTIMIZE_MARKING_DELAY_SECONDS: 300,
+        LOG_SOURCES,
       },
     });
 
@@ -268,6 +353,7 @@ describe('LlmoController', () => {
             throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
           }
         },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -296,6 +382,22 @@ describe('LlmoController', () => {
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
+      '@adobe/spacecat-shared-tokowaka-client': {
+        default: {
+          createFrom: () => mockTokowakaClient,
+        },
+        calculateForwardedHost: (url) => {
+          try {
+            const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+            const h = u.hostname;
+            const dots = (h.match(/\./g) || []).length;
+            return dots === 1 ? `www.${h}` : h;
+          } catch (e) {
+            throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+          }
+        },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+      },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
       },
@@ -319,6 +421,22 @@ describe('LlmoController', () => {
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '@adobe/spacecat-shared-tokowaka-client': {
+        default: {
+          createFrom: () => mockTokowakaClient,
+        },
+        calculateForwardedHost: (url) => {
+          try {
+            const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+            const h = u.hostname;
+            const dots = (h.match(/\./g) || []).length;
+            return dots === 1 ? `www.${h}` : h;
+          } catch (e) {
+            throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+          }
+        },
+        getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -468,6 +586,7 @@ describe('LlmoController', () => {
     mockEnv = {
       LLMO_HLX_API_KEY: TEST_API_KEY,
       AUDIT_JOBS_QUEUE_URL: TEST_QUEUE_URL,
+      IMPORT_WORKER_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789/spacecat-import-jobs',
       SLACK_LLMO_ALERTS_CHANNEL_ID: 'C123456789',
       SLACK_BOT_TOKEN: 'xoxb-test-token',
       SLACK_LLMO_EDGE_OPTIMIZE_TEAM: 'U123456789,U234567890,U345678901,U456789012,U567890123,U678901234,U789012345,U890123456,U901234567',
@@ -496,6 +615,14 @@ describe('LlmoController', () => {
           hasOrganization: () => true,
           hasScope: () => true,
           getScopes: () => [{ name: 'user' }],
+          profile: {
+            email: 'test@example.com',
+            sub: 'test-user-id',
+            trial_email: 'trial@example.com',
+            first_name: 'Test',
+            last_name: 'User',
+            provider: 'GOOGLE',
+          },
           getProfile: () => ({
             email: 'test@example.com',
             trial_email: 'trial@example.com',
@@ -507,8 +634,29 @@ describe('LlmoController', () => {
         },
       },
       pathInfo: { method: 'GET', suffix: '/llmo/sheet-data', headers: {} },
+      imsClient: {
+        isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+        getOrgGroups: (...args) => getOrgGroupsStub(...args),
+        getImsUserProfile: (...args) => getImsUserProfileStub(...args),
+        getImsUserOrganizations: (...args) => getImsUserOrganizationsStub(...args),
+      },
     };
 
+    getServicePrincipalTokenStub = sinon.stub().resolves({ access_token: 'sp-access-token' });
+    isUserInImsGroupStub = sinon.stub().resolves(false);
+    getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
+    getImsUserProfileStub = sinon.stub().resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] });
+    getImsUserOrganizationsStub = sinon.stub().resolves([]);
+    getImsTokenFromCookieStub.reset();
+    getImsTokenFromCookieStub.resolves('test-ims-user-token');
+    probeSiteAndResolveDomainStub = sinon.stub().resolves('www.example.com');
+    detectCdnForDomainStub.reset();
+    detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY);
+    authorizeEdgeCdnRoutingStub.resetBehavior();
+    authorizeEdgeCdnRoutingStub.callsFake((ctx, params, log) => (
+      edgeRoutingAuthReal.authorizeEdgeCdnRouting(ctx, params, log)
+    ));
+    callCdnRoutingApiStub = sinon.stub().resolves();
     tracingFetchStub = sinon.stub();
     fetchWithTimeoutStub = sinon.stub();
     readConfigStub = sinon.stub();
@@ -4232,6 +4380,45 @@ describe('LlmoController', () => {
   describe('createOrUpdateEdgeConfig', () => {
     let edgeConfigContext;
 
+    const trialEdgeRoutingUtilsForCdnAuth = () => ({
+      probeSiteAndResolveDomain: sinon.stub().resolves('www.example.com'),
+      callCdnRoutingApi: sinon.stub().resolves(),
+      detectCdnForDomain: sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY),
+      getHostnameWithoutWww(url, log) {
+        try {
+          const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+          let hostname = urlObj.hostname.toLowerCase();
+          if (hostname.startsWith('www.')) {
+            hostname = hostname.slice(4);
+          }
+          return hostname;
+        } catch (error) {
+          log.error(`Error getting hostname from URL ${url}: ${error.message}`);
+          throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
+        }
+      },
+      parseEdgeRoutingConfig: (json, cdnType) => {
+        const parsed = JSON.parse(json);
+        const config = parsed[cdnType];
+        if (!config || typeof config !== 'object' || !config.cdnRoutingUrl || !/^https?:\/\//.test(config.cdnRoutingUrl)) {
+          throw new Error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnType}`);
+        }
+        return config;
+      },
+      EDGE_OPTIMIZE_CDN_STRATEGIES: {
+        'aem-cs-fastly': {
+          buildUrl: (cdnConfig, domain) => `${cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '')}/${domain}/edgeoptimize`,
+          buildBody: (enabled) => ({ enabled }),
+          method: 'POST',
+        },
+      },
+      EDGE_OPTIMIZE_CDN_TYPES: ['aem-cs-fastly'],
+      SUPPORTED_EDGE_ROUTING_CDN_TYPES: ['aem-cs-fastly'],
+      OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE: 'optimize-at-edge-enabled-marking',
+      EDGE_OPTIMIZE_MARKING_DELAY_SECONDS: 300,
+      LOG_SOURCES,
+    });
+
     beforeEach(() => {
       mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: false });
       mockConfig.updateEdgeOptimizeConfig = sinon.stub();
@@ -4268,7 +4455,7 @@ describe('LlmoController', () => {
         'https://www.example.com',
         TEST_SITE_ID,
         sinon.match({ tokowakaEnabled: true }),
-        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+        sinon.match({ lastModifiedBy: 'test@example.com' }),
       );
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
         sinon.match({ opted: sinon.match.number }),
@@ -4620,7 +4807,7 @@ describe('LlmoController', () => {
         'https://www.example.com',
         TEST_SITE_ID,
         sinon.match({ enhancements: true }),
-        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+        sinon.match({ lastModifiedBy: 'test@example.com' }),
       );
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
         sinon.match({ opted: sinon.match.number }),
@@ -4635,6 +4822,31 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('User does not have access to this site');
     });
 
+    it('returns 403 when user is not an LLMO administrator', async () => {
+      const hasAccessStub = sinon.stub().resolves(true);
+      const isOwnerStub = sinon.stub().resolves(true);
+      const NonAdminController = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: hasAccessStub,
+              hasAdminAccess: () => false,
+              isLLMOAdministrator: () => false,
+              isOwnerOfSite: isOwnerStub,
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const result = await NonAdminController(mockContext)
+        .createOrUpdateEdgeConfig(edgeConfigContext);
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
+      expect(isOwnerStub).to.not.have.been.called;
+    });
+
     it('should handle site not found failure', async () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
@@ -4643,41 +4855,29 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('Site not found');
     });
 
-    it('should return 403 when user is not LLMO administrator', async () => {
-      const postLlmoAlertStubLocal = sinon.stub().resolves();
-      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
-        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
-        '@adobe/spacecat-shared-tokowaka-client': {
-          default: {
-            createFrom: () => mockTokowakaClient,
-          },
-          calculateForwardedHost: (url) => {
-            try {
-              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
-              const h = u.hostname;
-              const dots = (h.match(/\./g) || []).length;
-              return dots === 1 ? `www.${h}` : h;
-            } catch (e) {
-              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
-            }
-          },
-        },
-        '../../../src/controllers/llmo/llmo-onboarding.js': {
-          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
-          generateDataFolder: sinon.stub().returns('test-folder'),
-          performLlmoOnboarding: sinon.stub().resolves({}),
-          performLlmoOffboarding: sinon.stub().resolves({}),
-          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
+    it('returns 403 for CDN routing when paid user lacks LLMO product context in IMS profile', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getId: sinon.stub().returns('entitlement-123'),
+        getProductCode: sinon.stub().returns('LLMO'),
+        getTier: sinon.stub().returns('PAID'),
+      });
+      getImsUserProfileStub.resolves({ productContexts: [{ serviceCode: 'other_product' }] });
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'] });
+      mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['k'] });
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
+
+      const result = await controller.createOrUpdateEdgeConfig({
+        ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
+        pathInfo: {
+          ...edgeConfigContext.pathInfo,
+          headers: { cookie: 'promiseToken=test-token' },
         },
       });
 
-      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(edgeConfigContext);
-
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
+      expect(responseBody.message).to.include('LLMO product access');
     });
 
     // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
@@ -4816,6 +5016,7 @@ describe('LlmoController', () => {
               throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
             }
           },
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -4923,6 +5124,7 @@ describe('LlmoController', () => {
               throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
             }
           },
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
         },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
@@ -4972,6 +5174,518 @@ describe('LlmoController', () => {
       expect(calledMessage).to.include('• Site: https://www.example.com');
       expect(calledMessage).to.not.include('cc:');
     });
+
+    // ── Trial admin authorization (authorizeEdgeCdnRouting FREE_TRIAL + IMS org groups) ──
+
+    it('returns 403 when trial user org has no LLMO Admin IMS group', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getId: sinon.stub().returns('entitlement-123'),
+        getProductCode: sinon.stub().returns('LLMO'),
+        getTier: sinon.stub().returns('FREE_TRIAL'),
+      });
+      const trialOrg = {
+        getId: sinon.stub().returns(TEST_ORG_ID),
+        getImsOrgId: sinon.stub().returns('12345@AdobeOrg'),
+      };
+      mockSite.getOrganization.resolves(trialOrg);
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'] });
+      mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['k'] });
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
+      getImsUserOrganizationsStub.resolves([{
+        orgRef: { ident: '12345', authSrc: 'AdobeOrg' },
+        groups: [{ groupName: 'Administrators' }],
+      }]);
+      const ctx = {
+        ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
+        pathInfo: {
+          ...edgeConfigContext.pathInfo,
+          headers: { cookie: 'promiseToken=test-token' },
+        },
+        imsClient: {
+          isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+          getOrgGroups: (...args) => getOrgGroupsStub(...args),
+          getImsUserProfile: (...args) => getImsUserProfileStub(...args),
+          getImsUserOrganizations: (...args) => getImsUserOrganizationsStub(...args),
+        },
+      };
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: { createFrom: () => mockTokowakaClient },
+          calculateForwardedHost: (url) => new URL(url).hostname,
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({}),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: sinon.stub().resolves(),
+        },
+        '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
+        '../../../src/support/edge-routing-auth.js': {
+          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
+        },
+        '@adobe/spacecat-shared-ims-client': {
+          ImsClient: function MockImsClient() {
+            this.getServicePrincipalAccessToken = (...args) => (
+              getServicePrincipalTokenStub(...args)
+            );
+          },
+        },
+        '../../../src/support/edge-routing-utils.js': trialEdgeRoutingUtilsForCdnAuth(),
+      });
+      const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
+      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.include('LLMO Admin group members');
+    });
+
+    it('returns 403 when trial user has no matching IMS org in organization list', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getId: sinon.stub().returns('entitlement-123'),
+        getProductCode: sinon.stub().returns('LLMO'),
+        getTier: sinon.stub().returns('FREE_TRIAL'),
+      });
+      const trialOrg = {
+        getId: sinon.stub().returns(TEST_ORG_ID),
+        getImsOrgId: sinon.stub().returns('12345@AdobeOrg'),
+      };
+      mockSite.getOrganization.resolves(trialOrg);
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'] });
+      mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['k'] });
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
+      getImsUserOrganizationsStub.resolves([{
+        orgRef: { ident: '99999', authSrc: 'AdobeOrg' },
+        groups: [{ groupName: 'LLMO Admin' }],
+      }]);
+      const ctx = {
+        ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
+        pathInfo: {
+          ...edgeConfigContext.pathInfo,
+          headers: { cookie: 'promiseToken=test-token' },
+        },
+        imsClient: {
+          isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+          getOrgGroups: (...args) => getOrgGroupsStub(...args),
+          getImsUserProfile: (...args) => getImsUserProfileStub(...args),
+          getImsUserOrganizations: (...args) => getImsUserOrganizationsStub(...args),
+        },
+      };
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: { createFrom: () => mockTokowakaClient },
+          calculateForwardedHost: (url) => new URL(url).hostname,
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({}),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: sinon.stub().resolves(),
+        },
+        '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
+        '../../../src/support/edge-routing-auth.js': {
+          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
+        },
+        '@adobe/spacecat-shared-ims-client': {
+          ImsClient: function MockImsClient() {
+            this.getServicePrincipalAccessToken = (...args) => (
+              getServicePrincipalTokenStub(...args)
+            );
+          },
+        },
+        '../../../src/support/edge-routing-utils.js': trialEdgeRoutingUtilsForCdnAuth(),
+      });
+      const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
+      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.include('LLMO Admin group members');
+    });
+
+    it('returns 403 when getImsUserOrganizations throws (trial admin path)', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getId: sinon.stub().returns('entitlement-123'),
+        getProductCode: sinon.stub().returns('LLMO'),
+        getTier: sinon.stub().returns('FREE_TRIAL'),
+      });
+      const trialOrg = {
+        getId: sinon.stub().returns(TEST_ORG_ID),
+        getImsOrgId: sinon.stub().returns('12345@AdobeOrg'),
+      };
+      mockSite.getOrganization.resolves(trialOrg);
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'] });
+      mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['k'] });
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
+      getImsUserOrganizationsStub.rejects(new Error('IMS API error'));
+      const ctx = {
+        ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
+        pathInfo: {
+          ...edgeConfigContext.pathInfo,
+          headers: { cookie: 'promiseToken=test-token' },
+        },
+        imsClient: {
+          isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
+          getOrgGroups: (...args) => getOrgGroupsStub(...args),
+          getImsUserProfile: (...args) => getImsUserProfileStub(...args),
+          getImsUserOrganizations: (...args) => getImsUserOrganizationsStub(...args),
+        },
+      };
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: { createFrom: () => mockTokowakaClient },
+          calculateForwardedHost: (url) => new URL(url).hostname,
+          getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({}),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: sinon.stub().resolves(),
+        },
+        '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
+        '../../../src/support/edge-routing-auth.js': {
+          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
+        },
+        '@adobe/spacecat-shared-ims-client': {
+          ImsClient: function MockImsClient() {
+            this.getServicePrincipalAccessToken = (...args) => (
+              getServicePrincipalTokenStub(...args)
+            );
+          },
+        },
+        '../../../src/support/edge-routing-utils.js': trialEdgeRoutingUtilsForCdnAuth(),
+      });
+      const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
+      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
+      expect(result.status).to.equal(403);
+    });
+
+    // ── cdnType / enabled input validation ─────────────────────────────────────
+
+    it('skips automated CDN routing when cdnType is not supported for routing (logs only)', async () => {
+      const result = await controller.createOrUpdateEdgeConfig({
+        ...edgeConfigContext,
+        data: { cdnType: 'unknown-cdn' },
+      });
+      expect(result.status).to.equal(200);
+      expect(callCdnRoutingApiStub).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/not eligible for automated routing/),
+      );
+    });
+
+    it('returns 400 when enabled is not a boolean', async () => {
+      const result = await controller.createOrUpdateEdgeConfig({
+        ...edgeConfigContext,
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: 'yes' },
+      });
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('enabled field must be a boolean');
+    });
+
+    // ── CDN routing sub-tests ───────────────────────────────────────────────────
+    describe('CDN routing', () => {
+      const routingConfigFastly = JSON.stringify({
+        [LOG_SOURCES.AEM_CS_FASTLY]: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
+      });
+
+      function makeRoutingCtx(overrides = {}) {
+        const {
+          data: overrideData,
+          env: overrideEnv,
+          pathInfo: overridePathInfo,
+          ...restOverrides
+        } = overrides;
+        const mergedHeaders = {
+          ...(edgeConfigContext.pathInfo?.headers || {}),
+          ...(overridePathInfo?.headers || {}),
+        };
+        if (!('cookie' in mergedHeaders)) {
+          mergedHeaders.cookie = 'promiseToken=test-token';
+        }
+        return {
+          ...edgeConfigContext,
+          ...restOverrides,
+          data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY, ...overrideData },
+          env: {
+            ...edgeConfigContext.env,
+            ENV: 'prod',
+            EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly,
+            ...overrideEnv,
+          },
+          pathInfo: {
+            ...(edgeConfigContext.pathInfo || {}),
+            ...(overridePathInfo || {}),
+            headers: mergedHeaders,
+          },
+        };
+      }
+
+      beforeEach(() => {
+        mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
+        mockConfig.updateEdgeOptimizeConfig = sinon.stub();
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com');
+        mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'] });
+        mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['k'] });
+        mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+          getId: sinon.stub().returns('entitlement-123'),
+          getProductCode: sinon.stub().returns('LLMO'),
+          getTier: sinon.stub().returns('PAID'),
+        });
+        getImsUserProfileStub.resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] });
+        detectCdnForDomainStub.resetHistory();
+        detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY);
+      });
+
+      it('returns 400 when DNS-detected CDN does not match requested cdnType', async () => {
+        detectCdnForDomainStub.resolves('akamai');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('does not match the detected CDN');
+        expect(mockLog.error).to.have.been.calledWith(
+          sinon.match(/Requested cdnType: 'aem-cs-fastly', detected CDN: 'akamai'/),
+        );
+      });
+
+      it('returns 400 when CDN auto-detection returns no match', async () => {
+        detectCdnForDomainStub.resolves(null);
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('does not match the detected CDN');
+        expect(mockLog.error).to.have.been.calledWith(
+          sinon.match(/Requested cdnType: 'aem-cs-fastly', detected CDN: 'null'/),
+        );
+      });
+
+      it('logs when hostname extraction fails during CDN auto-detection', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://[');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/CDN auto-detection failed/),
+        );
+      });
+
+      it('returns 400 when ENV is not prod', async () => {
+        const result = await controller.createOrUpdateEdgeConfig(
+          makeRoutingCtx({ env: { ENV: 'stage', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly } }),
+        );
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('not available in stage');
+      });
+
+      it('returns 500 when EDGE_OPTIMIZE_ROUTING_CONFIG is invalid JSON', async () => {
+        const result = await controller.createOrUpdateEdgeConfig(
+          makeRoutingCtx({ env: { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: 'not-json' } }),
+        );
+        expect(result.status).to.equal(500);
+        expect((await result.json()).message).to.equal('Failed to parse routing config.');
+      });
+
+      it('returns 503 when routing config has no entry for cdnType', async () => {
+        const result = await controller.createOrUpdateEdgeConfig(
+          makeRoutingCtx({ env: { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: '{}' } }),
+        );
+        expect(result.status).to.equal(503);
+      });
+
+      it('returns 400 when site probe throws', async () => {
+        probeSiteAndResolveDomainStub.rejects(new Error('Connection refused'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('Connection refused');
+      });
+
+      it('returns 400 when probe returns non-2xx non-301', async () => {
+        probeSiteAndResolveDomainStub.rejects(new Error('did not return 2xx or 301'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('did not return 2xx');
+      });
+
+      it('returns 400 when probe returns 301 but domains do not match', async () => {
+        probeSiteAndResolveDomainStub.rejects(new Error('does not match probe domain'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('does not match');
+      });
+
+      it('returns 400 when site probe succeeds but x-edgeoptimize-request-id header is absent', async () => {
+        probeSiteAndResolveDomainStub.rejects(new Error('missing the x-edgeoptimize-request-id response header'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('x-edgeoptimize-request-id');
+        expect(getServicePrincipalTokenStub).to.not.have.been.called;
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+      });
+
+      it('returns 401 when SP token request fails', async () => {
+        getServicePrincipalTokenStub.rejects(new Error('IMS error'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(401);
+        expect((await result.json()).message).to.equal('Authentication failed with upstream IMS service');
+      });
+
+      it('returns 500 when CDN API returns an error response', async () => {
+        callCdnRoutingApiStub.rejects(new Error('Upstream call failed with status 403'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(500);
+        expect((await result.json()).message).to.equal('Failed to update CDN routing');
+      });
+
+      it('returns 500 when CDN API fails with a non-403 status', async () => {
+        callCdnRoutingApiStub.rejects(new Error('Upstream call failed with status 503'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(500);
+        expect((await result.json()).message).to.equal('Failed to update CDN routing');
+      });
+
+      it('returns 400 when promiseToken cookie is missing for CDN routing', async () => {
+        getImsTokenFromCookieStub.callsFake((ctx) => (
+          edgeRoutingAuthReal.getImsTokenFromCookie(ctx)
+        ));
+        const result = await controller.createOrUpdateEdgeConfig(
+          makeRoutingCtx({ pathInfo: { headers: { cookie: '' } } }),
+        );
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('promiseToken cookie is required');
+      });
+
+      it('returns 200 with routing data when CDN routing succeeds', async () => {
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        const body = await result.json();
+        expect(body).to.include.key('apiKeys');
+        expect(body).to.not.have.property('domain');
+        expect(body).to.not.have.property('cdnType');
+        expect(body).to.not.have.property('enabled');
+        // opted field updated, but enabled flag NOT written (import worker handles it)
+        expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledOnce;
+        expect(mockConfig.updateEdgeOptimizeConfig.firstCall.args[0]).to.not.have.property('enabled');
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockEnv.IMPORT_WORKER_QUEUE_URL,
+          { type: 'optimize-at-edge-enabled-marking' },
+          undefined,
+          { delaySeconds: 300 },
+        );
+      });
+
+      it('returns 200 and logs when SQS enqueue for enabled marking fails', async () => {
+        mockContext.sqs.sendMessage.rejects(new Error('sqs unavailable'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        expect(mockLog.warn).to.have.been.calledWith(
+          sinon.match(/Failed to queue edge-optimize enabled marking/),
+        );
+      });
+
+      it('returns 200 with routing data when CDN routing disabled (enabled=false)', async () => {
+        const routingData = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: false };
+        mockConfig.getEdgeOptimizeConfig = sinon.stub().returns(null);
+        const result = await controller.createOrUpdateEdgeConfig(
+          makeRoutingCtx({ data: routingData }),
+        );
+        expect(result.status).to.equal(200);
+        const body = await result.json();
+        expect(body).to.not.have.key('enabled');
+        // enabled=false is written directly to site config, no SQS message
+        expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledTwice;
+        expect(mockConfig.updateEdgeOptimizeConfig.secondCall.args[0]).to.include({
+          enabled: false,
+        });
+        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+      });
+
+      it('uses valid overrideBaseURL from fetch config for CDN probe URL', async () => {
+        mockConfig.getFetchConfig = sinon.stub().returns({
+          overrideBaseURL: 'https://override.example.com',
+        });
+        mockSite.getConfig = sinon.stub().returns(mockConfig);
+        await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(probeSiteAndResolveDomainStub).to.have.been.calledWith(
+          'https://override.example.com',
+          sinon.match.object,
+        );
+      });
+
+      it('prefixes CDN probe URL with https when site base URL has no scheme', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('www.example.com');
+        await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(probeSiteAndResolveDomainStub).to.have.been.calledWith(
+          'https://www.example.com',
+          sinon.match.object,
+        );
+      });
+
+      it('uses tokenError.status when getImsTokenFromCookie fails with a status', async () => {
+        const tokenErr = new Error('IMS cookie exchange failed');
+        tokenErr.status = 503;
+        getImsTokenFromCookieStub.rejects(tokenErr);
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(503);
+        expect((await result.json()).message).to.equal('IMS cookie exchange failed');
+      });
+
+      it('uses authErr.status when authorizeEdgeCdnRouting fails with a status', async () => {
+        const authErr = new Error('Custom auth failure');
+        authErr.status = 502;
+        authorizeEdgeCdnRoutingStub.rejects(authErr);
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(502);
+        expect((await result.json()).message).to.equal('Custom auth failure');
+      });
+
+      it('returns 401 when getImsTokenFromCookie fails without a status', async () => {
+        getImsTokenFromCookieStub.rejects(new Error('token failure'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(401);
+      });
+
+      it('returns 403 when authorizeEdgeCdnRouting fails without a status', async () => {
+        authorizeEdgeCdnRoutingStub.rejects(new Error('not authorized'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(403);
+      });
+
+      it('returns 200 with routing on 301 redirect to same root domain', async () => {
+        probeSiteAndResolveDomainStub.resolves('www.example.com');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        const body = await result.json();
+        expect(body.apiKeys).to.deep.equal(['k']);
+        expect(callCdnRoutingApiStub).to.have.been.calledOnce;
+      });
+
+      it('returns 500 when CDN call throws a plain error without status semantics', async () => {
+        callCdnRoutingApiStub.rejects(new Error('Network error'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(500);
+        expect((await result.json()).message).to.equal('Failed to update CDN routing');
+      });
+    }); // end describe('CDN routing')
 
     it('should call hasAccess before isLLMOAdministrator before isOwnerOfSite', async () => {
       const hasAccessStub = sinon.stub().resolves(true);
@@ -5117,6 +5831,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
 
@@ -5225,6 +5940,26 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.be.an('array').with.lengthOf(1);
       expect(responseBody[0].domain).to.equal('staging.lovesac.com');
+    });
+
+    it('should accept multiple staging domains on the same apex as production', async () => {
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com', 'preview.lovesac.com'] };
+      mockDataAccess.Site.findByBaseURL
+        .onFirstCall().resolves(null)
+        .onSecondCall().resolves(null);
+      mockDataAccess.Site.create
+        .onFirstCall().resolves(mockStageSite)
+        .onSecondCall().resolves({
+          ...mockStageSite,
+          getId: sinon.stub().returns('stage-site-2'),
+          getBaseURL: sinon.stub().returns('https://preview.lovesac.com'),
+        });
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(2);
     });
 
     it('should use default lastModifiedBy when profile.email is missing', async () => {
@@ -5719,415 +6454,6 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('enableEdgeOptimize', () => {
-    let enableEdgeContext;
-    const validSiteId = '12345678-1234-4123-8123-123456789012';
-    const FAKE_PROMISE_TOKEN = 'fake-promise-token';
-    const routingConfigFastly = JSON.stringify({
-      [LOG_SOURCES.AEM_CS_FASTLY]: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
-    });
-
-    function mockRequestWithPromiseToken(token = FAKE_PROMISE_TOKEN) {
-      return {
-        headers: {
-          get: (name) => (name === 'x-promise-token' ? token : null),
-        },
-      };
-    }
-
-    beforeEach(() => {
-      enableEdgeContext = {
-        ...mockContext,
-        params: { siteId: validSiteId },
-        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
-        request: mockRequestWithPromiseToken(),
-      };
-      mockDataAccess.Site.findById.resetBehavior();
-      mockDataAccess.Site.findById.resolves(mockSite);
-      mockSite.getBaseURL = sinon.stub().returns('https://example.com');
-      mockSite.getConfig = sinon.stub().returns(mockConfig);
-      mockConfig.getFetchConfig = sinon.stub().returns({});
-    });
-
-    it('returns 500 when EDGE_OPTIMIZE_ROUTING_CONFIG is not set (invalid JSON)', async () => {
-      const ctxNoConfig = { ...enableEdgeContext, env: { ENV: 'prod' } };
-      const result = await controller.updateEdgeOptimizeCDNRouting(ctxNoConfig);
-      expect(result.status).to.equal(500);
-      expect((await result.json()).message).to.equal('Failed to parse routing config.');
-    });
-
-    it('returns 503 when EDGE_OPTIMIZE_ROUTING_CONFIG has no entry for cdnType', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: '{}' };
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(503);
-      expect((await result.json()).message).to.include('API is missing mandatory environment variable');
-    });
-
-    it('returns 400 when x-promise-token header is missing', async () => {
-      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
-      enableEdgeContext.request = mockRequestWithPromiseToken('');
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('x-promise-token header is required');
-    });
-
-    it('returns 400 when x-promise-token header is undefined (null/undefined branch)', async () => {
-      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
-      enableEdgeContext.request = { headers: { get: () => undefined } };
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('x-promise-token header is required');
-    });
-
-    it('returns 400 when cdnType is missing', async () => {
-      enableEdgeContext.data = {};
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('cdnType is required');
-    });
-
-    it('returns 400 when context.data is undefined and no promise token in header', async () => {
-      const ctxNoData = { ...enableEdgeContext, data: undefined, request: mockRequestWithPromiseToken('') };
-      ctxNoData.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      const result = await controller.updateEdgeOptimizeCDNRouting(ctxNoData);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('x-promise-token header is required');
-    });
-
-    it('returns 400 when cdnType is not supported', async () => {
-      enableEdgeContext.data = { cdnType: 'unknown' };
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('cdnType must be one of');
-    });
-
-    it('returns 400 when ENV is set and not prod', async () => {
-      const ctxNonProd = { ...enableEdgeContext, env: { ENV: 'stage', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly } };
-      const result = await controller.updateEdgeOptimizeCDNRouting(ctxNonProd);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.equal('API is not available in stage environment');
-    });
-
-    it('returns 400 when enabled is not a boolean', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: 'true' };
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.equal('enabled field must be a boolean');
-    });
-
-    it('returns 404 when site not found', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockDataAccess.Site.findById.resolves(null);
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(404);
-      expect((await result.json()).message).to.equal('Site not found');
-    });
-
-    it('returns 403 when user does not have access to site', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      const result = await controllerWithAccessDenied(mockContext)
-        .updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.equal('User does not have access to this site');
-    });
-
-    it('returns 401 when exchangePromiseToken fails', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      exchangePromiseTokenStub.rejects(new Error('Missing promise token'));
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(401);
-      expect((await result.json()).message).to.equal('Authentication failed with upstream IMS service');
-    });
-
-    it('returns 401 when exchangePromiseToken throws without status and message', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      exchangePromiseTokenStub.rejects(Object.assign(new Error(), { message: '', status: undefined }));
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(401);
-      expect((await result.json()).message).to.equal('Authentication failed with upstream IMS service');
-    });
-
-    it('returns 400 when site probe returns non-200 and non-301', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: false, status: 404 });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('did not return 2xx');
-    });
-
-    it('returns 400 when probe returns 301 without Location header', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      tracingFetchStub.onFirstCall().resolves({
-        ok: false,
-        status: 301,
-        headers: { get: () => null },
-      });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.match(/hostname|URL|null/i);
-    });
-
-    it('returns 400 when probe returns 301 with invalid Location header', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockSite.getBaseURL.returns('https://example.com');
-      tracingFetchStub.onFirstCall().resolves({
-        ok: false,
-        status: 301,
-        headers: { get: (n) => (n === 'location' ? 'https://ex ample.com/' : null) },
-      });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('Error getting hostname');
-    });
-
-    it('returns 400 when probe returns 301 but probe URL is invalid for domain check', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockSite.getBaseURL.returns('https://[');
-      tracingFetchStub.onFirstCall().resolves({
-        ok: false,
-        status: 301,
-        headers: { get: (n) => (n === 'location' ? 'https://www.example.com/' : null) },
-      });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('Error getting hostname from URL');
-    });
-
-    it('returns 400 when probe returns 301 and Location domain does not match probe domain', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockSite.getBaseURL.returns('https://example.com');
-      tracingFetchStub.onFirstCall().resolves({
-        ok: false,
-        status: 301,
-        headers: { get: (n) => (n === 'location' ? 'https://other-domain.com/' : null) },
-      });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      const body = await result.json();
-      expect(body.message).to.include('domain');
-      expect(body.message).to.include('does not match');
-      expect(body.message).to.include('301');
-    });
-
-    it('301 with Location without scheme exercises hostname-without-www branch', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockSite.getBaseURL.returns('https://example.com');
-      tracingFetchStub.onFirstCall().resolves({
-        ok: false,
-        status: 301,
-        headers: { get: (n) => (n === 'location' ? 'example.com' : null) },
-      });
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onSecondCall().resolves({ ok: true });
-      try {
-        const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-        expect(result.status).to.equal(200);
-        expect((await result.json()).domain).to.be.a('string');
-      } catch (e) {
-        expect(e.message).to.include('locationUrl');
-      }
-    });
-
-    it('returns 200 with domain from Location when probe returns 301 and root domains match (www vs non-www)', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockSite.getBaseURL.returns('https://example.com');
-      tracingFetchStub.onFirstCall().resolves({
-        ok: false,
-        status: 301,
-        headers: { get: (n) => (n === 'location' ? 'https://www.example.com/' : null) },
-      });
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onSecondCall().resolves({ ok: true });
-      try {
-        const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-        expect(result.status).to.equal(200);
-        expect(await result.json()).to.deep.include({
-          enabled: true,
-          domain: 'www.example.com',
-          cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-        });
-      } catch (e) {
-        expect(e.message).to.include('locationUrl');
-      }
-    });
-
-    it('returns 200 with domain from Location when probe returns 301 with adobe.com -> www.adobe.com', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockSite.getBaseURL.returns('https://adobe.com');
-      tracingFetchStub.onFirstCall().resolves({
-        ok: false,
-        status: 301,
-        headers: { get: (n) => (n === 'location' ? 'https://www.adobe.com/' : null) },
-      });
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onSecondCall().resolves({ ok: true });
-      try {
-        const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-        expect(result.status).to.equal(200);
-        expect((await result.json()).domain).to.equal('www.adobe.com');
-      } catch (e) {
-        expect(e.message).to.include('locationUrl');
-      }
-    });
-
-    it('returns 400 when site probe fetch throws', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().rejects(new Error('Network error'));
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.equal('Error probing site: Network error');
-    });
-
-    it('returns 500 when CDN API returns 503', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().resolves({
-        ok: false,
-        status: 503,
-        statusText: 'X',
-        text: () => Promise.resolve(''),
-      });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(500);
-      expect((await result.json()).message).to.include('Upstream call failed with status 503');
-    });
-
-    it('returns Forbidden when CDN API returns 403', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().resolves({
-        ok: false,
-        status: 403,
-        statusText: 'X',
-        text: () => Promise.resolve(''),
-      });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.equal('User is not authorized to update CDN routing');
-    });
-
-    it('returns Unauthorized when CDN API returns 401', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().resolves({
-        ok: false,
-        status: 401,
-        statusText: 'X',
-        text: () => Promise.resolve(''),
-      });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(401);
-      expect((await result.json()).message).to.equal('User is not authorized to update CDN routing');
-    });
-
-    it('returns 200 with enabled, domain and cdnType when probe and CDN succeed', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = {
-        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-        enabled: true,
-      };
-      mockSite.getBaseURL.returns('example.com');
-      mockConfig.getFetchConfig.returns({});
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().resolves({ ok: true });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(200);
-      expect(await result.json()).to.deep.equal({
-        enabled: true,
-        domain: 'www.example.com',
-        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-      });
-      expect(tracingFetchStub.firstCall.args[0]).to.equal('https://example.com');
-    });
-
-    it('defaults enabled to true when context.data has only cdnType', async () => {
-      const ctxOnlyCdnType = {
-        ...enableEdgeContext,
-        data: {
-          cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-          enabled: true,
-        },
-      };
-      ctxOnlyCdnType.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().resolves({ ok: true });
-      const result = await controller.updateEdgeOptimizeCDNRouting(ctxOnlyCdnType);
-      expect(result.status).to.equal(200);
-      expect(await result.json()).to.deep.equal({
-        enabled: true,
-        domain: 'www.example.com',
-        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-      });
-      expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: true }));
-    });
-
-    it('returns 200 using overrideBaseURL from site config when valid', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      mockConfig.getFetchConfig.returns({ overrideBaseURL: 'https://override.example.com' });
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().resolves({ ok: true });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(200);
-      expect((await result.json()).domain).to.equal('override.example.com');
-    });
-
-    it('returns 200 with enabled false when data.enabled is false', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = {
-        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-        enabled: false,
-      };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().resolves({ ok: true });
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(200);
-      expect(await result.json()).to.deep.equal({
-        enabled: false,
-        domain: 'www.example.com',
-        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-      });
-      expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: false }));
-    });
-
-    it('returns error.status when thrown error has status property', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      const err = new Error('CDN request failed');
-      err.status = 418;
-      tracingFetchStub.onSecondCall().rejects(err);
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(418);
-      expect((await result.json()).message).to.equal('CDN request failed');
-    });
-
-    it('returns 500 when unexpected error has no status property', async () => {
-      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({ ok: true });
-      tracingFetchStub.onSecondCall().rejects(new Error('Network error'));
-      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
-      expect(result.status).to.equal(500);
-      expect((await result.json()).message).to.equal('Network error');
-    });
-  });
-
   describe('checkEdgeOptimizeStatus', () => {
     let edgeStatusContext;
     const validSiteId = '12345678-1234-4123-8123-123456789012';
@@ -6391,6 +6717,208 @@ describe('LlmoController', () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.markOpportunitiesReviewed(mockContext);
       expect(result.status).to.equal(404);
+    });
+  });
+
+  describe('updateQueryIndex', () => {
+    let updateQueryIndexController;
+    let appendRowsStub;
+    let previewAndPublishStub;
+
+    before(async () => {
+      appendRowsStub = sinon.stub().resolves();
+      previewAndPublishStub = sinon.stub().resolves();
+
+      const LlmoControllerForQueryIndex = await esmock(
+        '../../../src/controllers/llmo/llmo.js',
+        {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            appendRowsToQueryIndex: (...args) => appendRowsStub(...args),
+            previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
+          },
+          '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: sinon.stub(),
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+            hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          },
+          '../../../src/support/access-control-util.js': {
+            default: createMockAccessControlUtil(true, true, true),
+          },
+          '@adobe/spacecat-shared-tokowaka-client': {
+            default: { createFrom: () => mockTokowakaClient },
+            calculateForwardedHost: () => 'www.example.com',
+            getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+          },
+          '../../../src/utils/slack/base.js': {
+            postSlackMessage: sinon.stub(),
+          },
+        },
+      );
+      updateQueryIndexController = LlmoControllerForQueryIndex;
+    });
+
+    beforeEach(() => {
+      appendRowsStub.reset();
+      appendRowsStub.resolves();
+      previewAndPublishStub.reset();
+      previewAndPublishStub.resolves();
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(mockSite);
+    });
+
+    it('should successfully update query-index', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1', 'file2.json'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.message).to.include('updated, previewed, and published');
+      expect(body.entriesAdded).to.equal(2);
+      expect(appendRowsStub).to.have.been.calledOnce;
+      expect(previewAndPublishStub).to.have.been.calledOnce;
+    });
+
+    it('should return forbidden when user is not LLMO administrator', async () => {
+      const LlmoControllerDeniedAdmin = await esmock(
+        '../../../src/controllers/llmo/llmo.js',
+        {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            appendRowsToQueryIndex: sinon.stub(),
+            previewAndPublishQueryIndex: sinon.stub(),
+          },
+          '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: sinon.stub(),
+            composeBaseURL: (d) => `https://${d}`,
+            hasText: (s) => typeof s === 'string' && s.trim().length > 0,
+            isObject: (o) => o !== null && typeof o === 'object' && !Array.isArray(o),
+          },
+          '../../../src/support/access-control-util.js': {
+            default: createMockAccessControlUtil(true, true, false),
+          },
+          '@adobe/spacecat-shared-tokowaka-client': {
+            default: { createFrom: () => mockTokowakaClient },
+            calculateForwardedHost: () => 'www.example.com',
+            getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+          },
+          '../../../src/utils/slack/base.js': {
+            postSlackMessage: sinon.stub(),
+          },
+        },
+      );
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = LlmoControllerDeniedAdmin(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return bad request when body is missing', async () => {
+      const ctx = { ...mockContext, data: null };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Request body is required');
+    });
+
+    it('should return bad request when domain is missing', async () => {
+      const ctx = { ...mockContext, data: { fileNames: ['file1'] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('domain is required');
+    });
+
+    it('should return bad request when fileNames is not a non-empty array', async () => {
+      const ctx = { ...mockContext, data: { domain: 'example.com', fileNames: [] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('fileNames must be a non-empty array of strings');
+    });
+
+    it('should return bad request when fileNames contains non-string entries', async () => {
+      const ctx = { ...mockContext, data: { domain: 'example.com', fileNames: ['valid', ''] } };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a non-empty string');
+    });
+
+    it('should return not found when site does not exist', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'unknown.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('should return bad request when dataFolder is missing from llmo config', async () => {
+      mockConfig.getLlmoConfig.returns({});
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('dataFolder is missing');
+    });
+
+    it('should return internal server error when appendRows throws', async () => {
+      appendRowsStub.rejects(new Error('SharePoint connection failed'));
+      mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('SharePoint connection failed');
+    });
+
+    it('should return internal server error when previewAndPublish throws', async () => {
+      previewAndPublishStub.rejects(new Error('Preview failed: 503 Service Unavailable'));
+      mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
+
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['file1'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('Preview failed');
     });
   });
 });

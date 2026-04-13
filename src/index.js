@@ -93,8 +93,10 @@ import ConsumersController from './controllers/consumers.js';
 import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
+import AutofixChecksController from './controllers/autofix-checks.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
+import PageRelationshipsController from './controllers/page-relationships.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -229,6 +231,8 @@ async function run(request, context) {
     const imsOrgAccessController = ImsOrgAccessController(context);
     const contactSalesLeadsController = ContactSalesLeadsController(context);
     const featureFlagsController = FeatureFlagsController(context);
+    const autofixChecksController = AutofixChecksController(context);
+    const pageRelationshipsController = PageRelationshipsController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -277,7 +281,9 @@ async function run(request, context) {
       imsOrgAccessController,
       contactSalesLeadsController,
       featureFlagsController,
+      pageRelationshipsController,
       ephemeralRunController,
+      autofixChecksController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -287,6 +293,9 @@ async function run(request, context) {
 
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
       if (params.organizationId
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {

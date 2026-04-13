@@ -199,12 +199,18 @@ async function isScrapeRecent(
   try {
     const { Site, ScrapeJob } = dataAccess;
     const site = await Site.findById(siteId);
-    if (!site) return false;
+    if (!site) {
+      return false;
+    }
     const topPages = await site.getSiteTopPagesBySourceAndGeo('seo', 'global');
-    if (!topPages || topPages.length === 0) return false;
+    if (!topPages || topPages.length === 0) {
+      return false;
+    }
     const baseURL = composeBaseURL(new URL(topPages[0].getUrl()).host);
     const jobs = await ScrapeJob.allByBaseURLAndProcessingType(baseURL, 'default');
-    if (!jobs || jobs.length === 0) return false;
+    if (!jobs || jobs.length === 0) {
+      return false;
+    }
     const latestStartedAt = Math.max(...jobs.map((j) => new Date(j.getStartedAt()).getTime()));
     const ageInDays = (Date.now() - latestStartedAt) / (1000 * 60 * 60 * 24);
     return ageInDays < scrapeFreshnessDays;
@@ -237,7 +243,9 @@ async function isTrafficAnalysisWeekPresent(siteId, week, year, context) {
     const resp = await s3Client.send(
       new ListObjectsV2Command({ Bucket: s3Bucket, Prefix: prefix, MaxKeys: 1 }),
     );
-    if ((resp.Contents || []).length > 0) return true;
+    if ((resp.Contents || []).length > 0) {
+      return true;
+    }
   }
   return false;
 }
@@ -277,13 +285,17 @@ async function isImportFresh(siteId, importType, site, context, log, freshnessDa
   try {
     if (importType === 'top-pages') {
       const topPages = await site.getSiteTopPagesBySourceAndGeo('seo', 'global');
-      if (!topPages || topPages.length === 0) return false;
+      if (!topPages || topPages.length === 0) {
+        return false;
+      }
       const latestImportedAt = topPages
         .map((p) => p.getImportedAt?.() ?? p.importedAt)
         .filter(Boolean)
         .sort()
         .reverse()[0];
-      if (!latestImportedAt) return false;
+      if (!latestImportedAt) {
+        return false;
+      }
       const ageInDays = (Date.now() - new Date(latestImportedAt).getTime()) / (1000 * 60 * 60 * 24);
       return ageInDays < freshnessDay;
     }
@@ -294,17 +306,23 @@ async function isImportFresh(siteId, importType, site, context, log, freshnessDa
     }
 
     const metricsConfig = IMPORT_METRICS_SOURCE_MAP[importType];
-    if (!metricsConfig) return false;
+    if (!metricsConfig) {
+      return false;
+    }
 
     const records = await getStoredMetrics({ siteId, ...metricsConfig }, context);
-    if (!records || records.length === 0) return false;
+    if (!records || records.length === 0) {
+      return false;
+    }
 
     const latestTime = records
       .map((r) => r.time ?? r.importTime ?? r.importedAt)
       .filter(Boolean)
       .sort()
       .reverse()[0];
-    if (!latestTime) return false;
+    if (!latestTime) {
+      return false;
+    }
 
     const ageInDays = (Date.now() - new Date(latestTime).getTime()) / (1000 * 60 * 60 * 24);
     return ageInDays < freshnessDay;
@@ -421,7 +439,9 @@ async function getAuditTypesToSkipForSite(
 
   checkableTypes.forEach((auditType, i) => {
     const latestAudit = latestAudits[i];
-    if (!latestAudit) return; // no record → always run
+    if (!latestAudit) {
+      return; // no record - always run
+    }
     const ageInMs = Date.now() - new Date(latestAudit.getAuditedAt()).getTime();
     if (ageInMs < freshnessThresholdMs) {
       log.info(`Site ${siteId}: skipping SQS enqueue for ${auditType} — audit ran within ${auditFreshnessDays} days`);
@@ -933,8 +953,12 @@ export async function runEphemeralRunBatch(siteIds, body, context, createdBy = '
       );
       // Exclude traffic-analysis from single-message path when in backfill mode (handled via pairs)
       const filteredImportTypes = imports.types.filter((t) => {
-        if (importTypesToSkip.has(t)) return false;
-        if (t === TRAFFIC_ANALYSIS_IMPORT_TYPE && isTrafficAnalysisBackfillMode) return false;
+        if (importTypesToSkip.has(t)) {
+          return false;
+        }
+        if (t === TRAFFIC_ANALYSIS_IMPORT_TYPE && isTrafficAnalysisBackfillMode) {
+          return false;
+        }
         return true;
       });
       const freshnessSkipped = [

@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -31,6 +30,7 @@ import {
   queueDetectCdnAudit,
   queueDeliveryConfigWriter,
   validateSiteForRedirects,
+  sendAutofixMessage,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -705,14 +705,14 @@ describe('utils', () => {
     });
   });
 
-  // Merge conflict resolved: retain both describe blocks in sequence.
-
   describe('filterSitesForProductCode', () => {
     let mockTierClient;
     let mockContext;
     let mockOrg;
     let mockSites;
     let sandbox2;
+    let nonAdminUtil;
+    let adminUtil;
 
     beforeEach(() => {
       sandbox2 = sinon.createSandbox();
@@ -737,6 +737,9 @@ describe('utils', () => {
         },
         log: { error: sinon.stub() },
       };
+
+      nonAdminUtil = { hasAdminAccess: () => false };
+      adminUtil = { hasAdminAccess: () => true };
     });
 
     afterEach(() => {
@@ -746,7 +749,7 @@ describe('utils', () => {
     it('returns empty array when no entitlement exists', async () => {
       mockTierClient.checkValidEntitlement.resolves({ entitlement: null });
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.deep.equal([]);
     });
@@ -762,13 +765,13 @@ describe('utils', () => {
         { getSiteId: () => 'site-1' },
       ]);
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.have.lengthOf(1);
       expect(result[0].getId()).to.equal('site-1');
     });
 
-    it('returns empty array for PRE_ONBOARD-tier entitlement', async () => {
+    it('returns empty array for PRE_ONBOARD-tier entitlement for non-admin', async () => {
       mockTierClient.checkValidEntitlement.resolves({
         entitlement: {
           getId: () => 'ent-1',
@@ -776,10 +779,28 @@ describe('utils', () => {
         },
       });
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.deep.equal([]);
       expect(mockContext.dataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
+    });
+
+    it('returns enrolled sites for PRE_ONBOARD-tier entitlement for admin', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PRE_ONBOARD,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', adminUtil);
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].getId()).to.equal('site-1');
+      expect(mockContext.dataAccess.SiteEnrollment.allByEntitlementId).to.have.been.calledOnce;
     });
 
     it('returns enrolled sites for FREE_TRIAL-tier entitlement', async () => {
@@ -793,7 +814,7 @@ describe('utils', () => {
         { getSiteId: () => 'site-1' },
       ]);
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.have.lengthOf(1);
       expect(result[0].getId()).to.equal('site-1');
@@ -811,12 +832,12 @@ describe('utils', () => {
         { getSiteId: () => 'site-2' },
       ]);
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.have.lengthOf(2);
     });
 
-    it('returns empty array for any unrecognized future tier (allow-list pattern)', async () => {
+    it('returns empty array for any unrecognized future tier for non-admin (allow-list pattern)', async () => {
       mockTierClient.checkValidEntitlement.resolves({
         entitlement: {
           getId: () => 'ent-1',
@@ -824,9 +845,26 @@ describe('utils', () => {
         },
       });
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.deep.equal([]);
+    });
+
+    it('returns enrolled sites for any unrecognized future tier for admin', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => 'FUTURE_TIER',
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+        { getSiteId: () => 'site-2' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', adminUtil);
+
+      expect(result).to.have.lengthOf(2);
     });
   });
 
@@ -1291,6 +1329,138 @@ describe('utils', () => {
         ),
       ).to.be.rejectedWith('SQS down');
       expect(context.log.error).to.have.been.calledOnce;
+    });
+  });
+
+  describe('sendAutofixMessage', () => {
+    let mockSqs;
+
+    beforeEach(() => {
+      mockSqs = { sendMessage: sinon.stub().resolves() };
+    });
+
+    it('sends message with relationshipContext.fixTargetPageId when provided', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1', 's-2'],
+        'token',
+        null,
+        null,
+        null,
+        {
+          url: 'https://example.com',
+          relationshipContext: { fixTargetPageId: 'page-uuid-123' },
+        },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('relationshipContext');
+      expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-uuid-123' });
+      expect(payload).to.have.property('url', 'https://example.com');
+      expect(payload).to.have.property('siteId', 'site-1');
+      expect(payload).to.have.property('opportunityId', 'opp-1');
+      expect(payload.suggestionIds).to.deep.equal(['s-1', 's-2']);
+    });
+
+    it('sends message with relationshipContext when additional fields are provided', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        {
+          url: 'https://example.com',
+          relationshipContext: {
+            fixTargetPageId: 'page-uuid-123',
+            cancelInheritance: true,
+            fixTargetMode: 'source',
+            appliedOnPagePath: '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+          },
+        },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('relationshipContext');
+      expect(payload.relationshipContext).to.deep.equal({
+        fixTargetPageId: 'page-uuid-123',
+        cancelInheritance: true,
+        fixTargetMode: 'source',
+        appliedOnPagePath: '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+      });
+    });
+
+    it('omits relationshipContext when not provided', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        { url: 'https://example.com' },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('relationshipContext');
+      expect(payload).to.have.property('url', 'https://example.com');
+    });
+
+    it('omits relationshipContext when it is undefined', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        { url: 'https://example.com', relationshipContext: undefined },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('relationshipContext');
+    });
+
+    it('includes customData when provided alongside relationshipContext', async () => {
+      const customData = { key: 'value' };
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        customData,
+        {
+          url: 'https://example.com',
+          relationshipContext: { fixTargetPageId: 'page-123' },
+        },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
+      expect(payload).to.have.property('customData');
+      expect(payload.customData).to.deep.equal({ key: 'value' });
     });
   });
 });

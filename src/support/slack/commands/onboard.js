@@ -276,13 +276,27 @@ function OnboardCommand(context) {
             initialValues.site = normalizedSite;
           }
         }
-        if (imsOrgId) initialValues.imsOrgId = imsOrgId;
-        if (profile) initialValues.profile = profile;
-        if (workflowWaitTime) initialValues.workflowWaitTime = workflowWaitTime;
-        if (tier) initialValues.tier = tier;
-        if (projectId) initialValues.projectId = projectId;
-        if (language) initialValues.language = language;
-        if (region) initialValues.region = region;
+        if (imsOrgId) {
+          initialValues.imsOrgId = imsOrgId;
+        }
+        if (profile) {
+          initialValues.profile = profile;
+        }
+        if (workflowWaitTime) {
+          initialValues.workflowWaitTime = workflowWaitTime;
+        }
+        if (tier) {
+          initialValues.tier = tier;
+        }
+        if (projectId) {
+          initialValues.projectId = projectId;
+        }
+        if (language) {
+          initialValues.language = language;
+        }
+        if (region) {
+          initialValues.region = region;
+        }
 
         const buttonValue = Object.keys(initialValues).length > 0
           ? JSON.stringify(initialValues)

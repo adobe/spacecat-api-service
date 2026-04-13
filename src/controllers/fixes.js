@@ -101,7 +101,9 @@ export class FixesController {
     const { fixCreatedDate } = context.data || {};
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     let fixEntities = [];
     let fixes = [];
@@ -126,7 +128,9 @@ export class FixesController {
       // Check ownership for the first fix entity to ensure
       // the opportunity belongs to the site
       res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-      if (res) return res;
+      if (res) {
+        return res;
+      }
 
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
       return ok(fixes);
@@ -137,7 +141,9 @@ export class FixesController {
     // Check whether the suggestion belongs to the opportunity,
     // and the opportunity belongs to the site.
     res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
@@ -152,7 +158,9 @@ export class FixesController {
   async getByStatus(context) {
     const { siteId, opportunityId, status } = context.params;
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!hasText(status)) {
       return badRequest('Status is required');
@@ -160,7 +168,9 @@ export class FixesController {
 
     const fixEntities = await this.#FixEntity.allByOpportunityIdAndStatus(opportunityId, status);
     res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     return ok(fixEntities.map((fix) => FixDto.toJSON(fix)));
   }
@@ -175,12 +185,18 @@ export class FixesController {
     const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     return ok(FixDto.toJSON(fix));
   }
@@ -195,12 +211,18 @@ export class FixesController {
     const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const suggestions = await fix.getSuggestions();
     const results = await Promise.all(suggestions.map(async (s) => {
@@ -220,10 +242,14 @@ export class FixesController {
     const { siteId, opportunityId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     res = await checkOwnership(null, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!Array.isArray(context.data)) {
       return context.data ? badRequest('Request body must be an array') : badRequest('No updates provided');
@@ -289,7 +315,9 @@ export class FixesController {
     const needsEnrichment = fixDataArray.some(
       (fixData) => fixData.origin === 'aso' && !fixData.changeDetails?.documentPath,
     );
-    if (!needsEnrichment) return null;
+    if (!needsEnrichment) {
+      return null;
+    }
 
     try {
       const [site, opportunity] = await Promise.all([
@@ -297,7 +325,9 @@ export class FixesController {
         this.#Opportunity.findById(opportunityId),
       ]);
 
-      if (!site || !opportunity) return null;
+      if (!site || !opportunity) {
+        return null;
+      }
       const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
       const imsAccessToken = await exchangePromiseToken(
         this.#ctx,
@@ -332,9 +362,15 @@ export class FixesController {
    * Returns the original fixData unchanged if enrichment is not needed or fails.
    */
   static async #enrichWithDocumentPath(fixData, enrichmentCtx, log) {
-    if (!enrichmentCtx) return fixData;
-    if (fixData.origin !== 'aso') return fixData;
-    if (fixData.changeDetails?.documentPath) return fixData;
+    if (!enrichmentCtx) {
+      return fixData;
+    }
+    if (fixData.origin !== 'aso') {
+      return fixData;
+    }
+    if (fixData.changeDetails?.documentPath) {
+      return fixData;
+    }
 
     const {
       site, opportunityType, bearerToken, contentClient,
@@ -348,7 +384,9 @@ export class FixesController {
       contentClient ?? undefined, // used for AEM Edge
     );
 
-    if (!documentPath) return fixData;
+    if (!documentPath) {
+      return fixData;
+    }
 
     return {
       ...fixData,
@@ -366,7 +404,9 @@ export class FixesController {
     const { siteId, opportunityId } = context.params;
 
     const res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!Array.isArray(context.data)) {
       return (
@@ -447,12 +487,18 @@ export class FixesController {
   async patchFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!context.data) {
       return badRequest('No updates provided');
@@ -520,12 +566,18 @@ export class FixesController {
     const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     try {
       await fix.remove();
@@ -548,15 +600,21 @@ export class FixesController {
 
     // Validate request params and access
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     // Find the fix
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
 
     // Check ownership
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     // Validate fix is in FAILED status
     const currentFixStatus = fix.getStatus();
