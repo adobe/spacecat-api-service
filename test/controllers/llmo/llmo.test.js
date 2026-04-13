@@ -5533,6 +5533,15 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.include('does not match');
       });
 
+      it('returns 400 when site probe succeeds but x-edgeoptimize-request-id header is absent', async () => {
+        probeSiteAndResolveDomainStub.rejects(new Error('missing the x-edgeoptimize-request-id response header'));
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(400);
+        expect((await result.json()).message).to.include('x-edgeoptimize-request-id');
+        expect(getServicePrincipalTokenStub).to.not.have.been.called;
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+      });
+
       it('returns 401 when SP token request fails', async () => {
         getServicePrincipalTokenStub.rejects(new Error('IMS error'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());

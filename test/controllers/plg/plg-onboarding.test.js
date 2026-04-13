@@ -292,6 +292,7 @@ describe('PlgOnboardingController', () => {
 
     mockEnv = {
       DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID,
+      ASO_PLG_EXCLUDED_ORGS: DEMO_ORG_ID,
       LD_EXPERIENCE_SUCCESS_API_TOKEN: 'test-ld-token',
     };
 
@@ -364,7 +365,6 @@ describe('PlgOnboardingController', () => {
           enableAudits: enableAuditsStub,
           enableImports: enableImportsStub,
           triggerAudits: triggerAuditsStub,
-          ASO_DEMO_ORG: DEMO_ORG_ID,
         },
         '../../../src/support/utils.js': {
           autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -574,7 +574,6 @@ describe('PlgOnboardingController', () => {
             enableAudits: enableAuditsStub,
             enableImports: enableImportsStub,
             triggerAudits: triggerAuditsStub,
-            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -1080,6 +1079,7 @@ describe('PlgOnboardingController', () => {
         programId: '123',
         environmentId: '456',
         preferContentApi: true,
+        enableDAMAltTextUpdate: true,
         imsOrgId: TEST_IMS_ORG_ID,
       });
     });
@@ -1106,6 +1106,7 @@ describe('PlgOnboardingController', () => {
         programId: '123',
         environmentId: '456',
         preferContentApi: true,
+        enableDAMAltTextUpdate: true,
         imsOrgId: TEST_IMS_ORG_ID,
       });
     });
@@ -1465,7 +1466,7 @@ describe('PlgOnboardingController', () => {
         .to.have.been.calledWithMatch(/already assigned to another organization/);
     });
 
-    it('waitlists when site belongs to ASO_DEMO_ORG', async () => {
+    it('waitlists when site belongs to ASO_DEMO_ORG with no enrollments', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1478,6 +1479,37 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/already assigned to another organization/);
+    });
+
+    it('includes demo org message in waitlist reason when site in demo org has enrollments', async () => {
+      const existingSite = createMockSite({
+        orgId: DEMO_ORG_ID,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/demo org.*can be moved to/);
+    });
+
+    it('treats org as non-internal when ASO_PLG_EXCLUDED_ORGS is not set', async () => {
+      const existingSite = createMockSite({
+        orgId: DEMO_ORG_ID,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = { ...buildContext({ domain: TEST_DOMAIN }), env: {} };
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/cannot be moved/);
     });
   });
 
@@ -1716,7 +1748,7 @@ describe('PlgOnboardingController', () => {
       // Old domain is waitlisted with displacement reason
       expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(onboardedRecord.setWaitlistReason)
-        .to.have.been.calledWithMatch(/Displaced by new domain/);
+        .to.have.been.calledWithMatch(/was replaced by.*no active suggestions.*new domain.*current org/);
       expect(onboardedRecord.save).to.have.been.called;
 
       // Only the ASO enrollment is revoked
@@ -2772,7 +2804,6 @@ describe('PlgOnboardingController', () => {
             enableAudits: enableAuditsStub,
             enableImports: enableImportsStub,
             triggerAudits: triggerAuditsStub,
-            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -3159,7 +3190,6 @@ describe('PlgOnboardingController', () => {
             enableAudits: enableAuditsStub,
             enableImports: enableImportsStub,
             triggerAudits: triggerAuditsStub,
-            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -3247,7 +3277,6 @@ describe('PlgOnboardingController', () => {
               enableAudits: sandbox.stub(),
               enableImports: sandbox.stub(),
               triggerAudits: sandbox.stub(),
-              ASO_DEMO_ORG: DEMO_ORG_ID,
             },
             '../../../src/support/utils.js': {
               autoResolveAuthorUrl: sandbox.stub(),
@@ -3651,7 +3680,11 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(mockSite.setDeliveryConfig).to.have.been.calledWithMatch({ authorURL: 'https://author-p152454-e345003.adobeaemcloud.com' });
+        expect(mockSite.setDeliveryConfig).to.have.been.calledWithMatch({
+          authorURL: 'https://author-p152454-e345003.adobeaemcloud.com',
+          preferContentApi: true,
+          enableDAMAltTextUpdate: true,
+        });
       });
 
       it('BYPASS AEM_SITE_CHECK: sets hlxConfig when deliveryType is aem_edge with EDS author URL', async () => {
@@ -3995,6 +4028,40 @@ describe('PlgOnboardingController', () => {
         expect(res.status).to.equal(200);
         expect(record.setStatus).to.have.been.calledWith('INACTIVE');
         expect(record.save).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: removes all enrollments when existing org is internal/demo', async () => {
+        const enrollment1 = { getId: () => 'enroll-1', remove: sandbox.stub().resolves() };
+        const enrollment2 = { getId: () => 'enroll-2', remove: sandbox.stub().resolves() };
+        const existingSite = createMockSite({
+          orgId: DEMO_ORG_ID,
+          siteEnrollments: [enrollment1, enrollment2],
+        });
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+          organizationId: TEST_ORG_ID,
+        });
+        const newSite = createMockSite({ orgId: TEST_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+        mockDataAccess.Site.create.resolves(newSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Move from demo', siteConfig: { moveSite: true } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(enrollment1.remove).to.have.been.called;
+        expect(enrollment2.remove).to.have.been.called;
       });
 
       it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: returns 400 when onboarding has no organizationId', async () => {

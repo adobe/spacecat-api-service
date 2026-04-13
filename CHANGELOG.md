@@ -1,3 +1,87 @@
+## [1.436.8](https://github.com/adobe/spacecat-api-service/compare/v1.436.7...v1.436.8) (2026-04-13)
+
+
+### Bug Fixes
+
+* updating deliveryConfig to include enableDAMAltTextUpdate: true for plg-onboarded sites ([#2191](https://github.com/adobe/spacecat-api-service/issues/2191)) ([564ea5f](https://github.com/adobe/spacecat-api-service/commit/564ea5f7d0d33aba6e041e919960ac33515f4563))
+
+## [1.436.7](https://github.com/adobe/spacecat-api-service/compare/v1.436.6...v1.436.7) (2026-04-13)
+
+
+### Bug Fixes
+
+* filter-dimensions should return category's id column instead of category_id ([#2192](https://github.com/adobe/spacecat-api-service/issues/2192)) ([1d35741](https://github.com/adobe/spacecat-api-service/commit/1d35741d7da79841c9e80fcdebaa39d39d37dd2f))
+
+## [1.436.6](https://github.com/adobe/spacecat-api-service/compare/v1.436.5...v1.436.6) (2026-04-13)
+
+
+### Bug Fixes
+
+* adds base site id to brand creation ([#2169](https://github.com/adobe/spacecat-api-service/issues/2169)) ([b72ade9](https://github.com/adobe/spacecat-api-service/commit/b72ade95e7ecc64ef31ff9207e580857479216db))
+
+## [1.436.5](https://github.com/adobe/spacecat-api-service/compare/v1.436.4...v1.436.5) (2026-04-12)
+
+
+### Bug Fixes
+
+* added demo org check ([#2188](https://github.com/adobe/spacecat-api-service/issues/2188)) ([d80cdcb](https://github.com/adobe/spacecat-api-service/commit/d80cdcb74e3c96ae70e1049d92ffe10b337b936e))
+
+## [1.436.4](https://github.com/adobe/spacecat-api-service/compare/v1.436.3...v1.436.4) (2026-04-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/mysticat-shared-seo-client to v1.2.1 ([#2185](https://github.com/adobe/spacecat-api-service/issues/2185)) ([11a2342](https://github.com/adobe/spacecat-api-service/commit/11a23427b6de69709b30b1b90a22f1a4260f6c07))
+
+## [1.436.3](https://github.com/adobe/spacecat-api-service/compare/v1.436.2...v1.436.3) (2026-04-12)
+
+
+### Bug Fixes
+
+* **deps:** migrate to @adobe/mysticat-shared-seo-client 1.2.0 ([#2180](https://github.com/adobe/spacecat-api-service/issues/2180)) ([06b3e35](https://github.com/adobe/spacecat-api-service/commit/06b3e3581a15cc5379dc5e7be15a3fccfd020479))
+
+## [1.436.2](https://github.com/adobe/spacecat-api-service/compare/v1.436.1...v1.436.2) (2026-04-12)
+
+
+### Bug Fixes
+
+* allowlist adobe-aem.map.fastly.net cname for edge routing ([#2190](https://github.com/adobe/spacecat-api-service/issues/2190)) ([731c8ee](https://github.com/adobe/spacecat-api-service/commit/731c8ee7c632d99f0e3aa3a555b18939d05d563a))
+
+## [1.436.1](https://github.com/adobe/spacecat-api-service/compare/v1.436.0...v1.436.1) (2026-04-11)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2187](https://github.com/adobe/spacecat-api-service/issues/2187)) ([902fcf8](https://github.com/adobe/spacecat-api-service/commit/902fcf8c819eea936bc464ec9879eb218753499e))
+
+# [1.436.0](https://github.com/adobe/spacecat-api-service/compare/v1.435.1...v1.436.0) (2026-04-11)
+
+
+### Features
+
+* **edge-routing:** verify UA routing is active before enabling CDN routing ([#2186](https://github.com/adobe/spacecat-api-service/issues/2186)) ([999738f](https://github.com/adobe/spacecat-api-service/commit/999738f887179e7025ecd5450be183214f5ee228))
+
+## [1.435.1](https://github.com/adobe/spacecat-api-service/compare/v1.435.0...v1.435.1) (2026-04-11)
+
+
+### Bug Fixes
+
+* enhanced logging in the edge-optimize-config flow ([#2184](https://github.com/adobe/spacecat-api-service/issues/2184)) ([a61d48e](https://github.com/adobe/spacecat-api-service/commit/a61d48e562583a08b531145f63fc9f0ba63b51f5))
+
+# [1.435.0](https://github.com/adobe/spacecat-api-service/compare/v1.434.1...v1.435.0) (2026-04-10)
+
+
+### Features
+
+* **sites:** add enableMoneyPageUrls config flag ([#2182](https://github.com/adobe/spacecat-api-service/issues/2182)) ([e25e952](https://github.com/adobe/spacecat-api-service/commit/e25e9525ee65b4f8d6607aa5592a20dbcce718df))
+
+## [1.434.1](https://github.com/adobe/spacecat-api-service/compare/v1.434.0...v1.434.1) (2026-04-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.51.0 ([#2183](https://github.com/adobe/spacecat-api-service/issues/2183)) ([7c8486f](https://github.com/adobe/spacecat-api-service/commit/7c8486fee2a08177a54a36360f7e6504ff52d3d2))
+
 # [1.434.0](https://github.com/adobe/spacecat-api-service/compare/v1.433.1...v1.434.0) (2026-04-10)
 
 
