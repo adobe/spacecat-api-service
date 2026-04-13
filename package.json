@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.436.1",
+  "version": "1.436.6",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -72,8 +72,8 @@
     "@adobe/helix-shared-wrap": "2.0.2",
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.29",
+    "@adobe/mysticat-shared-seo-client": "1.2.1",
     "@adobe/spacecat-helix-content-sdk": "1.4.33",
-    "@adobe/spacecat-shared-ahrefs-client": "1.10.10",
     "@adobe/spacecat-shared-athena-client": "1.9.11",
     "@adobe/spacecat-shared-brand-client": "1.1.41",
     "@adobe/spacecat-shared-content-client": "1.8.23",
@@ -152,7 +152,7 @@
     "nock": "14.0.12",
     "nodemon": "3.1.14",
     "semantic-release": "^25.0.3",
-    "sinon": "21.1.1",
+    "sinon": "21.1.2",
     "sinon-chai": "4.0.1",
     "yaml": "2.8.3"
   },
