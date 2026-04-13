@@ -2,7 +2,10 @@
 
 **Jira:** [LLMO-4176](https://jira.corp.adobe.com/browse/LLMO-4176)
 **Epic:** [LLMO-4054 — Brandalf GA (Brandalf v1 fast follows)](https://jira.corp.adobe.com/browse/LLMO-4054)
-**Status:** Proposal / implementation plan
+**Status:** Implemented and tested on dev
+**PRs:**
+- api-service: [adobe/spacecat-api-service#2171](https://github.com/adobe/spacecat-api-service/pull/2171)
+- audit-worker: [adobe/spacecat-audit-worker#2380](https://github.com/adobe/spacecat-audit-worker/pull/2380) *(companion fix — required for v1 onboarding to complete successfully)*
 **Lifetime:** **Temporary.** This rule is a stop-gap to keep new and legacy
 customers from drifting into a mixed v1/v2 state. It should be **removed once
 all v1 customers have been migrated to v2**, at which point
@@ -83,6 +86,46 @@ the function never fails closed.
   continue to work), but it is no longer used to **decide** the mode.
 - It does **not** add a flag-flip guard on
   `PUT/DELETE /organizations/:id/feature-flags/LLMO/brandalf`.
+
+## Companion fix — audit-worker (`spacecat-audit-worker#2380`)
+
+Discovered during end-to-end testing on dev (2026-04-13). The safeguard in
+api-service correctly routes a mixed-state org (brandalf=true flag + pre-Brandalf
+sites) to v1 onboarding. However, the `llmo-customer-analysis` handler in the
+audit-worker independently re-checked the `brandalf` flag via `isBrandalfEnabled`,
+found no v2 customer-config brand (none is created during v1 onboarding), then
+called DRS without `brand_id`. DRS returns **422** for brandalf-enabled orgs
+without a `brand_id`.
+
+### Root cause
+
+`llmo-customer-analysis` was not consuming the `onboardingMode` field that the
+`drs-prompt-generation` handler already propagated in the audit context. The
+`onboardingMode` field is set by api-service (`onboarding_mode: onboardingMode` in
+`buildOnboardingMetadata`), picked up by `index.js`, and forwarded through
+`drs-prompt-generation` → `llmo-customer-analysis`.
+
+### Fix (one line)
+
+```js
+// Before — always checked isBrandalfEnabled regardless of onboarding path:
+const isV2 = await isBrandalfEnabled(orgId, env, log);
+
+// After — short-circuits when onboardingMode is explicitly 'v1':
+const isV2 = onboardingMode !== 'v1' && await isBrandalfEnabled(orgId, env, log);
+```
+
+When `onboardingMode === 'v1'`, `isBrandalfEnabled` is never called and the BP
+schedule is created without `brand_id` — matching v1 DRS expectations.
+
+### Decision table
+
+| `onboardingMode` in auditContext | `brandalf` flag | Outcome |
+|---|---|---|
+| `'v2'` | true | Resolve brand from DB, include `brand_id` in schedule |
+| `'v1'` (explicit) | true | **Skip brandalf check**, create schedule without `brand_id` |
+| not set | true | Fall back to `isBrandalfEnabled` (backward compat for old messages) |
+| not set | false | No brand resolution, schedule without `brand_id` |
 
 ## Background — how the flow works today
 
@@ -388,37 +431,37 @@ finished would be dead code that future readers would have to reverse-engineer.
 
 ## Open questions
 
-1. **Default cutoff.** Plan uses a hard-coded fallback of `1775001600000`
-   (`2026-04-01T00:00:00Z`). The real cutoff will be set per-environment via
-   `LLMO_BRANDALF_GA_CUTOFF_MS`. Confirm the default is acceptable for any
-   env where the var is missing.
-2. **Cutoff inclusivity.** Plan treats it as **exclusive** (`createdAt <
-   cutoff` ⇒ legacy). A site whose `createdAt` is exactly equal to the
-   cutoff is treated as a v2 customer. Confirm.
-3. **Env var rollout.** `LLMO_BRANDALF_GA_CUTOFF_MS` needs to be added to
-   the Lambda env in dev / stage / prod (and to `.env.example` if one
-   exists). Confirm the deploy mechanism — Lambda env-var update without a
-   full redeploy is sufficient since `resolveBrandalfCutoffMs` reads from
-   `context.env` on every request.
+1. ~~**Default cutoff.**~~ ✅ Resolved — `1775001600000` (`2026-04-01T00:00:00Z`)
+   is the hard-coded fallback. `LLMO_BRANDALF_GA_CUTOFF_MS` is set per-environment
+   via HashiCorp Vault (`dx_mysticat/<env>/api-service`). If the var is absent, the
+   default applies (any site onboarded before 2026-04-01 is treated as legacy).
+2. ~~**Cutoff inclusivity.**~~ ✅ Resolved — exclusive (`<`, not `<=`). A site
+   created exactly at the cutoff instant is a v2 customer.
+3. ~~**Env var rollout.**~~ ✅ Resolved — `LLMO_BRANDALF_GA_CUTOFF_MS` is set in
+   Vault. Lambda reads it on startup; a cold start (or alias update to a new
+   published version) is sufficient to pick up changes — no full redeploy needed.
 4. **Existing inconsistent orgs.** The monitoring script will list them;
    the plan does not auto-remediate. Is that the right call?
 
 ## Implementation order
 
-1. Add `LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT` constant +
+1. ✅ Add `LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT` constant +
    `resolveBrandalfCutoffMs` + `hasPreBrandalfSites` helpers to
    `src/support/llmo-onboarding-mode.js`, and update
    `resolveLlmoOnboardingMode` to use them. Keep the
    `LLMO_ONBOARDING_DEFAULT_VERSION` env var as-is — it still drives the v1
    kill switch.
-2. Extend `test/support/llmo-onboarding-mode.test.js` with the new cases.
+2. ✅ Extend `test/support/llmo-onboarding-mode.test.js` with the new cases.
 3. Add integration tests in `test/it/` with seed data covering the four
    scenarios above.
 4. Add the monitoring script and run it once against stage to confirm output
    format.
-5. Open PR with title:
-   `feat(LLMO-4176): default legacy LLMO orgs to v1 onboarding by createdAt`,
-   linking back to LLMO-4176 and the parent epic LLMO-4054.
+5. ✅ Open PR [adobe/spacecat-api-service#2171](https://github.com/adobe/spacecat-api-service/pull/2171).
+6. ✅ Open companion PR [adobe/spacecat-audit-worker#2380](https://github.com/adobe/spacecat-audit-worker/pull/2380)
+   to fix `llmo-customer-analysis` skipping brandalf check for `onboardingMode=v1`.
+   **Both PRs must be merged and deployed together** — the api-service fix
+   routes correctly but the brand-presence schedule will still fail with DRS 422
+   if the audit-worker is not patched.
 
 ## Changes vs the previous version of this plan
 
