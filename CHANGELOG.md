@@ -1,3 +1,10 @@
+## [1.436.9](https://github.com/adobe/spacecat-api-service/compare/v1.436.8...v1.436.9) (2026-04-13)
+
+
+### Bug Fixes
+
+* adding missing ip in edge routing utils. ([#2194](https://github.com/adobe/spacecat-api-service/issues/2194)) ([d731162](https://github.com/adobe/spacecat-api-service/commit/d7311624452ed262e13ffcb68c4564565fd269f5))
+
 ## [1.436.8](https://github.com/adobe/spacecat-api-service/compare/v1.436.7...v1.436.8) (2026-04-13)
 
 
