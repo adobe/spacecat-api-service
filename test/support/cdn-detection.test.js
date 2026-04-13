@@ -243,5 +243,15 @@ describe('cdn-detection', () => {
       expect(log.info).to.have.been.calledWith(sinon.match('CNAMEs for www.example.com'));
       expect(log.info).to.have.been.calledWith(sinon.match('DNS lookup failed for www.example.com (A record)'));
     });
+
+    it('logs (none) when CNAMEs and IPs resolve to empty arrays', async () => {
+      dnsStubs.resolveCname.resolves([]);
+      dnsStubs.resolve4.resolves([]);
+
+      const result = await detectCdnForDomain('example.com', log);
+      expect(result).to.equal('other');
+      expect(log.info).to.have.been.calledWith('[cdn-detection] CNAMEs for www.example.com: (none)');
+      expect(log.info).to.have.been.calledWith('[cdn-detection] IPs for www.example.com: (none)');
+    });
   });
 });
