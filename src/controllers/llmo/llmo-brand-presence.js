@@ -454,20 +454,20 @@ export async function fetchBrandsForConfig(client, organizationId, siteFilter, f
 }
 
 /**
- * Org-scoped categories (active / pending).
+ * Org-scoped categories (active / pending). Option `id` is `categories.id` (UUID) for filtering.
  * @internal Exported for tests
  */
 export async function fetchCategoriesForConfig(client, organizationId) {
   const { data, error } = await client
     .from('categories')
-    .select('category_id, name')
+    .select('id, name')
     .eq('organization_id', organizationId)
     .in('status', ['pending', 'active'])
     .limit(QUERY_LIMIT);
   if (error || !data?.length) {
     return [];
   }
-  const opts = data.map((c) => toFilterOption(c.category_id, c.name));
+  const opts = data.map((c) => toFilterOption(String(c.id), c.name));
   opts.sort((a, b) => strCompare(a.label, b.label));
   return opts;
 }

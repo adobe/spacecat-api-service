@@ -573,7 +573,7 @@ describe('llmo-brand-presence', () => {
         sites: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000aa' }], error: null },
         brands: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000bb', name: 'Acme' }], error: null },
         prompts: { data: null, count: 12, error: null },
-        categories: { data: [{ category_id: 'books', name: 'Books' }], error: null },
+        categories: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000ee', name: 'Books' }], error: null },
         topics: {
           data: [{
             id: '0178a3f0-1234-7000-8000-0000000000cc',
@@ -602,7 +602,7 @@ describe('llmo-brand-presence', () => {
       ]);
       expect(body.regions).to.deep.equal([{ id: 'US', label: 'United States' }]);
       expect(body.brands).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000bb', label: 'Acme' }]);
-      expect(body.categories).to.deep.equal([{ id: 'books', label: 'Books' }]);
+      expect(body.categories).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000ee', label: 'Books' }]);
       expect(body.topics).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000cc', label: 'Topic A' }]);
       expect(body.page_intents).to.deep.equal([{ id: 'informational', label: 'informational' }]);
       expect(tableMock.rpc).not.to.have.been.called;
@@ -656,7 +656,7 @@ describe('llmo-brand-presence', () => {
           error: null,
         },
         prompts: { data: null, count: 3, error: null },
-        categories: { data: [{ category_id: 'books', name: 'Books' }], error: null },
+        categories: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000ee', name: 'Books' }], error: null },
         topics: {
           data: [{
             id: '0178a3f0-1234-7000-8000-0000000000cc',
@@ -698,7 +698,7 @@ describe('llmo-brand-presence', () => {
           error: null,
         },
         prompts: { data: null, count: 7, error: null },
-        categories: { data: [{ category_id: 'books', name: 'Books' }], error: null },
+        categories: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000ee', name: 'Books' }], error: null },
         topics: {
           data: [{
             id: '0178a3f0-1234-7000-8000-0000000000cc',
@@ -737,7 +737,7 @@ describe('llmo-brand-presence', () => {
           error: null,
         },
         prompts: { data: null, count: 1, error: null },
-        categories: { data: [{ category_id: 'books', name: 'Books' }], error: null },
+        categories: { data: [{ id: '0178a3f0-1234-7000-8000-0000000000ee', name: 'Books' }], error: null },
         topics: {
           data: [{
             id: '0178a3f0-1234-7000-8000-0000000000cc',

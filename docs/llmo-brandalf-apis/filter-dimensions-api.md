@@ -56,7 +56,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-d
     { "id": "uuid", "label": "Brand Name" }
   ],
   "categories": [
-    { "id": "books", "label": "Books" }
+    { "id": "0178a3f0-1234-7000-8000-0000000000aa", "label": "Books" }
   ],
   "topics": [
     { "id": "0178a3f0-1234-7000-8000-0000000000aa", "label": "Topic A" }
@@ -82,7 +82,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-d
 | Field | Source |
 |--------|--------|
 | `brands` | Org-wide: `brands` (active/pending). With `siteId`: **`brand_sites`** rows for that org + site, with embedded `brands` (id, name) |
-| `categories` | `categories` (org, active/pending) |
+| `categories` | `categories` (org, active/pending); each `id` is **`categories.id`** (UUID) for use as `categoryId` on other Brand Presence APIs |
 | `topics` | `topics` filtered by org and optional brand scope |
 | `origins` | Fixed: `human`, `ai` |
 | `regions` | `regions` reference table |
