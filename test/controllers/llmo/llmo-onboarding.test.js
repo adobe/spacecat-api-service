@@ -2925,7 +2925,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(newBrand.status).to.equal('active');
       expect(newBrand.origin).to.equal('system');
       expect(newBrand.regions).to.deep.equal(['gl']);
-      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
       expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
