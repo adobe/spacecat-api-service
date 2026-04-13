@@ -16,7 +16,7 @@ import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
-import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import SeoClient from '@adobe/mysticat-shared-seo-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
@@ -927,20 +927,20 @@ function toggleWWW(url) {
 }
 
 /**
- * Tests a URL against the Ahrefs top pages endpoint to see if it returns data.
+ * Tests a URL against the SEO top pages endpoint to see if it returns data.
  * @param {string} url - The URL to test
- * @param {object} ahrefsClient - The Ahrefs API client
+ * @param {object} seoClient - The SEO API client
  * @param {object} log - Logger instance
  * @returns {Promise<boolean>} - True if the URL returns top pages data, false otherwise
  */
-async function testAhrefsTopPages(url, ahrefsClient, log) {
+async function testSeoTopPages(url, seoClient, log) {
   try {
-    const { result } = await ahrefsClient.getTopPages(url, 1);
+    const { result } = await seoClient.getTopPages(url, { limit: 1 });
     const hasData = isNonEmptyArray(result?.pages);
-    log.debug(`Ahrefs top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
+    log.debug(`SEO top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
     return hasData;
   } catch (error) {
-    log.debug(`Ahrefs top pages test for ${url}: FAILED - ${error.message}`);
+    log.debug(`SEO top pages test for ${url}: FAILED - ${error.message}`);
     return false;
   }
 }
@@ -959,7 +959,7 @@ export async function determineOverrideBaseURL(baseURL, context) {
 
   try {
     log.info(`Determining overrideBaseURL for ${baseURL}`);
-    const ahrefsClient = AhrefsAPIClient.createFrom(context);
+    const seoClient = SeoClient.createFrom(context);
     const alternateURL = toggleWWW(baseURL);
 
     // If toggleWWW returns the same URL, it means the URL has a subdomain
@@ -972,8 +972,8 @@ export async function determineOverrideBaseURL(baseURL, context) {
     log.debug(`Testing base URL: ${baseURL} and alternate: ${alternateURL}`);
 
     const [baseURLSuccess, alternateURLSuccess] = await Promise.all([
-      testAhrefsTopPages(baseURL, ahrefsClient, log),
-      testAhrefsTopPages(alternateURL, ahrefsClient, log),
+      testSeoTopPages(baseURL, seoClient, log),
+      testSeoTopPages(alternateURL, seoClient, log),
     ]);
 
     if (!baseURLSuccess && alternateURLSuccess) {
@@ -986,7 +986,7 @@ export async function determineOverrideBaseURL(baseURL, context) {
     } else if (baseURLSuccess && !alternateURLSuccess) {
       log.debug('Base URL succeeded, no overrideBaseURL needed');
     } else {
-      log.warn('Both URLs failed Ahrefs test, no overrideBaseURL set');
+      log.warn('Both URLs failed SEO top pages test, no overrideBaseURL set');
     }
 
     return null;
