@@ -1,3 +1,10 @@
+## [1.436.8](https://github.com/adobe/spacecat-api-service/compare/v1.436.7...v1.436.8) (2026-04-13)
+
+
+### Bug Fixes
+
+* updating deliveryConfig to include enableDAMAltTextUpdate: true for plg-onboarded sites ([#2191](https://github.com/adobe/spacecat-api-service/issues/2191)) ([564ea5f](https://github.com/adobe/spacecat-api-service/commit/564ea5f7d0d33aba6e041e919960ac33515f4563))
+
 ## [1.436.7](https://github.com/adobe/spacecat-api-service/compare/v1.436.6...v1.436.7) (2026-04-13)
 
 
