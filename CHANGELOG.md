@@ -1,3 +1,10 @@
+## [1.436.10](https://github.com/adobe/spacecat-api-service/compare/v1.436.9...v1.436.10) (2026-04-13)
+
+
+### Bug Fixes
+
+* update User-Agent header to include browser UA string for edge preview fetch ([#2196](https://github.com/adobe/spacecat-api-service/issues/2196)) ([5dec00f](https://github.com/adobe/spacecat-api-service/commit/5dec00f58cd2facc00e0ddc24d7d2a1e6e24de60))
+
 ## [1.436.9](https://github.com/adobe/spacecat-api-service/compare/v1.436.8...v1.436.9) (2026-04-13)
 
 
