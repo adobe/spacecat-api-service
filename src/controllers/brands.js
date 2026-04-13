@@ -939,6 +939,7 @@ function BrandsController(ctx, log, env) {
         topic: topicData,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       return createResponse(created, 201);
@@ -1129,6 +1130,9 @@ function BrandsController(ctx, log, env) {
       if (!brandUuid) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
+      delete updates.baseUrl;
 
       const updated = await updateBrand({
         organizationId: spaceCatId,

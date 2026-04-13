@@ -17,6 +17,7 @@ import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
  */
 const BRAND_SELECT = [
   '*',
+  'base_site:sites!site_id(id, base_url)',
   'brand_aliases(alias, regions)',
   'brand_social_accounts(url, regions)',
   'brand_earned_sources(name, url, regions)',
@@ -69,6 +70,8 @@ function mapDbBrandToV2(row) {
   return {
     id: row.id,
     name: row.name,
+    baseSiteId: row.base_site?.id || row.site_id || null,
+    baseUrl: row.base_site?.base_url || null,
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
@@ -362,10 +365,27 @@ export async function upsertBrand({
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
+  // Check if the brand already exists with a base site set.
+  // This prevents silently downgrading an active brand to pending when a caller
+  // re-upserts by name without passing baseSiteId.
+  const { data: existing } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('name', brand.name)
+    .maybeSingle();
+
+  // A brand cannot be active without a base site ID — but respect persisted state
+  // on the update path (the DB row may already have site_id set).
+  const hasBaseSite = hasText(brand.baseSiteId) || hasText(existing?.site_id);
+  const status = (!hasBaseSite && (brand.status || 'active') === 'active')
+    ? 'pending'
+    : (brand.status || 'active');
+
   const row = {
     organization_id: organizationId,
     name: brand.name,
-    status: brand.status || 'active',
+    status,
     origin: brand.origin || 'human',
     description: brand.description || null,
     vertical: brand.vertical || null,
@@ -376,6 +396,11 @@ export async function upsertBrand({
     updated_by: updatedBy,
   };
 
+  // Set base site ID if provided.
+  if (hasText(brand.baseSiteId)) {
+    row.site_id = brand.baseSiteId;
+  }
+
   const { data: upserted, error } = await postgrestClient
     .from('brands')
     .upsert(row, { onConflict: 'organization_id,name' })
@@ -383,6 +408,11 @@ export async function upsertBrand({
     .single();
 
   if (error) {
+    if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
+      const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
     throw new Error(`Failed to upsert brand: ${error.message}`);
   }
 
@@ -442,6 +472,21 @@ export async function updateBrand({
     patch.vertical = updates.vertical;
   }
 
+  // baseSiteId is immutable once set — only allow setting from NULL.
+  // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
+  if (hasText(updates.baseSiteId)) {
+    const { data: current } = await postgrestClient
+      .from('brands')
+      .select('site_id')
+      .eq('id', brandId)
+      .maybeSingle();
+
+    if (!current?.site_id) {
+      patch.site_id = updates.baseSiteId;
+    }
+    // If site_id is already set, silently ignore the update (immutable).
+  }
+
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
       .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
@@ -460,6 +505,11 @@ export async function updateBrand({
     .maybeSingle();
 
   if (error) {
+    if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
+      const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
     throw new Error(`Failed to update brand: ${error.message}`);
   }
   if (!data) {

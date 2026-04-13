@@ -2397,15 +2397,15 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Mock Ahrefs client to return overrideBaseURL
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub(),
       };
       // Base URL fails, www variant succeeds
-      mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://example.com', { limit: 1 })
         .resolves({ result: { pages: [] } });
-      mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://www.example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -2432,9 +2432,9 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -2523,15 +2523,15 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Mock Ahrefs client - both URLs succeed
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub(),
       };
       // Both URLs succeed, so no overrideBaseURL should be set
-      mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://example.com/page1' }] } });
-      mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://www.example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -2558,9 +2558,9 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -2635,7 +2635,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Mock Ahrefs client - should NOT be called since we skip detection
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub(),
       };
 
@@ -2663,9 +2663,9 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -2693,7 +2693,7 @@ describe('LLMO Onboarding Functions', () => {
       await performLlmoOnboardingWithMocks(params, context);
 
       // Verify Ahrefs was NOT called (auto-detection was skipped)
-      expect(mockAhrefsClient.getTopPages).to.not.have.been.called;
+      expect(mockSeoClient.getTopPages).to.not.have.been.called;
 
       // Verify updateFetchConfig was NOT called (existing override preserved)
       expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
@@ -3618,7 +3618,7 @@ describe('LLMO Onboarding Functions', () => {
           'https://www.example.com': [],
         },
         expected: null,
-        expectedLog: { level: 'warn', pattern: /Both URLs failed Ahrefs test/ },
+        expectedLog: { level: 'warn', pattern: /Both URLs failed SEO top pages test/ },
       },
       {
         name: 'should handle multi-part TLD (.com.au) when only alternate succeeds',
@@ -3665,16 +3665,16 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     it('should handle Ahrefs API errors gracefully', async () => {
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub().rejects(new Error('Ahrefs API error')),
       };
 
       const { determineOverrideBaseURL } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -3689,9 +3689,9 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(result).to.be.null;
       expect(mockLog.debug).to.have.been.calledWith(
-        sinon.match(/Ahrefs top pages test.*FAILED/),
+        sinon.match(/SEO top pages test.*FAILED/),
       );
-      expect(mockLog.warn).to.have.been.calledWith('Both URLs failed Ahrefs test, no overrideBaseURL set');
+      expect(mockLog.warn).to.have.been.calledWith('Both URLs failed SEO top pages test, no overrideBaseURL set');
     });
 
     // Subdomain detection tests
@@ -3712,19 +3712,19 @@ describe('LLMO Onboarding Functions', () => {
 
     subdomainTestCases.forEach(({ name, url }) => {
       it(name, async () => {
-        const { result, mockAhrefsClient } = await testOverrideBaseURL(url, {});
+        const { result, mockSeoClient } = await testOverrideBaseURL(url, {});
 
         expect(result).to.be.null;
         expect(mockLog.info).to.have.been.calledWith(
           `Skipping overrideBaseURL detection for subdomain URL: ${url}`,
         );
         // Verify Ahrefs was NOT called
-        expect(mockAhrefsClient.getTopPages).to.not.have.been.called;
+        expect(mockSeoClient.getTopPages).to.not.have.been.called;
       });
     });
 
     it('should NOT skip detection for apex domain with multi-part TLD (example.co.uk)', async () => {
-      const { result, mockAhrefsClient } = await testOverrideBaseURL(
+      const { result, mockSeoClient } = await testOverrideBaseURL(
         'https://example.co.uk',
         {
           'https://example.co.uk': [{ url: 'https://example.co.uk/page1' }],
@@ -3734,7 +3734,7 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(result).to.be.null; // Both succeed, no override needed
       // Verify Ahrefs WAS called (not skipped)
-      expect(mockAhrefsClient.getTopPages).to.have.been.calledTwice;
+      expect(mockSeoClient.getTopPages).to.have.been.calledTwice;
       expect(mockLog.debug).to.have.been.calledWith('Both URLs succeeded, no overrideBaseURL needed');
     });
 
