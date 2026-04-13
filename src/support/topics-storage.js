@@ -73,13 +73,14 @@ export async function listTopics({
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
- * @param {object} params.topic - Topic data { name, description?, brandId? }
+ * @param {object} params.topic - Topic data { name, description?, brandId?, categoryId? }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
+ * @param {object} [params.log] - Logger instance for warnings
  * @returns {Promise<object>} Created topic
  */
 export async function createTopic({
-  organizationId, topic, postgrestClient, updatedBy = 'system',
+  organizationId, topic, postgrestClient, updatedBy = 'system', log,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -114,7 +115,7 @@ export async function createTopic({
   // categoryId is a UUID FK to categories.id — resolve it from the payload.
   const categoryId = topic.categoryId || null;
   if (categoryId && data?.id) {
-    await postgrestClient
+    const { error: junctionError } = await postgrestClient
       .from('topic_categories')
       .upsert(
         { topic_id: data.id, category_id: categoryId },
@@ -123,6 +124,9 @@ export async function createTopic({
     // Upsert errors are intentionally not thrown — the topic was already
     // created successfully.  A missing or invalid categoryId should not
     // fail the entire operation.
+    if (junctionError) {
+      log?.warn(`Failed to link topic ${data.id} to category ${categoryId}: ${junctionError.message}`);
+    }
   }
 
   return mapDbTopicToV2(data);

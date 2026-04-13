@@ -185,6 +185,42 @@ describe('topics-storage', () => {
       expect(fromStub).to.have.been.calledWith('topic_categories');
     });
 
+    it('warns via log when topic_categories upsert fails', async () => {
+      const dbRow = {
+        id: 'uuid-warn',
+        topic_id: 'warn-topic',
+        name: 'Warn Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+
+      const topicsQuery = createChainableQuery({ data: dbRow, error: null });
+      const tcQuery = createChainableQuery({ data: null, error: { message: 'FK violation' } });
+      const fromStub = sinon.stub();
+      fromStub.withArgs('topics').returns(topicsQuery);
+      fromStub.withArgs('topic_categories').returns(tcQuery);
+      const postgrestClient = { from: fromStub };
+      const log = { warn: sinon.stub() };
+
+      const result = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Warn Topic', categoryId: 'bad-category-uuid' },
+        postgrestClient,
+        log,
+      });
+
+      // Topic creation still succeeds
+      expect(result.id).to.equal('warn-topic');
+      // Warning was emitted
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.include('FK violation');
+    });
+
     it('skips topic_categories when categoryId is not provided', async () => {
       const dbRow = {
         id: 'uuid-no-cat',
