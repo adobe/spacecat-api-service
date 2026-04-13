@@ -223,4 +223,156 @@ describe('Tokens Controller', () => {
       );
     });
   });
+
+  describe('getGrants', () => {
+    const grantId1 = '323e4567-e89b-12d3-a456-426614174002';
+    const grantId2 = '423e4567-e89b-12d3-a456-426614174003';
+    const suggestionId1 = '523e4567-e89b-12d3-a456-426614174004';
+    const suggestionId2 = '623e4567-e89b-12d3-a456-426614174005';
+
+    const mockGrant = (grantId, suggestionId) => ({
+      getId: () => `id-${grantId}`,
+      getGrantId: () => grantId,
+      getSuggestionId: () => suggestionId,
+      getSiteId: () => siteId,
+      getTokenId: () => tokenId,
+      getTokenType: () => 'grant_cwv',
+      getGrantedAt: () => '2025-03-01T00:00:00Z',
+    });
+
+    beforeEach(() => {
+      mockDataAccess.Token.findById = sandbox.stub().resolves(mockToken);
+      mockDataAccess.SuggestionGrant = {
+        allByIndexKeys: sandbox.stub().resolves([
+          mockGrant(grantId1, suggestionId1),
+          mockGrant(grantId2, suggestionId2),
+        ]),
+      };
+
+      tokensController = TokensController({
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      });
+    });
+
+    it('returns grants with suggestionId for a valid token', async () => {
+      const context = {
+        params: { siteId, tokenId },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await tokensController.getGrants(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.have.lengthOf(2);
+      expect(body[0]).to.deep.equal({
+        id: `id-${grantId1}`,
+        grantId: grantId1,
+        suggestionId: suggestionId1,
+        siteId,
+        tokenId,
+        tokenType: 'grant_cwv',
+        grantedAt: '2025-03-01T00:00:00Z',
+      });
+      expect(mockDataAccess.SuggestionGrant.allByIndexKeys)
+        .to.have.been.calledOnceWith({ tokenId });
+    });
+
+    it('returns empty array when no grants exist', async () => {
+      mockDataAccess.SuggestionGrant.allByIndexKeys.resolves([]);
+      const context = {
+        params: { siteId, tokenId },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await tokensController.getGrants(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal([]);
+    });
+
+    it('returns 400 for invalid site ID', async () => {
+      const result = await tokensController.getGrants({
+        params: { siteId: 'bad', tokenId },
+      });
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Site ID required');
+    });
+
+    it('returns 400 for invalid token ID', async () => {
+      const result = await tokensController.getGrants({
+        params: { siteId, tokenId: 'bad' },
+      });
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Token ID required');
+    });
+
+    it('returns 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const context = {
+        params: { siteId, tokenId },
+        log: { error: sinon.stub() },
+      };
+      const result = await tokensController.getGrants(context);
+      expect(result.status).to.equal(404);
+      expect((await result.json()).message).to.equal('Site not found');
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+      const context = {
+        params: { siteId, tokenId },
+        log: { error: sinon.stub() },
+      };
+      const result = await tokensController.getGrants(context);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.equal('Access denied to this site');
+    });
+
+    it('returns 404 when token is not found', async () => {
+      mockDataAccess.Token.findById.resolves(null);
+      const context = {
+        params: { siteId, tokenId },
+        log: { error: sinon.stub() },
+      };
+      const result = await tokensController.getGrants(context);
+      expect(result.status).to.equal(404);
+      expect((await result.json()).message).to.equal('Token not found');
+    });
+
+    it('returns 404 when token belongs to a different site', async () => {
+      mockDataAccess.Token.findById.resolves({
+        ...mockToken,
+        getSiteId: () => 'different-site-id',
+      });
+      const context = {
+        params: { siteId, tokenId },
+        log: { error: sinon.stub() },
+      };
+      const result = await tokensController.getGrants(context);
+      expect(result.status).to.equal(404);
+      expect((await result.json()).message).to.equal('Token not found');
+    });
+
+    it('returns 500 on unexpected error', async () => {
+      mockDataAccess.SuggestionGrant.allByIndexKeys.rejects(new Error('DB failure'));
+      const context = {
+        params: { siteId, tokenId },
+        log: { error: sinon.stub() },
+      };
+      const result = await tokensController.getGrants(context);
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message).to.equal('DB failure');
+      expect(context.log.error).to.have.been.calledWith(
+        `Error getting grants for token ${tokenId} on site ${siteId}: DB failure`,
+      );
+    });
+  });
 });

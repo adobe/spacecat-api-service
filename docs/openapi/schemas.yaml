@@ -263,6 +263,41 @@ Config:
     edgeOptimizeConfig:
       description: Optional. The edge optimize configuration for the site.
       $ref: '#/EdgeOptimizeConfig'
+    enableMoneyPageUrls:
+      description: Optional. Whether money page URLs are included in audit targets. Defaults to true.
+      type: boolean
+      default: true
+    auditTargetURLs:
+      description: Optional. Custom audit target URLs grouped by source (manual, moneyPages).
+      $ref: '#/AuditTargetURLs'
+AuditTargetURLs:
+  type: object
+  description: Custom audit target URLs grouped by source. HTTPS only, hostname must match the site base URL.
+  properties:
+    manual:
+      description: Manually curated list of URLs to include in audits. Maximum 500 entries.
+      type: array
+      maxItems: 500
+      items:
+        $ref: '#/AuditTargetURL'
+    moneyPages:
+      description: Revenue generating pages. Maximum 1000 entries.
+      type: array
+      maxItems: 1000
+      items:
+        $ref: '#/AuditTargetURL'
+  additionalProperties: true
+AuditTargetURL:
+  type: object
+  required:
+    - url
+  additionalProperties: false
+  properties:
+    url:
+      type: string
+      format: uri
+      description: The URL to audit. Must use HTTPS and hostname must match the site base URL (www prefix is treated as equivalent).
+      example: 'https://example.com/high-value-page'
 EdgeOptimizeConfig:
   type: object
   description: Edge optimize configuration for a site

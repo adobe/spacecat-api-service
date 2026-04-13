@@ -2534,6 +2534,43 @@ function SuggestionsController(ctx, sqs, env) {
     }
   };
 
+  /**
+   * Revokes a suggestion grant by grant ID.
+   * @param {Object} context - Request context.
+   * @returns {Promise<Response>} 204 on success, 404 if not found.
+   */
+  const revokeGrant = async (context) => {
+    const siteId = context.params?.siteId;
+    const grantId = context.params?.grantId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(grantId)) {
+      return badRequest('Grant ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    try {
+      const result = await SuggestionGrant.revokeSuggestionGrant(grantId);
+      if (!result.success) {
+        return notFound('Grant not found');
+      }
+      return noContent();
+    } catch (e) {
+      context.log.error(`Error revoking suggestion grant ${grantId}`, e);
+      return createResponse({ message: 'Error revoking grant' }, 500);
+    }
+  };
+
   return {
     autofixSuggestions,
     createSuggestions,
@@ -2554,6 +2591,7 @@ function SuggestionsController(ctx, sqs, env) {
     patchSuggestion,
     patchSuggestionsStatus,
     removeSuggestion,
+    revokeGrant,
   };
 }
 
