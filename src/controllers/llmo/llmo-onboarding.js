@@ -33,7 +33,7 @@ import {
   LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
-import { upsertBrand } from '../../support/brands-storage.js';
+import { listBrands, upsertBrand } from '../../support/brands-storage.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1415,12 +1415,30 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         const audience = brandProfile?.main_profile?.target_audience
           || `General consumers interested in ${brandName} products and services`;
 
+        // Read region from V2 normalized brands table (set by Brandalf), fall back to 'US'
+        let brandRegion = 'US';
+        try {
+          const postgrest = context.dataAccess?.services?.postgrestClient;
+          if (postgrest) {
+            const brands = await listBrands(organization.getId(), postgrest, { status: 'active' });
+            const matchingBrand = brands.find(
+              (b) => b.name === brandName.trim() || b.baseSiteId === site.getId(),
+            );
+            if (matchingBrand?.region?.length > 0) {
+              [brandRegion] = matchingBrand.region;
+              log.info(`Using brand region "${brandRegion}" from V2 brands table for prompt generation`);
+            }
+          }
+        } catch (regionError) {
+          log.warn(`Failed to read brand region, defaulting to US: ${regionError.message}`);
+        }
+
         const drsJob = await submitOnboardingPromptGenerationJob({
           drsClient,
           baseUrl: baseURL,
           brandName: brandName.trim(),
           audience,
-          region: 'US',
+          region: brandRegion,
           numPrompts: 50,
           siteId: site.getId(),
           imsOrgId,
