@@ -191,6 +191,7 @@ const AEM_CS_FASTLY_IPS = new Set([
   '151.101.67.10',
   '151.101.3.10',
   '151.101.107.10',
+  '151.101.131.10',
 ]);
 
 async function checkHost(host, log) {
