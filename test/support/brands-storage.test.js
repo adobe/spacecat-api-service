@@ -416,6 +416,29 @@ describe('brands-storage', () => {
       expect(err.status).to.equal(409);
     });
 
+    it('does not downgrade active brand to pending when re-upserting without baseSiteId', async () => {
+      const fullBrandRow = makeBrandRow({ name: 'Test', status: 'active', site_id: 'existing-site-id' });
+
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // existing brand lookup — row already has site_id
+          { data: { site_id: 'existing-site-id' }, error: null },
+          // upsert result
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          // getBrandById result
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' }, // no baseSiteId
+        postgrestClient,
+      });
+
+      expect(result.status).to.equal('active');
+    });
+
     it('sets site_id in upsert row when baseSiteId is provided', async () => {
       const fullBrandRow = makeBrandRow({ name: 'Test', site_id: 'site-uuid' });
 

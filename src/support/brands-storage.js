@@ -365,8 +365,20 @@ export async function upsertBrand({
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
-  // A brand cannot be active without a base site ID.
-  const status = (!hasText(brand.baseSiteId) && (brand.status || 'active') === 'active')
+  // Check if the brand already exists with a base site set.
+  // This prevents silently downgrading an active brand to pending when a caller
+  // re-upserts by name without passing baseSiteId.
+  const { data: existing } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('name', brand.name)
+    .maybeSingle();
+
+  // A brand cannot be active without a base site ID — but respect persisted state
+  // on the update path (the DB row may already have site_id set).
+  const hasBaseSite = hasText(brand.baseSiteId) || hasText(existing?.site_id);
+  const status = (!hasBaseSite && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
 
