@@ -198,4 +198,50 @@ describe('cdn-detection', () => {
     const result = await detectCdnForDomain('example.com');
     expect(result).to.be.null;
   });
+
+  describe('logging', () => {
+    let log;
+
+    beforeEach(() => {
+      log = { info: sinon.stub() };
+    });
+
+    it('logs CNAMEs and IPs when detection returns other', async () => {
+      dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
+      dnsStubs.resolve4.resolves(['1.2.3.4']);
+
+      const result = await detectCdnForDomain('example.com', log);
+      expect(result).to.equal('other');
+      expect(log.info).to.have.been.calledWith('[cdn-detection] Detecting CDN for domain example.com');
+      expect(log.info).to.have.been.calledWith(sinon.match('CNAMEs for www.example.com'));
+      expect(log.info).to.have.been.calledWith(sinon.match('IPs for www.example.com'));
+    });
+
+    it('logs CNAME match when detection returns aem-cs-fastly', async () => {
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves(['cdn.adobeaemcloud.com.']);
+
+      const result = await detectCdnForDomain('example.com', log);
+      expect(result).to.equal('aem-cs-fastly');
+      expect(log.info).to.have.been.calledWith(sinon.match('CNAMEs for www.example.com'));
+    });
+
+    it('logs DNS failure for CNAME and A record', async () => {
+      dnsStubs.resolveCname.rejects(dnsError('SERVFAIL'));
+      dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
+
+      const result = await detectCdnForDomain('example.com', log);
+      expect(result).to.be.null;
+      expect(log.info).to.have.been.calledWith(sinon.match('DNS lookup failed for www.example.com (CNAME)'));
+    });
+
+    it('logs CNAME success then A record failure', async () => {
+      dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
+      dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
+
+      const result = await detectCdnForDomain('example.com', log);
+      expect(result).to.be.null;
+      expect(log.info).to.have.been.calledWith(sinon.match('CNAMEs for www.example.com'));
+      expect(log.info).to.have.been.calledWith(sinon.match('DNS lookup failed for www.example.com (A record)'));
+    });
+  });
 });
