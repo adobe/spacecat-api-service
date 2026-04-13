@@ -642,6 +642,20 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
 }
 
 /**
+ * Returns true when the request originates from the sites-optimizer-ui client
+ * and carries the x-view-as-trial header, indicating the user has enabled
+ * trial-mode simulation. Used to apply PLG-style suggestion filtering without
+ * any DB writes (read-only path only).
+ * @param {Object} requestContext - Per-request context with pathInfo.headers
+ * @returns {boolean}
+ */
+export function isViewAsTrialRequest(requestContext) {
+  const headers = requestContext?.pathInfo?.headers;
+  return headers?.['x-client-type'] === 'sites-optimizer-ui'
+    && headers?.['x-view-as-trial'] === 'true';
+}
+
+/**
  * Get the IMS user token from the context.
  * @param {object} context - The context of the request.
  * @returns {string} imsUserToken - The IMS User access token.

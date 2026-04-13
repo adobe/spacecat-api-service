@@ -45,6 +45,7 @@ import {
   ErrorWithStatusCode,
   getHostName,
   getIsSummitPlgEnabled,
+  isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
@@ -212,7 +213,9 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
   const filterByGrantStatus = async (site, suggestions, context) => {
-    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
+    const isPlgMode = await getIsSummitPlgEnabled(site, ctx, context)
+      || isViewAsTrialRequest(context);
+    if (!isPlgMode) {
       return suggestions;
     }
     try {
