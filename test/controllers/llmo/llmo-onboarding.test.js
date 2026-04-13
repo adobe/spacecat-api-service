@@ -1446,7 +1446,7 @@ describe('LLMO Onboarding Functions', () => {
       });
       // Must use baseURL (matches sites.base_url), not overrideBaseURL
       expect(mockUpsertBrand.firstCall.args[0].brand.urls).to.deep.equal([
-        { value: 'https://example.com', type: 'url' },
+        { value: 'https://example.com', type: 'base' },
       ]);
       expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
 
@@ -2725,7 +2725,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.status).to.equal('active');
       expect(brand.v1SiteId).to.equal('site-123');
       expect(brand.baseUrl).to.equal('https://www.example.com');
-      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
       expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
