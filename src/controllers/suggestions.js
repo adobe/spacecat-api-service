@@ -2090,10 +2090,6 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('User does not have access to this site');
-    }
-
     const geoExperiment = await GeoExperiment.findById(geoExperimentId);
     if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
       return notFound('GeoExperiment not found');
