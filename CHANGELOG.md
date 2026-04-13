@@ -1,3 +1,10 @@
+## [1.436.6](https://github.com/adobe/spacecat-api-service/compare/v1.436.5...v1.436.6) (2026-04-13)
+
+
+### Bug Fixes
+
+* adds base site id to brand creation ([#2169](https://github.com/adobe/spacecat-api-service/issues/2169)) ([b72ade9](https://github.com/adobe/spacecat-api-service/commit/b72ade95e7ecc64ef31ff9207e580857479216db))
+
 ## [1.436.5](https://github.com/adobe/spacecat-api-service/compare/v1.436.4...v1.436.5) (2026-04-12)
 
 
