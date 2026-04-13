@@ -666,37 +666,19 @@ describe('llmo-agentic-traffic', () => {
   // ── Filter Dimensions ──────────────────────────────────────────────────────
 
   describe('createAgenticTrafficFilterDimensionsHandler', () => {
-    it('returns aggregated distinct filter values', async () => {
-      const client = createMockClient(
-        {
-          rpc_agentic_traffic_by_category: {
-            data: [{ category_name: 'Electronics' }, { category_name: 'Fashion' }],
-            error: null,
-          },
-          rpc_agentic_traffic_by_user_agent: {
-            data: [
-              { agent_type: 'Chatbots' },
-              { agent_type: 'Research' },
-              { agent_type: 'Chatbots' },
-            ],
-            error: null,
-          },
+    it('returns distinct filter values from rpc_agentic_traffic_distinct_filters', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_distinct_filters: {
+          data: [{
+            categories: ['Electronics', 'Fashion'],
+            agent_types: ['Chatbots', 'Research'],
+            platforms: ['ChatGPT', 'Perplexity'],
+            content_types: ['article', 'product'],
+            user_agents: ['GPTBot', 'PerplexityBot'],
+          }],
+          error: null,
         },
-        {
-          agentic_traffic: {
-            data: [
-              { platform: 'ChatGPT' },
-              { platform: 'Perplexity' },
-              { platform: 'ChatGPT' },
-            ],
-            error: null,
-          },
-          agentic_url_classifications: {
-            data: [{ content_type: 'article' }, { content_type: 'product' }],
-            error: null,
-          },
-        },
-      );
+      });
       const ctx = makeContext({ client });
       const handler = createAgenticTrafficFilterDimensionsHandler(stubbedValidateAccess);
       const res = await handler(ctx);
@@ -708,46 +690,35 @@ describe('llmo-agentic-traffic', () => {
       expect(body.contentTypes).to.deep.equal(['article', 'product']);
     });
 
-    it('returns empty arrays gracefully when queries fail', async () => {
-      const client = createMockClient(
-        {
-          rpc_agentic_traffic_by_category: { data: null, error: { message: 'db error' } },
-          rpc_agentic_traffic_by_user_agent: { data: null, error: { message: 'db error' } },
+    it('returns 500 when the RPC fails', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_distinct_filters: {
+          data: null,
+          error: { message: 'db error' },
         },
-        {
-          agentic_traffic: { data: null, error: { message: 'table error' } },
-          agentic_url_classifications: { data: null, error: { message: 'table error' } },
-        },
-      );
+      });
       const ctx = makeContext({ client });
       const handler = createAgenticTrafficFilterDimensionsHandler(stubbedValidateAccess);
       const res = await handler(ctx);
-      // Should still return 200 with empty arrays — not crash
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns empty arrays when the RPC returns no rows', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_distinct_filters: {
+          data: [],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficFilterDimensionsHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.categories).to.deep.equal([]);
       expect(body.agentTypes).to.deep.equal([]);
-    });
-
-    it('deduplicates values across rows', async () => {
-      const client = createMockClient(
-        {
-          rpc_agentic_traffic_by_category: {
-            data: [{ category_name: 'Sports' }, { category_name: 'Sports' }],
-            error: null,
-          },
-          rpc_agentic_traffic_by_user_agent: { data: [], error: null },
-        },
-        {
-          agentic_traffic: { data: [], error: null },
-          agentic_url_classifications: { data: [], error: null },
-        },
-      );
-      const ctx = makeContext({ client });
-      const handler = createAgenticTrafficFilterDimensionsHandler(stubbedValidateAccess);
-      const res = await handler(ctx);
-      const body = await res.json();
-      expect(body.categories).to.deep.equal(['Sports']);
+      expect(body.platforms).to.deep.equal([]);
+      expect(body.contentTypes).to.deep.equal([]);
     });
   });
 

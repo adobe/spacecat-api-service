@@ -34,8 +34,6 @@ const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
 const DEFAULT_BY_URL_LIMIT = 2000;
 const MAX_BY_URL_LIMIT = 2000;
-const FILTER_DIMENSIONS_PLATFORM_LIMIT = 500;
-const FILTER_DIMENSIONS_CONTENT_TYPE_LIMIT = 500;
 
 function defaultDateRange() {
   const end = new Date();
@@ -410,13 +408,9 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
 /**
  * GET /sites/:siteId/agentic-traffic/filter-dimensions
  *
- * Returns distinct filter values for agentic traffic dashboards by combining:
- *  - rpc_agentic_traffic_by_category    → distinct categories
- *  - rpc_agentic_traffic_by_user_agent  → distinct agent types
- *  - agentic_traffic table              → distinct platforms (bounded)
- *  - agentic_url_classifications table  → distinct content types (bounded)
- *
- * All calls are made in parallel.
+ * Delegates to rpc_agentic_traffic_distinct_filters, which returns all five
+ * filter dimensions in a single round-trip with cascading behaviour: each
+ * dimension list respects the other active filters but ignores its own.
  */
 export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAccess) {
   return async function getAgenticTrafficFilterDimensions(context) {
@@ -426,62 +420,20 @@ export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAc
       'filter-dimensions',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const baseRpcParams = buildRpcParams(siteId, parsed);
-
-        // by_user_agent does not accept p_user_agent
-        const userAgentRpcParams = { ...baseRpcParams };
-        delete userAgentRpcParams.p_user_agent;
-
-        const [
-          categoryResult,
-          userAgentResult,
-          platformResult,
-          contentTypeResult,
-        ] = await Promise.all([
-          client.rpc('rpc_agentic_traffic_by_category', baseRpcParams),
-          client.rpc('rpc_agentic_traffic_by_user_agent', userAgentRpcParams),
-          client
-            .from('agentic_traffic')
-            .select('platform')
-            .eq('site_id', siteId)
-            .gte('traffic_date', parsed.startDate)
-            .lte('traffic_date', parsed.endDate)
-            .not('platform', 'is', null)
-            .limit(FILTER_DIMENSIONS_PLATFORM_LIMIT),
-          client
-            .from('agentic_url_classifications')
-            .select('content_type')
-            .eq('site_id', siteId)
-            .not('content_type', 'is', null)
-            .neq('content_type', '')
-            .limit(FILTER_DIMENSIONS_CONTENT_TYPE_LIMIT),
-        ]);
-
-        if (categoryResult.error) {
-          ctx.log.error(`Agentic traffic filter-dimensions categories error: ${categoryResult.error.message}`);
+        const { data, error } = await client.rpc(
+          'rpc_agentic_traffic_distinct_filters',
+          buildRpcParams(siteId, parsed),
+        );
+        if (error) {
+          ctx.log.error(`Agentic traffic filter-dimensions PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch agentic traffic filter dimensions');
         }
-        if (userAgentResult.error) {
-          ctx.log.error(`Agentic traffic filter-dimensions user-agents error: ${userAgentResult.error.message}`);
-        }
-
-        const categories = [...new Set(
-          (categoryResult.data || []).map((r) => r.category_name).filter(Boolean),
-        )].sort();
-        const agentTypes = [...new Set(
-          (userAgentResult.data || []).map((r) => r.agent_type).filter(Boolean),
-        )].sort();
-        const platforms = [...new Set(
-          (platformResult.data || []).map((r) => r.platform).filter(Boolean),
-        )].sort();
-        const contentTypes = [...new Set(
-          (contentTypeResult.data || []).map((r) => r.content_type).filter(Boolean),
-        )].sort();
-
+        /* c8 ignore next */ const row = (data || [])[0] || {};
         return ok({
-          categories,
-          agentTypes,
-          platforms,
-          contentTypes,
+          categories: row.categories || [],
+          agentTypes: row.agent_types || [],
+          platforms: row.platforms || [],
+          contentTypes: row.content_types || [],
         });
       },
     );
