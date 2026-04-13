@@ -317,7 +317,7 @@ describe('edge-routing-utils', () => {
 
     it('returns aem-cs-fastly when A record matches known Fastly IP', async () => {
       dnsPromises.resolveCname.resolves([]);
-      dnsPromises.resolve4.withArgs('example.com').resolves(['151.101.131.10']);
+      dnsPromises.resolve4.withArgs('example.com').resolves(['146.75.123.10']);
       const result = await edgeUtilsDns.detectCdnForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
