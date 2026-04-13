@@ -114,7 +114,9 @@ export default class AccessControlUtil {
   }
 
   canManageImsOrgAccess() {
-    if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) return false;
+    if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) {
+      return false;
+    }
     return this.authInfo.isAdmin();
   }
 
@@ -275,7 +277,9 @@ export default class AccessControlUtil {
       await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
-      if (isDelegatedAccess) return hasOrgAccess; // productCode scoping replaces subService check
+      if (isDelegatedAccess) {
+        return hasOrgAccess; // productCode scoping replaces subService check
+      }
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }
     return hasOrgAccess;

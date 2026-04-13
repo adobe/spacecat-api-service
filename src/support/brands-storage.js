@@ -17,11 +17,12 @@ import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
  */
 const BRAND_SELECT = [
   '*',
+  'base_site:sites!site_id(id, base_url)',
   'brand_aliases(alias, regions)',
   'brand_social_accounts(url, regions)',
   'brand_earned_sources(name, url, regions)',
   'competitors(name, url, regions)',
-  'brand_sites(site_id, paths, sites(base_url))',
+  'brand_sites(site_id, paths, type, sites(base_url))',
 ].join(', ');
 
 /**
@@ -51,15 +52,26 @@ function mapDbBrandToV2(row) {
   // base URL itself when no paths are configured).
   const urls = (row.brand_sites || []).flatMap((bs) => {
     const base = bs.sites?.base_url;
-    if (!hasText(base)) return [];
+    if (!hasText(base)) {
+      return [];
+    }
     const paths = bs.paths || [];
     const effectivePaths = paths.length === 0 ? ['/'] : paths;
-    return effectivePaths.map((p) => ({ value: p === '/' ? base : `${base}${p}` }));
+    return effectivePaths.map((p) => {
+      const entry = { value: p === '/' ? base : `${base}${p}` };
+      // Only the root entry (/) carries the base-URL type; subpaths are plain URLs
+      if (p === '/' && hasText(bs.type)) {
+        entry.type = bs.type;
+      }
+      return entry;
+    });
   });
 
   return {
     id: row.id,
     name: row.name,
+    baseSiteId: row.base_site?.id || row.site_id || null,
+    baseUrl: row.base_site?.base_url || null,
     status: row.status || 'active',
     origin: row.origin || 'human',
     description: row.description || null,
@@ -101,12 +113,18 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
     .from(table)
     .delete()
     .eq('brand_id', brandId);
-  if (deleteError) throw new Error(`Failed to clear ${table}: ${deleteError.message}`);
-  if (rows.length === 0) return;
+  if (deleteError) {
+    throw new Error(`Failed to clear ${table}: ${deleteError.message}`);
+  }
+  if (rows.length === 0) {
+    return;
+  }
   const { error: insertError } = await postgrestClient
     .from(table)
     .upsert(rows, { onConflict });
-  if (insertError) throw new Error(`Failed to sync ${table}: ${insertError.message}`);
+  if (insertError) {
+    throw new Error(`Failed to sync ${table}: ${insertError.message}`);
+  }
 }
 
 /**
@@ -118,23 +136,39 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .from('brand_sites')
     .delete()
     .eq('brand_id', brandId);
-  if (deleteError) throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
+  if (deleteError) {
+    throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
+  }
 
-  if (!urls || urls.length === 0) return;
+  if (!urls || urls.length === 0) {
+    return;
+  }
 
-  // Group paths by base URL
+  // Group paths by base URL and track type
   const pathsByBase = new Map();
+  const typeByBase = new Map();
   urls
-    .map((u) => (typeof u === 'string' ? u : u?.value))
-    .filter(hasText)
-    .forEach((value) => {
+    .forEach((u) => {
+      const value = typeof u === 'string' ? u : u?.value;
+      if (!hasText(value)) {
+        return;
+      }
       const { base, path } = parseUrlParts(value);
       const normalizedBase = composeBaseURL(base);
-      if (!pathsByBase.has(normalizedBase)) pathsByBase.set(normalizedBase, []);
+      if (!pathsByBase.has(normalizedBase)) {
+        pathsByBase.set(normalizedBase, []);
+      }
       pathsByBase.get(normalizedBase).push(path || '/');
+      // First URL with a type wins for a given base URL — prevents silent overwrite
+      // when multiple paths under the same domain carry different types.
+      if (typeof u === 'object' && hasText(u?.type) && !typeByBase.has(normalizedBase)) {
+        typeByBase.set(normalizedBase, u.type);
+      }
     });
 
-  if (pathsByBase.size === 0) return;
+  if (pathsByBase.size === 0) {
+    return;
+  }
 
   const { data: sites } = await postgrestClient
     .from('sites')
@@ -142,20 +176,25 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .eq('organization_id', organizationId)
     .in('base_url', [...pathsByBase.keys()]);
 
-  if (!sites || sites.length === 0) return;
+  if (!sites || sites.length === 0) {
+    return;
+  }
 
   const rows = sites.map((s) => ({
     organization_id: organizationId,
     brand_id: brandId,
     site_id: s.id,
     paths: pathsByBase.get(s.base_url) || [],
+    type: typeByBase.get(s.base_url) || null,
     updated_by: updatedBy,
   }));
 
   const { error } = await postgrestClient
     .from('brand_sites')
     .upsert(rows, { onConflict: 'brand_id,site_id' });
-  if (error) throw new Error(`Failed to sync brand_sites: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to sync brand_sites: ${error.message}`);
+  }
 }
 
 /**
@@ -245,7 +284,9 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
  * @returns {Promise<object[]>} Array of brands in V2 config shape
  */
 export async function listBrands(organizationId, postgrestClient, options = {}) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   let query = postgrestClient
     .from('brands')
@@ -260,7 +301,9 @@ export async function listBrands(organizationId, postgrestClient, options = {}) 
   }
 
   const { data, error } = await query;
-  if (error) throw new Error(`Failed to list brands: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list brands: ${error.message}`);
+  }
 
   return (data || []).map(mapDbBrandToV2);
 }
@@ -274,7 +317,9 @@ export async function listBrands(organizationId, postgrestClient, options = {}) 
  * @returns {Promise<object|null>} Brand in V2 config shape or null
  */
 export async function getBrandById(organizationId, brandId, postgrestClient) {
-  if (!postgrestClient?.from || !hasText(brandId)) return null;
+  if (!postgrestClient?.from || !hasText(brandId)) {
+    return null;
+  }
 
   const { data, error } = await postgrestClient
     .from('brands')
@@ -283,8 +328,12 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
     .eq('id', brandId)
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to get brand: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to get brand: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   return mapDbBrandToV2(data);
 }
@@ -306,16 +355,37 @@ export async function upsertBrand({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
-  if (!hasText(brand?.name)) throw new Error('Brand name is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (!hasText(brand?.name)) {
+    throw new Error('Brand name is required');
+  }
 
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
+  // Check if the brand already exists with a base site set.
+  // This prevents silently downgrading an active brand to pending when a caller
+  // re-upserts by name without passing baseSiteId.
+  const { data: existing } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('name', brand.name)
+    .maybeSingle();
+
+  // A brand cannot be active without a base site ID — but respect persisted state
+  // on the update path (the DB row may already have site_id set).
+  const hasBaseSite = hasText(brand.baseSiteId) || hasText(existing?.site_id);
+  const status = (!hasBaseSite && (brand.status || 'active') === 'active')
+    ? 'pending'
+    : (brand.status || 'active');
+
   const row = {
     organization_id: organizationId,
     name: brand.name,
-    status: brand.status || 'active',
+    status,
     origin: brand.origin || 'human',
     description: brand.description || null,
     vertical: brand.vertical || null,
@@ -326,13 +396,25 @@ export async function upsertBrand({
     updated_by: updatedBy,
   };
 
+  // Set base site ID if provided.
+  if (hasText(brand.baseSiteId)) {
+    row.site_id = brand.baseSiteId;
+  }
+
   const { data: upserted, error } = await postgrestClient
     .from('brands')
     .upsert(row, { onConflict: 'organization_id,name' })
     .select('id, name')
     .single();
 
-  if (error) throw new Error(`Failed to upsert brand: ${error.message}`);
+  if (error) {
+    if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
+      const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
+    throw new Error(`Failed to upsert brand: ${error.message}`);
+  }
 
   const brandId = upserted.id;
 
@@ -368,15 +450,42 @@ export async function updateBrand({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const patch = { updated_by: updatedBy };
 
-  if (updates.name !== undefined) patch.name = updates.name;
-  if (updates.status !== undefined) patch.status = updates.status;
-  if (updates.origin !== undefined) patch.origin = updates.origin;
-  if (updates.description !== undefined) patch.description = updates.description;
-  if (updates.vertical !== undefined) patch.vertical = updates.vertical;
+  if (updates.name !== undefined) {
+    patch.name = updates.name;
+  }
+  if (updates.status !== undefined) {
+    patch.status = updates.status;
+  }
+  if (updates.origin !== undefined) {
+    patch.origin = updates.origin;
+  }
+  if (updates.description !== undefined) {
+    patch.description = updates.description;
+  }
+  if (updates.vertical !== undefined) {
+    patch.vertical = updates.vertical;
+  }
+
+  // baseSiteId is immutable once set — only allow setting from NULL.
+  // The DB partial unique index (brands_base_site_unique) enforces uniqueness.
+  if (hasText(updates.baseSiteId)) {
+    const { data: current } = await postgrestClient
+      .from('brands')
+      .select('site_id')
+      .eq('id', brandId)
+      .maybeSingle();
+
+    if (!current?.site_id) {
+      patch.site_id = updates.baseSiteId;
+    }
+    // If site_id is already set, silently ignore the update (immutable).
+  }
 
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
@@ -395,8 +504,17 @@ export async function updateBrand({
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to update brand: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
+      const err = new Error('This site is already the primary URL for another brand');
+      err.status = 409;
+      throw err;
+    }
+    throw new Error(`Failed to update brand: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   const childSyncs = [];
 
@@ -420,7 +538,9 @@ export async function updateBrand({
     );
   }
 
-  if (childSyncs.length > 0) await Promise.all(childSyncs);
+  if (childSyncs.length > 0) {
+    await Promise.all(childSyncs);
+  }
 
   if (updates.urls !== undefined) {
     await syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy);
@@ -439,7 +559,9 @@ export async function updateBrand({
  * @returns {Promise<boolean>} True if deleted, false if not found
  */
 export async function deleteBrand(organizationId, brandId, postgrestClient, updatedBy = 'system') {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const { data, error } = await postgrestClient
     .from('brands')
@@ -449,7 +571,9 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to delete brand: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to delete brand: ${error.message}`);
+  }
   return !!data;
 }
 
@@ -460,13 +584,17 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
  * @returns {Promise<object[]>} Array of { code, name }
  */
 export async function listRegions(postgrestClient) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   const { data, error } = await postgrestClient
     .from('regions')
     .select('code, name')
     .order('code', { ascending: true });
 
-  if (error) throw new Error(`Failed to list regions: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list regions: ${error.message}`);
+  }
   return data || [];
 }

@@ -16,7 +16,7 @@ import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
-import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import SeoClient from '@adobe/mysticat-shared-seo-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
@@ -239,8 +239,12 @@ export async function ensureInitialCustomerConfigV2({
 
   const existingConfig = await readCustomerConfigV2FromPostgres(organizationId, postgrestClient);
   if (existingConfig) {
-    if (!existingConfig.customer) existingConfig.customer = {};
-    if (!existingConfig.customer.brands) existingConfig.customer.brands = [];
+    if (!existingConfig.customer) {
+      existingConfig.customer = {};
+    }
+    if (!existingConfig.customer.brands) {
+      existingConfig.customer.brands = [];
+    }
     const { brands } = existingConfig.customer;
     const siteAlreadyRegistered = brands.some((b) => b.v1SiteId === siteId);
 
@@ -923,20 +927,20 @@ function toggleWWW(url) {
 }
 
 /**
- * Tests a URL against the Ahrefs top pages endpoint to see if it returns data.
+ * Tests a URL against the SEO top pages endpoint to see if it returns data.
  * @param {string} url - The URL to test
- * @param {object} ahrefsClient - The Ahrefs API client
+ * @param {object} seoClient - The SEO API client
  * @param {object} log - Logger instance
  * @returns {Promise<boolean>} - True if the URL returns top pages data, false otherwise
  */
-async function testAhrefsTopPages(url, ahrefsClient, log) {
+async function testSeoTopPages(url, seoClient, log) {
   try {
-    const { result } = await ahrefsClient.getTopPages(url, 1);
+    const { result } = await seoClient.getTopPages(url, { limit: 1 });
     const hasData = isNonEmptyArray(result?.pages);
-    log.debug(`Ahrefs top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
+    log.debug(`SEO top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
     return hasData;
   } catch (error) {
-    log.debug(`Ahrefs top pages test for ${url}: FAILED - ${error.message}`);
+    log.debug(`SEO top pages test for ${url}: FAILED - ${error.message}`);
     return false;
   }
 }
@@ -955,7 +959,7 @@ export async function determineOverrideBaseURL(baseURL, context) {
 
   try {
     log.info(`Determining overrideBaseURL for ${baseURL}`);
-    const ahrefsClient = AhrefsAPIClient.createFrom(context);
+    const seoClient = SeoClient.createFrom(context);
     const alternateURL = toggleWWW(baseURL);
 
     // If toggleWWW returns the same URL, it means the URL has a subdomain
@@ -968,8 +972,8 @@ export async function determineOverrideBaseURL(baseURL, context) {
     log.debug(`Testing base URL: ${baseURL} and alternate: ${alternateURL}`);
 
     const [baseURLSuccess, alternateURLSuccess] = await Promise.all([
-      testAhrefsTopPages(baseURL, ahrefsClient, log),
-      testAhrefsTopPages(alternateURL, ahrefsClient, log),
+      testSeoTopPages(baseURL, seoClient, log),
+      testSeoTopPages(alternateURL, seoClient, log),
     ]);
 
     if (!baseURLSuccess && alternateURLSuccess) {
@@ -982,7 +986,7 @@ export async function determineOverrideBaseURL(baseURL, context) {
     } else if (baseURLSuccess && !alternateURLSuccess) {
       log.debug('Base URL succeeded, no overrideBaseURL needed');
     } else {
-      log.warn('Both URLs failed Ahrefs test, no overrideBaseURL set');
+      log.warn('Both URLs failed SEO top pages test, no overrideBaseURL set');
     }
 
     return null;
@@ -1358,6 +1362,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           brand: {
             name: brandName.trim(),
             status: 'active',
+            baseSiteId: site.getId(),
             urls: [{ value: baseURL, type: 'url' }],
             brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
           },
@@ -1495,4 +1500,75 @@ export async function performLlmoOffboarding(site, config, context) {
     dataFolder,
     message: 'LLMO offboarding completed successfully',
   };
+}
+
+export async function appendRowsToQueryIndex(dataFolder, fileNames, env, log) {
+  const sharepointClient = await createSharePointClient(env);
+  const redirects = sharepointClient.getRedirects();
+
+  const now = Math.floor(Date.now() / 1000);
+  const rows = fileNames.map((fileName) => {
+    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
+    return [
+      `/${dataFolder}/${name}`,
+      now,
+      now,
+    ];
+  });
+
+  log.info(`Appending ${rows.length} rows to query-index.xlsx in ${dataFolder}`);
+  await redirects.appendRowsToSheet(`/${dataFolder}/query-index.xlsx`, rows);
+  log.info(`Successfully appended rows to query-index.xlsx in ${dataFolder}`);
+}
+
+export async function previewAndPublishQueryIndex(dataFolder, env, log) {
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const baseUrl = 'https://admin.hlx.page';
+  const filePath = `${dataFolder}/query-index.json`;
+
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    throw new Error('HLX_ONBOARDING_TOKEN is not set');
+  }
+
+  const headers = {
+    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
+  };
+
+  const fetchOptions = { method: 'POST', headers, timeout: 30000 };
+
+  const previewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${filePath}`;
+  log.info(`Previewing query-index at ${previewUrl}`);
+  const previewResponse = await fetch(previewUrl, fetchOptions);
+  if (!previewResponse.ok) {
+    const errorCode = previewResponse.headers?.get('x-error-code') || '';
+    const errorMsg = previewResponse.headers?.get('x-error') || '';
+    let bodyText = '';
+    try {
+      bodyText = await previewResponse.text();
+    } catch {
+      /* noop */
+    }
+    log.error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
+    throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
+  }
+  log.info('Preview of query-index succeeded');
+
+  const publishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${filePath}`;
+  log.info(`Publishing query-index at ${publishUrl}`);
+  const publishResponse = await fetch(publishUrl, fetchOptions);
+  if (!publishResponse.ok) {
+    const errorCode = publishResponse.headers?.get('x-error-code') || '';
+    const errorMsg = publishResponse.headers?.get('x-error') || '';
+    let bodyText = '';
+    try {
+      bodyText = await publishResponse.text();
+    } catch {
+      /* noop */
+    }
+    log.error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
+    throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
+  }
+  log.info('Publish of query-index succeeded');
 }

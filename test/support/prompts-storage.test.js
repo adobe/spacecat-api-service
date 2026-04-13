@@ -159,7 +159,9 @@ describe('prompts-storage', () => {
     it('returns empty items with total when no rows match', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [], error: null, count: 0 });
         },
       };
@@ -194,7 +196,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -231,8 +235,12 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'topics') return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -248,7 +256,9 @@ describe('prompts-storage', () => {
     it('defaults limit and page when falsy values are passed', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [], error: null, count: 0 });
         },
       };
@@ -279,7 +289,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -297,7 +309,9 @@ describe('prompts-storage', () => {
     it('falls back to 0 when count is null and rows are empty', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [], error: null, count: null });
         },
       };
@@ -326,9 +340,15 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'categories') return makeChain({ data: [], error: null });
-          if (table === 'topics') return makeChain({ data: [], error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'categories') {
+            return makeChain({ data: [], error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: [], error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -358,7 +378,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: null });
         },
       };
@@ -399,7 +421,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -429,8 +453,12 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'categories') return makeChain({ data: null, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'categories') {
+            return makeChain({ data: null, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -464,9 +492,15 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'categories') return makeChain({ data: { id: 'cat-uuid' }, error: null });
-          if (table === 'topics') return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'categories') {
+            return makeChain({ data: { id: 'cat-uuid' }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -489,7 +523,9 @@ describe('prompts-storage', () => {
     it('throws on query error', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: null, error: { message: 'DB error' } });
         },
       };
@@ -812,8 +848,12 @@ describe('prompts-storage', () => {
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
           }
-          if (table === 'categories') return makeChain({ data: [{ id: 'cat-uuid', category_id: 'photoshop' }], error: null });
-          if (table === 'topics') return makeChain({ data: [{ id: 'topic-uuid', topic_id: 'editing' }], error: null });
+          if (table === 'categories') {
+            return makeChain({ data: [{ id: 'cat-uuid', category_id: 'photoshop' }], error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: [{ id: 'topic-uuid', topic_id: 'editing' }], error: null });
+          }
           return makeChain({});
         },
       };
@@ -1387,8 +1427,12 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'categories') return makeChain({ data: { id: 'cat-uuid' }, error: null });
-          if (table === 'topics') return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          if (table === 'categories') {
+            return makeChain({ data: { id: 'cat-uuid' }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          }
           return makeChain({ data: row, error: null });
         },
       };
@@ -1528,7 +1572,9 @@ describe('prompts-storage', () => {
     it('passes search param through to query', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1545,7 +1591,9 @@ describe('prompts-storage', () => {
     it('applies origin filter', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1561,7 +1609,9 @@ describe('prompts-storage', () => {
     it('applies region filter', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1577,7 +1627,9 @@ describe('prompts-storage', () => {
     it('applies sort and order params', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1594,7 +1646,9 @@ describe('prompts-storage', () => {
     it('uses default sort when invalid sort column', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1610,7 +1664,9 @@ describe('prompts-storage', () => {
     it('sorts by foreign table column (topic)', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1628,7 +1684,9 @@ describe('prompts-storage', () => {
       const rowWithSource = { ...sampleRow, source: 'sheet' };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [rowWithSource], error: null, count: 1 });
         },
       };
@@ -1767,7 +1825,9 @@ describe('prompts-storage', () => {
       const client = {
         from: () => {
           callCount += 1;
-          if (callCount === 1) return makeChain({ data: { id: 'row-id' }, error: null });
+          if (callCount === 1) {
+            return makeChain({ data: { id: 'row-id' }, error: null });
+          }
           return makeChain({ data: null, error: null });
         },
       };

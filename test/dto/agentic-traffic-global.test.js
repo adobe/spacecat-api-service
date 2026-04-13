@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import { AgenticTrafficGlobalDto } from '../../src/dto/agentic-traffic-global.js';
 
