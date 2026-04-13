@@ -109,6 +109,22 @@ export async function createTopic({
   if (error) {
     throw new Error(`Failed to create topic: ${error.message}`);
   }
+
+  // Link topic to category via the topic_categories junction table.
+  // categoryId is a UUID FK to categories.id — resolve it from the payload.
+  const categoryId = topic.categoryId || null;
+  if (categoryId && data?.id) {
+    await postgrestClient
+      .from('topic_categories')
+      .upsert(
+        { topic_id: data.id, category_id: categoryId },
+        { onConflict: 'topic_id,category_id' },
+      );
+    // Upsert errors are intentionally not thrown — the topic was already
+    // created successfully.  A missing or invalid categoryId should not
+    // fail the entire operation.
+  }
+
   return mapDbTopicToV2(data);
 }
 
