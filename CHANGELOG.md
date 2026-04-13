@@ -1,3 +1,31 @@
+## [1.436.9](https://github.com/adobe/spacecat-api-service/compare/v1.436.8...v1.436.9) (2026-04-13)
+
+
+### Bug Fixes
+
+* adding missing ip in edge routing utils. ([#2194](https://github.com/adobe/spacecat-api-service/issues/2194)) ([d731162](https://github.com/adobe/spacecat-api-service/commit/d7311624452ed262e13ffcb68c4564565fd269f5))
+
+## [1.436.8](https://github.com/adobe/spacecat-api-service/compare/v1.436.7...v1.436.8) (2026-04-13)
+
+
+### Bug Fixes
+
+* updating deliveryConfig to include enableDAMAltTextUpdate: true for plg-onboarded sites ([#2191](https://github.com/adobe/spacecat-api-service/issues/2191)) ([564ea5f](https://github.com/adobe/spacecat-api-service/commit/564ea5f7d0d33aba6e041e919960ac33515f4563))
+
+## [1.436.7](https://github.com/adobe/spacecat-api-service/compare/v1.436.6...v1.436.7) (2026-04-13)
+
+
+### Bug Fixes
+
+* filter-dimensions should return category's id column instead of category_id ([#2192](https://github.com/adobe/spacecat-api-service/issues/2192)) ([1d35741](https://github.com/adobe/spacecat-api-service/commit/1d35741d7da79841c9e80fcdebaa39d39d37dd2f))
+
+## [1.436.6](https://github.com/adobe/spacecat-api-service/compare/v1.436.5...v1.436.6) (2026-04-13)
+
+
+### Bug Fixes
+
+* adds base site id to brand creation ([#2169](https://github.com/adobe/spacecat-api-service/issues/2169)) ([b72ade9](https://github.com/adobe/spacecat-api-service/commit/b72ade95e7ecc64ef31ff9207e580857479216db))
+
 ## [1.436.5](https://github.com/adobe/spacecat-api-service/compare/v1.436.4...v1.436.5) (2026-04-12)
 
 

@@ -322,6 +322,13 @@ describe('edge-routing-utils', () => {
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
 
+    it('returns aem-cs-fastly when A record matches 151.101.131.10', async () => {
+      dnsPromises.resolveCname.resolves([]);
+      dnsPromises.resolve4.withArgs('example.com').resolves(['151.101.131.10']);
+      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
+    });
+
     it('logs CNAME and A-record diagnostics when log is provided (covers log?.info branches)', async () => {
       const dnsLog = { info: sandbox.stub() };
       dnsPromises.resolveCname.withArgs('example.com').resolves(['unrelated-cname.example.com']);
