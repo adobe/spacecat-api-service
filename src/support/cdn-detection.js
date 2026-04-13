@@ -18,11 +18,10 @@ const AEM_CS_FASTLY_CNAME_PATTERNS = [
   'adobe-aem.map.fastly.net',
 ];
 const AEM_CS_FASTLY_IPS = new Set([
-  '146.75.123.10',
   '151.101.195.10',
   '151.101.67.10',
   '151.101.3.10',
-  '151.101.107.10',
+  '151.101.131.10',
 ]);
 
 // ENODATA = record type doesn't exist; ENOTFOUND = domain doesn't exist (NXDOMAIN).
@@ -45,21 +44,26 @@ function catchDnsLookup(err) {
  *  - null             when a DNS lookup failed (inconclusive)
  *
  * @param {string} host - Hostname to check
+ * @param {object} [log] - Logger instance
  * @returns {Promise<string|null>}
  */
-async function checkHost(host) {
+async function checkHost(host, log) {
   const cnames = await dns.resolveCname(host).catch(catchDnsLookup);
   if (cnames === null) {
+    log?.info(`[cdn-detection] DNS lookup failed for ${host} (CNAME)`);
     return null;
   }
+  log?.info(`[cdn-detection] CNAMEs for ${host}: ${cnames.length ? cnames.join(', ') : '(none)'}`);
   if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((p) => c.includes(p)))) {
     return 'aem-cs-fastly';
   }
 
   const ips = await dns.resolve4(host).catch(catchDnsLookup);
   if (ips === null) {
+    log?.info(`[cdn-detection] DNS lookup failed for ${host} (A record)`);
     return null;
   }
+  log?.info(`[cdn-detection] IPs for ${host}: ${ips.length ? ips.join(', ') : '(none)'}`);
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
     return 'aem-cs-fastly';
   }
@@ -78,16 +82,19 @@ async function checkHost(host) {
  * Never throws.
  *
  * @param {string} domain - bare domain (e.g. 'example.com')
+ * @param {object} [log] - Logger instance
  * @returns {Promise<string|null>}
  */
-export async function detectCdnForDomain(domain) {
+export async function detectCdnForDomain(domain, log) {
   try {
-    const wwwResult = await checkHost(`www.${domain}`);
+    log?.info(`[cdn-detection] Detecting CDN for domain ${domain}`);
+
+    const wwwResult = await checkHost(`www.${domain}`, log);
     if (wwwResult === 'aem-cs-fastly') {
       return 'aem-cs-fastly';
     }
 
-    const bareResult = await checkHost(domain);
+    const bareResult = await checkHost(domain, log);
     if (bareResult === 'aem-cs-fastly') {
       return 'aem-cs-fastly';
     }

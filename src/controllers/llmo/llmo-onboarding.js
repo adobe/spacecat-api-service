@@ -1325,7 +1325,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
     }
 
-    detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname);
+    detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname, log);
     if (detectedCdn) {
       siteConfig.updateLlmoDetectedCdn?.(detectedCdn);
       log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
