@@ -1079,6 +1079,7 @@ describe('PlgOnboardingController', () => {
         programId: '123',
         environmentId: '456',
         preferContentApi: true,
+        enableDAMAltTextUpdate: true,
         imsOrgId: TEST_IMS_ORG_ID,
       });
     });
@@ -1105,6 +1106,7 @@ describe('PlgOnboardingController', () => {
         programId: '123',
         environmentId: '456',
         preferContentApi: true,
+        enableDAMAltTextUpdate: true,
         imsOrgId: TEST_IMS_ORG_ID,
       });
     });
@@ -3678,7 +3680,11 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(mockSite.setDeliveryConfig).to.have.been.calledWithMatch({ authorURL: 'https://author-p152454-e345003.adobeaemcloud.com' });
+        expect(mockSite.setDeliveryConfig).to.have.been.calledWithMatch({
+          authorURL: 'https://author-p152454-e345003.adobeaemcloud.com',
+          preferContentApi: true,
+          enableDAMAltTextUpdate: true,
+        });
       });
 
       it('BYPASS AEM_SITE_CHECK: sets hlxConfig when deliveryType is aem_edge with EDS author URL', async () => {
