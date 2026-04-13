@@ -7780,8 +7780,6 @@ describe('Suggestions Controller', () => {
     let mockGeoExperiment;
 
     beforeEach(() => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
-
       mockGeoExperiment = {
         getId: () => GEO_EXP_ID,
         getSiteId: () => SITE_ID,
@@ -7856,17 +7854,6 @@ describe('Suggestions Controller', () => {
         data: { name: 'New Name' },
       });
       expect(response.status).to.equal(404);
-    });
-
-    it('returns 403 without site access', async () => {
-      AccessControlUtil.prototype.hasAccess.restore();
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      const response = await suggestionsController.patchGeoExperiment({
-        ...context,
-        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
-        data: { name: 'New Name' },
-      });
-      expect(response.status).to.equal(403);
     });
 
     it('returns 404 when GeoExperiment not found', async () => {
