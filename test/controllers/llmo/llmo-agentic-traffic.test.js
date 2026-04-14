@@ -25,6 +25,7 @@ import {
   createAgenticTrafficByUrlHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
+  createAgenticTrafficUrlBrandPresenceHandler,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
@@ -75,7 +76,7 @@ function makeContext(overrides = {}) {
       },
       ...overrides.dataAccess,
     },
-    log: { error: sinon.stub() },
+    log: { error: sinon.stub(), info: sinon.stub() },
     ...overrides.context,
   };
 }
@@ -128,6 +129,36 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficKpisHandler(denyAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
+    });
+  });
+
+  // ── Platform code translation ──────────────────────────────────────────────
+
+  describe('platform code to DB value translation', () => {
+    const cases = [
+      ['openai', 'ChatGPT'],
+      ['chatgpt', 'ChatGPT'],
+      ['anthropic', 'Anthropic'],
+      ['mistral', 'MistralAI'],
+      ['perplexity', 'Perplexity'],
+      ['gemini', 'Gemini'],
+      ['google', 'Google'],
+      ['amazon', 'Amazon'],
+      ['all', null],
+      [undefined, null],
+      ['unknown-code', null],
+    ];
+
+    cases.forEach(([input, expected]) => {
+      it(`translates platform='${input}' → p_platform=${JSON.stringify(expected)}`, async () => {
+        const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+        const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: input } });
+        const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+        await handler(ctx);
+        expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
+          p_platform: expected,
+        });
+      });
     });
   });
 
@@ -906,6 +937,96 @@ describe('llmo-agentic-traffic', () => {
       const client = { rpc: sinon.stub(), from: sinon.stub().callsFake(() => makeChain()) };
       const ctx = makeContext({ client });
       const handler = createAgenticTrafficWeeksHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── URL Brand Presence ──────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficUrlBrandPresenceHandler', () => {
+    const RPC = 'rpc_brand_presence_url_detail';
+
+    it('returns brand presence data for the URL on success', async () => {
+      const rpcPayload = {
+        totalCitations: 42,
+        totalMentions: 30,
+        uniquePrompts: 10,
+        weeklyTrends: [
+          { weekStr: '2026-W01', citationCount: 5, mentionCount: 3 },
+        ],
+        prompts: [
+          {
+            prompt: 'What is Adobe Express?',
+            topic: 'Product Features',
+            topicId: 'topic-uuid-1',
+            regionCode: 'US',
+            citations: 8,
+            mentions: 6,
+            avgSentiment: 0.75,
+            avgVisibilityScore: 85.0,
+            executionCount: 10,
+          },
+        ],
+      };
+      const client = createMockClient({
+        [RPC]: { data: rpcPayload, error: null }, // RETURNS JSONB → object directly, not array
+      });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://www.adobe.com/express' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.totalCitations).to.equal(42);
+      expect(body.uniquePrompts).to.equal(10);
+      expect(body.weeklyTrends).to.have.length(1);
+      expect(body.prompts).to.have.length(1);
+      expect(body.prompts[0].prompt).to.equal('What is Adobe Express?');
+    });
+
+    it('returns 400 when url param is missing', async () => {
+      const client = createMockClient({ [RPC]: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+      expect(client.rpc).not.to.have.been.called;
+    });
+
+    it('passes organizationId from site to the RPC', async () => {
+      const client = createMockClient({
+        [RPC]: {
+          data: [{
+            totalCitations: 0, totalMentions: 0, uniquePrompts: 0, weeklyTrends: [], prompts: [],
+          }],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com/page' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_organization_id).to.equal('org-1');
+      expect(rpcArgs.p_url).to.equal('https://example.com/page');
+      expect(rpcArgs.p_site_id).to.equal(SITE_ID);
+    });
+
+    it('returns empty arrays when RPC returns no data', async () => {
+      const client = createMockClient({ [RPC]: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.totalCitations).to.equal(0);
+      expect(body.weeklyTrends).to.deep.equal([]);
+      expect(body.prompts).to.deep.equal([]);
+    });
+
+    it('returns 500 when RPC errors', async () => {
+      const client = createMockClient({ [RPC]: { data: null, error: { message: 'db error' } } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
     });

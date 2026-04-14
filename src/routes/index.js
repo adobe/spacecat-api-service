@@ -440,6 +440,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/filter-dimensions': llmoMysticatController.getAgenticTrafficFilterDimensions,
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
+    'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.

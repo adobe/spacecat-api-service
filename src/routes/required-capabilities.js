@@ -65,6 +65,7 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/:brandId/opportunities',
 
   // Agentic traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/agentic-traffic/url-brand-presence',
   'GET /sites/:siteId/agentic-traffic/kpis',
   'GET /sites/:siteId/agentic-traffic/kpis-trend',
   'GET /sites/:siteId/agentic-traffic/by-region',
