@@ -420,6 +420,11 @@ describe('getRouteHandlers', () => {
     runChecks: sinon.stub(),
   };
 
+  const mockSiteDetectionController = {
+    createSiteDetectionJob: sinon.stub(),
+    getSiteDetectionJobStatus: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -471,6 +476,7 @@ describe('getRouteHandlers', () => {
       mockPageRelationshipsController,
       mockEphemeralRunController,
       mockAutofixChecksController,
+      mockSiteDetectionController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -485,6 +491,7 @@ describe('getRouteHandlers', () => {
       'POST /projects',
       'POST /preflight/jobs',
       'POST /preflight/beta/jobs',
+      'POST /sites/detect',
       'GET /sites',
       'POST /sites',
       'GET /sites.csv',
@@ -617,6 +624,7 @@ describe('getRouteHandlers', () => {
       'GET /projects/by-project-name/:projectName/sites',
       'GET /preflight/jobs/:jobId',
       'GET /preflight/beta/jobs/:jobId',
+      'GET /sites/detect/jobs/:jobId',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'PATCH /sites/:siteId/config/cdn-logs',
