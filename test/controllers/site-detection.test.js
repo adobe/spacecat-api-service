@@ -115,7 +115,7 @@ describe('SiteDetectionController', () => {
     });
 
     it('returns 400 when domain is missing', async () => {
-      const resp = await controller.createSiteDetectionJob({ data: {} });
+      const resp = await controller.createSiteDetectionJob({ data: { hlxVersion: 5 } });
       expect(resp.status).to.equal(400);
     });
 
