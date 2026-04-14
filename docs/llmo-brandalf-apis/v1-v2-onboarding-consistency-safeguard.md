@@ -340,7 +340,7 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
 
     // Rows 3, 5, 7: brandalf=true without the row-1 condition → v2
     log.info(
-      `LLMO mode resolution: organization ${organizationId} has brandalf=true — using v2 (explicit migration override)`,
+      `LLMO mode resolution: organization ${organizationId} has brandalf=true — using v2`,
     );
     return LLMO_ONBOARDING_MODE_V2;
   }
