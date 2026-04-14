@@ -22,6 +22,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
+// TODO: replace with imported `conflict` once @adobe/spacecat-shared-http-utils exports it
 function conflict(message) {
   return createResponse({ message }, 409);
 }
@@ -146,7 +147,7 @@ function SiteDetectionController(ctx, log, env) {
     const jobId = context.params?.jobId;
 
     if (!isValidUUID(jobId)) {
-      log.error(`Invalid jobId: ${jobId}`);
+      log.warn(`Invalid jobId: ${jobId}`);
       return badRequest('Invalid jobId');
     }
 
@@ -154,7 +155,7 @@ function SiteDetectionController(ctx, log, env) {
       const job = await dataAccess.AsyncJob.findById(jobId);
 
       if (!job) {
-        log.error(`Job with ID ${jobId} not found`);
+        log.warn(`Job with ID ${jobId} not found`);
         return notFound(`Job with ID ${jobId} not found`);
       }
 
