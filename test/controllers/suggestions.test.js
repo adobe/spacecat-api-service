@@ -5980,6 +5980,32 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns badRequest when suggestionIds contains non-UUID values', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: ['not-a-uuid', 'https://example.com/page'] },
+        env: {},
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.include('https://example.com/page');
+    });
+
+    it('returns badRequest when suggestionIds contains a mix of valid and invalid UUIDs', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], 'not-a-uuid'] },
+        env: {},
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.not.include(SUGGESTION_IDS[0]);
+    });
+
     it('returns forbidden when user does not have access to site', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
 

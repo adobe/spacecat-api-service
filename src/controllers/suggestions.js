@@ -1607,6 +1607,12 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const suggestionIds = [...new Set(rawSuggestionIds)];
 
+    const invalidIds = suggestionIds.filter((id) => !isValidUUID(id));
+    if (invalidIds.length > 0) {
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, invalid suggestionIds: ${invalidIds.join(', ')}`);
+      return badRequest(`suggestionIds must contain valid UUIDs. Invalid: ${invalidIds.join(', ')}`);
+    }
+
     // No productCode is passed to hasAccess(); the delegation block is not entered.
     // Org membership is the intended access gate for this endpoint.
     if (!await accessControlUtil.hasAccess(site)) {
