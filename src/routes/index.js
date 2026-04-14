@@ -95,6 +95,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} siteDetectionController - The site detection controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -147,6 +148,7 @@ export default function getRouteHandlers(
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  siteDetectionController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -211,6 +213,8 @@ export default function getRouteHandlers(
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
     'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
+    'POST /sites/detect': siteDetectionController.createSiteDetectionJob,
+    'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,

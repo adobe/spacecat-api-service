@@ -68,6 +68,7 @@ import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
+import SiteDetectionController from './controllers/site-detection.js';
 import DemoController from './controllers/demo.js';
 import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
@@ -204,6 +205,7 @@ async function run(request, context) {
     const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
+    const siteDetectionController = SiteDetectionController(context, log, context.env);
     const demoController = DemoController(context);
     const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
@@ -284,6 +286,7 @@ async function run(request, context) {
       pageRelationshipsController,
       ephemeralRunController,
       autofixChecksController,
+      siteDetectionController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
