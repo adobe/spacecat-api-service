@@ -69,6 +69,12 @@ describe('Preflight Controller', () => {
     getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
   };
 
+  const mockConfiguration = {
+    getEnabledAuditsForSite: sandbox.stub().returns([
+      'preflight-alt-text', 'preflight-headings', 'preflight-links',
+    ]),
+  };
+
   const mockDataAccess = {
     AsyncJob: {
       create: sandbox.stub().resolves(mockJob),
@@ -76,6 +82,9 @@ describe('Preflight Controller', () => {
     },
     Site: {
       findByPreviewURL: sandbox.stub().resolves(mockSite),
+    },
+    Configuration: {
+      findLatest: sandbox.stub().resolves(mockConfiguration),
     },
   };
 
@@ -1404,6 +1413,97 @@ describe('Preflight Controller', () => {
 
       const [, calledOptions] = fetchStub.secondCall.args;
       expect(calledOptions.headers.Authorization).to.be.undefined;
+    });
+
+    it('passes enabled preflight audits from Configuration to Mysticat', async () => {
+      mockConfiguration.getEnabledAuditsForSite.returns([
+        'preflight-headings', 'preflight-links', 'lhs-mobile',
+      ]);
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.audits).to.deep.equal(['headings', 'links']);
+    });
+
+    it('passes all preflight audits when all handlers are enabled', async () => {
+      mockConfiguration.getEnabledAuditsForSite.returns([
+        'preflight-alt-text', 'preflight-headings', 'preflight-links',
+      ]);
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.audits).to.deep.equal(['alt-text', 'headings', 'links']);
+    });
+
+    it('omits audits field when no preflight handlers are enabled', async () => {
+      mockConfiguration.getEnabledAuditsForSite.returns([
+        'lhs-mobile', 'cwv',
+      ]);
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.audits).to.be.undefined;
+    });
+
+    it('runs all audits when Configuration.findLatest fails', async () => {
+      mockDataAccess.Configuration.findLatest = sandbox.stub().rejects(new Error('DB error'));
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.audits).to.be.undefined;
+    });
+
+    it('runs all audits when Configuration.findLatest returns null', async () => {
+      mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(null);
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.audits).to.be.undefined;
     });
   });
 

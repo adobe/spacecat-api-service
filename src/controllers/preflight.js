@@ -269,6 +269,7 @@ function PreflightController(ctx, log, env) {
     url,
     step,
     authorizationHeader,
+    audits,
   ) {
     const response = await fetch(`${mysticatBaseUrl}/v1/preflight/analyze`, {
       method: 'POST',
@@ -277,7 +278,12 @@ function PreflightController(ctx, log, env) {
         ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
       },
       body: JSON.stringify({
-        site_id: siteId, url, mode: step, scan_id: scanId, persist: true,
+        site_id: siteId,
+        url,
+        mode: step,
+        scan_id: scanId,
+        persist: true,
+        ...(isNonEmptyArray(audits) && { audits }),
       }),
     });
 
@@ -386,6 +392,23 @@ function PreflightController(ctx, log, env) {
         }
       }
 
+      // Resolve enabled preflight audits from global Configuration.
+      // Strip the preflight- prefix so names match Mysticat's audit registry
+      // (e.g. preflight-headings → headings). Mysticat skips any it hasn't
+      // implemented yet since the list is admin-curated, not user input.
+      let preflightAudits;
+      try {
+        const configuration = await dataAccess.Configuration.findLatest();
+        if (configuration) {
+          const enabledAudits = configuration.getEnabledAuditsForSite(site);
+          preflightAudits = enabledAudits
+            .filter((type) => type.startsWith('preflight-'))
+            .map((type) => type.replace(/^preflight-/, ''));
+        }
+      } catch (e) {
+        log.warn(`Failed to load Configuration for preflight audits, running all: ${e.message}`);
+      }
+
       const job = await dataAccess.AsyncJob.create({
         status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
@@ -403,6 +426,7 @@ function PreflightController(ctx, log, env) {
           url,
           step,
           authorizationHeader,
+          preflightAudits,
         );
       } catch (mysticatError) {
         log.error(`Mysticat analyze failed: ${mysticatError.message}`);
