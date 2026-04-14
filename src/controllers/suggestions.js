@@ -45,7 +45,6 @@ import {
   ErrorWithStatusCode,
   getHostName,
   getIsSummitPlgEnabled,
-  isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
@@ -275,9 +274,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const isRealPlg = await getIsSummitPlgEnabled(site, ctx, context)
-      && !isViewAsTrialRequest(context);
-    if (opportunity && isRealPlg) {
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       /* c8 ignore next 3 */

@@ -764,12 +764,11 @@ describe('Suggestions Controller', () => {
     expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
   });
 
-  it('does not call grantSuggestionsForOpportunity when x-view-as-trial is true', async () => {
+  it('calls grantSuggestionsForOpportunity when x-view-as-trial is true', async () => {
     const grantStub = sandbox.stub().resolves();
     const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
       '../../src/support/utils.js': {
         getIsSummitPlgEnabled: async () => true,
-        isViewAsTrialRequest: (ctx) => ctx?.pathInfo?.headers?.['x-view-as-trial'] === 'true',
       },
       '../../src/support/grant-suggestions-handler.js': {
         grantSuggestionsForOpportunity: grantStub,
@@ -786,7 +785,43 @@ describe('Suggestions Controller', () => {
       ...context,
     });
     expect(response.status).to.equal(200);
-    expect(grantStub).to.not.have.been.called;
+    expect(grantStub).to.have.been.calledOnce;
+    expect(grantStub).to.have.been.calledWith(mockSuggestionDataAccess, site, sinon.match.object);
+  });
+
+  it('grants and filters suggestions for view-as-trial request end-to-end', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: SUGGESTION_IDS.slice(1),
+      grantIds: [`grant-${grantedId}`],
+    });
+    const grantStub = sandbox.stub().resolves();
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    // grants are written first so filtering can find them
+    expect(grantStub).to.have.been.calledOnce;
+    // response is filtered to only granted suggestions
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(result[0].id).to.equal(grantedId);
   });
 
   it('filters suggestions by grant status for getByStatus when x-view-as-trial header is present', async () => {

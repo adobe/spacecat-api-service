@@ -598,8 +598,7 @@ export async function resolveWwwUrl(site, context) {
 /**
  * Returns true when the request originates from the sites-optimizer-ui client
  * and carries the x-view-as-trial header, indicating the user has enabled
- * trial-mode simulation. Used to apply PLG-style suggestion filtering without
- * any DB writes (read-only path only).
+ * trial-mode simulation. Used to apply PLG-style suggestion filtering
  * @param {Object} requestContext - Per-request context with pathInfo.headers
  * @returns {boolean}
  */
@@ -616,8 +615,7 @@ export function isViewAsTrialRequest(requestContext) {
  * @param {Object} context - Request context with dataAccess, log
  * @param {Object} [requestContext] - Optional per-request context; when provided, the check
  *   is gated on the x-client-type header being 'sites-optimizer-ui'. Requests carrying the
- *   x-view-as-trial header are treated as PLG for read-only paths (filtering only — callers
- *   must still exclude DB writes using isViewAsTrialRequest).
+ *   x-view-as-trial header are treated as PLG for read-only paths.
  * @returns {Promise<boolean>}
  */
 export async function getIsSummitPlgEnabled(site, context, requestContext) {
