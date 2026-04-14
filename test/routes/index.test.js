@@ -270,9 +270,7 @@ describe('getRouteHandlers', () => {
     getFilterDimensions: () => null,
     getAgenticTrafficGlobal: () => null,
     postAgenticTrafficGlobal: () => null,
-<<<<<<< fix/topic-category-name
     getRegions: () => null,
-=======
     getAgenticTrafficKpis: () => null,
     getAgenticTrafficKpisTrend: () => null,
     getAgenticTrafficByRegion: () => null,
@@ -284,7 +282,6 @@ describe('getRouteHandlers', () => {
     getAgenticTrafficFilterDimensions: () => null,
     getAgenticTrafficWeeks: () => null,
     getAgenticTrafficMovers: () => null,
->>>>>>> main
   };
 
   const mockLlmoOpportunitiesController = {
