@@ -1,3 +1,10 @@
+# [1.437.0](https://github.com/adobe/spacecat-api-service/compare/v1.436.12...v1.437.0) (2026-04-14)
+
+
+### Features
+
+* add agentic traffic endpoints to fetch PG data | LLMO-4000 ([#2178](https://github.com/adobe/spacecat-api-service/issues/2178)) ([32ca5e0](https://github.com/adobe/spacecat-api-service/commit/32ca5e09b170ba3c4b2b241be69a29adf6509567))
+
 ## [1.436.12](https://github.com/adobe/spacecat-api-service/compare/v1.436.11...v1.436.12) (2026-04-14)
 
 
