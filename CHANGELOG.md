@@ -1,3 +1,10 @@
+## [1.436.12](https://github.com/adobe/spacecat-api-service/compare/v1.436.11...v1.436.12) (2026-04-14)
+
+
+### Bug Fixes
+
+* geo-experiment name to include date ([#2205](https://github.com/adobe/spacecat-api-service/issues/2205)) ([f2b5ab7](https://github.com/adobe/spacecat-api-service/commit/f2b5ab7f0d411a55236294c452e90562e048b966))
+
 ## [1.436.11](https://github.com/adobe/spacecat-api-service/compare/v1.436.10...v1.436.11) (2026-04-13)
 
 
