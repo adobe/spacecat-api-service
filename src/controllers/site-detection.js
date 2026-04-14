@@ -20,7 +20,7 @@ import {
 import {
   accepted, badRequest, conflict, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { Site as SiteModel, SiteCandidate as SiteCandidateModel } from '@adobe/spacecat-shared-data-access';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
 /**
  * Creates a site detection controller instance.
