@@ -12,7 +12,6 @@
 
 import { promises as dns } from 'dns';
 
-// Keep in sync with AEM_CS_FASTLY_CNAME_PATTERNS / AEM_CS_FASTLY_IPS in edge-routing-utils.js
 const AEM_CS_FASTLY_CNAME_PATTERNS = [
   'cdn.adobeaemcloud.com',
   'adobe-aem.map.fastly.net',
@@ -27,6 +26,16 @@ const AEM_CS_FASTLY_IPS = new Set([
 // ENODATA = record type doesn't exist; ENOTFOUND = domain doesn't exist (NXDOMAIN).
 // Both are authoritative answers — safe to treat as "no records" and continue.
 const DNS_NO_RECORD_CODES = new Set(['ENODATA', 'ENOTFOUND']);
+
+/**
+ * Checks whether a CNAME matches a known pattern using suffix matching.
+ * Handles the trailing dot that DNS resolvers sometimes return.
+ * e.g. "foo.cdn.adobeaemcloud.com." matches pattern "cdn.adobeaemcloud.com"
+ */
+function cnameMatchesPattern(cname, pattern) {
+  const normalized = cname.endsWith('.') ? cname.slice(0, -1) : cname;
+  return normalized === pattern || normalized.endsWith(`.${pattern}`);
+}
 
 function catchDnsLookup(err) {
   if (DNS_NO_RECORD_CODES.has(err.code)) {
@@ -54,7 +63,7 @@ async function checkHost(host, log) {
     return null;
   }
   log?.info(`[cdn-detection] CNAMEs for ${host}: ${cnames.length ? cnames.join(', ') : '(none)'}`);
-  if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((p) => c.includes(p)))) {
+  if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((p) => cnameMatchesPattern(c, p)))) {
     return 'aem-cs-fastly';
   }
 

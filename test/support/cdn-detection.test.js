@@ -92,6 +92,22 @@ describe('cdn-detection', () => {
     }
   });
 
+  it('returns aem-cs-fastly when CNAME exactly equals pattern (no trailing dot)', async () => {
+    dnsStubs.resolveCname.withArgs('www.example.com').resolves(['cdn.adobeaemcloud.com']);
+    dnsStubs.resolve4.resolves([]);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.equal('aem-cs-fastly');
+  });
+
+  it('rejects CNAME that contains pattern as substring but not as suffix', async () => {
+    dnsStubs.resolveCname.resolves(['evil.cdn.adobeaemcloud.com.attacker.com']);
+    dnsStubs.resolve4.resolves(['1.2.3.4']);
+
+    const result = await detectCdnForDomain('example.com');
+    expect(result).to.equal('other');
+  });
+
   it('returns other when domain does not match Fastly CNAME or IPs', async () => {
     dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
     dnsStubs.resolve4.resolves(['1.2.3.4']);
