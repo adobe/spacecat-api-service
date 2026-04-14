@@ -18,9 +18,13 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import {
-  accepted, badRequest, conflict, internalServerError, notFound, ok,
+  accepted, badRequest, createResponse, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+
+function conflict(message) {
+  return createResponse({ message }, 409);
+}
 
 /**
  * Creates a site detection controller instance.
@@ -155,6 +159,7 @@ function SiteDetectionController(ctx, log, env) {
       }
 
       const result = job.getResult();
+      const rawError = job.getError();
 
       return ok({
         jobId: job.getId(),
@@ -166,7 +171,7 @@ function SiteDetectionController(ctx, log, env) {
           domain: result.domain,
           reason: result.reason,
         } : null,
-        error: job.getError(),
+        error: rawError ? { code: rawError.code, message: rawError.message } : null,
       });
     } catch (error) {
       log.error(`Failed to get site detection job status: ${error.message}`);
