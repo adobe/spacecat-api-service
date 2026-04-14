@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { readFeatureFlag } from './feature-flags-storage.js';
+import { readFeatureFlag, upsertFeatureFlag } from './feature-flags-storage.js';
 
 export const LLMO_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const LLMO_BRANDALF_FLAG = 'brandalf';
@@ -104,18 +104,16 @@ export async function hasPreBrandalfSites(organizationId, context) {
 /**
  * Resolves the LLMO onboarding mode (v1 or v2) for the given organization.
  *
- * Decision order:
- *  1. If LLMO_ONBOARDING_DEFAULT_VERSION is explicitly set to 'v1', return v1 immediately
- *     (global kill switch — skips the DB lookup).
- *  2. If the org has any site created before LLMO_BRANDALF_GA_CUTOFF_MS, return v1
- *     (legacy customer protection). If that org *also* has `brandalf=true` already
- *     set, log an error: this means a previously-migrated v2 org is being forced
- *     back to v1, which leaves the org in a mixed state (v2 flag + new v1 site)
- *     that needs manual remediation.
- *  3. Otherwise return v2 (new customer default).
+ * Decision order (see decision matrix in v1-v2-onboarding-consistency-safeguard.md):
+ *  1. If brandalf=true on the org:
+ *     a. If kill switch is v1 AND org has pre-cutoff sites → revert brandalf
+ *        flag to false, log warning, return v1 (row 1 remediation).
+ *     b. Otherwise → return v2 (rows 3, 5, 7).
+ *  2. If LLMO_ONBOARDING_DEFAULT_VERSION is 'v1' → return v1 (kill switch, rows 2, 4).
+ *  3. If org has pre-cutoff sites → return v1 (legacy protection, row 6).
+ *  4. Otherwise → return v2 (new customer default, row 8).
  *
- * TEMPORARY — the legacy-customer check (step 2) should be removed once all v1
- * customers have been migrated to v2, at which point this function always returns v2.
+ * TEMPORARY — should be removed once all v1 customers have been migrated to v2.
  *
  * @param {string} organizationId
  * @param {object} context - Request context
@@ -123,11 +121,67 @@ export async function hasPreBrandalfSites(organizationId, context) {
  */
 export async function resolveLlmoOnboardingMode(organizationId, context) {
   const { log = console } = context || {};
+  const postgrestClient = context?.dataAccess?.services?.postgrestClient;
 
-  // 1. Environment-level default.
-  //    'v1' → global kill switch (everyone on v1, no DB lookup needed).
-  //    'v2' or unset → proceed to per-org check.
-  //    anything else → warn and treat as v2 (safe default for new customers).
+  // 1. Brandalf flag check: if the org has brandalf=true, it has been
+  //    explicitly migrated to v2. Honor it — except when the kill switch
+  //    is active AND the org has pre-cutoff sites (row 1 remediation).
+  let brandalfEnabled = false;
+  try {
+    brandalfEnabled = await readBrandalfFlagOverride(organizationId, postgrestClient) === true;
+  } catch (flagError) {
+    log.warn(
+      `Failed to read brandalf flag for org ${organizationId}: ${flagError.message} — proceeding with default resolution`,
+    );
+  }
+
+  if (brandalfEnabled) {
+    const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
+
+    // Row 1: kill switch active + pre-cutoff sites + brandalf=true
+    // → revert flag to false and force v1.
+    if (configuredDefault === LLMO_ONBOARDING_MODE_V1) {
+      try {
+        if (await hasPreBrandalfSites(organizationId, context)) {
+          try {
+            await upsertFeatureFlag({
+              organizationId,
+              product: LLMO_FEATURE_FLAG_PRODUCT,
+              flagName: LLMO_BRANDALF_FLAG,
+              value: false,
+              updatedBy: 'llmo-onboarding-mode-resolution',
+              postgrestClient,
+            });
+          } catch (revertError) {
+            log.error(
+              `Failed to revert brandalf flag for org ${organizationId}: ${revertError.message}`,
+            );
+          }
+          log.warn(
+            `LLMO mode resolution: organization ${organizationId} has brandalf=true but also has `
+            + 'pre-cutoff sites while kill switch is active. Reverted brandalf flag to false. '
+            + 'This org has sites that require migration before it can use v2.',
+          );
+          return LLMO_ONBOARDING_MODE_V1;
+        }
+      } catch (error) {
+        log.warn(
+          `Failed to check pre-Brandalf sites for org ${organizationId}: ${error.message}`,
+        );
+        // Cannot confirm pre-cutoff sites — fall through to v2
+        // (brandalf=true is still set, so honor the migration).
+      }
+    }
+
+    // Rows 3, 5, 7: brandalf=true without row-1 condition → v2.
+    log.info(
+      `LLMO mode resolution: organization ${organizationId} has brandalf=true — using v2`,
+    );
+    return LLMO_ONBOARDING_MODE_V2;
+  }
+
+  // 2. Environment-level default (brandalf is false/missing from here on).
+  //    'v1' is the global kill switch; anything else defaults to v2.
   const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
   if (configuredDefault === LLMO_ONBOARDING_MODE_V1) {
     return LLMO_ONBOARDING_MODE_V1;
@@ -138,35 +192,15 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
     );
   }
 
-  // 2. Protect legacy customers: any org with a pre-cutoff site stays on v1.
+  // 3. Protect legacy customers: any org with a pre-cutoff site stays on v1.
   try {
     if (await hasPreBrandalfSites(organizationId, context)) {
-      // Detect the regression case: org has a pre-cutoff site but was *already*
-      // migrated to v2 (brandalf flag set). Forcing back to v1 here will leave
-      // a mixed v1/v2 state that the monitoring script needs to flag.
-      // Best-effort — failure to read the flag must not block onboarding.
-      try {
-        const postgrestClient = context?.dataAccess?.services?.postgrestClient;
-        const brandalfEnabled = await readBrandalfFlagOverride(organizationId, postgrestClient);
-        if (brandalfEnabled === true) {
-          log.error(
-            `LLMO mode resolution: organization ${organizationId} has brandalf=true but also a pre-Brandalf-GA site. `
-            + 'Forcing v1 will create a mixed v1/v2 state — manual remediation required.',
-          );
-        }
-      } catch (flagError) {
-        log.warn(
-          `Failed to read brandalf flag for mixed-state check on org ${organizationId}: ${flagError.message}`,
-        );
-      }
       return LLMO_ONBOARDING_MODE_V1;
     }
   } catch (error) {
     log.warn(
       `Failed to check pre-Brandalf sites for organization ${organizationId}: ${error.message}`,
     );
-    // Fall through to v2 — new orgs are unaffected; the monitoring script will
-    // surface any legacy org that hit a transient error.
   }
 
   return LLMO_ONBOARDING_MODE_V2;

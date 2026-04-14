@@ -1429,7 +1429,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
         const drsJob = await submitOnboardingPromptGenerationJob({
           drsClient,
-          baseUrl: baseURL,
+          baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
           brandName: brandName.trim(),
           audience,
           region: 'US',
