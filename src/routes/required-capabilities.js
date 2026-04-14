@@ -64,6 +64,19 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/opportunities',
   'GET /org/:spaceCatId/brands/:brandId/opportunities',
 
+  // Agentic traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/agentic-traffic/kpis',
+  'GET /sites/:siteId/agentic-traffic/kpis-trend',
+  'GET /sites/:siteId/agentic-traffic/by-region',
+  'GET /sites/:siteId/agentic-traffic/by-category',
+  'GET /sites/:siteId/agentic-traffic/by-page-type',
+  'GET /sites/:siteId/agentic-traffic/by-status',
+  'GET /sites/:siteId/agentic-traffic/by-user-agent',
+  'GET /sites/:siteId/agentic-traffic/by-url',
+  'GET /sites/:siteId/agentic-traffic/filter-dimensions',
+  'GET /sites/:siteId/agentic-traffic/weeks',
+  'GET /sites/:siteId/agentic-traffic/movers',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
