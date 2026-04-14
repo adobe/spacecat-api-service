@@ -7519,6 +7519,7 @@ PageRelationshipsSearchResponse:
 
 CreateSiteDetectionJobResponse:
   type: object
+  required: [jobId, status, createdAt, pollUrl]
   properties:
     createdAt:
       type: string
@@ -7533,10 +7534,12 @@ CreateSiteDetectionJobResponse:
       description: The URL to poll for the status of the site detection job.
     status:
       type: string
-      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+      enum: [IN_PROGRESS]
+      description: Always IN_PROGRESS immediately after creation.
 
 SiteDetectionJobResponse:
   type: object
+  required: [jobId, status, createdAt, updatedAt]
   properties:
     createdAt:
       type: string
@@ -7562,6 +7565,10 @@ SiteDetectionJobResponse:
         domain:
           type: string
           description: The domain that was processed.
+        baseURL:
+          type: string
+          format: uri
+          description: The normalized base URL (present for action=created).
         reason:
           type: string
           description: Human-readable reason for the action (present for rejected/duplicate).

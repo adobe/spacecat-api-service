@@ -24,6 +24,11 @@ const JOB_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 describe('SiteDetectionController', () => {
   const sandbox = sinon.createSandbox();
 
+  // Stubs are created at describe-scope (not inside beforeEach) intentionally.
+  // sandbox.resetHistory() in beforeEach clears call records between tests, and
+  // sandbox.restore() in afterEach does NOT nullify these standalone stubs
+  // (restore() only uninstalls stubs created via sandbox.stub(obj, 'method')).
+  // This pattern is safe here because none of these stubs replace object properties.
   const log = {
     info: sandbox.stub(),
     error: sandbox.stub(),
@@ -39,6 +44,9 @@ describe('SiteDetectionController', () => {
     getResult: sandbox.stub().returns(null),
     getError: sandbox.stub().returns(null),
     remove: sandbox.stub().resolves(),
+    setStatus: sandbox.stub(),
+    setError: sandbox.stub(),
+    save: sandbox.stub().resolves(),
   };
 
   const mockSite = {
@@ -104,6 +112,26 @@ describe('SiteDetectionController', () => {
       log,
       null,
     )).to.throw('Environment object required');
+  });
+
+  it('returns 500 from createSiteDetectionJob when AUDIT_JOBS_QUEUE_URL is missing', async () => {
+    const ctrl = SiteDetectionController(
+      { dataAccess: mockDataAccess, sqs: mockSqs },
+      log,
+      { AWS_ENV: 'prod' },
+    );
+    const resp = await ctrl.createSiteDetectionJob({ data: { domain: 'foo.example.com' } });
+    expect(resp.status).to.equal(500);
+  });
+
+  it('getSiteDetectionJobStatus still works when AUDIT_JOBS_QUEUE_URL is missing', async () => {
+    const ctrl = SiteDetectionController(
+      { dataAccess: mockDataAccess, sqs: mockSqs },
+      log,
+      { AWS_ENV: 'prod' },
+    );
+    const resp = await ctrl.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+    expect(resp.status).to.equal(200);
   });
 
   // ── createSiteDetectionJob ────────────────────────────────────────────────
@@ -221,6 +249,17 @@ describe('SiteDetectionController', () => {
       expect(mockJob.remove).to.have.been.calledOnce;
     });
 
+    it('marks job FAILED and returns 500 when both SQS send and job.remove fail', async () => {
+      mockSqs.sendMessage.rejects(new Error('SQS unavailable'));
+      mockJob.remove.rejects(new Error('DB unavailable'));
+
+      const resp = await controller.createSiteDetectionJob({ data: { domain: 'foo.example.com' } });
+      expect(resp.status).to.equal(500);
+      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockJob.setError).to.have.been.calledWith(sinon.match({ code: 'SQS_FAILURE' }));
+      expect(mockJob.save).to.have.been.calledOnce;
+    });
+
     it('returns 500 when AsyncJob.create throws', async () => {
       mockDataAccess.AsyncJob.create.rejects(new Error('DB error'));
 
@@ -267,6 +306,7 @@ describe('SiteDetectionController', () => {
       const body = await resp.json();
       expect(body.result.action).to.equal('created');
       expect(body.result.domain).to.equal('foo.example.com');
+      expect(body.result.baseURL).to.equal('https://foo.example.com');
     });
 
     it('strips stack trace — only exposes code and message from error', async () => {

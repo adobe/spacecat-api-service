@@ -66,6 +66,11 @@ function SiteDetectionController(ctx, log, env) {
    * @returns {Promise<Object>} 202 Accepted with jobId and pollUrl, or error response
    */
   const createSiteDetectionJob = async (context) => {
+    if (!hasText(env.AUDIT_JOBS_QUEUE_URL)) {
+      log.error('AUDIT_JOBS_QUEUE_URL is not configured');
+      return internalServerError('Service misconfiguration: AUDIT_JOBS_QUEUE_URL is not set');
+    }
+
     const { data } = context;
 
     if (!isNonEmptyObject(data)) {
@@ -120,7 +125,16 @@ function SiteDetectionController(ctx, log, env) {
         });
       } catch (error) {
         log.error(`Failed to send message to SQS: ${error.message}`);
-        await job.remove();
+        try {
+          await job.remove();
+        } catch (removeErr) {
+          log.error(`Failed to remove orphaned job ${job.getId()}: ${removeErr.message}`);
+          try {
+            job.setStatus('FAILED');
+            job.setError({ code: 'SQS_FAILURE', message: error.message });
+            await job.save();
+          } catch (_) { /* best-effort: ignore save failure */ }
+        }
         throw new Error(`Failed to send message to SQS: ${error.message}`);
       }
 
@@ -170,6 +184,7 @@ function SiteDetectionController(ctx, log, env) {
         result: result ? {
           action: result.action,
           domain: result.domain,
+          baseURL: result.baseURL,
           reason: result.reason,
         } : null,
         error: rawError ? { code: rawError.code, message: rawError.message } : null,
