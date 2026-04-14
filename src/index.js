@@ -87,6 +87,9 @@ import EphemeralRunController from './controllers/ephemeral-run.js';
 import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
+import EmailTrafficController from './controllers/email/traffic.js';
+import ECA2Controller from './controllers/email/eca2.js';
+import TopEmailOpportunitiesController from './controllers/email/top-email-opportunities.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
 import ConsumersController from './controllers/consumers.js';
@@ -239,6 +242,12 @@ async function run(request, context) {
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
+    const emailTrafficController = EmailTrafficController(context, log, context.env);
+    const eca2Controller = ECA2Controller(context, log, context.env);
+    const topEmailOpportunitiesController = TopEmailOpportunitiesController(
+      context,
+      context.env,
+    );
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
@@ -302,6 +311,9 @@ async function run(request, context) {
       autofixChecksController,
       plgOnboardingController,
       drsBpPgAuditController,
+      emailTrafficController,
+      eca2Controller,
+      topEmailOpportunitiesController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

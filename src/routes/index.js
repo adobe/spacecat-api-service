@@ -96,6 +96,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
+ * @param {Object} emailTrafficController - The email traffic controller.
+ * @param {Object} eca2Controller - The ECA2 controller.
+ * @param {Object} topEmailOpportunitiesController - The top email opportunities controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -149,6 +152,9 @@ export default function getRouteHandlers(
   autofixChecksController,
   plgOnboardingController,
   drsBpPgAuditController,
+  emailTrafficController,
+  eca2Controller,
+  topEmailOpportunitiesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -337,6 +343,31 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type': trafficController.getImpactByPageTrafficType,
     'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device': trafficController.getImpactByPageTrafficTypeDevice,
     'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices': trafficController.getTrafficLossByDevices,
+    // Email Traffic Routes
+    'GET /sites/:siteId/traffic/email/campaign': emailTrafficController.getEmailTrafficByCampaign,
+    'GET /sites/:siteId/traffic/email/campaign/device': emailTrafficController.getEmailTrafficByCampaignDevice,
+    'GET /sites/:siteId/traffic/email/campaign/path': emailTrafficController.getEmailTrafficByCampaignPath,
+    'GET /sites/:siteId/traffic/email/campaign/path/device': emailTrafficController.getEmailTrafficByCampaignPathDevice,
+    'GET /sites/:siteId/traffic/email/campaign/page-type': emailTrafficController.getEmailTrafficByCampaignPageType,
+    'GET /sites/:siteId/traffic/email/campaign/page-type/device': emailTrafficController.getEmailTrafficByCampaignPageTypeDevice,
+    'GET /sites/:siteId/traffic/email/source': emailTrafficController.getEmailTrafficBySource,
+    'GET /sites/:siteId/traffic/email/source/campaign': emailTrafficController.getEmailTrafficBySourceCampaign,
+    'GET /sites/:siteId/traffic/email/url': emailTrafficController.getEmailTrafficByUrl,
+    'GET /sites/:siteId/traffic/email/url/device': emailTrafficController.getEmailTrafficByUrlDevice,
+    'GET /sites/:siteId/traffic/email/url/page-type': emailTrafficController.getEmailTrafficByUrlPageType,
+    'GET /sites/:siteId/traffic/email/url/page-type/device': emailTrafficController.getEmailTrafficByUrlPageTypeDevice,
+    'GET /sites/:siteId/traffic/email/page-type': emailTrafficController.getEmailTrafficByPageType,
+    'GET /sites/:siteId/traffic/email/page-type/device': emailTrafficController.getEmailTrafficByPageTypeDevice,
+    'GET /sites/:siteId/traffic/email/device': emailTrafficController.getEmailTrafficByDevice,
+    'GET /sites/:siteId/traffic/email/temporal/campaign': emailTrafficController.getEmailTrafficTemporalSeriesByCampaign,
+    'GET /sites/:siteId/traffic/email/temporal/campaign/device': emailTrafficController.getEmailTrafficTemporalSeriesByCampaignDevice,
+    'GET /sites/:siteId/traffic/email/temporal/url': emailTrafficController.getEmailTrafficTemporalSeriesByUrl,
+    'GET /sites/:siteId/traffic/email/temporal/url/device': emailTrafficController.getEmailTrafficTemporalSeriesByUrlDevice,
+    'GET /sites/:siteId/traffic/email/temporal/source': emailTrafficController.getEmailTrafficTemporalSeriesBySource,
+    'GET /sites/:siteId/traffic/email/temporal/device': emailTrafficController.getEmailTrafficTemporalSeriesByDevice,
+    'GET /sites/:siteId/traffic/email/eca2/weekly-summary': eca2Controller.getECAWeeklySummary,
+    'GET /sites/:siteId/opportunities/top-email': topEmailOpportunitiesController.getTopEmailOpportunities,
+
     'POST /sites/:siteId/traffic/predominant-type': trafficToolsController.getPredominantTraffic,
     'POST /sites/:siteId/traffic/predominant-type/:channel': trafficToolsController.getPredominantTraffic,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,

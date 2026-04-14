@@ -408,6 +408,52 @@ paths:
     $ref: './site-paid.yaml#/site-traffic-paid-impact-by-page-traffic-type-device'
   /sites/{siteId}/traffic/paid/traffic-loss-by-devices:
     $ref: './site-paid.yaml#/site-traffic-paid-traffic-loss-by-devices'
+  /sites/{siteId}/traffic/email/campaign:
+    $ref: './site-email.yaml#/site-traffic-email-campaign'
+  /sites/{siteId}/traffic/email/campaign/device:
+    $ref: './site-email.yaml#/site-traffic-email-campaign-device'
+  /sites/{siteId}/traffic/email/campaign/path:
+    $ref: './site-email.yaml#/site-traffic-email-campaign-path'
+  /sites/{siteId}/traffic/email/campaign/path/device:
+    $ref: './site-email.yaml#/site-traffic-email-campaign-path-device'
+  /sites/{siteId}/traffic/email/campaign/page-type:
+    $ref: './site-email.yaml#/site-traffic-email-campaign-page-type'
+  /sites/{siteId}/traffic/email/campaign/page-type/device:
+    $ref: './site-email.yaml#/site-traffic-email-campaign-page-type-device'
+  /sites/{siteId}/traffic/email/source:
+    $ref: './site-email.yaml#/site-traffic-email-source'
+  /sites/{siteId}/traffic/email/source/campaign:
+    $ref: './site-email.yaml#/site-traffic-email-source-campaign'
+  /sites/{siteId}/traffic/email/url:
+    $ref: './site-email.yaml#/site-traffic-email-url'
+  /sites/{siteId}/traffic/email/url/device:
+    $ref: './site-email.yaml#/site-traffic-email-url-device'
+  /sites/{siteId}/traffic/email/url/page-type:
+    $ref: './site-email.yaml#/site-traffic-email-url-page-type'
+  /sites/{siteId}/traffic/email/url/page-type/device:
+    $ref: './site-email.yaml#/site-traffic-email-url-page-type-device'
+  /sites/{siteId}/traffic/email/page-type:
+    $ref: './site-email.yaml#/site-traffic-email-page-type'
+  /sites/{siteId}/traffic/email/page-type/device:
+    $ref: './site-email.yaml#/site-traffic-email-page-type-device'
+  /sites/{siteId}/traffic/email/device:
+    $ref: './site-email.yaml#/site-traffic-email-device'
+  /sites/{siteId}/traffic/email/temporal/campaign:
+    $ref: './site-email.yaml#/site-traffic-email-temporal-campaign'
+  /sites/{siteId}/traffic/email/temporal/campaign/device:
+    $ref: './site-email.yaml#/site-traffic-email-temporal-campaign-device'
+  /sites/{siteId}/traffic/email/temporal/url:
+    $ref: './site-email.yaml#/site-traffic-email-temporal-url'
+  /sites/{siteId}/traffic/email/temporal/url/device:
+    $ref: './site-email.yaml#/site-traffic-email-temporal-url-device'
+  /sites/{siteId}/traffic/email/temporal/source:
+    $ref: './site-email.yaml#/site-traffic-email-temporal-source'
+  /sites/{siteId}/traffic/email/temporal/device:
+    $ref: './site-email.yaml#/site-traffic-email-temporal-device'
+  /sites/{siteId}/traffic/email/eca2/weekly-summary:
+    $ref: './site-email.yaml#/site-traffic-email-eca2-weekly-summary'
+  /sites/{siteId}/opportunities/top-email:
+    $ref: './site-email.yaml#/site-opportunities-top-email'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:

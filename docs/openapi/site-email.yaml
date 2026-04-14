@@ -1,0 +1,675 @@
+site-traffic-email-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by campaign
+    description: Returns email traffic data for a site, grouped by utm_campaign for a given week or month and year.
+    operationId: getEmailTrafficByCampaign
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by campaign and device
+    description: Returns email traffic data for a site, grouped by utm_campaign and device for a given week or month and year.
+    operationId: getEmailTrafficByCampaignDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-campaign-path:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by campaign and path
+    description: Returns email traffic data for a site, grouped by utm_campaign and landing page path for a given week or month and year.
+    operationId: getEmailTrafficByCampaignPath
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-campaign-path-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by campaign, path, and device
+    description: Returns email traffic data for a site, grouped by utm_campaign, landing page path, and device for a given week or month and year.
+    operationId: getEmailTrafficByCampaignPathDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-campaign-page-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by campaign and page type
+    description: Returns email traffic data for a site, grouped by utm_campaign and page type for a given week or month and year.
+    operationId: getEmailTrafficByCampaignPageType
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-campaign-page-type-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by campaign, page type, and device
+    description: Returns email traffic data for a site, grouped by utm_campaign, page type, and device for a given week or month and year.
+    operationId: getEmailTrafficByCampaignPageTypeDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-source:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by source
+    description: Returns email traffic data for a site, grouped by utm_source (ESP identification) for a given week or month and year.
+    operationId: getEmailTrafficBySource
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-source-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by source and campaign
+    description: Returns email traffic data for a site, grouped by utm_source and utm_campaign for a given week or month and year.
+    operationId: getEmailTrafficBySourceCampaign
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by landing page URL
+    description: Returns email traffic data for a site, grouped by landing page URL for a given week or month and year.
+    operationId: getEmailTrafficByUrl
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-url-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by landing page URL and device
+    description: Returns email traffic data for a site, grouped by landing page URL and device for a given week or month and year.
+    operationId: getEmailTrafficByUrlDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-url-page-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by landing page URL and page type
+    description: Returns email traffic data for a site, grouped by landing page URL and page type for a given week or month and year.
+    operationId: getEmailTrafficByUrlPageType
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-url-page-type-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by landing page URL, page type, and device
+    description: Returns email traffic data for a site, grouped by landing page URL, page type, and device for a given week or month and year.
+    operationId: getEmailTrafficByUrlPageTypeDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-page-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by page type
+    description: Returns email traffic data for a site, grouped by page type for a given week or month and year.
+    operationId: getEmailTrafficByPageType
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-page-type-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by page type and device
+    description: Returns email traffic data for a site, grouped by page type and device for a given week or month and year.
+    operationId: getEmailTrafficByPageTypeDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic data grouped by device
+    description: Returns email traffic data for a site, grouped by device for a given week or month and year.
+    operationId: getEmailTrafficByDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-temporal-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic temporal series grouped by campaign
+    description: Returns email traffic temporal series (week-over-week) for a site, grouped by utm_campaign.
+    operationId: getEmailTrafficTemporalSeriesByCampaign
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-temporal-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic temporal series grouped by campaign and device
+    description: Returns email traffic temporal series (week-over-week) for a site, grouped by utm_campaign and device.
+    operationId: getEmailTrafficTemporalSeriesByCampaignDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-temporal-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic temporal series grouped by URL
+    description: Returns email traffic temporal series (week-over-week) for a site, grouped by landing page URL.
+    operationId: getEmailTrafficTemporalSeriesByUrl
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-temporal-url-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic temporal series grouped by URL and device
+    description: Returns email traffic temporal series (week-over-week) for a site, grouped by landing page URL and device.
+    operationId: getEmailTrafficTemporalSeriesByUrlDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-temporal-source:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic temporal series grouped by source
+    description: Returns email traffic temporal series (week-over-week) for a site, grouped by utm_source.
+    operationId: getEmailTrafficTemporalSeriesBySource
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-temporal-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get email traffic temporal series grouped by device
+    description: Returns email traffic temporal series (week-over-week) for a site, grouped by device.
+    operationId: getEmailTrafficTemporalSeriesByDevice
+    responses:
+      '302':
+        description: Redirect to signed S3 URL containing the result data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-email-eca2-weekly-summary:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - email
+    summary: Get ECA2 weekly summary for email traffic
+    description: Returns an Email Campaign Analysis v2 weekly summary with trends for a site.
+    operationId: getECAWeeklySummary
+    responses:
+      '200':
+        description: ECA2 weekly summary with trend data.
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-opportunities-top-email:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - email
+      - opportunities
+    summary: Get top email traffic opportunities
+    description: Returns the top email traffic opportunities for a site, ranked by impact.
+    operationId: getTopEmailOpportunities
+    responses:
+      '200':
+        description: Array of top email opportunity summaries.
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []

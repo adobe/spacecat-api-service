@@ -440,6 +440,38 @@ describe('getRouteHandlers', () => {
     getProjectionAudit: sinon.stub(),
   };
 
+  const mockEmailTrafficController = {
+    getEmailTrafficByCampaign: sinon.stub(),
+    getEmailTrafficByCampaignDevice: sinon.stub(),
+    getEmailTrafficByCampaignPath: sinon.stub(),
+    getEmailTrafficByCampaignPathDevice: sinon.stub(),
+    getEmailTrafficByCampaignPageType: sinon.stub(),
+    getEmailTrafficByCampaignPageTypeDevice: sinon.stub(),
+    getEmailTrafficBySource: sinon.stub(),
+    getEmailTrafficBySourceCampaign: sinon.stub(),
+    getEmailTrafficByUrl: sinon.stub(),
+    getEmailTrafficByUrlDevice: sinon.stub(),
+    getEmailTrafficByUrlPageType: sinon.stub(),
+    getEmailTrafficByUrlPageTypeDevice: sinon.stub(),
+    getEmailTrafficByPageType: sinon.stub(),
+    getEmailTrafficByPageTypeDevice: sinon.stub(),
+    getEmailTrafficByDevice: sinon.stub(),
+    getEmailTrafficTemporalSeriesByCampaign: sinon.stub(),
+    getEmailTrafficTemporalSeriesByCampaignDevice: sinon.stub(),
+    getEmailTrafficTemporalSeriesByUrl: sinon.stub(),
+    getEmailTrafficTemporalSeriesByUrlDevice: sinon.stub(),
+    getEmailTrafficTemporalSeriesBySource: sinon.stub(),
+    getEmailTrafficTemporalSeriesByDevice: sinon.stub(),
+  };
+
+  const mockEca2Controller = {
+    getECAWeeklySummary: sinon.stub(),
+  };
+
+  const mockTopEmailOpportunitiesController = {
+    getTopEmailOpportunities: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -492,6 +524,9 @@ describe('getRouteHandlers', () => {
       mockAutofixChecksController,
       mockPlgOnboardingController,
       mockDrsBpPgAuditController,
+      mockEmailTrafficController,
+      mockEca2Controller,
+      mockTopEmailOpportunitiesController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -763,6 +798,29 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type',
       'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device',
       'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices',
+      'GET /sites/:siteId/traffic/email/campaign',
+      'GET /sites/:siteId/traffic/email/campaign/device',
+      'GET /sites/:siteId/traffic/email/campaign/path',
+      'GET /sites/:siteId/traffic/email/campaign/path/device',
+      'GET /sites/:siteId/traffic/email/campaign/page-type',
+      'GET /sites/:siteId/traffic/email/campaign/page-type/device',
+      'GET /sites/:siteId/traffic/email/source',
+      'GET /sites/:siteId/traffic/email/source/campaign',
+      'GET /sites/:siteId/traffic/email/url',
+      'GET /sites/:siteId/traffic/email/url/device',
+      'GET /sites/:siteId/traffic/email/url/page-type',
+      'GET /sites/:siteId/traffic/email/url/page-type/device',
+      'GET /sites/:siteId/traffic/email/page-type',
+      'GET /sites/:siteId/traffic/email/page-type/device',
+      'GET /sites/:siteId/traffic/email/device',
+      'GET /sites/:siteId/traffic/email/temporal/campaign',
+      'GET /sites/:siteId/traffic/email/temporal/campaign/device',
+      'GET /sites/:siteId/traffic/email/temporal/url',
+      'GET /sites/:siteId/traffic/email/temporal/url/device',
+      'GET /sites/:siteId/traffic/email/temporal/source',
+      'GET /sites/:siteId/traffic/email/temporal/device',
+      'GET /sites/:siteId/traffic/email/eca2/weekly-summary',
+      'GET /sites/:siteId/opportunities/top-email',
       'POST /sites/:siteId/traffic/predominant-type',
       'POST /sites/:siteId/traffic/predominant-type/:channel',
       'GET /sites/:siteId/brand-guidelines',
