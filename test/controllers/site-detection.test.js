@@ -260,6 +260,15 @@ describe('SiteDetectionController', () => {
       expect(mockJob.save).to.have.been.calledOnce;
     });
 
+    it('returns 500 and silently swallows the save error when SQS, remove, and save all fail', async () => {
+      mockSqs.sendMessage.rejects(new Error('SQS unavailable'));
+      mockJob.remove.rejects(new Error('DB unavailable'));
+      mockJob.save.rejects(new Error('Save also unavailable'));
+
+      const resp = await controller.createSiteDetectionJob({ data: { domain: 'foo.example.com' } });
+      expect(resp.status).to.equal(500);
+    });
+
     it('returns 500 when AsyncJob.create throws', async () => {
       mockDataAccess.AsyncJob.create.rejects(new Error('DB error'));
 
