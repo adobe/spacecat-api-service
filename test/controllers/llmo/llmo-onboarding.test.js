@@ -1549,9 +1549,10 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
       // Mock listBrands to return a brand with region NL (as set by Brandalf)
+      // Use a different name so the match falls through to baseSiteId, covering both branches
       const mockListBrands = sinon.stub().resolves([{
         id: 'brand-123',
-        name: 'Test Brand',
+        name: 'Different Brand Name',
         baseSiteId: 'site123',
         region: ['NL'],
       }]);
@@ -1596,6 +1597,121 @@ describe('LLMO Onboarding Functions', () => {
       );
       expect(mockLog.info).to.have.been.calledWith(
         'Using brand region "NL" from V2 brands table for prompt generation',
+      );
+    });
+
+    it('should fall back to US region when listBrands throws an error', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns({
+            main_profile: { target_audience: 'Test audience' },
+          }),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const selectRead = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({
+        data: {
+          organization_id: 'org123',
+          product: 'LLMO',
+          flag_name: 'brandalf',
+          flag_value: true,
+        },
+        error: null,
+      });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select: selectRead,
+        upsert: upsertStub,
+      });
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      // Mock listBrands to throw an error
+      const mockListBrands = sinon.stub().rejects(new Error('PostgREST connection failed'));
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockListBrands,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      // Verify prompt generation still proceeds with default US region
+      expect(mockDrsClient.createFrom().submitJob.secondCall).to.have.been.calledWith(
+        sinon.match({
+          provider_id: 'prompt_generation_base_url',
+          source: 'onboarding',
+          parameters: sinon.match({
+            region: 'US',
+          }),
+        }),
+      );
+      expect(mockLog.warn).to.have.been.calledWith(
+        'Failed to read brand region, defaulting to US: PostgREST connection failed',
       );
     });
 
