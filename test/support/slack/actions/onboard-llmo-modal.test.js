@@ -268,6 +268,9 @@ describe('onboard-llmo-modal', () => {
         default: tierClientMock,
       },
       '../../../../src/utils/slack/base.js': sharedSlackMock,
+      '../../../../src/support/cdn-detection.js': {
+        detectCdnForDomain: sinon.stub().resolves(null),
+      },
       '@adobe/spacecat-shared-utils': {
         composeBaseURL: sinon.stub().callsFake((url) => url),
         tracingFetch: createDefaultMockTracingFetch(sandbox),
@@ -492,6 +495,9 @@ describe('onboard-llmo-modal', () => {
           default: tierClientMock,
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/cdn-detection.js': {
+          detectCdnForDomain: sinon.stub().resolves(null),
+        },
       });
 
       // Re-mock the module with the new octokit mock
@@ -998,6 +1004,9 @@ describe('onboard-llmo-modal', () => {
         '@octokit/rest': { Octokit: octokitMock },
         '@adobe/spacecat-shared-tier-client': { default: tierClientMock },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/cdn-detection.js': {
+          detectCdnForDomain: sinon.stub().resolves(null),
+        },
       });
 
       mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
@@ -1078,6 +1087,9 @@ example-com:
           default: tierClientMock,
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/cdn-detection.js': {
+          detectCdnForDomain: sinon.stub().resolves(null),
+        },
       });
 
       // Re-mock the module with the new octokit mock
