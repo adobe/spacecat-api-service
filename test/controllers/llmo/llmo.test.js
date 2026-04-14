@@ -645,7 +645,7 @@ describe('LlmoController', () => {
     getServicePrincipalTokenStub = sinon.stub().resolves({ access_token: 'sp-access-token' });
     isUserInImsGroupStub = sinon.stub().resolves(false);
     getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
-    getImsUserProfileStub = sinon.stub().resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] });
+    getImsUserProfileStub = sinon.stub().resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
     getImsUserOrganizationsStub = sinon.stub().resolves([]);
     getImsTokenFromCookieStub.reset();
     getImsTokenFromCookieStub.resolves('test-ims-user-token');
@@ -4861,7 +4861,7 @@ describe('LlmoController', () => {
         getProductCode: sinon.stub().returns('LLMO'),
         getTier: sinon.stub().returns('PAID'),
       });
-      getImsUserProfileStub.resolves({ productContexts: [{ serviceCode: 'other_product' }] });
+      getImsUserProfileStub.resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'other_product' } }] });
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'] });
       mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['k'] });
       mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
@@ -5455,7 +5455,7 @@ describe('LlmoController', () => {
           getProductCode: sinon.stub().returns('LLMO'),
           getTier: sinon.stub().returns('PAID'),
         });
-        getImsUserProfileStub.resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] });
+        getImsUserProfileStub.resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
         detectCdnForDomainStub.resetHistory();
         detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY);
       });

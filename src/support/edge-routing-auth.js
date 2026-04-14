@@ -55,12 +55,12 @@ export async function getImsTokenFromCookie(context) {
  * @returns {boolean}
  */
 export function hasPaidLlmoProductContext(imsUserProfile) {
-  const productContexts = imsUserProfile?.productContexts;
+  const productContexts = imsUserProfile?.projectedProductContext;
   if (!Array.isArray(productContexts) || productContexts.length === 0) {
     return false;
   }
   return productContexts.some(
-    (ctx) => LLMO_IMS_SERVICE_CODES.includes(ctx?.serviceCode),
+    (ctx) => LLMO_IMS_SERVICE_CODES.includes(ctx?.prodCtx?.serviceCode),
   );
 }
 
