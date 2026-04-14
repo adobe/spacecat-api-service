@@ -213,9 +213,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
   const filterByGrantStatus = async (site, suggestions, context) => {
-    const isPlgMode = await getIsSummitPlgEnabled(site, ctx, context)
-      || isViewAsTrialRequest(context);
-    if (!isPlgMode) {
+    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
       return suggestions;
     }
     try {
@@ -277,7 +275,9 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+    const isRealPlg = await getIsSummitPlgEnabled(site, ctx, context)
+      && !isViewAsTrialRequest(context);
+    if (opportunity && isRealPlg) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       /* c8 ignore next 3 */
