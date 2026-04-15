@@ -133,58 +133,8 @@ export async function triggerBrandalfOnboardingJob({
   return drsJob;
 }
 
-function buildPromptGenerationMetadata({
-  siteId,
-  imsOrgId,
-  baseUrl,
-  brandName,
-  region,
-  onboardingMode,
-}) {
-  return buildOnboardingMetadata({
-    siteId,
-    imsOrgId,
-    brandName,
-    onboardingMode,
-    extra: {
-      base_url: baseUrl,
-      region,
-    },
-  });
-}
-
-export async function submitOnboardingPromptGenerationJob({
-  drsClient,
-  baseUrl,
-  brandName,
-  audience,
-  region = 'US',
-  numPrompts = 50,
-  siteId,
-  imsOrgId,
-  onboardingMode,
-}) {
-  return drsClient.submitJob({
-    provider_id: 'prompt_generation_base_url',
-    source: 'onboarding',
-    parameters: {
-      base_url: baseUrl,
-      brand: brandName,
-      audience,
-      region,
-      num_prompts: numPrompts,
-      model: 'gpt-5-nano',
-      metadata: buildPromptGenerationMetadata({
-        siteId,
-        imsOrgId,
-        baseUrl,
-        brandName,
-        region,
-        onboardingMode,
-      }),
-    },
-  });
-}
+// submitOnboardingPromptGenerationJob removed — prompt generation is now
+// triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
 export function buildInitialCustomerConfigV2({
   brandName,
