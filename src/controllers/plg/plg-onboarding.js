@@ -43,7 +43,7 @@ import {
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
-import { loadProfileConfig } from '../../utils/slack/base.js';
+import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -97,6 +97,68 @@ function isInternalOrg(orgId, env) {
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
+
+const PLG_STATUS_NOTIFICATION_CONFIG = {
+  [STATUSES.ONBOARDED]: { emoji: ':white_check_mark:', label: 'Onboarded' },
+  [STATUSES.WAITLISTED]: { emoji: ':warning:', label: 'Waitlisted' },
+  [STATUSES.WAITING_FOR_IP_ALLOWLISTING]: { emoji: ':warning:', label: 'Waiting for IP Allowlisting' },
+  [STATUSES.ERROR]: { emoji: ':red_circle:', label: 'Error' },
+  [STATUSES.INACTIVE]: { emoji: ':zzz:', label: 'Inactive' },
+};
+
+/**
+ * Posts a PLG onboarding status notification to the configured ESE Slack channel.
+ * Fires on terminal/actionable status transitions. Fails gracefully.
+ * @param {object} onboarding - The PlgOnboarding record after save.
+ * @param {object} context - The request context containing env and log.
+ * @returns {Promise<void>}
+ */
+async function postPlgOnboardingNotification(onboarding, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+
+  if (!channelId || !token) {
+    return;
+  }
+
+  const status = onboarding.getStatus();
+  const config = PLG_STATUS_NOTIFICATION_CONFIG[status];
+  if (!config) {
+    return;
+  }
+
+  const domain = onboarding.getDomain();
+  const imsOrgId = onboarding.getImsOrgId();
+
+  let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *IMS Org:* \`${imsOrgId}\``;
+
+  const waitlistReason = onboarding.getWaitlistReason();
+  if (waitlistReason) {
+    message += `\n• *Reason:* ${waitlistReason}`;
+  }
+
+  const botBlocker = onboarding.getBotBlocker();
+  if (botBlocker?.type) {
+    message += `\n• *Bot Blocker:* ${botBlocker.type}`;
+    if (botBlocker.ipsToAllowlist?.length) {
+      message += ` (IPs to allowlist: ${botBlocker.ipsToAllowlist.join(', ')})`;
+    }
+  }
+
+  const error = onboarding.getError();
+  if (error?.message) {
+    message += `\n• *Error:* ${error.message}`;
+  }
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (slackError) {
+    log.error(`Failed to post PLG onboarding notification to Slack: ${slackError.message}`);
+  }
+}
 
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
@@ -464,6 +526,7 @@ async function performAsoPlgOnboarding({
       alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
       alreadyOnboarded.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`);
       await alreadyOnboarded.save();
+      await postPlgOnboardingNotification(alreadyOnboarded, context);
       // NOTE: the underlying Site record is intentionally left unchanged. The Site model does
       // not carry PLG lifecycle state — PlgOnboarding is the sole source of truth for whether
       // a domain is actively enrolled in PLG. Audit scheduling and other downstream systems
@@ -507,6 +570,7 @@ async function performAsoPlgOnboarding({
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
       return onboarding;
     }
   }
@@ -524,6 +588,7 @@ async function performAsoPlgOnboarding({
       onboarding.setSteps(steps);
       onboarding.setCompletedAt(new Date().toISOString());
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
       return onboarding;
     }
     log.warn(`Preonboarded site ${onboarding.getSiteId()} not found, falling through to full onboarding`);
@@ -560,6 +625,7 @@ async function performAsoPlgOnboarding({
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
         onboarding.setSteps(steps);
         await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
         return onboarding;
       }
     }
@@ -593,6 +659,7 @@ async function performAsoPlgOnboarding({
         onboarding.setSiteId(site.getId());
         onboarding.setSteps(steps);
         await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
         return onboarding;
       }
     }
@@ -617,6 +684,7 @@ async function performAsoPlgOnboarding({
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
 
       return onboarding;
     }
@@ -871,6 +939,7 @@ async function performAsoPlgOnboarding({
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
     await onboarding.save();
+    await postPlgOnboardingNotification(onboarding, context);
 
     return onboarding;
   } catch (error) {
@@ -883,6 +952,7 @@ async function performAsoPlgOnboarding({
     });
     try {
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
     } catch (saveError) {
       log.error(`Failed to persist error state for onboarding ${onboarding.getId()}: ${saveError.message}`);
     }
@@ -1224,6 +1294,7 @@ function PlgOnboardingController(ctx) {
               justification: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
             }]);
             await oldOnboarded.save();
+            await postPlgOnboardingNotification(oldOnboarded, context);
             try {
               await revokeAsoSiteEnrollments(oldOnboarded, context);
             } catch (revokeErr) {
@@ -1309,6 +1380,7 @@ function PlgOnboardingController(ctx) {
             }
             onboarding.setStatus(STATUSES.INACTIVE);
             await onboarding.save();
+            await postPlgOnboardingNotification(onboarding, context);
             log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
             const result = await performAsoPlgOnboarding(
               { domain: siteConfig.alternateDomain, imsOrgId: onboarding.getImsOrgId() },
@@ -1361,6 +1433,7 @@ function PlgOnboardingController(ctx) {
           // Offboard the original record (OrgA's) since domain belongs to OrgB
           onboarding.setStatus(STATUSES.INACTIVE);
           await onboarding.save();
+          await postPlgOnboardingNotification(onboarding, context);
           log.info(`Offboarded onboarding ${onboarding.getId()} for domain ${domain} (belongs to org ${existingImsOrgId})`);
 
           // Run the flow under the existing org — it will create the PlgOnboarding record
