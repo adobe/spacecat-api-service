@@ -182,7 +182,7 @@ export function applyTopicPathFilter(query, decodedTopicParam) {
  * @param {Array<Object>} rows - execution rows
  * @param {string} decodedTopicParam - decoded :topicId
  */
-function topicLabelForDetailResponse(rows, decodedTopicParam) {
+export function topicLabelForDetailResponse(rows, decodedTopicParam) {
   if (!rows || rows.length === 0) {
     return decodedTopicParam;
   }
@@ -1645,7 +1645,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
 }
 
 // eslint-disable-next-line max-len
-const PROMPTS_SELECT = 'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+const PROMPTS_SELECT = 'topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
 
 /**
  * Creates the getTopicPrompts handler.
@@ -1716,7 +1716,10 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let items = buildPromptDetails(data || []);
+      const rawRows = data || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rawRows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rawRows, topicName);
+      let items = buildPromptDetails(rawRows);
 
       // When a search query is provided, filter to only prompts whose text
       // matches — mirroring the original brand presence client-side behaviour
@@ -1733,7 +1736,12 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
-      return ok({ items: paged, totalCount });
+      return ok({
+        items: paged,
+        totalCount,
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
+      });
     },
   );
 }
@@ -1896,6 +1904,39 @@ const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, men
  */
 function weekFromExecDate(execDate) {
   return toISOWeek(execDate).week;
+}
+
+/**
+ * Maps a `brand_presence_executions` detail row (`DETAIL_SELECT`) to one `executions[]` entry.
+ * Shared by topic-detail and prompt-detail handlers.
+ * @param {Object} r - Raw PostgREST row
+ * @returns {Object}
+ */
+function mapBrandPresenceDetailExecutionRow(r) {
+  const mentioned = r.mentions === true || r.mentions === 'true';
+  const cited = r.citations === true || r.citations === 'true';
+  const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+  return {
+    prompt: r.prompt || '',
+    promptId: r.prompt_id != null ? String(r.prompt_id) : '',
+    executionId: r.id != null ? String(r.id) : '',
+    region: r.region_code || '',
+    executionDate: r.execution_date || '',
+    week: weekFromExecDate(r.execution_date),
+    answer: r.answer || '',
+    mentions: mentioned,
+    citations: cited,
+    visibilityScore: Number.isNaN(vs) ? 0 : vs,
+    position: r.position ? String(r.position) : '',
+    sentiment: r.sentiment || '',
+    volume: r.volume != null ? String(r.volume) : '',
+    origin: r.origin || '',
+    category: r.category_name || '',
+    sources: r.url || '',
+    errorCode: r.error_code || '',
+    businessCompetitors: r.business_competitors || '',
+    detectedBrandMentions: r.detected_brand_mentions || '',
+  };
 }
 
 /**
@@ -2184,32 +2225,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       // Build execution entries (all rows, newest first)
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map((r) => {
-          const mentioned = r.mentions === true || r.mentions === 'true';
-          const cited = r.citations === true || r.citations === 'true';
-          const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-          return {
-            prompt: r.prompt || '',
-            promptId: r.prompt_id != null ? String(r.prompt_id) : '',
-            executionId: r.id != null ? String(r.id) : '',
-            region: r.region_code || '',
-            executionDate: r.execution_date || '',
-            week: weekFromExecDate(r.execution_date),
-            answer: r.answer || '',
-            mentions: mentioned,
-            citations: cited,
-            visibilityScore: Number.isNaN(vs) ? 0 : vs,
-            position: r.position ? String(r.position) : '',
-            sentiment: r.sentiment || '',
-            volume: r.volume != null ? String(r.volume) : '',
-            origin: r.origin || '',
-            category: r.category_name || '',
-            sources: r.url || '',
-            errorCode: r.error_code || '',
-            businessCompetitors: r.business_competitors || '',
-            detectedBrandMentions: r.detected_brand_mentions || '',
-          };
-        });
+        .map(mapBrandPresenceDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));
@@ -2376,32 +2392,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
 
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map((r) => {
-          const mentioned = r.mentions === true || r.mentions === 'true';
-          const cited = r.citations === true || r.citations === 'true';
-          const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-          return {
-            prompt: r.prompt || '',
-            promptId: r.prompt_id != null ? String(r.prompt_id) : '',
-            executionId: r.id != null ? String(r.id) : '',
-            region: r.region_code || '',
-            executionDate: r.execution_date || '',
-            week: weekFromExecDate(r.execution_date),
-            answer: r.answer || '',
-            mentions: mentioned,
-            citations: cited,
-            visibilityScore: Number.isNaN(vs) ? 0 : vs,
-            position: r.position ? String(r.position) : '',
-            sentiment: r.sentiment || '',
-            volume: r.volume != null ? String(r.volume) : '',
-            origin: r.origin || '',
-            category: r.category_name || '',
-            sources: r.url || '',
-            errorCode: r.error_code || '',
-            businessCompetitors: r.business_competitors || '',
-            detectedBrandMentions: r.detected_brand_mentions || '',
-          };
-        });
+        .map(mapBrandPresenceDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));

@@ -17,6 +17,7 @@ import {
   addDaysToDate,
   applyTopicPathFilter,
   topicIdForDetailResponse,
+  topicLabelForDetailResponse,
   aggregateDetailSources,
   aggregateSentimentByWeek,
   aggregateTopicData,
@@ -348,6 +349,26 @@ describe('llmo-brand-presence', () => {
     it('returns UUID path when first row topic_id is empty string', () => {
       const id = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
       expect(topicIdForDetailResponse([{ topic_id: '' }], id)).to.equal(id);
+    });
+  });
+
+  describe('topicLabelForDetailResponse', () => {
+    it('returns decoded path when there are no rows', () => {
+      expect(topicLabelForDetailResponse([], 'My Topic')).to.equal('My Topic');
+    });
+
+    it('returns first row topics when present', () => {
+      expect(topicLabelForDetailResponse([{ topics: 'AI Overview' }], 'ignored')).to.equal('AI Overview');
+    });
+
+    it('returns path when first row topics is null', () => {
+      const path = 'c3d4e5f6-a7b8-9012-cdef-123456789012';
+      expect(topicLabelForDetailResponse([{ topics: null, topic_id: path }], path)).to.equal(path);
+    });
+
+    it('returns path when first row topics is empty string', () => {
+      const path = 'Named Topic';
+      expect(topicLabelForDetailResponse([{ topics: '' }], path)).to.equal(path);
     });
   });
 
@@ -4927,6 +4948,44 @@ describe('llmo-brand-presence', () => {
       expect(body.items).to.have.lengthOf(1);
       expect(body.items[0].prompt).to.equal('q1');
       expect(body.totalCount).to.equal(1);
+      expect(body.topic).to.equal('PDF');
+      expect(body.topicId).to.be.null;
+    });
+
+    it('returns topic and topicId when path is a topic UUID', async () => {
+      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const rows = [
+        {
+          topic_id: topicUuid,
+          topics: 'Resolved Label',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          execution_date: '2026-03-01',
+          url: 'https://x.com',
+          error_code: null,
+          origin: 'human',
+          category_name: 'Docs',
+        },
+      ];
+      mockContext.params.topicId = topicUuid;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal('Resolved Label');
+      expect(body.topicId).to.equal(topicUuid);
+      expect(body.totalCount).to.equal(1);
     });
 
     it('returns empty items when no data', async () => {
@@ -4943,6 +5002,8 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.items).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
+      expect(body.topic).to.equal('None');
+      expect(body.topicId).to.be.null;
     });
 
     it('returns empty items when data is null', async () => {
@@ -4959,6 +5020,8 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.items).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
+      expect(body.topic).to.equal('None');
+      expect(body.topicId).to.be.null;
     });
 
     it('filters by topics column using topicId param', async () => {
@@ -6750,6 +6813,49 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.topic).to.equal('Shown Topic Name');
+      expect(body.topicId).to.equal(topicUuid);
+    });
+
+    it('uses path param for body.topic when rows have null topics (prompt-detail)', async () => {
+      const topicUuid = 'd4e5f6a7-b8c9-0123-def4-567890abcdef';
+      const rows = [
+        {
+          id: 'e1',
+          topics: null,
+          topic_id: topicUuid,
+          prompt: 'What is AI?',
+          prompt_id: 'p1',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          volume: '100',
+          origin: 'organic',
+          category_name: 'Search',
+          execution_date: '2026-03-01',
+          answer: 'Answer A',
+          url: 'https://a.com',
+          error_code: null,
+          business_competitors: '',
+          detected_brand_mentions: '',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = topicUuid;
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal(topicUuid);
       expect(body.topicId).to.equal(topicUuid);
     });
 
