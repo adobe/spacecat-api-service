@@ -7862,10 +7862,21 @@ AgenticTrafficByUrlRow:
     - deployedAtEdge
 
 AgenticTrafficByUrl:
-  type: array
-  items:
-    $ref: '#/AgenticTrafficByUrlRow'
-  description: Per-URL performance analysis
+  type: object
+  description: Paginated per-URL performance analysis
+  properties:
+    totalCount:
+      type: integer
+      description: Total number of URLs matching the filters (across all pages)
+      example: 1240
+    rows:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficByUrlRow'
+      description: URLs for the requested page
+  required:
+    - totalCount
+    - rows
 
 AgenticTrafficFilterDimensions:
   type: object

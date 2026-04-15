@@ -416,6 +416,7 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic by-url PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by URL');
         }
+        /* c8 ignore next */
         const rows = data ?? [];
         // total_count is returned in every row by the RPC; pick it from the first one
         /* c8 ignore next */
