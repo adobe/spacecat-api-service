@@ -236,6 +236,54 @@ describe('llmo-agentic-traffic', () => {
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
     });
+
+    it('accepts snake_case query parameter aliases', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        context: {
+          data: {
+            start_date: '2026-01-01',
+            end_date: '2026-01-28',
+            category_name: 'Products',
+            agent_type: 'Chatbots',
+            user_agent: 'GPTBot',
+            content_type: 'html',
+          },
+        },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
+        p_start_date: '2026-01-01',
+        p_end_date: '2026-01-28',
+        p_category_name: 'Products',
+        p_agent_type: 'Chatbots',
+        p_user_agent: 'GPTBot',
+        p_content_type: 'html',
+      });
+    });
+
+    it('uses the default date range when dates are omitted', async () => {
+      sandbox.useFakeTimers(new Date('2026-02-01T12:00:00.000Z'));
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        context: {
+          data: undefined,
+        },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
+        p_start_date: '2026-01-04',
+        p_end_date: '2026-02-01',
+      });
+    });
   });
 
   // ── KPIs Trend ─────────────────────────────────────────────────────────────
@@ -607,21 +655,21 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].deployedAtEdge).to.equal(true);
     });
 
-    it('caps limit at 2000', async () => {
+    it('caps limit at 500', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       const rpcCallArgs = client.rpc.firstCall.args[1];
-      expect(rpcCallArgs.p_limit).to.equal(2000);
+      expect(rpcCallArgs.p_page_limit).to.equal(500);
     });
 
-    it('uses default limit of 2000 when not specified', async () => {
+    it('uses default limit of 50 when not specified', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
-      expect(client.rpc.firstCall.args[1].p_limit).to.equal(2000);
+      expect(client.rpc.firstCall.args[1].p_page_limit).to.equal(50);
     });
 
     it('falls back to desc for an invalid sort order', async () => {
@@ -630,6 +678,44 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
+    });
+
+    it('forwards pagination and path search params to the new RPC signature', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          limit: 75,
+          pageOffset: 10,
+          urlPathSearch: 'pricing',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_page_limit: 75,
+        p_page_offset: 10,
+        p_url_path_search: 'pricing',
+      });
+    });
+
+    it('normalizes invalid page offsets to 0', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          pageOffset: 'not-a-number',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_page_offset: 0,
+      });
     });
 
     it('handles null optional fields in URL rows', async () => {

@@ -33,8 +33,8 @@ const ERR_NOT_FOUND = 'not found';
 
 const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
-const DEFAULT_BY_URL_LIMIT = 2000;
-const MAX_BY_URL_LIMIT = 2000;
+const DEFAULT_BY_URL_LIMIT = 50;
+const MAX_BY_URL_LIMIT = 500;
 
 /**
  * Maps UI platform filter codes (PLATFORM_CODES) to the values stored in the
@@ -392,14 +392,21 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
         const rawSortOrder = (ctx.data?.sortOrder || ctx.data?.sort_order || 'desc').toLowerCase();
         const sortOrder = VALID_SORT_ORDERS.has(rawSortOrder) ? rawSortOrder : 'desc';
         const rawLimit = ctx.data?.limit;
+        const rawPageOffset = ctx.data?.pageOffset || ctx.data?.page_offset;
+        const urlPathSearch = ctx.data?.urlPathSearch || ctx.data?.url_path_search || null;
         const parsedLimit = Number.parseInt(String(rawLimit), 10) || DEFAULT_BY_URL_LIMIT;
         const limit = rawLimit != null
           ? Math.min(parsedLimit, MAX_BY_URL_LIMIT)
           : DEFAULT_BY_URL_LIMIT;
+        const pageOffset = rawPageOffset != null
+          ? Math.max(Number.parseInt(String(rawPageOffset), 10) || 0, 0)
+          : 0;
 
         const rpcParams = {
           ...buildRpcParams(siteId, parsed),
-          p_limit: limit,
+          p_page_limit: limit,
+          p_page_offset: pageOffset,
+          p_url_path_search: urlPathSearch,
           p_sort_by: rawSortBy,
           p_sort_order: sortOrder,
         };

@@ -161,6 +161,53 @@ function parseTopicIds(q) {
   return arr.filter((id) => id != null && isValidUUID(String(id)));
 }
 
+/**
+ * PostgREST filter for URL path `:topicId` (after decodeURIComponent):
+ * trimmed value is a UUID → topic_id; otherwise topics (display name).
+ * @param {Object} query - PostgREST builder chain (from/select/org/date/model already applied)
+ * @param {string} decodedTopicParam - decoded path segment
+ * @returns {Object} query with .eq('topic_id' | 'topics', ...) applied
+ */
+export function applyTopicPathFilter(query, decodedTopicParam) {
+  const trimmed = String(decodedTopicParam).trim();
+  if (isValidUUID(trimmed)) {
+    return query.eq('topic_id', trimmed);
+  }
+  return query.eq('topics', decodedTopicParam);
+}
+
+/**
+ * Response topic label: use row topics when present, else the path param
+ * (e.g. UUID when no rows or null topics).
+ * @param {Array<Object>} rows - execution rows
+ * @param {string} decodedTopicParam - decoded :topicId
+ */
+export function topicLabelForDetailResponse(rows, decodedTopicParam) {
+  if (!rows || rows.length === 0) {
+    return decodedTopicParam;
+  }
+  const label = rows[0].topics;
+  return hasText(label) ? label : decodedTopicParam;
+}
+
+/**
+ * Stable topic id for JSON: prefer DB topic_id on first row, else UUID path param if valid.
+ * @param {Array<Object>} rows - execution rows (may be empty)
+ * @param {string} decodedTopicParam - decoded :topicId
+ * @returns {string|null}
+ */
+export function topicIdForDetailResponse(rows, decodedTopicParam) {
+  const trimmedParam = String(decodedTopicParam).trim();
+  const rowId = rows?.[0]?.topic_id;
+  if (hasText(rowId)) {
+    return String(rowId).trim();
+  }
+  if (isValidUUID(trimmedParam)) {
+    return trimmedParam;
+  }
+  return null;
+}
+
 function parseFilterDimensionsParams(context) {
   const q = context.data || {};
   return {
@@ -1598,7 +1645,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
 }
 
 // eslint-disable-next-line max-len
-const PROMPTS_SELECT = 'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+const PROMPTS_SELECT = 'topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
 
 /**
  * Creates the getTopicPrompts handler.
@@ -1633,10 +1680,10 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         .from('brand_presence_executions')
         .select(PROMPTS_SELECT)
         .eq('organization_id', organizationId)
-        .eq('topics', topicName)
         .gte('execution_date', startDate)
         .lte('execution_date', endDate)
         .eq('model', model);
+      q = applyTopicPathFilter(q, topicName);
 
       if (shouldApplyFilter(params.siteId)) {
         q = q.eq('site_id', params.siteId);
@@ -1669,7 +1716,10 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let items = buildPromptDetails(data || []);
+      const rawRows = data || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rawRows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rawRows, topicName);
+      let items = buildPromptDetails(rawRows);
 
       // When a search query is provided, filter to only prompts whose text
       // matches — mirroring the original brand presence client-side behaviour
@@ -1686,7 +1736,12 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
-      return ok({ items: paged, totalCount });
+      return ok({
+        items: paged,
+        totalCount,
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
+      });
     },
   );
 }
@@ -1842,13 +1897,46 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // ── Topic Detail / Prompt Detail ─────────────────────────────────────────────
 
 // eslint-disable-next-line max-len
-const DETAIL_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code';
+const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
 /**
  * Derives the ISO week string from an execution_date using the shared toISOWeek helper.
  */
 function weekFromExecDate(execDate) {
   return toISOWeek(execDate).week;
+}
+
+/**
+ * Maps a `brand_presence_executions` detail row (`DETAIL_SELECT`) to one `executions[]` entry.
+ * Shared by topic-detail and prompt-detail handlers.
+ * @param {Object} r - Raw PostgREST row
+ * @returns {Object}
+ */
+function mapBrandPresenceDetailExecutionRow(r) {
+  const mentioned = r.mentions === true || r.mentions === 'true';
+  const cited = r.citations === true || r.citations === 'true';
+  const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+  return {
+    prompt: r.prompt || '',
+    promptId: r.prompt_id != null ? String(r.prompt_id) : '',
+    executionId: r.id != null ? String(r.id) : '',
+    region: r.region_code || '',
+    executionDate: r.execution_date || '',
+    week: weekFromExecDate(r.execution_date),
+    answer: r.answer || '',
+    mentions: mentioned,
+    citations: cited,
+    visibilityScore: Number.isNaN(vs) ? 0 : vs,
+    position: r.position ? String(r.position) : '',
+    sentiment: r.sentiment || '',
+    volume: r.volume != null ? String(r.volume) : '',
+    origin: r.origin || '',
+    category: r.category_name || '',
+    sources: r.url || '',
+    errorCode: r.error_code || '',
+    businessCompetitors: r.business_competitors || '',
+    detectedBrandMentions: r.detected_brand_mentions || '',
+  };
 }
 
 /**
@@ -2094,8 +2182,8 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
-        .eq('topics', topicName);
+      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      q = applyTopicPathFilter(q, topicName);
 
       const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
 
@@ -2105,9 +2193,12 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       }
 
       const rows = execRows || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
         return ok({
-          topic: topicName,
+          topic: topicResponseLabel,
+          topicId: topicIdResponse,
           stats: {
             averageVisibilityScore: 0,
             averagePosition: 0,
@@ -2134,28 +2225,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       // Build execution entries (all rows, newest first)
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map((r) => {
-          const mentioned = r.mentions === true || r.mentions === 'true';
-          const cited = r.citations === true || r.citations === 'true';
-          const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-          return {
-            prompt: r.prompt || '',
-            region: r.region_code || '',
-            executionDate: r.execution_date || '',
-            week: weekFromExecDate(r.execution_date),
-            answer: r.answer || '',
-            mentions: mentioned,
-            citations: cited,
-            visibilityScore: Number.isNaN(vs) ? 0 : vs,
-            position: r.position ? String(r.position) : '',
-            sentiment: r.sentiment || '',
-            volume: r.volume != null ? String(r.volume) : '',
-            origin: r.origin || '',
-            category: r.category_name || '',
-            sources: r.url || '',
-            errorCode: r.error_code || '',
-          };
-        });
+        .map(mapBrandPresenceDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));
@@ -2169,7 +2239,8 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       const sources = aggregateDetailSources(flatSources);
 
       return ok({
-        topic: topicName,
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
         /* c8 ignore start */
         stats: {
           averageVisibilityScore: topicStats.averageVisibilityScore || 0,
@@ -2234,8 +2305,8 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
-        .eq('topics', topicName)
+      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      q = applyTopicPathFilter(q, topicName)
         .eq('prompt', promptText);
 
       if (shouldApplyFilter(regionCode)) {
@@ -2250,9 +2321,12 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       }
 
       const rows = execRows || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
         return ok({
-          topic: topicName,
+          topic: topicResponseLabel,
+          topicId: topicIdResponse,
           prompt: promptText,
           region: regionCode || '',
           stats: {
@@ -2318,28 +2392,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
 
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map((r) => {
-          const mentioned = r.mentions === true || r.mentions === 'true';
-          const cited = r.citations === true || r.citations === 'true';
-          const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-          return {
-            prompt: r.prompt || '',
-            region: r.region_code || '',
-            executionDate: r.execution_date || '',
-            week: weekFromExecDate(r.execution_date),
-            answer: r.answer || '',
-            mentions: mentioned,
-            citations: cited,
-            visibilityScore: Number.isNaN(vs) ? 0 : vs,
-            position: r.position ? String(r.position) : '',
-            sentiment: r.sentiment || '',
-            volume: r.volume != null ? String(r.volume) : '',
-            origin: r.origin || '',
-            category: r.category_name || '',
-            sources: r.url || '',
-            errorCode: r.error_code || '',
-          };
-        });
+        .map(mapBrandPresenceDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));
@@ -2353,7 +2406,8 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       const sources = aggregateDetailSources(flatSources);
 
       return ok({
-        topic: topicName,
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
         prompt: promptText,
         region: regionCode || '',
         stats: {
