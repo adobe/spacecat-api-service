@@ -1871,7 +1871,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // ── Topic Detail / Prompt Detail ─────────────────────────────────────────────
 
 // eslint-disable-next-line max-len
-const DETAIL_SELECT = 'id, topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
+const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
 /**
  * Derives the ISO week string from an execution_date using the shared toISOWeek helper.
@@ -2172,6 +2172,8 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
           const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
           return {
             prompt: r.prompt || '',
+            promptId: r.prompt_id != null ? String(r.prompt_id) : '',
+            executionId: r.id != null ? String(r.id) : '',
             region: r.region_code || '',
             executionDate: r.execution_date || '',
             week: weekFromExecDate(r.execution_date),
@@ -2362,6 +2364,8 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
           const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
           return {
             prompt: r.prompt || '',
+            promptId: r.prompt_id != null ? String(r.prompt_id) : '',
+            executionId: r.id != null ? String(r.id) : '',
             region: r.region_code || '',
             executionDate: r.execution_date || '',
             week: weekFromExecDate(r.execution_date),

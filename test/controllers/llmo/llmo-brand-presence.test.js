@@ -6312,6 +6312,7 @@ describe('llmo-brand-presence', () => {
           topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'q1',
+          prompt_id: 'p1-id',
           region_code: 'US',
           mentions: true,
           citations: false,
@@ -6334,6 +6335,7 @@ describe('llmo-brand-presence', () => {
           topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'q2',
+          prompt_id: 'p2-id',
           region_code: 'US',
           mentions: false,
           citations: true,
@@ -6367,6 +6369,10 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[0].executionDate).to.equal('2026-03-08');
       expect(body.executions[1].executionDate).to.equal('2026-03-01');
       expect(body.executions[0].prompt).to.equal('q2');
+      expect(body.executions[0].promptId).to.equal('p2-id');
+      expect(body.executions[0].executionId).to.equal('exec-2');
+      expect(body.executions[1].promptId).to.equal('p1-id');
+      expect(body.executions[1].executionId).to.equal('exec-1');
       expect(body.executions[0].mentions).to.equal(false);
       expect(body.executions[0].citations).to.equal(true);
       expect(body.executions[0].errorCode).to.equal('E01');
@@ -6544,6 +6550,8 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.executions[0].prompt).to.equal('');
+      expect(body.executions[0].promptId).to.equal('');
+      expect(body.executions[0].executionId).to.equal('');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
       expect(body.executions[0].businessCompetitors).to.equal('');
@@ -6794,6 +6802,7 @@ describe('llmo-brand-presence', () => {
           topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'What is AI?',
+          prompt_id: 'pd-older',
           region_code: 'US',
           mentions: true,
           citations: true,
@@ -6815,6 +6824,7 @@ describe('llmo-brand-presence', () => {
           topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'What is AI?',
+          prompt_id: 'pd-newer',
           region_code: 'US',
           mentions: false,
           citations: false,
@@ -6853,6 +6863,10 @@ describe('llmo-brand-presence', () => {
       // Sorted newest first
       expect(body.executions[0].executionDate).to.equal('2026-03-08');
       expect(body.executions[1].executionDate).to.equal('2026-03-01');
+      expect(body.executions[0].promptId).to.equal('pd-newer');
+      expect(body.executions[1].promptId).to.equal('pd-older');
+      expect(body.executions[0].executionId).to.equal('e2');
+      expect(body.executions[1].executionId).to.equal('e1');
       expect(body.executions[0].businessCompetitors).to.equal('Rival;OtherCo');
       expect(body.executions[0].detectedBrandMentions).to.equal('Acme');
       expect(body.executions[1].businessCompetitors).to.equal('');
@@ -7029,10 +7043,13 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.executions[0].prompt).to.equal('');
+      expect(body.executions[0].promptId).to.equal('');
+      expect(body.executions[0].executionId).to.equal('e1');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
       expect(body.executions[0].businessCompetitors).to.equal('');
       expect(body.executions[0].detectedBrandMentions).to.equal('');
+      expect(body.executions[1].executionId).to.equal('e2');
     });
 
     it('includes sources aggregated from fetchSourcesForExecutions', async () => {
