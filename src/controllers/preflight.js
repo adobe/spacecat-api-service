@@ -392,25 +392,30 @@ function PreflightController(ctx, log, env) {
         }
       }
 
-      // Resolve enabled preflight audits from global Configuration.
-      // Convention: handler types are suffixed with -preflight (e.g. headings-preflight).
-      // Strip the suffix so names match Mysticat's audit registry (e.g. headings).
-      // Mysticat skips any it hasn't implemented yet since the list is admin-curated.
-      let preflightAudits;
+      // Resolve Configuration and check preflight enablement for the site.
+      let configuration;
       try {
-        const configuration = await dataAccess.Configuration.findLatest();
+        configuration = await dataAccess.Configuration.findLatest();
         if (!configuration) {
           return internalServerError('Configuration not available');
         }
-        const enabledAudits = configuration.getEnabledAuditsForSite(site);
-        preflightAudits = enabledAudits
-          .filter((type) => type.endsWith('-preflight'))
-          .map((type) => type.replace(/-preflight$/, ''));
       } catch (e) {
-        log.error(`Failed to load Configuration for preflight audits: ${e.message}`);
+        log.error(`Failed to load Configuration: ${e.message}`);
         return internalServerError('Failed to load audit configuration');
       }
 
+      // Check that the preflight handler is enabled for this site
+      const preflightEnabled = configuration.isHandlerEnabledForSite('preflight', site);
+
+      // Resolve individual preflight audits.
+      // Convention: handler types are suffixed with -preflight (e.g. headings-preflight).
+      // Strip the suffix so names match Mysticat's audit registry (e.g. headings).
+      const enabledAudits = configuration.getEnabledAuditsForSite(site);
+      const preflightAudits = enabledAudits
+        .filter((type) => type.endsWith('-preflight'))
+        .map((type) => type.replace(/-preflight$/, ''));
+
+      // Always create the job so callers can poll for status
       const job = await dataAccess.AsyncJob.create({
         status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
@@ -419,6 +424,44 @@ function PreflightController(ctx, log, env) {
           tags: ['preflight', 'beta'],
         },
       });
+
+      // Cancel if preflight is not enabled for the site
+      if (!preflightEnabled) {
+        const reason = `preflight audits disabled for site ${site.getId()}`;
+        log.info(`[preflight-beta] ${reason}`);
+        job.setStatus(AsyncJob.Status.CANCELLED);
+        job.setMetadata({
+          ...job.getMetadata(),
+          payload: { ...job.getMetadata().payload, reason },
+        });
+        await job.save();
+        return accepted({
+          jobId: job.getId(),
+          status: job.getStatus(),
+          createdAt: job.getCreatedAt(),
+          pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
+            + `/preflight/beta/jobs/${job.getId()}`,
+        });
+      }
+
+      // Cancel if no individual preflight audits are enabled
+      if (preflightAudits.length === 0) {
+        const reason = `all individual preflight audits disabled for site ${site.getId()}`;
+        log.info(`[preflight-beta] ${reason}`);
+        job.setStatus(AsyncJob.Status.CANCELLED);
+        job.setMetadata({
+          ...job.getMetadata(),
+          payload: { ...job.getMetadata().payload, reason },
+        });
+        await job.save();
+        return accepted({
+          jobId: job.getId(),
+          status: job.getStatus(),
+          createdAt: job.getCreatedAt(),
+          pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
+            + `/preflight/beta/jobs/${job.getId()}`,
+        });
+      }
 
       try {
         await callMysticatAnalyze(

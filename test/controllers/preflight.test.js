@@ -73,6 +73,7 @@ describe('Preflight Controller', () => {
     getEnabledAuditsForSite: sandbox.stub().returns([
       'alt-text-preflight', 'headings-preflight', 'links-preflight',
     ]),
+    isHandlerEnabledForSite: sandbox.stub().returns(true),
   };
 
   const mockDataAccess = {
@@ -844,9 +845,14 @@ describe('Preflight Controller', () => {
   });
 
   describe('createBetaPreflightJob', () => {
+    let betaJobStatus = 'IN_PROGRESS';
+    let betaJobMetadata = {};
     const mockBetaJob = {
       ...mockJob,
-      setStatus: sandbox.stub(),
+      getStatus: () => betaJobStatus,
+      setStatus: sandbox.stub().callsFake((s) => { betaJobStatus = s; }),
+      getMetadata: () => betaJobMetadata,
+      setMetadata: sandbox.stub().callsFake((m) => { betaJobMetadata = m; }),
       setError: sandbox.stub(),
       setEndedAt: sandbox.stub(),
       save: sandbox.stub().resolves(),
@@ -863,6 +869,13 @@ describe('Preflight Controller', () => {
       fetchStub.onFirstCall().resolves({ ok: true, status: 200 });
       fetchStub.onSecondCall().resolves({ ok: true });
       mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockBetaJob);
+      mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(mockConfiguration);
+      mockConfiguration.isHandlerEnabledForSite.returns(true);
+      mockConfiguration.getEnabledAuditsForSite.returns([
+        'alt-text-preflight', 'headings-preflight', 'links-preflight',
+      ]);
+      betaJobStatus = 'IN_PROGRESS';
+      betaJobMetadata = {};
     });
 
     afterEach(() => {
@@ -1445,7 +1458,45 @@ describe('Preflight Controller', () => {
       expect(body.audits).to.deep.equal(['alt-text', 'headings', 'links']);
     });
 
-    it('sends empty audits list when no preflight handlers are enabled', async () => {
+    it('cancels job when preflight handler is not enabled for site', async () => {
+      mockConfiguration.isHandlerEnabledForSite.returns(false);
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result.status).to.equal('CANCELLED');
+      expect(result.pollUrl).to.include('/v1/preflight/beta/jobs/');
+      expect(mockBetaJob.setStatus).to.have.been.calledWith('CANCELLED');
+      expect(fetchStub.secondCall).to.be.null; // Mysticat not called
+    });
+
+    it('cancels job with ci pollUrl in dev when preflight not enabled', async () => {
+      mockConfiguration.isHandlerEnabledForSite.returns(false);
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result.status).to.equal('CANCELLED');
+      expect(result.pollUrl).to.include('/ci/preflight/beta/jobs/');
+    });
+
+    it('cancels job when no individual preflight audits are enabled', async () => {
       mockConfiguration.getEnabledAuditsForSite.returns([
         'lhs-mobile', 'cwv',
       ]);
@@ -1455,9 +1506,33 @@ describe('Preflight Controller', () => {
       });
       expect(response.status).to.equal(202);
 
-      const [, calledOptions] = fetchStub.secondCall.args;
-      const body = JSON.parse(calledOptions.body);
-      expect(body.audits).to.deep.equal([]);
+      const result = await response.json();
+      expect(result.status).to.equal('CANCELLED');
+      expect(mockBetaJob.setStatus).to.have.been.calledWith('CANCELLED');
+      expect(fetchStub.secondCall).to.be.null; // Mysticat not called
+    });
+
+    it('cancels job with ci pollUrl in dev when all individual audits disabled', async () => {
+      mockConfiguration.getEnabledAuditsForSite.returns(['lhs-mobile']);
+
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          MYSTIQUE_API_BASE_URL: 'https://mysticat.example.com',
+          AWS_ENV: 'dev',
+        },
+      );
+
+      const response = await preflightController.createBetaPreflightJob({
+        data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
+      });
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result.status).to.equal('CANCELLED');
+      expect(result.pollUrl).to.include('/ci/preflight/beta/jobs/');
     });
 
     it('returns 500 when Configuration.findLatest fails', async () => {
