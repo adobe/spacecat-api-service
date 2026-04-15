@@ -1070,9 +1070,28 @@ function PlgOnboardingController(ctx) {
         return internalServerError('Failed to list PLG onboarding records');
       }
 
+      // Resolve updatedBy IMS IDs to emails for the response
+      const { imsClient } = context;
+      const uniqueUpdatedByIds = [...new Set(
+        records.map((r) => r.getUpdatedBy()).filter((v) => hasText(v) && v !== 'system'),
+      )];
+      const emailMap = {};
+      await Promise.all(uniqueUpdatedByIds.map(async (imsId) => {
+        try {
+          const imsProfile = await imsClient.getImsAdminProfile(imsId);
+          emailMap[imsId] = imsProfile.email || null;
+        } catch (e) {
+          log.warn(`Failed to resolve email for updatedBy ${imsId}: ${e.message}`);
+          emailMap[imsId] = null;
+        }
+      }));
+
       let payload;
       try {
-        payload = records.map(PlgOnboardingDto.toJSON);
+        payload = records.map((record) => ({
+          ...PlgOnboardingDto.toJSON(record),
+          trialEmail: emailMap[record.getUpdatedBy()] ?? null,
+        }));
       } catch (serializationError) {
         const serMsg = serializationError instanceof Error
           ? serializationError.message
