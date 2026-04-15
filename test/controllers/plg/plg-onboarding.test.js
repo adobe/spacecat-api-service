@@ -3113,6 +3113,44 @@ describe('PlgOnboardingController', () => {
           sinon.match(/^Failed to list PLG onboardings: connection reset/),
         );
       });
+
+      it('resolves trialEmail via getImsAdminProfile when updatedBy is set', async () => {
+        const record = createMockOnboarding({ updatedBy: 'user-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'user@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].trialEmail).to.equal('user@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('user-ims-id@AdobeID');
+      });
+
+      it('sets trialEmail to null when getImsAdminProfile fails', async () => {
+        const record = createMockOnboarding({ updatedBy: 'bad-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().rejects(new Error('IMS unavailable')),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].trialEmail).to.be.null;
+        expect(mockLog.warn).to.have.been.calledWithMatch(
+          sinon.match(/Failed to resolve email for updatedBy bad-ims-id@AdobeID/),
+        );
+      });
     });
   });
 

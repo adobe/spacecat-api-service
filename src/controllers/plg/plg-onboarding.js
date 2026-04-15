@@ -957,9 +957,7 @@ function PlgOnboardingController(ctx) {
 
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
-      const profile = authInfo?.getProfile();
-      log.info(`PLG onboarding updatedBy resolution: name=${profile?.name}, email=${profile?.email}, isAdmin=${isAdmin}`);
-      onboarding.setUpdatedBy(profile?.email || 'system');
+      onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
       await onboarding.save();
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
