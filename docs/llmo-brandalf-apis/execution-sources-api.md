@@ -21,16 +21,21 @@ Returns all `brand_presence_sources` rows for a single **brand presence executio
 
 ## Query parameters
 
-Same filter semantics as [Topic Detail API](topic-detail-api.md) and [Prompt Detail API](prompt-detail-api.md):
+**Required** (must be present on every request; omitting any of them returns **400** with `Missing required query parameter: …`):
 
-| Parameter | Aliases | Type | Default | Description |
-|-----------|---------|------|---------|-------------|
-| `startDate` | `start_date` | string (YYYY-MM-DD) | 28 days ago | Start of date range (applied to the parent execution lookup) |
-| `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
-| `model` | `platform` | string | `chatgpt-free` | LLM model enum |
-| `siteId` | `site_id` | string (UUID) | — | Filter by site; must belong to the organization |
-| `regionCode` | `region`, `region_code` | string | — | Filter executions by region |
-| `origin` | — | string | — | Filter by origin (case-insensitive partial match) |
+| Parameter | Aliases | Type | Description |
+|-----------|---------|------|-------------|
+| `startDate` | `start_date` | string (YYYY-MM-DD) | Start of date range for the parent execution lookup |
+| `endDate` | `end_date` | string (YYYY-MM-DD) | End of date range |
+| `platform` | `model` | string | LLM model enum (same values as other brand-presence APIs) |
+
+Optional filters (same semantics as [Topic Detail API](topic-detail-api.md) / [Prompt Detail API](prompt-detail-api.md)):
+
+| Parameter | Aliases | Type | Description |
+|-----------|---------|------|-------------|
+| `siteId` | `site_id` | string (UUID) | Filter by site; must belong to the organization |
+| `regionCode` | `region`, `region_code` | string | Filter executions by region |
+| `origin` | — | string | Filter by origin (case-insensitive partial match) |
 
 The handler first loads the execution with these filters, then loads sources for `(execution_id, execution_date)` to align with partitioned `brand_presence_sources`.
 
@@ -39,7 +44,7 @@ The handler first loads the execution with these filters, then loads sources for
 ## Sample URL
 
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/executions/001b5813-283f-4563-9b94-3f32727f6051/sources?model=chatgpt-free&startDate=2026-02-01&endDate=2026-04-15
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/executions/001b5813-283f-4563-9b94-3f32727f6051/sources?startDate=2026-02-01&endDate=2026-04-15&platform=chatgpt-free
 ```
 
 ---
@@ -78,6 +83,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/executio
 |--------|-----------|
 | 400 | PostgREST not configured (`DATA_SERVICE_PROVIDER` ≠ postgres) |
 | 400 | Invalid `executionId` (not a UUID) |
+| 400 | Missing required query parameter: `startDate`, `endDate`, or `platform` |
 | 400 | Organization not found / PostgREST error on execution or sources query |
 | 403 | User does not belong to the organization |
 | 403 | `siteId` does not belong to the organization |

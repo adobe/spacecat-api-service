@@ -2112,12 +2112,34 @@ function buildDetailExecQuery(client, organizationId, params, defaults, filterBy
 }
 
 /**
+ * Execution-sources requires explicit `startDate`/`endDate`/`platform` (or aliases) so the
+ * execution row can be resolved inside the date window and model partition.
+ * @param {Object} context - Request context (`data` = query)
+ * @returns {Response|null} badRequest or null when valid
+ */
+function validateExecutionSourcesRequiredQuery(context) {
+  const q = context.data || {};
+  const startRaw = q.startDate ?? q.start_date;
+  const endRaw = q.endDate ?? q.end_date;
+  const platformRaw = q.model ?? q.platform;
+  if (!hasText(startRaw)) {
+    return badRequest('Missing required query parameter: startDate');
+  }
+  if (!hasText(endRaw)) {
+    return badRequest('Missing required query parameter: endDate');
+  }
+  if (!hasText(platformRaw)) {
+    return badRequest('Missing required query parameter: platform');
+  }
+  return null;
+}
+
+/**
  * Builds a single-execution query for brand presence sources (same filters as topic/prompt detail).
  * @param {Object} client - PostgREST client
  * @param {string} organizationId - Organization UUID
  * @param {string} executionId - Execution row id
- * @param {Object} params - Parsed filter params
- * @param {Object} defaults - Default date range
+ * @param {Object} params - Parsed filter params (must include startDate, endDate, model)
  * @param {string|null} filterByBrandId - Brand UUID or null when brand is "all"
  * @returns {Object} Chainable query ending in .limit(1)
  */
@@ -2126,12 +2148,10 @@ function buildSingleExecutionSourcesExecQuery(
   organizationId,
   executionId,
   params,
-  defaults,
   filterByBrandId,
 ) {
-  const startDate = params.startDate || defaults.startDate;
-  const endDate = params.endDate || defaults.endDate;
-  const model = resolveModelFromRequest(params.model);
+  const { startDate, endDate, model: modelParam } = params;
+  const model = resolveModelFromRequest(modelParam);
 
   let q = client
     .from('brand_presence_executions')
@@ -2539,8 +2559,12 @@ export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
         return badRequest('Invalid execution id');
       }
 
+      const missingQuery = validateExecutionSourcesRequiredQuery(ctx);
+      if (missingQuery) {
+        return missingQuery;
+      }
+
       const params = parseFilterDimensionsParams(ctx);
-      const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
@@ -2560,7 +2584,6 @@ export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
         organizationId,
         executionId,
         params,
-        defaults,
         filterByBrandId,
       );
       const { data: execRows, error: execError } = await execQ.limit(1);

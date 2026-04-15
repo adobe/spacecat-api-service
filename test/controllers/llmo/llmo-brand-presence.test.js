@@ -7240,6 +7240,11 @@ describe('llmo-brand-presence', () => {
 
     beforeEach(() => {
       mockContext.params.executionId = execUuid;
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+      };
     });
 
     it('returns badRequest when postgrestService is missing', async () => {
@@ -7273,8 +7278,136 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('returns badRequest when startDate is missing', async () => {
+      mockContext.data = { endDate: '2026-04-15', platform: 'chatgpt-free' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: startDate');
+    });
+
+    it('treats null context.data as empty query for required params', async () => {
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: startDate');
+    });
+
+    it('returns badRequest when endDate is missing', async () => {
+      mockContext.data = { startDate: '2026-02-01', platform: 'chatgpt-free' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: endDate');
+    });
+
+    it('returns badRequest when platform is missing', async () => {
+      mockContext.data = { startDate: '2026-02-01', endDate: '2026-04-15' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: platform');
+    });
+
+    it('accepts start_date, end_date, and model as required query aliases', async () => {
+      mockContext.data = {
+        start_date: '2026-02-01',
+        end_date: '2026-04-15',
+        model: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts null startDate when start_date is provided', async () => {
+      mockContext.data = {
+        startDate: null,
+        start_date: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts null endDate when end_date is provided', async () => {
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: null,
+        end_date: '2026-04-15',
+        platform: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts null model when platform is provided', async () => {
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        model: null,
+        platform: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
     it('returns forbidden when siteId is provided but does not belong to org', async () => {
-      mockContext.data = { siteId: 'site-xyz' };
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+        siteId: 'site-xyz',
+      };
       mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
 
       const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
@@ -7523,7 +7656,13 @@ describe('llmo-brand-presence', () => {
         brand_presence_executions: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
-      mockContext.data = { region: 'US', origin: 'organic' };
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+        region: 'US',
+        origin: 'organic',
+      };
       mockContext.dataAccess.Site.postgrestService = client;
 
       const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
@@ -7541,7 +7680,12 @@ describe('llmo-brand-presence', () => {
           { data: [], error: null },
         ],
       );
-      mockContext.data = { siteId: 'site-123' };
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+        siteId: 'site-123',
+      };
       mockContext.dataAccess.Site.postgrestService = client;
 
       const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
