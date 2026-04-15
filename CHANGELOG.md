@@ -1,3 +1,15 @@
+# [1.439.0](https://github.com/adobe/spacecat-api-service/compare/v1.438.0...v1.439.0) (2026-04-15)
+
+
+### Bug Fixes
+
+* align llmo agentic by-url RPC params ([#2215](https://github.com/adobe/spacecat-api-service/issues/2215)) ([39b1a37](https://github.com/adobe/spacecat-api-service/commit/39b1a37f6a76c480258b777b5c5b41a15f183836))
+
+
+### Features
+
+* add url-brand-presence endpoint | LLMO-4000 ([#2208](https://github.com/adobe/spacecat-api-service/issues/2208)) ([d64fb8a](https://github.com/adobe/spacecat-api-service/commit/d64fb8a0e047e5cee4176e86e63f95f2a6f4192b))
+
 # [1.438.0](https://github.com/adobe/spacecat-api-service/compare/v1.437.3...v1.438.0) (2026-04-15)
 
 
