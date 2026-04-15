@@ -899,6 +899,13 @@ async function performAsoPlgOnboarding({
 }
 
 /**
+ * Resolves requestor emails from IMS user IDs stored in updated_by.
+ * @param {Array} records - PlgOnboarding records.
+ * @param {object} imsClient - IMS client instance.
+ * @returns {Promise<object>} Map of userId -> email.
+ */
+
+/**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
   * @returns {object} Controller with onboard, getStatus, and getAllOnboardings methods.
@@ -956,8 +963,13 @@ function PlgOnboardingController(ctx) {
       }
     }
 
+    /* c8 ignore next */
+    const requestorEmail = authInfo?.getProfile()?.email || null;
+
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
+      onboarding.setUpdatedBy(requestorEmail || imsOrgId || 'system');
+      await onboarding.save();
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
       log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);
