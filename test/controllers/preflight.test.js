@@ -71,7 +71,7 @@ describe('Preflight Controller', () => {
 
   const mockConfiguration = {
     getEnabledAuditsForSite: sandbox.stub().returns([
-      'preflight-alt-text', 'preflight-headings', 'preflight-links',
+      'alt-text-preflight', 'headings-preflight', 'links-preflight',
     ]),
   };
 
@@ -1417,7 +1417,7 @@ describe('Preflight Controller', () => {
 
     it('passes enabled preflight audits from Configuration to Mysticat', async () => {
       mockConfiguration.getEnabledAuditsForSite.returns([
-        'preflight-headings', 'preflight-links', 'lhs-mobile',
+        'headings-preflight', 'links-preflight', 'lhs-mobile',
       ]);
 
       const response = await preflightController.createBetaPreflightJob({
@@ -1432,7 +1432,7 @@ describe('Preflight Controller', () => {
 
     it('passes all preflight audits when all handlers are enabled', async () => {
       mockConfiguration.getEnabledAuditsForSite.returns([
-        'preflight-alt-text', 'preflight-headings', 'preflight-links',
+        'alt-text-preflight', 'headings-preflight', 'links-preflight',
       ]);
 
       const response = await preflightController.createBetaPreflightJob({
