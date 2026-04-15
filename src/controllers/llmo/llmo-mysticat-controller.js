@@ -41,6 +41,7 @@ import {
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
+  createAgenticTrafficUrlBrandPresenceHandler,
 } from './llmo-agentic-traffic.js';
 
 /**
@@ -154,6 +155,9 @@ function LlmoMysticatController(ctx) {
   );
   const getAgenticTrafficWeeks = createAgenticTrafficWeeksHandler(getSiteAndValidateAccess);
   const getAgenticTrafficMovers = createAgenticTrafficMoversHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
+    getSiteAndValidateAccess,
+  );
 
   return {
     getFilterDimensions,
@@ -184,6 +188,7 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficFilterDimensions,
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
+    getAgenticTrafficUrlBrandPresence,
   };
 }
 

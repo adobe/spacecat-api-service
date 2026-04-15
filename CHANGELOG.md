@@ -1,3 +1,50 @@
+# [1.441.0](https://github.com/adobe/spacecat-api-service/compare/v1.440.2...v1.441.0) (2026-04-15)
+
+
+### Features
+
+* **LLMO-4176:** add brandalf flag override and decision matrix to onboarding mode resolution ([#2171](https://github.com/adobe/spacecat-api-service/issues/2171)) ([977e4e9](https://github.com/adobe/spacecat-api-service/commit/977e4e976ce2abd0a247af60969eca0e22624d5c))
+
+## [1.440.2](https://github.com/adobe/spacecat-api-service/compare/v1.440.1...v1.440.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.13.4 ([#2218](https://github.com/adobe/spacecat-api-service/issues/2218)) ([6866a3e](https://github.com/adobe/spacecat-api-service/commit/6866a3e006f03e6e48fe300b4ae111ec29bd75e9))
+
+## [1.440.1](https://github.com/adobe/spacecat-api-service/compare/v1.440.0...v1.440.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2213](https://github.com/adobe/spacecat-api-service/issues/2213)) ([94d98e9](https://github.com/adobe/spacecat-api-service/commit/94d98e961a7bde3c1cdaa712132d94fa296eb536))
+
+# [1.440.0](https://github.com/adobe/spacecat-api-service/compare/v1.439.0...v1.440.0) (2026-04-15)
+
+
+### Features
+
+* add SkipAuthHandler for local dev authentication bypass ([#2181](https://github.com/adobe/spacecat-api-service/issues/2181)) ([8b7e3c6](https://github.com/adobe/spacecat-api-service/commit/8b7e3c6bea08784edeea34432d664693c44465e3))
+
+# [1.439.0](https://github.com/adobe/spacecat-api-service/compare/v1.438.0...v1.439.0) (2026-04-15)
+
+
+### Bug Fixes
+
+* align llmo agentic by-url RPC params ([#2215](https://github.com/adobe/spacecat-api-service/issues/2215)) ([39b1a37](https://github.com/adobe/spacecat-api-service/commit/39b1a37f6a76c480258b777b5c5b41a15f183836))
+
+
+### Features
+
+* add url-brand-presence endpoint | LLMO-4000 ([#2208](https://github.com/adobe/spacecat-api-service/issues/2208)) ([d64fb8a](https://github.com/adobe/spacecat-api-service/commit/d64fb8a0e047e5cee4176e86e63f95f2a6f4192b))
+
+# [1.438.0](https://github.com/adobe/spacecat-api-service/compare/v1.437.3...v1.438.0) (2026-04-15)
+
+
+### Features
+
+* prompt details add mentions and competitors data ([#2214](https://github.com/adobe/spacecat-api-service/issues/2214)) ([3edd3ea](https://github.com/adobe/spacecat-api-service/commit/3edd3ea01867437a1dfb993be0d19c7549b39045))
+
 ## [1.437.3](https://github.com/adobe/spacecat-api-service/compare/v1.437.2...v1.437.3) (2026-04-15)
 
 

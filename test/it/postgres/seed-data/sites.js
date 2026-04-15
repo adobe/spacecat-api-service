@@ -80,4 +80,23 @@ export const sites = [
     is_live: true,
     name: 'Site Four (Delegate)',
   },
+  // TEMPORARY: LLMO mode-resolution test sites — remove with resolveLlmoOnboardingMode legacy check
+  {
+    id: 'fd111111-1111-4111-b111-111111111111',
+    base_url: 'https://legacy-llmo.example.com',
+    organization_id: 'fe111111-1111-4111-b111-111111111111',
+    delivery_type: 'aem_edge',
+    is_live: true,
+    name: 'Legacy LLMO Site',
+    created_at: '2026-03-15T00:00:00.000Z', // before Brandalf GA cutoff (2026-04-01)
+  },
+  {
+    id: 'fd222222-2222-4222-a222-222222222222',
+    base_url: 'https://new-llmo.example.com',
+    organization_id: 'fe222222-2222-4222-a222-222222222222',
+    delivery_type: 'aem_edge',
+    is_live: true,
+    name: 'New LLMO Site',
+    created_at: '2026-05-01T00:00:00.000Z', // after Brandalf GA cutoff (2026-04-01)
+  },
 ];

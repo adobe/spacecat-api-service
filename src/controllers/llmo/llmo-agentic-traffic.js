@@ -13,6 +13,7 @@
 import {
   ok, badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 
 /**
@@ -32,8 +33,31 @@ const ERR_NOT_FOUND = 'not found';
 
 const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
-const DEFAULT_BY_URL_LIMIT = 2000;
-const MAX_BY_URL_LIMIT = 2000;
+const DEFAULT_BY_URL_LIMIT = 50;
+const MAX_BY_URL_LIMIT = 500;
+
+/**
+ * Maps UI platform filter codes (PLATFORM_CODES) to the values stored in the
+ * agentic_traffic.platform column. Both ChatGPT paid/free codes map to the
+ * same DB value; 'all' and unknown codes resolve to null (no filter).
+ *
+ * NOTE: This mapping is applied in parseAgenticTrafficParams and therefore
+ * affects ALL site-scoped agentic traffic endpoints (kpis, kpis-trend,
+ * by-region, by-category, by-page-type, by-status, by-user-agent, by-url,
+ * filter-dimensions, weeks, movers, url-brand-presence). Before this mapping
+ * existed, the raw UI code (e.g. "openai") was passed to the DB verbatim,
+ * which never matched any rows. This is the intentional behavioural fix.
+ */
+const PLATFORM_CODE_TO_DB = {
+  openai: 'ChatGPT',
+  chatgpt: 'ChatGPT',
+  anthropic: 'Anthropic',
+  mistral: 'MistralAI',
+  perplexity: 'Perplexity',
+  gemini: 'Gemini',
+  google: 'Google',
+  amazon: 'Amazon',
+};
 
 function defaultDateRange() {
   const end = new Date();
@@ -55,7 +79,7 @@ function parseAgenticTrafficParams(context) {
   return {
     startDate: q.startDate || q.start_date || defaults.startDate,
     endDate: q.endDate || q.end_date || defaults.endDate,
-    platform: q.platform || null,
+    platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
     categoryName: q.categoryName || q.category_name || null,
     agentType: q.agentType || q.agent_type || null,
     userAgent: q.userAgent || q.user_agent || null,
@@ -84,7 +108,9 @@ function buildRpcParams(siteId, parsed) {
  * @param {Object} context - Request context
  * @param {Function} getSiteAndValidateAccess - Async (context) => { site, organization }
  * @param {string} handlerName - For error logging
- * @param {Function} handlerFn - Async (context, client, siteId) => response
+ * @param {Function} handlerFn - Async (context, client, siteId, siteContext) => response
+ *   siteContext = { site, organization } — forwarded from getSiteAndValidateAccess so
+ *   handlers that need org data (e.g. url-brand-presence) avoid a second DB lookup.
  * @returns {Promise<Response>}
  */
 async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handlerName, handlerFn) {
@@ -98,8 +124,9 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
 
   const { siteId } = context.params;
 
+  let siteContext;
   try {
-    await getSiteAndValidateAccess(context);
+    siteContext = await getSiteAndValidateAccess(context);
   } catch (error) {
     if (error.message?.includes(ERR_SITE_ACCESS)) {
       return forbidden('Only users belonging to the organization can view agentic traffic data');
@@ -111,7 +138,7 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
     return badRequest(error.message);
   }
 
-  return handlerFn(context, Site.postgrestService, siteId);
+  return handlerFn(context, Site.postgrestService, siteId, siteContext);
 }
 
 /**
@@ -365,14 +392,21 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
         const rawSortOrder = (ctx.data?.sortOrder || ctx.data?.sort_order || 'desc').toLowerCase();
         const sortOrder = VALID_SORT_ORDERS.has(rawSortOrder) ? rawSortOrder : 'desc';
         const rawLimit = ctx.data?.limit;
+        const rawPageOffset = ctx.data?.pageOffset || ctx.data?.page_offset;
+        const urlPathSearch = ctx.data?.urlPathSearch || ctx.data?.url_path_search || null;
         const parsedLimit = Number.parseInt(String(rawLimit), 10) || DEFAULT_BY_URL_LIMIT;
         const limit = rawLimit != null
           ? Math.min(parsedLimit, MAX_BY_URL_LIMIT)
           : DEFAULT_BY_URL_LIMIT;
+        const pageOffset = rawPageOffset != null
+          ? Math.max(Number.parseInt(String(rawPageOffset), 10) || 0, 0)
+          : 0;
 
         const rpcParams = {
           ...buildRpcParams(siteId, parsed),
-          p_limit: limit,
+          p_page_limit: limit,
+          p_page_offset: pageOffset,
+          p_url_path_search: urlPathSearch,
           p_sort_by: rawSortBy,
           p_sort_order: sortOrder,
         };
@@ -544,6 +578,69 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
         });
 
         return ok({ weeks });
+      },
+    );
+  };
+}
+
+/**
+ * GET /sites/:siteId/agentic-traffic/url-brand-presence?url=&startDate=&endDate=&platform=
+ *
+ * Brand presence citation detail for a specific URL. Returns citation stats,
+ * weekly citation trends, and the top prompts that cite this URL as a source
+ * in brand presence LLM executions.
+ *
+ * The URL is resolved via source_urls.url_hash (md5 fast-lookup) so the caller
+ * must pass a full URL (e.g. "https://www.example.com/path").
+ * The organisation_id is derived from the site to keep auth consistent with all
+ * other site-scoped agentic traffic endpoints.
+ */
+export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAccess) {
+  return async function getAgenticTrafficUrlBrandPresence(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'url-brand-presence',
+      async (ctx, client, siteId, siteContext) => {
+        const parsed = parseAgenticTrafficParams(ctx);
+        const rawUrl = ctx.data?.url;
+
+        if (!hasText(rawUrl)) {
+          return badRequest('url parameter is required');
+        }
+
+        // organisationId comes from siteContext forwarded by withAgenticTrafficAuth —
+        // getSiteAndValidateAccess already fetched the site, so no second DB roundtrip.
+        const organizationId = siteContext?.site?.getOrganizationId();
+
+        const rpcParams = {
+          p_organization_id: organizationId,
+          p_url: rawUrl,
+          p_start_date: parsed.startDate,
+          p_end_date: parsed.endDate,
+          p_model: parsed.platform || null,
+          p_site_id: siteId,
+        };
+
+        const { data, error } = await client.rpc(
+          'rpc_brand_presence_url_detail',
+          rpcParams,
+        );
+
+        if (error) {
+          ctx.log.error(`Agentic traffic url-brand-presence PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch brand presence data for URL');
+        }
+
+        // RETURNS JSONB → PostgREST delivers the object directly, not wrapped in an array
+        /* c8 ignore next */ const result = data ?? {};
+        return ok({
+          totalCitations: Number(result.totalCitations ?? 0),
+          totalMentions: Number(result.totalMentions ?? 0),
+          uniquePrompts: Number(result.uniquePrompts ?? 0),
+          weeklyTrends: Array.isArray(result.weeklyTrends) ? result.weeklyTrends : [],
+          prompts: Array.isArray(result.prompts) ? result.prompts : [],
+        });
       },
     );
   };
