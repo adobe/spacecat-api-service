@@ -1097,7 +1097,7 @@ function PlgOnboardingController(ctx) {
       let payload;
       try {
         payload = records.map((record) => {
-          const json = PlgOnboardingDto.toJSON(record);
+          const json = PlgOnboardingDto.toAdminJSON(record);
           return {
             ...json,
             trialEmail: emailMap[record.getUpdatedBy()] ?? null,
@@ -1198,7 +1198,7 @@ function PlgOnboardingController(ctx) {
     // UPHOLD: just store the review and return
     if (decision === REVIEW_DECISIONS.UPHELD) {
       await onboarding.save();
-      return ok(PlgOnboardingDto.toJSON(onboarding));
+      return ok(PlgOnboardingDto.toAdminJSON(onboarding));
     }
 
     // BYPASS: scenario-specific prep, then re-run the flow
@@ -1237,7 +1237,7 @@ function PlgOnboardingController(ctx) {
             { domain: onboarding.getDomain(), imsOrgId },
             context,
           );
-          return ok(PlgOnboardingDto.toJSON(result));
+          return ok(PlgOnboardingDto.toAdminJSON(result));
         }
 
         case REVIEW_REASONS.AEM_SITE_CHECK: {
@@ -1287,7 +1287,7 @@ function PlgOnboardingController(ctx) {
             },
             context,
           );
-          return ok(PlgOnboardingDto.toJSON(result));
+          return ok(PlgOnboardingDto.toAdminJSON(result));
         }
 
         case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED: {
@@ -1314,7 +1314,7 @@ function PlgOnboardingController(ctx) {
               { domain: siteConfig.alternateDomain, imsOrgId: onboarding.getImsOrgId() },
               context,
             );
-            return ok(PlgOnboardingDto.toJSON(result));
+            return ok(PlgOnboardingDto.toAdminJSON(result));
           }
 
           // Handle moveSite: transfer site from existing org to current org
@@ -1347,7 +1347,7 @@ function PlgOnboardingController(ctx) {
               { domain, imsOrgId: onboarding.getImsOrgId() },
               context,
             );
-            return ok(PlgOnboardingDto.toJSON(result));
+            return ok(PlgOnboardingDto.toAdminJSON(result));
           }
 
           // Default bypass: run flow under the existing org that owns the site
@@ -1368,7 +1368,7 @@ function PlgOnboardingController(ctx) {
             { domain, imsOrgId: existingImsOrgId },
             context,
           );
-          return ok(PlgOnboardingDto.toJSON(result));
+          return ok(PlgOnboardingDto.toAdminJSON(result));
         }
 
         /* c8 ignore next 2 */
@@ -1423,7 +1423,7 @@ function PlgOnboardingController(ctx) {
     const onboarding = await PlgOnboarding.create({
       imsOrgId, domain, baseURL, status,
     });
-    return created(PlgOnboardingDto.toJSON(onboarding));
+    return created(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
   /**
@@ -1453,7 +1453,7 @@ function PlgOnboardingController(ctx) {
 
     onboarding.setStatus(status);
     await onboarding.save();
-    return ok(PlgOnboardingDto.toJSON(onboarding));
+    return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
   /**
