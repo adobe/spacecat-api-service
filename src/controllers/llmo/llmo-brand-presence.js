@@ -47,11 +47,41 @@ const MODEL_QUERY_ALIASES = new Map([
   ['chatgpt', 'chatgpt-free'],
 ]);
 
+const POSTGREST_QUERY_TIMEOUT_MS = 10000; // 10 seconds
+
+/**
+ * Wraps a PostgREST query promise with a timeout to prevent indefinite hangs.
+ * @param {Promise} queryPromise - The PostgREST query promise
+ * @param {number} [timeoutMs=POSTGREST_QUERY_TIMEOUT_MS] - Timeout in milliseconds
+ * @returns {Promise} - Resolves with query result or rejects on timeout
+ */
+function withQueryTimeout(queryPromise, timeoutMs = POSTGREST_QUERY_TIMEOUT_MS) {
+  let timer;
+  return Promise.race([
+    queryPromise.then(
+      (result) => {
+        clearTimeout(timer);
+        return result;
+      },
+      (err) => {
+        clearTimeout(timer);
+        throw err;
+      },
+    ),
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`PostgREST query timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    }),
+  ]);
+}
+
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
-const IN_FILTER_CHUNK_SIZE = 50;
+const IN_FILTER_CHUNK_SIZE = 100;
 const QUERY_LIMIT = 5000;
 /** High row limit for large execution queries (sentiment, topics, prompt-detail, etc). */
-const WEEKS_QUERY_LIMIT = 200000;
+const WEEKS_QUERY_LIMIT = 5000;
 
 /**
  * Expected error message substrings from getOrgAndValidateAccess (see llmo-mysticat-controller).
@@ -91,7 +121,15 @@ async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerNa
     return badRequest(error.message);
   }
 
-  return handlerFn(context, Site.postgrestService);
+  try {
+    return await handlerFn(context, Site.postgrestService);
+  } catch (err) {
+    if (err.message?.includes('timed out')) {
+      log.error(`Brand presence ${handlerName} query timeout: ${err.message}`);
+      return badRequest('The request took too long to process. Please try narrowing your date range or filters.');
+    }
+    throw err;
+  }
 }
 
 /** @internal Exported for testing null/undefined fallbacks */
@@ -246,12 +284,12 @@ export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
   if (!shouldApplyFilter(siteId)) {
     return true;
   }
-  const { data, error } = await client
+  const { data, error } = await withQueryTimeout(client
     .from('sites')
     .select('id')
     .eq('id', siteId)
     .eq('organization_id', organizationId)
-    .limit(1);
+    .limit(1));
   return !error && data?.length === 1;
 }
 
@@ -261,22 +299,22 @@ export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
  */
 export async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
   if (shouldApplyFilter(siteId)) {
-    const { data: piData, error: piError } = await client
+    const { data: piData, error: piError } = await withQueryTimeout(client
       .from('page_intents')
       .select('page_intent')
       .eq('site_id', siteId)
-      .limit(QUERY_LIMIT);
+      .limit(QUERY_LIMIT));
     if (!piError && piData?.length) {
       const intents = [...new Set(piData.map((r) => r.page_intent).filter(Boolean))];
       const sorted = intents.toSorted(strCompare);
       return sorted.map((p) => toFilterOption(p, p));
     }
   } else if (!filterByBrandId) {
-    const { data: piData, error: piError } = await client
+    const { data: piData, error: piError } = await withQueryTimeout(client
       .from('page_intents')
       .select('page_intent,sites!inner(organization_id)')
       .eq('sites.organization_id', organizationId)
-      .limit(QUERY_LIMIT);
+      .limit(QUERY_LIMIT));
     if (!piError && piData?.length) {
       const intents = [...new Set(piData.map((r) => r.page_intent).filter(Boolean))];
       const sorted = intents.toSorted(strCompare);
@@ -287,11 +325,11 @@ export async function fetchPageIntents(client, organizationId, siteId, filterByB
     for (let i = 0; i < siteIds.length; i += IN_FILTER_CHUNK_SIZE) {
       chunks.push(siteIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
     }
-    const results = await Promise.all(chunks.map((chunk) => client
+    const results = await withQueryTimeout(Promise.all(chunks.map((chunk) => client
       .from('page_intents')
       .select('page_intent')
       .in('site_id', chunk)
-      .limit(QUERY_LIMIT)));
+      .limit(QUERY_LIMIT))));
     const allIntents = new Set();
     results.forEach(({ data: piData, error: piError }) => {
       if (!piError && piData?.length) {
@@ -893,12 +931,12 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const { data, error } = await client.rpc('rpc_brand_presence_execution_date_range', {
+      const { data, error } = await withQueryTimeout(client.rpc('rpc_brand_presence_execution_date_range', {
         p_organization_id: organizationId,
         p_model: model,
         p_site_id: shouldApplyFilter(siteId) ? siteId : null,
         p_brand_id: filterByBrandId || null,
-      });
+      }));
 
       if (error) {
         ctx.log.error(`Brand presence weeks PostgREST error: ${error.message}`);
@@ -960,7 +998,7 @@ async function callMarketTrackingTrendsRpc(client, organizationId, params, defau
   };
   log.info(`RPC ${rpcName} called with: ${JSON.stringify(rpcParams)}`);
   const start = performance.now();
-  const result = await client.rpc(rpcName, rpcParams);
+  const result = await withQueryTimeout(client.rpc(rpcName, rpcParams));
   const elapsed = (performance.now() - start).toFixed(0);
   log.info(`RPC ${rpcName} completed in ${elapsed}ms`);
   return result;
@@ -983,7 +1021,7 @@ async function callCompetitorSummaryRpc(client, organizationId, params, defaults
   };
   log.info(`RPC rpc_market_tracking_competitor_summary called with: ${JSON.stringify(rpcParams)}`);
   const start = performance.now();
-  const result = await client.rpc('rpc_market_tracking_competitor_summary', rpcParams);
+  const result = await withQueryTimeout(client.rpc('rpc_market_tracking_competitor_summary', rpcParams));
   const elapsed = (performance.now() - start).toFixed(0);
   log.info(`RPC rpc_market_tracking_competitor_summary completed in ${elapsed}ms`);
   return result;
@@ -1294,7 +1332,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
         q = q.ilike('origin', params.origin);
       }
 
-      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+      const { data, error } = await withQueryTimeout(q.limit(WEEKS_QUERY_LIMIT));
 
       if (error) {
         ctx.log.error(`Brand presence sentiment-overview PostgREST error: ${error.message}`);
@@ -1598,7 +1636,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const { data, error } = await client.rpc('rpc_brand_presence_topics', {
+      const { data, error } = await withQueryTimeout(client.rpc('rpc_brand_presence_topics', {
         p_organization_id: organizationId,
         p_start_date: params.startDate || defaults.startDate,
         p_end_date: params.endDate || defaults.endDate,
@@ -1617,7 +1655,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         p_sort_order: pagination.sortOrder,
         p_page_offset: pagination.page * pagination.pageSize,
         p_page_limit: pagination.pageSize,
-      });
+      }));
 
       if (error) {
         ctx.log.error(`Brand presence topics RPC error: ${error.message}`);
@@ -1698,7 +1736,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         q = q.ilike('origin', params.origin);
       }
 
-      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+      const { data, error } = await withQueryTimeout(q.limit(WEEKS_QUERY_LIMIT));
 
       if (error) {
         ctx.log.error(`Brand presence topic-prompts PostgREST error: ${error.message}`);
@@ -1831,7 +1869,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
         q = q.ilike('origin', params.origin);
       }
 
-      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+      const { data, error } = await withQueryTimeout(q.limit(WEEKS_QUERY_LIMIT));
 
       if (error) {
         ctx.log.error('Brand presence search PostgREST error', {
@@ -2112,14 +2150,14 @@ async function fetchSourcesForExecutions(client, organizationId, execIds, startD
     chunks.push(execIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
   }
 
-  const results = await Promise.all(chunks.map((chunk) => client
+  const results = await withQueryTimeout(Promise.all(chunks.map((chunk) => client
     .from('brand_presence_sources')
     .select('execution_id, execution_date, content_type, url_id, source_urls(url, hostname)')
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
     .in('execution_id', chunk)
-    .limit(WEEKS_QUERY_LIMIT)));
+    .limit(WEEKS_QUERY_LIMIT))));
 
   const allSources = [];
   for (const { data, error } of results) {
@@ -2185,7 +2223,9 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
       q = applyTopicPathFilter(q, topicName);
 
-      const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
+      const { data: execRows, error: execError } = await withQueryTimeout(
+        q.limit(WEEKS_QUERY_LIMIT),
+      );
 
       if (execError) {
         ctx.log.error(`Brand presence topic-detail PostgREST error: ${execError.message}`);
@@ -2313,7 +2353,9 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
         q = q.eq('region_code', regionCode);
       }
 
-      const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
+      const { data: execRows, error: execError } = await withQueryTimeout(
+        q.limit(WEEKS_QUERY_LIMIT),
+      );
 
       if (execError) {
         ctx.log.error(`Brand presence prompt-detail PostgREST error: ${execError.message}`);
@@ -2467,7 +2509,7 @@ function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByB
   const endDate = params.endDate || defaults.endDate;
   const model = resolveModelFromRequest(params.model);
 
-  return client.rpc('rpc_share_of_voice', {
+  return withQueryTimeout(client.rpc('rpc_share_of_voice', {
     p_organization_id: organizationId,
     p_start_date: startDate,
     p_end_date: endDate,
@@ -2481,7 +2523,7 @@ function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByB
     p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
     p_max_competitors: params.maxCompetitors
       ? Number(params.maxCompetitors) : DEFAULT_MAX_COMPETITORS,
-  });
+  }));
 }
 
 async function fetchConfiguredCompetitorNames(client, organizationId, filterByBrandId) {
@@ -2492,7 +2534,7 @@ async function fetchConfiguredCompetitorNames(client, organizationId, filterByBr
   if (filterByBrandId) {
     q = q.eq('brand_id', filterByBrandId);
   }
-  const { data, error } = await q.limit(QUERY_LIMIT);
+  const { data, error } = await withQueryTimeout(q.limit(QUERY_LIMIT));
   if (error || !data) {
     return new Set();
   }
@@ -2697,11 +2739,11 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
       // Resolve brand name for display
       let brandName = 'Our Brand';
       if (filterByBrandId) {
-        const { data: brandData } = await client
+        const { data: brandData } = await withQueryTimeout(client
           .from('brands')
           .select('name')
           .eq('id', filterByBrandId)
-          .limit(1);
+          .limit(1));
         if (brandData?.[0]?.name) {
           brandName = brandData[0].name;
         }
@@ -2786,7 +2828,7 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         rpcParams.p_topic_ids = params.topicIds;
       }
 
-      const { data, error } = await client.rpc('rpc_sentiment_movers', rpcParams);
+      const { data, error } = await withQueryTimeout(client.rpc('rpc_sentiment_movers', rpcParams));
 
       if (error) {
         ctx.log.error(`Brand presence sentiment-movers PostgREST error: ${error.message}`);
@@ -2909,7 +2951,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         params,
       );
 
-      const { data, error } = await client.rpc('rpc_brand_presence_stats', rpcParams);
+      const { data, error } = await withQueryTimeout(client.rpc('rpc_brand_presence_stats', rpcParams));
 
       if (error) {
         ctx.log.error(`Brand presence stats RPC error: ${error.message}`);
@@ -2923,13 +2965,13 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
       if (showTrends) {
         const weeks = splitDateRangeIntoWeeksBackward(startDate, endDate);
         if (weeks.length > 0) {
-          const trendResults = await Promise.all(
+          const trendResults = await withQueryTimeout(Promise.all(
             weeks.map((w) => client.rpc('rpc_brand_presence_stats', {
               ...rpcParams,
               p_start_date: w.startDate,
               p_end_date: w.endDate,
             })),
-          );
+          ));
 
           const failed = trendResults.find((r) => r.error);
           if (failed) {
