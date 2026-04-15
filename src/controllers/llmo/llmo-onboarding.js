@@ -1325,13 +1325,17 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
     }
 
-    detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname, log);
-    if (detectedCdn) {
-      siteConfig.updateLlmoDetectedCdn?.(detectedCdn);
-      log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
-      say(`:mag: Detected CDN: ${detectedCdn}`);
-    } else {
-      log.info(`CDN detection inconclusive for site ${site.getId()}`);
+    try {
+      detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname, log);
+      if (detectedCdn) {
+        siteConfig.updateLlmoDetectedCdn?.(detectedCdn);
+        log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
+        say(`:mag: Detected CDN: ${detectedCdn}`);
+      } else {
+        log.info(`CDN detection inconclusive for site ${site.getId()}`);
+      }
+    } catch (cdnError) {
+      log.warn(`CDN detection failed for site ${site.getId()}: ${cdnError.message}`);
     }
 
     // update the site config object
