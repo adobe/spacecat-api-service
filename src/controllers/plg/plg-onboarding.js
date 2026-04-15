@@ -124,7 +124,7 @@ async function postPlgOnboardingNotification(onboarding, context) {
 
   const status = onboarding.getStatus();
   const config = PLG_STATUS_NOTIFICATION_CONFIG[status];
-  /* c8 ignore next 2 */
+  /* c8 ignore next 3 */
   if (!config) {
     return;
   }
