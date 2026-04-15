@@ -3132,6 +3132,23 @@ describe('PlgOnboardingController', () => {
         expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('user-ims-id@AdobeID');
       });
 
+      it('sets trialEmail to null when getImsAdminProfile returns no email', async () => {
+        const record = createMockOnboarding({ updatedBy: 'user-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({}),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].trialEmail).to.be.null;
+      });
+
       it('sets trialEmail to null when getImsAdminProfile fails', async () => {
         const record = createMockOnboarding({ updatedBy: 'bad-ims-id@AdobeID' });
         mockDataAccess.PlgOnboarding.all.resolves([record]);
