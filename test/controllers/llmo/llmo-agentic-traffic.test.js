@@ -565,21 +565,21 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].deployedAtEdge).to.equal(true);
     });
 
-    it('caps limit at 2000', async () => {
+    it('caps limit at 500', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       const rpcCallArgs = client.rpc.firstCall.args[1];
-      expect(rpcCallArgs.p_limit).to.equal(2000);
+      expect(rpcCallArgs.p_page_limit).to.equal(500);
     });
 
-    it('uses default limit of 2000 when not specified', async () => {
+    it('uses default limit of 50 when not specified', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
-      expect(client.rpc.firstCall.args[1].p_limit).to.equal(2000);
+      expect(client.rpc.firstCall.args[1].p_page_limit).to.equal(50);
     });
 
     it('falls back to desc for an invalid sort order', async () => {
@@ -588,6 +588,27 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
+    });
+
+    it('forwards pagination and path search params to the new RPC signature', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          limit: 75,
+          pageOffset: 10,
+          urlPathSearch: 'pricing',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_page_limit: 75,
+        p_page_offset: 10,
+        p_url_path_search: 'pricing',
+      });
     });
 
     it('handles null optional fields in URL rows', async () => {
