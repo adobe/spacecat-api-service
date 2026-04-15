@@ -6,8 +6,6 @@ Returns all `brand_presence_sources` rows for a single **brand presence executio
 
 ## API Paths
 
-OpenAPI: [`api.yaml`](../openapi/api.yaml) → `/org/{spaceCatId}/brands/all/.../sources` and `/org/{spaceCatId}/brands/{brandId}/.../sources` (see [`org-brand-presence-api.yaml`](../openapi/org-brand-presence-api.yaml)).
-
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources` | Sources for an execution (any brand in the org) |

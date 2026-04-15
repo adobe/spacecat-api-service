@@ -133,10 +133,6 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
-  /org/{spaceCatId}/brands/all/brand-presence/executions/{executionId}/sources:
-    $ref: './org-brand-presence-api.yaml#/org-brand-presence-execution-sources-all'
-  /org/{spaceCatId}/brands/{brandId}/brand-presence/executions/{executionId}/sources:
-    $ref: './org-brand-presence-api.yaml#/org-brand-presence-execution-sources-by-brand'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:

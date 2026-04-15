@@ -1905,9 +1905,8 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // eslint-disable-next-line max-len
 const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
-/** Detail columns plus org/site/model for execution-sources lookup */
-// eslint-disable-next-line max-len
-const EXECUTION_SOURCES_EXEC_SELECT = `${DETAIL_SELECT}, brand_id, site_id, model`;
+/** Minimal columns for execution-sources execution row (summary + execution_date partition key). */
+const EXECUTION_SOURCES_EXEC_SELECT = 'id, execution_date, brand_id, site_id, model';
 
 /** brand_presence_sources columns plus embedded URL for execution-sources API */
 // eslint-disable-next-line max-len
