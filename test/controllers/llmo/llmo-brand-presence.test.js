@@ -15,6 +15,9 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
   addDaysToDate,
+  applyTopicPathFilter,
+  topicIdForDetailResponse,
+  topicLabelForDetailResponse,
   aggregateDetailSources,
   aggregateSentimentByWeek,
   aggregateTopicData,
@@ -27,6 +30,8 @@ import {
   createBrandPresenceWeeksHandler,
   generateIsoWeekRange,
   createFilterDimensionsHandler,
+  createRegionsHandler,
+  fetchRegionsForConfig,
   brandLinkedToSite,
   fetchDistinctPromptCountForConfig,
   fetchBrandsForOrgSite,
@@ -300,6 +305,70 @@ describe('llmo-brand-presence', () => {
     it('compares truthy strings normally', () => {
       expect(strCompare('a', 'b')).to.be.lessThan(0);
       expect(strCompare('b', 'a')).to.be.greaterThan(0);
+    });
+  });
+
+  describe('applyTopicPathFilter', () => {
+    it('uses topic_id for valid UUID strings', () => {
+      const id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const q = { eq: sinon.stub().returnsThis() };
+      applyTopicPathFilter(q, id);
+      expect(q.eq).to.have.been.calledOnceWith('topic_id', id);
+    });
+
+    it('uses topics for non-UUID values', () => {
+      const q = { eq: sinon.stub().returnsThis() };
+      applyTopicPathFilter(q, 'My Topic');
+      expect(q.eq).to.have.been.calledOnceWith('topics', 'My Topic');
+    });
+
+    it('trims whitespace for UUID detection', () => {
+      const id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const q = { eq: sinon.stub().returnsThis() };
+      applyTopicPathFilter(q, `  ${id}  `);
+      expect(q.eq).to.have.been.calledOnceWith('topic_id', id);
+    });
+  });
+
+  describe('topicIdForDetailResponse', () => {
+    it('returns topic_id from first row when present', () => {
+      const id = 'f6a7b8c9-d0e1-2345-f678-901234567890';
+      expect(topicIdForDetailResponse([{ topic_id: id }], 'Any Topic')).to.equal(id);
+    });
+
+    it('returns trimmed UUID path when rows lack topic_id', () => {
+      const id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      expect(topicIdForDetailResponse([], id)).to.equal(id);
+      expect(topicIdForDetailResponse([], `  ${id}  `)).to.equal(id);
+    });
+
+    it('returns null for name path when rows lack topic_id', () => {
+      expect(topicIdForDetailResponse([], 'My Topic')).to.be.null;
+    });
+
+    it('returns UUID path when first row topic_id is empty string', () => {
+      const id = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
+      expect(topicIdForDetailResponse([{ topic_id: '' }], id)).to.equal(id);
+    });
+  });
+
+  describe('topicLabelForDetailResponse', () => {
+    it('returns decoded path when there are no rows', () => {
+      expect(topicLabelForDetailResponse([], 'My Topic')).to.equal('My Topic');
+    });
+
+    it('returns first row topics when present', () => {
+      expect(topicLabelForDetailResponse([{ topics: 'AI Overview' }], 'ignored')).to.equal('AI Overview');
+    });
+
+    it('returns path when first row topics is null', () => {
+      const path = 'c3d4e5f6-a7b8-9012-cdef-123456789012';
+      expect(topicLabelForDetailResponse([{ topics: null, topic_id: path }], path)).to.equal(path);
+    });
+
+    it('returns path when first row topics is empty string', () => {
+      const path = 'Named Topic';
+      expect(topicLabelForDetailResponse([{ topics: '' }], path)).to.equal(path);
     });
   });
 
@@ -4879,6 +4948,44 @@ describe('llmo-brand-presence', () => {
       expect(body.items).to.have.lengthOf(1);
       expect(body.items[0].prompt).to.equal('q1');
       expect(body.totalCount).to.equal(1);
+      expect(body.topic).to.equal('PDF');
+      expect(body.topicId).to.be.null;
+    });
+
+    it('returns topic and topicId when path is a topic UUID', async () => {
+      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const rows = [
+        {
+          topic_id: topicUuid,
+          topics: 'Resolved Label',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          execution_date: '2026-03-01',
+          url: 'https://x.com',
+          error_code: null,
+          origin: 'human',
+          category_name: 'Docs',
+        },
+      ];
+      mockContext.params.topicId = topicUuid;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal('Resolved Label');
+      expect(body.topicId).to.equal(topicUuid);
+      expect(body.totalCount).to.equal(1);
     });
 
     it('returns empty items when no data', async () => {
@@ -4895,6 +5002,8 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.items).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
+      expect(body.topic).to.equal('None');
+      expect(body.topicId).to.be.null;
     });
 
     it('returns empty items when data is null', async () => {
@@ -4911,6 +5020,8 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.items).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
+      expect(body.topic).to.equal('None');
+      expect(body.topicId).to.be.null;
     });
 
     it('filters by topics column using topicId param', async () => {
@@ -4922,6 +5033,18 @@ describe('llmo-brand-presence', () => {
       await handler(mockContext);
 
       expect(client.eq).to.have.been.calledWith('topics', 'AI Art');
+    });
+
+    it('filters by topic_id when topicId param is a UUID', async () => {
+      const client = createChainableMock();
+      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      mockContext.params.topicId = topicUuid;
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('topic_id', topicUuid);
     });
 
     it('applies pagination to prompt results', async () => {
@@ -6032,10 +6155,28 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.topic).to.equal('AI Overview');
+      expect(body.topicId).to.be.null;
       expect(body.weeklyStats).to.deep.equal([]);
       expect(body.executions).to.deep.equal([]);
       expect(body.sources).to.deep.equal([]);
       expect(body.stats.averageVisibilityScore).to.equal(0);
+    });
+
+    it('returns topicId when path is UUID and no execution rows', async () => {
+      const topicUuid = 'd4e5f6a7-b8c9-0123-def0-123456789012';
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = topicUuid;
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topic).to.equal(topicUuid);
+      expect(body.topicId).to.equal(topicUuid);
     });
 
     it('returns ok with zeroed stats when data is null', async () => {
@@ -6076,6 +6217,103 @@ describe('llmo-brand-presence', () => {
       expect(client.eq).to.have.been.calledWith('topics', 'AI Overview');
     });
 
+    it('filters by topic_id when topicId path is a UUID', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      mockContext.params.topicId = topicUuid;
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('topic_id', topicUuid);
+    });
+
+    it('returns topics display name in body.topic when path used a UUID', async () => {
+      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const rows = [
+        {
+          id: 'exec-1',
+          topics: 'Resolved Topic Title',
+          topic_id: topicUuid,
+          prompt: 'q',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 10,
+          position: '1',
+          sentiment: 'Positive',
+          volume: '1',
+          origin: 'o',
+          category_name: 'C',
+          execution_date: '2026-03-01',
+          answer: 'a',
+          url: '',
+          error_code: null,
+          business_competitors: '',
+          detected_brand_mentions: '',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = topicUuid;
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal('Resolved Topic Title');
+      expect(body.topicId).to.equal(topicUuid);
+    });
+
+    it('uses path param for body.topic when rows have null topics', async () => {
+      const topicUuid = 'c3d4e5f6-a7b8-9012-cdef-123456789012';
+      const rows = [
+        {
+          id: 'exec-1',
+          topics: null,
+          topic_id: topicUuid,
+          prompt: 'q',
+          region_code: 'US',
+          mentions: false,
+          citations: false,
+          visibility_score: 10,
+          position: '1',
+          sentiment: 'Neutral',
+          volume: '1',
+          origin: 'o',
+          category_name: 'C',
+          execution_date: '2026-03-01',
+          answer: 'a',
+          url: '',
+          error_code: null,
+          business_competitors: '',
+          detected_brand_mentions: '',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = topicUuid;
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal(topicUuid);
+      expect(body.topicId).to.equal(topicUuid);
+    });
+
     it('filters by brand_id when brandId is a UUID', async () => {
       const client = createTableAwareMock({
         brand_presence_executions: { data: [], error: null },
@@ -6091,12 +6329,55 @@ describe('llmo-brand-presence', () => {
       expect(client.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000001');
     });
 
-    it('returns executions sorted newest first and includes all mapped fields', async () => {
+    it('returns topicId from row when path is topic name', async () => {
+      const topicDbId = 'e5f6a7b8-c9d0-1234-e789-012345678901';
       const rows = [
         {
           id: 'exec-1',
           topics: 'AI Overview',
+          topic_id: topicDbId,
           prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 10,
+          position: '1',
+          sentiment: 'Positive',
+          volume: '1',
+          origin: 'o',
+          category_name: 'C',
+          execution_date: '2026-03-01',
+          answer: 'a',
+          url: '',
+          error_code: null,
+          business_competitors: '',
+          detected_brand_mentions: '',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'AI%20Overview';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topic).to.equal('AI Overview');
+      expect(body.topicId).to.equal(topicDbId);
+    });
+
+    it('returns executions sorted newest first and includes all mapped fields', async () => {
+      const topicRowId = 'a0b1c2d3-e4f5-6789-a012-3456789abcde';
+      const rows = [
+        {
+          id: 'exec-1',
+          topic_id: topicRowId,
+          topics: 'AI Overview',
+          prompt: 'q1',
+          prompt_id: 'p1-id',
           region_code: 'US',
           mentions: true,
           citations: false,
@@ -6111,11 +6392,15 @@ describe('llmo-brand-presence', () => {
           answer: 'Some answer',
           url: 'https://a.com',
           error_code: null,
+          business_competitors: null,
+          detected_brand_mentions: null,
         },
         {
           id: 'exec-2',
+          topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'q2',
+          prompt_id: 'p2-id',
           region_code: 'US',
           mentions: false,
           citations: true,
@@ -6129,6 +6414,8 @@ describe('llmo-brand-presence', () => {
           answer: 'Another answer',
           url: 'https://b.com',
           error_code: 'E01',
+          business_competitors: 'CompA;CompB',
+          detected_brand_mentions: 'Our Brand, Other',
         },
       ];
       const client = createTableAwareMock({
@@ -6147,6 +6434,10 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[0].executionDate).to.equal('2026-03-08');
       expect(body.executions[1].executionDate).to.equal('2026-03-01');
       expect(body.executions[0].prompt).to.equal('q2');
+      expect(body.executions[0].promptId).to.equal('p2-id');
+      expect(body.executions[0].executionId).to.equal('exec-2');
+      expect(body.executions[1].promptId).to.equal('p1-id');
+      expect(body.executions[1].executionId).to.equal('exec-1');
       expect(body.executions[0].mentions).to.equal(false);
       expect(body.executions[0].citations).to.equal(true);
       expect(body.executions[0].errorCode).to.equal('E01');
@@ -6154,6 +6445,11 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[1].position).to.equal('');
       expect(body.executions[1].sentiment).to.equal('');
       expect(body.executions[1].category).to.equal('');
+      expect(body.executions[0].businessCompetitors).to.equal('CompA;CompB');
+      expect(body.executions[0].detectedBrandMentions).to.equal('Our Brand, Other');
+      expect(body.executions[1].businessCompetitors).to.equal('');
+      expect(body.executions[1].detectedBrandMentions).to.equal('');
+      expect(body.topicId).to.equal(topicRowId);
       expect(body.weeklyStats.length).to.be.greaterThan(0);
     });
 
@@ -6319,8 +6615,12 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.executions[0].prompt).to.equal('');
+      expect(body.executions[0].promptId).to.equal('');
+      expect(body.executions[0].executionId).to.equal('');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
+      expect(body.executions[0].businessCompetitors).to.equal('');
+      expect(body.executions[0].detectedBrandMentions).to.equal('');
     });
   });
 
@@ -6391,12 +6691,31 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.topic).to.equal('AI Overview');
+      expect(body.topicId).to.be.null;
       expect(body.prompt).to.equal('What is AI?');
       expect(body.weeklyStats).to.deep.equal([]);
       expect(body.executions).to.deep.equal([]);
       expect(body.sources).to.deep.equal([]);
       expect(body.stats.visibilityScore).to.equal(0);
       expect(body.stats.mentions).to.equal(0);
+    });
+
+    it('returns topicId when path is UUID and no execution rows (prompt-detail)', async () => {
+      const topicUuid = 'e5f6a7b8-c9d0-1234-e789-012345678902';
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = topicUuid;
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.topic).to.equal(topicUuid);
+      expect(body.topicId).to.equal(topicUuid);
     });
 
     it('returns ok with zeroed stats when data is null', async () => {
@@ -6436,6 +6755,108 @@ describe('llmo-brand-presence', () => {
 
       expect(client.eq).to.have.been.calledWith('topics', 'AI Overview');
       expect(client.eq).to.have.been.calledWith('prompt', 'What is AI?');
+    });
+
+    it('filters by topic_id when topicId path is a UUID', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      const topicUuid = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
+      mockContext.params.topicId = topicUuid;
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('topic_id', topicUuid);
+      expect(client.eq).to.have.been.calledWith('prompt', 'What is AI?');
+    });
+
+    it('returns topics display name in body.topic when path used a UUID (prompt-detail)', async () => {
+      const topicUuid = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
+      const rows = [
+        {
+          id: 'e1',
+          topics: 'Shown Topic Name',
+          topic_id: topicUuid,
+          prompt: 'What is AI?',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          volume: '100',
+          origin: 'organic',
+          category_name: 'Search',
+          execution_date: '2026-03-01',
+          answer: 'Answer A',
+          url: 'https://a.com',
+          error_code: null,
+          business_competitors: '',
+          detected_brand_mentions: '',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = topicUuid;
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal('Shown Topic Name');
+      expect(body.topicId).to.equal(topicUuid);
+    });
+
+    it('uses path param for body.topic when rows have null topics (prompt-detail)', async () => {
+      const topicUuid = 'd4e5f6a7-b8c9-0123-def4-567890abcdef';
+      const rows = [
+        {
+          id: 'e1',
+          topics: null,
+          topic_id: topicUuid,
+          prompt: 'What is AI?',
+          prompt_id: 'p1',
+          region_code: 'US',
+          mentions: true,
+          citations: true,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          volume: '100',
+          origin: 'organic',
+          category_name: 'Search',
+          execution_date: '2026-03-01',
+          answer: 'Answer A',
+          url: 'https://a.com',
+          error_code: null,
+          business_competitors: '',
+          detected_brand_mentions: '',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = topicUuid;
+      mockContext.data = { prompt: 'What is AI?' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topic).to.equal(topicUuid);
+      expect(body.topicId).to.equal(topicUuid);
     });
 
     it('applies region_code filter when promptRegion is provided', async () => {
@@ -6482,11 +6903,14 @@ describe('llmo-brand-presence', () => {
     });
 
     it('computes averaged stats and returns executions sorted newest first', async () => {
+      const topicRowId = 'f1a2b3c4-d5e6-7890-abcd-ef1234567890';
       const rows = [
         {
           id: 'e1',
+          topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'What is AI?',
+          prompt_id: 'pd-older',
           region_code: 'US',
           mentions: true,
           citations: true,
@@ -6500,11 +6924,15 @@ describe('llmo-brand-presence', () => {
           answer: 'Answer A',
           url: 'https://a.com',
           error_code: null,
+          business_competitors: null,
+          detected_brand_mentions: null,
         },
         {
           id: 'e2',
+          topic_id: topicRowId,
           topics: 'AI Overview',
           prompt: 'What is AI?',
+          prompt_id: 'pd-newer',
           region_code: 'US',
           mentions: false,
           citations: false,
@@ -6518,6 +6946,8 @@ describe('llmo-brand-presence', () => {
           answer: 'Answer B',
           url: '',
           error_code: null,
+          business_competitors: 'Rival;OtherCo',
+          detected_brand_mentions: 'Acme',
         },
       ];
       const client = createTableAwareMock({
@@ -6541,6 +6971,15 @@ describe('llmo-brand-presence', () => {
       // Sorted newest first
       expect(body.executions[0].executionDate).to.equal('2026-03-08');
       expect(body.executions[1].executionDate).to.equal('2026-03-01');
+      expect(body.executions[0].promptId).to.equal('pd-newer');
+      expect(body.executions[1].promptId).to.equal('pd-older');
+      expect(body.executions[0].executionId).to.equal('e2');
+      expect(body.executions[1].executionId).to.equal('e1');
+      expect(body.executions[0].businessCompetitors).to.equal('Rival;OtherCo');
+      expect(body.executions[0].detectedBrandMentions).to.equal('Acme');
+      expect(body.executions[1].businessCompetitors).to.equal('');
+      expect(body.executions[1].detectedBrandMentions).to.equal('');
+      expect(body.topicId).to.equal(topicRowId);
     });
 
     it('counts negative sentiment rows but scores them at 0', async () => {
@@ -6712,8 +7151,13 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.executions[0].prompt).to.equal('');
+      expect(body.executions[0].promptId).to.equal('');
+      expect(body.executions[0].executionId).to.equal('e1');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
+      expect(body.executions[0].businessCompetitors).to.equal('');
+      expect(body.executions[0].detectedBrandMentions).to.equal('');
+      expect(body.executions[1].executionId).to.equal('e2');
     });
 
     it('includes sources aggregated from fetchSourcesForExecutions', async () => {
@@ -6761,6 +7205,89 @@ describe('llmo-brand-presence', () => {
       expect(body.sources).to.have.lengthOf(1);
       expect(body.sources[0].hostname).to.equal('docs.example.com');
       expect(body.sources[0].contentType).to.equal('pdf');
+    });
+  });
+
+  describe('fetchRegionsForConfig', () => {
+    it('returns [] when query returns an error', async () => {
+      const client = createTableAwareMock({
+        regions: { data: null, error: { message: 'regions query failed' } },
+      });
+      const result = await fetchRegionsForConfig(client);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns [] when data is empty', async () => {
+      const client = createTableAwareMock({
+        regions: { data: [], error: null },
+      });
+      const result = await fetchRegionsForConfig(client);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns FilterOption array when data is present', async () => {
+      const client = createTableAwareMock({
+        regions: {
+          data: [
+            { code: 'US', name: 'United States' },
+            { code: 'WW', name: 'Global' },
+          ],
+          error: null,
+        },
+      });
+      const result = await fetchRegionsForConfig(client);
+      expect(result).to.deep.equal([
+        { id: 'US', label: 'United States' },
+        { id: 'WW', label: 'Global' },
+      ]);
+    });
+  });
+
+  describe('createRegionsHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createRegionsHandler();
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Regions API requires PostgREST (DATA_SERVICE_PROVIDER=postgres)',
+      );
+    });
+
+    it('returns ok with region list when postgrestService is present', async () => {
+      const client = createTableAwareMock({
+        regions: {
+          data: [
+            { code: 'US', name: 'United States' },
+            { code: 'WW', name: 'Global' },
+          ],
+          error: null,
+        },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createRegionsHandler();
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal([
+        { id: 'US', label: 'United States' },
+        { id: 'WW', label: 'Global' },
+      ]);
+    });
+
+    it('returns badRequest when fetchRegionsForConfig throws', async () => {
+      const client = createTableAwareMock({});
+      client.from = sinon.stub().throws(new Error('DB connection lost'));
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createRegionsHandler();
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockContext.log.error).to.have.been.calledWith('Regions handler error: DB connection lost');
     });
   });
 });

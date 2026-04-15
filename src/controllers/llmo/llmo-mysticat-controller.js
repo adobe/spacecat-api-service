@@ -22,11 +22,26 @@ import {
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
+  createRegionsHandler,
 } from './llmo-brand-presence.js';
 import {
   createAgenticTrafficGlobalGetHandler,
   createAgenticTrafficGlobalPostHandler,
 } from './llmo-agentic-traffic-global.js';
+import {
+  createAgenticTrafficKpisHandler,
+  createAgenticTrafficKpisTrendHandler,
+  createAgenticTrafficByRegionHandler,
+  createAgenticTrafficByCategoryHandler,
+  createAgenticTrafficByPageTypeHandler,
+  createAgenticTrafficByStatusHandler,
+  createAgenticTrafficByUserAgentHandler,
+  createAgenticTrafficByUrlHandler,
+  createAgenticTrafficFilterDimensionsHandler,
+  createAgenticTrafficWeeksHandler,
+  createAgenticTrafficMoversHandler,
+  createAgenticTrafficUrlBrandPresenceHandler,
+} from './llmo-agentic-traffic.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -94,10 +109,53 @@ function LlmoMysticatController(ctx) {
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getRegions = createRegionsHandler();
   const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
     validateGlobalAgenticTrafficReadAccess,
   );
   const postAgenticTrafficGlobal = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+
+  const getSiteAndValidateAccess = async (context) => {
+    const { siteId } = context.params;
+    const { dataAccess } = context;
+    const { Site, Organization } = dataAccess;
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      throw new Error(`Site not found: ${siteId}`);
+    }
+    const organization = await Organization.findById(site.getOrganizationId());
+    if (!organization) {
+      throw new Error(`Organization not found for site: ${siteId}`);
+    }
+    if (!await hasLlmoOrganizationAccess(organization)) {
+      throw new Error('Only users belonging to the organization can view agentic traffic data');
+    }
+    return { site, organization };
+  };
+
+  const getAgenticTrafficKpis = createAgenticTrafficKpisHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficKpisTrend = createAgenticTrafficKpisTrendHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByRegion = createAgenticTrafficByRegionHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByCategory = createAgenticTrafficByCategoryHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByPageType = createAgenticTrafficByPageTypeHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByStatus = createAgenticTrafficByStatusHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByUserAgent = createAgenticTrafficByUserAgentHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByUrl = createAgenticTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficFilterDimensions = createAgenticTrafficFilterDimensionsHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficWeeks = createAgenticTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficMovers = createAgenticTrafficMoversHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
+    getSiteAndValidateAccess,
+  );
 
   return {
     getFilterDimensions,
@@ -113,8 +171,21 @@ function LlmoMysticatController(ctx) {
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
+    getRegions,
     getAgenticTrafficGlobal,
     postAgenticTrafficGlobal,
+    getAgenticTrafficKpis,
+    getAgenticTrafficKpisTrend,
+    getAgenticTrafficByRegion,
+    getAgenticTrafficByCategory,
+    getAgenticTrafficByPageType,
+    getAgenticTrafficByStatus,
+    getAgenticTrafficByUserAgent,
+    getAgenticTrafficByUrl,
+    getAgenticTrafficFilterDimensions,
+    getAgenticTrafficWeeks,
+    getAgenticTrafficMovers,
+    getAgenticTrafficUrlBrandPresence,
   };
 }
 

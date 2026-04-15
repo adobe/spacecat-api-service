@@ -106,15 +106,21 @@ describe('edge-routing-auth', () => {
   });
 
   describe('hasPaidLlmoProductContext', () => {
-    it('returns false when productContexts missing or empty', () => {
+    it('returns false when projectedProductContext missing or empty', () => {
       expect(hasPaidLlmoProductContext({})).to.equal(false);
-      expect(hasPaidLlmoProductContext({ productContexts: [] })).to.equal(false);
+      expect(hasPaidLlmoProductContext({ projectedProductContext: [] })).to.equal(false);
     });
 
     it('returns true when dx_llmo service code is present', () => {
       expect(hasPaidLlmoProductContext({
-        productContexts: [{ serviceCode: 'dx_llmo' }],
+        projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }],
       })).to.equal(true);
+    });
+
+    it('returns false when service code does not match', () => {
+      expect(hasPaidLlmoProductContext({
+        projectedProductContext: [{ prodCtx: { serviceCode: 'other' } }],
+      })).to.equal(false);
     });
   });
 
@@ -129,7 +135,9 @@ describe('edge-routing-auth', () => {
         },
       },
       imsClient: {
-        getImsUserProfile: sandbox.stub().resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] }),
+        getImsUserProfile: sandbox.stub().resolves({
+          projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }],
+        }),
         getImsUserOrganizations: sandbox.stub().resolves([]),
       },
     });
@@ -164,7 +172,9 @@ describe('edge-routing-auth', () => {
 
     it('rejects paid users without LLMO product context', async () => {
       const ctx = baseCtx();
-      ctx.imsClient.getImsUserProfile.resolves({ productContexts: [{ serviceCode: 'other' }] });
+      ctx.imsClient.getImsUserProfile.resolves({
+        projectedProductContext: [{ prodCtx: { serviceCode: 'other' } }],
+      });
       await expect(
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
