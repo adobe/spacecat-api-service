@@ -60,6 +60,10 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/trending-urls',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/cited-domains',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/cited-domains',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/domain-urls',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts',
 
   // LLMO Opportunities - org-scoped, LLMO product; not yet required by S2S consumers
   'GET /org/:spaceCatId/opportunities/count',

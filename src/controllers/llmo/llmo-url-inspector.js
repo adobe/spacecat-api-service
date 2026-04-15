@@ -344,3 +344,143 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
     },
   );
 }
+
+/**
+ * Creates the getUrlInspectorDomainUrls handler.
+ * Phase 2 drilldown: paginated URLs within a specific domain.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createUrlInspectorDomainUrlsHandler(
+  getOrgAndValidateAccess,
+) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'url-inspector-domain-urls',
+    async (ctx, client) => {
+      const { spaceCatId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const pagination = parsePaginationParams(ctx, { defaultPageSize: 50 });
+      const defaults = defaultDateRange();
+      const q = ctx.data || {};
+
+      if (!shouldApplyFilter(params.siteId)) {
+        return badRequest('siteId is required for URL Inspector endpoints');
+      }
+
+      const hostname = q.hostname || q.domain;
+      if (!hostname) {
+        return badRequest('hostname is required for domain URL drilldown');
+      }
+
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(
+        client,
+        spaceCatId,
+        params.siteId,
+      );
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+
+      const { model, error: modelError } = resolveUrlInspectorPlatform(params);
+      if (modelError) return badRequest(modelError);
+
+      const channel = q.channel || q.selectedChannel;
+      const offset = pagination.page * pagination.pageSize;
+
+      const { data, error } = await client.rpc('rpc_url_inspector_domain_urls', {
+        p_site_id: params.siteId,
+        p_start_date: params.startDate || defaults.startDate,
+        p_end_date: params.endDate || defaults.endDate,
+        p_hostname: hostname,
+        p_channel: shouldApplyFilter(channel) ? channel : null,
+        p_platform: model,
+        p_limit: pagination.pageSize,
+        p_offset: offset,
+      });
+
+      if (error) {
+        ctx.log.error(`URL Inspector domain URLs RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const rows = data || [];
+      const totalCount = rows.length > 0
+        ? Number(rows[0].total_count ?? 0) : 0;
+
+      const urls = rows.map((r) => ({
+        url: r.url || '',
+        contentType: r.content_type || '',
+        citations: Number(r.citations ?? 0),
+      }));
+
+      return ok({ urls, totalCount });
+    },
+  );
+}
+
+/**
+ * Creates the getUrlInspectorUrlPrompts handler.
+ * Phase 3 drilldown: prompts that cited a specific URL.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createUrlInspectorUrlPromptsHandler(
+  getOrgAndValidateAccess,
+) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'url-inspector-url-prompts',
+    async (ctx, client) => {
+      const { spaceCatId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const q = ctx.data || {};
+
+      if (!shouldApplyFilter(params.siteId)) {
+        return badRequest('siteId is required for URL Inspector endpoints');
+      }
+
+      const urlId = q.urlId || q.url_id;
+      if (!urlId) {
+        return badRequest('urlId is required for URL prompt breakdown');
+      }
+
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(
+        client,
+        spaceCatId,
+        params.siteId,
+      );
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+
+      const { model, error: modelError } = resolveUrlInspectorPlatform(params);
+      if (modelError) return badRequest(modelError);
+
+      const { data, error } = await client.rpc('rpc_url_inspector_url_prompts', {
+        p_site_id: params.siteId,
+        p_start_date: params.startDate || defaults.startDate,
+        p_end_date: params.endDate || defaults.endDate,
+        p_url_id: urlId,
+        p_platform: model,
+      });
+
+      if (error) {
+        ctx.log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const rows = data || [];
+      const prompts = rows.map((r) => ({
+        prompt: r.prompt || '',
+        category: r.category || '',
+        region: r.region || '',
+        topics: r.topics || '',
+        citations: Number(r.citations ?? 0),
+      }));
+
+      return ok({ prompts });
+    },
+  );
+}

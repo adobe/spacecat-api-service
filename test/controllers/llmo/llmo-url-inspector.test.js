@@ -24,6 +24,12 @@ import {
 use(sinonChai);
 
 const ORG_ID = '11111111-1111-1111-1111-111111111111';
+
+/** Parse response body whether it's a JSON string or already an object. */
+function parseBody(response) {
+  if (typeof response.body === 'string') return JSON.parse(response.body);
+  return response.body;
+}
 const SITE_ID = '22222222-2222-2222-2222-222222222222';
 const BRAND_ID = '33333333-3333-3333-3333-333333333333';
 
@@ -109,7 +115,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = response.body ? JSON.parse(response.body) : response;
+      const body = parseBody(response);
 
       expect(response.status).to.equal(200);
       expect(body.stats.totalPromptsCited).to.equal(10);
@@ -160,7 +166,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = JSON.parse(response.body);
+      const body = parseBody(response);
 
       expect(response.status).to.equal(200);
       expect(body.stats.totalPromptsCited).to.equal(0);
@@ -227,7 +233,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = JSON.parse(response.body);
+      const body = parseBody(response);
 
       expect(response.status).to.equal(200);
       expect(body.urls).to.have.length(2);
@@ -244,7 +250,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = JSON.parse(response.body);
+      const body = parseBody(response);
 
       expect(response.status).to.equal(200);
       expect(body.urls).to.have.length(0);
@@ -311,7 +317,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = JSON.parse(response.body);
+      const body = parseBody(response);
 
       expect(response.status).to.equal(200);
       expect(body.totalNonOwnedUrls).to.equal(500);
@@ -353,7 +359,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = JSON.parse(response.body);
+      const body = parseBody(response);
 
       expect(body.urls).to.have.length(1);
       expect(body.urls[0].prompts).to.have.length(1);
@@ -367,7 +373,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = JSON.parse(response.body);
+      const body = parseBody(response);
 
       expect(response.status).to.equal(200);
       expect(body.urls).to.have.length(0);
@@ -418,7 +424,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = JSON.parse(response.body);
+      const body = parseBody(response);
 
       expect(response.status).to.equal(200);
       expect(body.domains).to.have.length(2);

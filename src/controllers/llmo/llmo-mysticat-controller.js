@@ -28,6 +28,8 @@ import {
   createUrlInspectorOwnedUrlsHandler,
   createUrlInspectorTrendingUrlsHandler,
   createUrlInspectorCitedDomainsHandler,
+  createUrlInspectorDomainUrlsHandler,
+  createUrlInspectorUrlPromptsHandler,
 } from './llmo-url-inspector.js';
 
 /**
@@ -72,6 +74,12 @@ function LlmoMysticatController(ctx) {
   const getUrlInspectorCitedDomains = createUrlInspectorCitedDomainsHandler(
     getOrgAndValidateAccess,
   );
+  const getUrlInspectorDomainUrls = createUrlInspectorDomainUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorUrlPrompts = createUrlInspectorUrlPromptsHandler(
+    getOrgAndValidateAccess,
+  );
 
   return {
     getFilterDimensions,
@@ -90,6 +98,8 @@ function LlmoMysticatController(ctx) {
     getUrlInspectorOwnedUrls,
     getUrlInspectorTrendingUrls,
     getUrlInspectorCitedDomains,
+    getUrlInspectorDomainUrls,
+    getUrlInspectorUrlPrompts,
   };
 }
 

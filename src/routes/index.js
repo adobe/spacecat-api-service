@@ -447,6 +447,10 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/trending-urls': llmoMysticatController.getUrlInspectorTrendingUrls,
     'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/cited-domains': llmoMysticatController.getUrlInspectorCitedDomains,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/cited-domains': llmoMysticatController.getUrlInspectorCitedDomains,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
 
     // LLMO Opportunities (org-level)
     'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
