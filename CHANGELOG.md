@@ -1,3 +1,24 @@
+## [1.437.3](https://github.com/adobe/spacecat-api-service/compare/v1.437.2...v1.437.3) (2026-04-15)
+
+
+### Bug Fixes
+
+* resolve topic/category by name instead of slug in prompt upsert ([#2199](https://github.com/adobe/spacecat-api-service/issues/2199)) ([85d8f34](https://github.com/adobe/spacecat-api-service/commit/85d8f34d1943915c967d7b70d9114bbc80ca77b6))
+
+## [1.437.2](https://github.com/adobe/spacecat-api-service/compare/v1.437.1...v1.437.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* edge routing user profile validation ([#2211](https://github.com/adobe/spacecat-api-service/issues/2211)) ([1561c75](https://github.com/adobe/spacecat-api-service/commit/1561c75168677a2dfcbb1f3318a3b1ee1aad4bd7))
+
+## [1.437.1](https://github.com/adobe/spacecat-api-service/compare/v1.437.0...v1.437.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/mysticat-shared-seo-client to v1.2.2 ([#2209](https://github.com/adobe/spacecat-api-service/issues/2209)) ([d169a63](https://github.com/adobe/spacecat-api-service/commit/d169a637bc0f47e99a38904268426b0dbab3ed29))
+
 # [1.437.0](https://github.com/adobe/spacecat-api-service/compare/v1.436.12...v1.437.0) (2026-04-14)
 
 

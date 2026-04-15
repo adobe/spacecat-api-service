@@ -22,6 +22,7 @@ import {
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
+  createRegionsHandler,
 } from './llmo-brand-presence.js';
 import {
   createAgenticTrafficGlobalGetHandler,
@@ -108,6 +109,7 @@ function LlmoMysticatController(ctx) {
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getRegions = createRegionsHandler();
   const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
     validateGlobalAgenticTrafficReadAccess,
   );
@@ -169,6 +171,7 @@ function LlmoMysticatController(ctx) {
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
+    getRegions,
     getAgenticTrafficGlobal,
     postAgenticTrafficGlobal,
     getAgenticTrafficKpis,

@@ -141,6 +141,9 @@ export const INTERNAL_ROUTES = [
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
+
+  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
+  'GET /v2/regions',
 ];
 
 /**

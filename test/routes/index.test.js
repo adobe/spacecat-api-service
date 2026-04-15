@@ -270,6 +270,7 @@ describe('getRouteHandlers', () => {
     getFilterDimensions: () => null,
     getAgenticTrafficGlobal: () => null,
     postAgenticTrafficGlobal: () => null,
+    getRegions: () => null,
     getAgenticTrafficKpis: () => null,
     getAgenticTrafficKpisTrend: () => null,
     getAgenticTrafficByRegion: () => null,
@@ -524,6 +525,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers',
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
+      'GET /v2/regions',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -546,6 +548,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /llmo/onboard/update-query-index']).to.equal(mockLlmoController.updateQueryIndex);
     expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
     expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
+    expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
     expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);

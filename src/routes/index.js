@@ -176,6 +176,7 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'GET /v2/regions': llmoMysticatController.getRegions,
     'GET /v2/orgs/:spaceCatId/brands': brandsController.listBrandsForOrg,
     'GET /v2/orgs/:spaceCatId/brands/:brandId': brandsController.getBrandForOrg,
     'GET /v2/orgs/:spaceCatId/categories': brandsController.listCategoriesForOrg,

@@ -27,6 +27,8 @@ import {
   createBrandPresenceWeeksHandler,
   generateIsoWeekRange,
   createFilterDimensionsHandler,
+  createRegionsHandler,
+  fetchRegionsForConfig,
   brandLinkedToSite,
   fetchDistinctPromptCountForConfig,
   fetchBrandsForOrgSite,
@@ -6761,6 +6763,89 @@ describe('llmo-brand-presence', () => {
       expect(body.sources).to.have.lengthOf(1);
       expect(body.sources[0].hostname).to.equal('docs.example.com');
       expect(body.sources[0].contentType).to.equal('pdf');
+    });
+  });
+
+  describe('fetchRegionsForConfig', () => {
+    it('returns [] when query returns an error', async () => {
+      const client = createTableAwareMock({
+        regions: { data: null, error: { message: 'regions query failed' } },
+      });
+      const result = await fetchRegionsForConfig(client);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns [] when data is empty', async () => {
+      const client = createTableAwareMock({
+        regions: { data: [], error: null },
+      });
+      const result = await fetchRegionsForConfig(client);
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns FilterOption array when data is present', async () => {
+      const client = createTableAwareMock({
+        regions: {
+          data: [
+            { code: 'US', name: 'United States' },
+            { code: 'WW', name: 'Global' },
+          ],
+          error: null,
+        },
+      });
+      const result = await fetchRegionsForConfig(client);
+      expect(result).to.deep.equal([
+        { id: 'US', label: 'United States' },
+        { id: 'WW', label: 'Global' },
+      ]);
+    });
+  });
+
+  describe('createRegionsHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createRegionsHandler();
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Regions API requires PostgREST (DATA_SERVICE_PROVIDER=postgres)',
+      );
+    });
+
+    it('returns ok with region list when postgrestService is present', async () => {
+      const client = createTableAwareMock({
+        regions: {
+          data: [
+            { code: 'US', name: 'United States' },
+            { code: 'WW', name: 'Global' },
+          ],
+          error: null,
+        },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createRegionsHandler();
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal([
+        { id: 'US', label: 'United States' },
+        { id: 'WW', label: 'Global' },
+      ]);
+    });
+
+    it('returns badRequest when fetchRegionsForConfig throws', async () => {
+      const client = createTableAwareMock({});
+      client.from = sinon.stub().throws(new Error('DB connection lost'));
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createRegionsHandler();
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockContext.log.error).to.have.been.calledWith('Regions handler error: DB connection lost');
     });
   });
 });
