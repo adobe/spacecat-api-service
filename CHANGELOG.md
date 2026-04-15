@@ -1,3 +1,10 @@
+# [1.443.0](https://github.com/adobe/spacecat-api-service/compare/v1.442.1...v1.443.0) (2026-04-15)
+
+
+### Features
+
+* url performance pagination for agentic traffic | LLMO-4000 ([#2219](https://github.com/adobe/spacecat-api-service/issues/2219)) ([c149d15](https://github.com/adobe/spacecat-api-service/commit/c149d15b13335b6db572fc97e535eedf4f0f3544))
+
 ## [1.442.1](https://github.com/adobe/spacecat-api-service/compare/v1.442.0...v1.442.1) (2026-04-15)
 
 
