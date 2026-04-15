@@ -15,6 +15,8 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
   addDaysToDate,
+  applyExecutionCategoryFilter,
+  applyExecutionRegionFilter,
   applyTopicPathFilter,
   topicIdForDetailResponse,
   topicLabelForDetailResponse,
@@ -24,6 +26,7 @@ import {
   aggregateWeeklyDetailStats,
   buildPromptDetails,
   aggregateShareOfVoice,
+  buildScalarRpcCategoryRegion,
   buildPromptKey,
   buildTopicPromptKey,
   createBrandPresenceStatsHandler,
@@ -50,7 +53,12 @@ import {
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   dateToIsoWeek,
+  expandBrandPresenceStatsRpcSlices,
+  extractCategoryRegionFromQuery,
   getWeekDateRange,
+  mergeBrandPresenceStatsRpcRows,
+  mergeUniqueOrderedStrings,
+  parseListParam,
   splitDateRangeIntoWeeksBackward,
   strCompare,
   toFilterOption,
@@ -306,6 +314,409 @@ describe('llmo-brand-presence', () => {
     it('compares truthy strings normally', () => {
       expect(strCompare('a', 'b')).to.be.lessThan(0);
       expect(strCompare('b', 'a')).to.be.greaterThan(0);
+    });
+  });
+
+  describe('parseListParam / extractCategoryRegionFromQuery', () => {
+    it('parseListParam accepts arrays, comma strings, and trims', () => {
+      expect(parseListParam([' a ', 'b'])).to.deep.equal(['a', 'b']);
+      expect(parseListParam('x, y')).to.deep.equal(['x', 'y']);
+      expect(parseListParam(null)).to.deep.equal([]);
+    });
+
+    it('parseListParam wraps scalar non-string values', () => {
+      expect(parseListParam(42)).to.deep.equal(['42']);
+    });
+
+    it('parseListParam drops null entries inside arrays', () => {
+      expect(parseListParam(['a', null, 'b'])).to.deep.equal(['a', 'b']);
+    });
+
+    it('extractCategoryRegionFromQuery merges plural and singular params', () => {
+      const q = {
+        category_ids: '0178a3f0-1234-7000-8000-000000000001',
+        categoryId: '0178a3f0-1234-7000-8000-000000000002',
+        regionCodes: 'US,DE',
+      };
+      const r = extractCategoryRegionFromQuery(q);
+      expect(r.categoryUuidIds).to.have.lengthOf(2);
+      expect(r.regionCodesList).to.deep.equal(['US', 'DE']);
+    });
+
+    it('extractCategoryRegionFromQuery accepts region_codes alias', () => {
+      const r = extractCategoryRegionFromQuery({ region_codes: 'FR' });
+      expect(r.regionCodesList).to.deep.equal(['FR']);
+    });
+
+    it('extractCategoryRegionFromQuery dedupes overlapping singular and plural category values', () => {
+      const u = '0178a3f0-1234-7000-8000-000000000001';
+      const r = extractCategoryRegionFromQuery({ categoryIds: u, categoryId: u });
+      expect(r.categoryUuidIds).to.have.lengthOf(1);
+    });
+
+    it('extractCategoryRegionFromQuery ignores null singular categoryId', () => {
+      const r = extractCategoryRegionFromQuery({ categoryIds: 'Foo', categoryId: null });
+      expect(r.categoryNames).to.deep.equal(['Foo']);
+    });
+
+    it('mergeUniqueOrderedStrings skips null entries and duplicate keys', () => {
+      expect(mergeUniqueOrderedStrings([null, 'a'], null)).to.deep.equal(['a']);
+      expect(mergeUniqueOrderedStrings(['b'], 'B')).to.deep.equal(['b']);
+      expect(mergeUniqueOrderedStrings(['x'], '')).to.deep.equal(['x']);
+      expect(mergeUniqueOrderedStrings(['  ', 'ok'], null)).to.deep.equal(['ok']);
+      expect(mergeUniqueOrderedStrings(['a'], undefined)).to.deep.equal(['a']);
+      expect(mergeUniqueOrderedStrings([], 'solo')).to.deep.equal(['solo']);
+      expect(mergeUniqueOrderedStrings('', 'solo')).to.deep.equal(['solo']);
+      expect(mergeUniqueOrderedStrings(undefined, 'z')).to.deep.equal(['z']);
+      expect(mergeUniqueOrderedStrings(null, 'y')).to.deep.equal(['y']);
+    });
+  });
+
+  describe('mergeBrandPresenceStatsRpcRows / expandBrandPresenceStatsRpcSlices', () => {
+    it('mergeBrandPresenceStatsRpcRows returns zeros for empty input', () => {
+      expect(mergeBrandPresenceStatsRpcRows([]).total_executions).to.equal(0);
+    });
+
+    it('mergeBrandPresenceStatsRpcRows computes weighted average visibility', () => {
+      const row10 = {
+        total_executions: 10,
+        average_visibility_score: 2,
+        total_mentions: 1,
+        total_citations: 2,
+      };
+      const row30 = {
+        total_executions: 30,
+        average_visibility_score: 4,
+        total_mentions: 3,
+        total_citations: 4,
+      };
+      const merged = mergeBrandPresenceStatsRpcRows([[row10], [row30]]);
+      expect(merged.total_executions).to.equal(40);
+      expect(merged.average_visibility_score).to.equal(3.5);
+    });
+
+    it('mergeBrandPresenceStatsRpcRows accepts plain row objects', () => {
+      const row = {
+        total_executions: 5,
+        average_visibility_score: 10,
+        total_mentions: 1,
+        total_citations: 2,
+      };
+      const merged = mergeBrandPresenceStatsRpcRows([row]);
+      expect(merged.total_executions).to.equal(5);
+      expect(merged.average_visibility_score).to.equal(10);
+    });
+
+    it('mergeBrandPresenceStatsRpcRows treats missing numeric fields as zero', () => {
+      const merged = mergeBrandPresenceStatsRpcRows([[{}]]);
+      expect(merged.total_executions).to.equal(0);
+      expect(merged.average_visibility_score).to.equal(0);
+    });
+
+    it('mergeBrandPresenceStatsRpcRows ignores empty RPC row arrays', () => {
+      const merged = mergeBrandPresenceStatsRpcRows([[]]);
+      expect(merged.total_executions).to.equal(0);
+    });
+
+    it('mergeBrandPresenceStatsRpcRows treats null input as empty', () => {
+      const merged = mergeBrandPresenceStatsRpcRows(null);
+      expect(merged.total_executions).to.equal(0);
+    });
+
+    it('mergeBrandPresenceStatsRpcRows accepts a mix of wrapped rows and plain row objects', () => {
+      const wrapped = {
+        total_executions: 2,
+        average_visibility_score: 6,
+        total_mentions: 0,
+        total_citations: 0,
+      };
+      const plain = {
+        total_executions: 8,
+        average_visibility_score: 4,
+        total_mentions: 0,
+        total_citations: 0,
+      };
+      const merged = mergeBrandPresenceStatsRpcRows([[wrapped], plain]);
+      expect(merged.total_executions).to.equal(10);
+    });
+
+    it('expandBrandPresenceStatsRpcSlices builds cartesian slices for multi category and region', () => {
+      const u1 = '0178a3f0-1234-7000-8000-000000000001';
+      const u2 = '0178a3f0-1234-7000-8000-000000000002';
+      const slices = expandBrandPresenceStatsRpcSlices({
+        categoryUuidIds: [u1, u2],
+        categoryNames: [],
+        regionCodesList: ['US', 'DE'],
+      });
+      expect(slices).to.have.lengthOf(4);
+      expect(slices[0].p_region_code).to.equal('US');
+    });
+
+    it('expandBrandPresenceStatsRpcSlices handles multiple category names', () => {
+      const slices = expandBrandPresenceStatsRpcSlices({
+        categoryUuidIds: [],
+        categoryNames: ['A', 'B'],
+        regionCodesList: [],
+      });
+      expect(slices).to.have.lengthOf(2);
+      expect(slices[0].p_category_name).to.equal('A');
+    });
+
+    it('expandBrandPresenceStatsRpcSlices handles multiple regions only', () => {
+      const slices = expandBrandPresenceStatsRpcSlices({
+        categoryUuidIds: [],
+        categoryNames: [],
+        regionCodesList: ['US', 'DE'],
+      });
+      expect(slices).to.have.lengthOf(2);
+      expect(slices[0].p_region_code).to.equal('US');
+      expect(slices[1].p_region_code).to.equal('DE');
+    });
+
+    it('expandBrandPresenceStatsRpcSlices handles a single UUID category', () => {
+      const u = '0178a3f0-1234-7000-8000-000000000001';
+      const slices = expandBrandPresenceStatsRpcSlices({
+        categoryUuidIds: [u],
+        categoryNames: [],
+        regionCodesList: [],
+      });
+      expect(slices).to.have.lengthOf(1);
+      expect(slices[0].p_category_id).to.equal(u);
+    });
+
+    it('expandBrandPresenceStatsRpcSlices handles a single category name', () => {
+      const slices = expandBrandPresenceStatsRpcSlices({
+        categoryUuidIds: [],
+        categoryNames: ['Only'],
+        regionCodesList: [],
+      });
+      expect(slices).to.have.lengthOf(1);
+      expect(slices[0].p_category_name).to.equal('Only');
+    });
+
+    it('expandBrandPresenceStatsRpcSlices handles a single region with default category slice', () => {
+      const slices = expandBrandPresenceStatsRpcSlices({ regionCodesList: ['US'] });
+      expect(slices).to.have.lengthOf(1);
+      expect(slices[0].p_region_code).to.equal('US');
+    });
+
+    it('expandBrandPresenceStatsRpcSlices treats null region list as empty', () => {
+      const slices = expandBrandPresenceStatsRpcSlices({
+        categoryUuidIds: [],
+        categoryNames: [],
+        regionCodesList: null,
+      });
+      expect(slices[0].p_region_code).to.be.null;
+    });
+
+    it('expandBrandPresenceStatsRpcSlices treats null category lists as empty', () => {
+      const slices = expandBrandPresenceStatsRpcSlices({
+        categoryUuidIds: null,
+        categoryNames: null,
+        regionCodesList: ['US', 'DE'],
+      });
+      expect(slices).to.have.lengthOf(2);
+    });
+  });
+
+  describe('buildScalarRpcCategoryRegion', () => {
+    it('returns p_category_name when exactly one name is selected', () => {
+      const r = buildScalarRpcCategoryRegion({
+        categoryUuidIds: [],
+        categoryNames: ['X'],
+        regionCodesList: [],
+      });
+      expect(r).to.deep.equal({
+        p_category_id: null,
+        p_category_name: 'X',
+        p_region_code: null,
+      });
+    });
+
+    it('returns p_region_code when exactly one region is selected', () => {
+      const r = buildScalarRpcCategoryRegion({
+        categoryUuidIds: [],
+        categoryNames: [],
+        regionCodesList: ['DE'],
+      });
+      expect(r.p_region_code).to.equal('DE');
+    });
+
+    it('returns null category id when multiple UUIDs are present', () => {
+      const r = buildScalarRpcCategoryRegion({
+        categoryUuidIds: [
+          '0178a3f0-1234-7000-8000-000000000001',
+          '0178a3f0-1234-7000-8000-000000000002',
+        ],
+        categoryNames: [],
+        regionCodesList: [],
+      });
+      expect(r.p_category_id).to.be.null;
+      expect(r.p_category_name).to.be.null;
+    });
+
+    it('treats null filter arrays as empty in buildScalarRpcCategoryRegion', () => {
+      const r = buildScalarRpcCategoryRegion({
+        categoryUuidIds: null,
+        categoryNames: null,
+        regionCodesList: null,
+      });
+      expect(r.p_category_id).to.be.null;
+      expect(r.p_category_name).to.be.null;
+      expect(r.p_region_code).to.be.null;
+    });
+
+    it('returns both p_category_id and p_region_code when each has a single value', () => {
+      const u = '0178a3f0-1234-7000-8000-000000000001';
+      const r = buildScalarRpcCategoryRegion({
+        categoryUuidIds: [u],
+        categoryNames: [],
+        regionCodesList: ['US'],
+      });
+      expect(r.p_category_id).to.equal(u);
+      expect(r.p_region_code).to.equal('US');
+    });
+  });
+
+  describe('applyExecutionCategoryFilter / applyExecutionRegionFilter', () => {
+    function makeCategoryChain() {
+      return {
+        eq: sinon.stub().returnsThis(),
+        in: sinon.stub().returnsThis(),
+        or: sinon.stub().returnsThis(),
+      };
+    }
+
+    function makeRegionChain() {
+      return {
+        eq: sinon.stub().returnsThis(),
+        in: sinon.stub().returnsThis(),
+      };
+    }
+
+    it('applyExecutionCategoryFilter uses in() for multiple UUIDs', () => {
+      const chain = makeCategoryChain();
+      const ids = ['0178a3f0-1234-7000-8000-000000000001', '0178a3f0-1234-7000-8000-000000000002'];
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: ids, categoryNames: [] });
+      expect(chain.in).to.have.been.calledWith('category_id', ids);
+    });
+
+    it('applyExecutionCategoryFilter coerces falsy categoryUuidIds to empty via || []', () => {
+      const chain = makeCategoryChain();
+      const uuid = '0178a3f0-1234-7000-8000-000000000001';
+      applyExecutionCategoryFilter(chain, {
+        categoryUuidIds: false,
+        categoryNames: [uuid],
+      });
+      expect(chain.eq).to.have.been.calledWith('category_name', uuid);
+    });
+
+    it('applyExecutionCategoryFilter coerces falsy categoryNames to empty via || []', () => {
+      const chain = makeCategoryChain();
+      const uuid = '0178a3f0-1234-7000-8000-000000000001';
+      applyExecutionCategoryFilter(chain, {
+        categoryUuidIds: [uuid],
+        categoryNames: false,
+      });
+      expect(chain.eq).to.have.been.calledWith('category_id', uuid);
+    });
+
+    it('applyExecutionCategoryFilter uses in() for multiple names', () => {
+      const chain = makeCategoryChain();
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [], categoryNames: ['X', 'Y'] });
+      expect(chain.in).to.have.been.calledWith('category_name', ['X', 'Y']);
+    });
+
+    it('applyExecutionCategoryFilter uses or() when UUIDs and names are combined', () => {
+      const chain = makeCategoryChain();
+      const uuid = '0178a3f0-1234-7000-8000-000000000001';
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [uuid], categoryNames: ['N'] });
+      expect(chain.or).to.have.been.calledOnce;
+    });
+
+    it('applyExecutionCategoryFilter uses category_id.in in or branch for multiple UUIDs', () => {
+      const chain = makeCategoryChain();
+      const u1 = '0178a3f0-1234-7000-8000-000000000001';
+      const u2 = '0178a3f0-1234-7000-8000-000000000002';
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [u1, u2], categoryNames: ['N'] });
+      const arg = chain.or.firstCall.args[0];
+      expect(arg).to.include('category_id.in.');
+    });
+
+    it('applyExecutionCategoryFilter uses category_name.in in or branch for multiple names', () => {
+      const chain = makeCategoryChain();
+      const u = '0178a3f0-1234-7000-8000-000000000001';
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [u], categoryNames: ['A', 'B'] });
+      const arg = chain.or.firstCall.args[0];
+      expect(arg).to.include('category_name.in.');
+    });
+
+    it('applyExecutionCategoryFilter escapes quotes in category name or branch', () => {
+      const chain = makeCategoryChain();
+      const u = '0178a3f0-1234-7000-8000-000000000001';
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [u], categoryNames: ['N"X'] });
+      const arg = chain.or.firstCall.args[0];
+      expect(arg).to.include('\\"');
+    });
+
+    it('applyExecutionCategoryFilter escapes backslashes in category name or branch', () => {
+      const chain = makeCategoryChain();
+      const u = '0178a3f0-1234-7000-8000-000000000001';
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [u], categoryNames: ['a\\b'] });
+      const arg = chain.or.firstCall.args[0];
+      expect(arg).to.include('\\\\');
+    });
+
+    it('applyExecutionRegionFilter uses in() for multiple regions', () => {
+      const chain = makeRegionChain();
+      applyExecutionRegionFilter(chain, { regionCodesList: ['US', 'DE'] });
+      expect(chain.in).to.have.been.calledWith('region_code', ['US', 'DE']);
+    });
+
+    it('applyExecutionCategoryFilter uses eq for a single UUID', () => {
+      const chain = makeCategoryChain();
+      const uuid = '0178a3f0-1234-7000-8000-000000000001';
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [uuid], categoryNames: [] });
+      expect(chain.eq).to.have.been.calledWith('category_id', uuid);
+    });
+
+    it('applyExecutionCategoryFilter uses eq for a single name', () => {
+      const chain = makeCategoryChain();
+      applyExecutionCategoryFilter(chain, { categoryUuidIds: [], categoryNames: ['Solo'] });
+      expect(chain.eq).to.have.been.calledWith('category_name', 'Solo');
+    });
+
+    it('applyExecutionCategoryFilter returns chain unchanged when empty', () => {
+      const chain = makeCategoryChain();
+      const out = applyExecutionCategoryFilter(chain, { categoryUuidIds: [], categoryNames: [] });
+      expect(out).to.equal(chain);
+      expect(chain.eq).not.to.have.been.called;
+    });
+
+    it('applyExecutionRegionFilter uses eq for a single region', () => {
+      const chain = makeRegionChain();
+      applyExecutionRegionFilter(chain, { regionCodesList: ['US'] });
+      expect(chain.eq).to.have.been.calledWith('region_code', 'US');
+    });
+
+    it('applyExecutionRegionFilter uses eq when region list is a single numeric code', () => {
+      const chain = makeRegionChain();
+      applyExecutionRegionFilter(chain, { regionCodesList: [0] });
+      expect(chain.eq).to.have.been.calledWith('region_code', 0);
+    });
+
+    it('applyExecutionRegionFilter coerces falsy regionCodesList to empty via || []', () => {
+      const chain = makeRegionChain();
+      const out = applyExecutionRegionFilter(chain, { regionCodesList: false });
+      expect(out).to.equal(chain);
+      expect(chain.eq).not.to.have.been.called;
+    });
+
+    it('applyExecutionRegionFilter returns chain unchanged when empty', () => {
+      const chain = makeRegionChain();
+      const out = applyExecutionRegionFilter(chain, { regionCodesList: [] });
+      expect(out).to.equal(chain);
+      expect(chain.eq).not.to.have.been.called;
     });
   });
 
@@ -1911,6 +2322,42 @@ describe('llmo-brand-presence', () => {
       );
     });
 
+    it('filters by multiple categoryIds using in()', async () => {
+      const u1 = '0178a3f0-1234-7000-8000-000000000091';
+      const u2 = '0178a3f0-1234-7000-8000-000000000092';
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { categoryIds: `${u1},${u2}` };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.in).to.have.been.calledWith('category_id', [u1, u2]);
+    });
+
+    it('filters by multiple regionCodes using in()', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { regionCodes: 'US,DE' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.in).to.have.been.calledWith('region_code', ['US', 'DE']);
+    });
+
+    it('uses or() when UUID and name categories are combined', async () => {
+      const uuid = '0178a3f0-1234-7000-8000-000000000099';
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { categoryIds: uuid, categoryId: 'Acrobat' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.or).to.have.been.calledOnce;
+    });
+
     it('uses WEEKS_QUERY_LIMIT (200000) for the query', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.dataAccess.Site.postgrestService = chainMock;
@@ -1981,6 +2428,17 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(400);
       expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns badRequest when multiple regionCodes are provided', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { regionCodes: 'US,DE' };
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
     });
 
     it('returns forbidden when user has no org access', async () => {
@@ -2645,6 +3103,19 @@ describe('llmo-brand-presence', () => {
       expect(getOrgAndValidateAccess).not.to.have.been.called;
     });
 
+    it('returns badRequest when multiple categoryIds are provided', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+      mockContext.data = {
+        categoryIds: '0178a3f0-1234-7000-8000-000000000001,0178a3f0-1234-7000-8000-000000000002',
+      };
+      const handler = createCompetitorSummaryHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
+    });
+
     it('returns forbidden when user has no org access', async () => {
       mockContext.dataAccess.Site.postgrestService = createChainableMock();
       getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
@@ -2898,6 +3369,18 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(400);
       const body = await result.text();
       expect(body).to.include('Invalid type parameter');
+    });
+
+    it('returns badRequest when multiple regionCodes are provided', async () => {
+      mockContext.data = { type: 'top', regionCodes: 'US,DE' };
+      mockContext.dataAccess.Site.postgrestService = createRpcMock();
+
+      const handler = createSentimentMoversHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
     });
 
     it('returns ok with movers for valid data', async () => {
@@ -3425,6 +3908,19 @@ describe('llmo-brand-presence', () => {
       expect(getOrgAndValidateAccess).not.to.have.been.called;
     });
 
+    it('returns badRequest when multiple categoryIds are provided', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = {
+        categoryIds: '0178a3f0-1234-7000-8000-000000000001,0178a3f0-1234-7000-8000-000000000002',
+      };
+      const handler = createShareOfVoiceHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
+    });
+
     it('returns forbidden when user has no org access', async () => {
       mockContext.dataAccess.Site.postgrestService = mockClient;
       getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
@@ -3767,6 +4263,58 @@ describe('llmo-brand-presence', () => {
       expect(body.message).to.equal('relation does not exist');
     });
 
+    it('returns badRequest when mixing category UUID and category name for stats', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        categoryIds: '0178a3f0-1234-7000-8000-000000000099',
+        categoryId: 'Acrobat',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Cannot combine category UUID(s) with category name(s) for aggregated stats.');
+    });
+
+    it('merges stats when multiple categoryIds require fan-out RPC calls', async () => {
+      const rowA = {
+        total_executions: 10,
+        average_visibility_score: 2,
+        total_mentions: 1,
+        total_citations: 2,
+      };
+      const rowB = {
+        total_executions: 30,
+        average_visibility_score: 4,
+        total_mentions: 3,
+        total_citations: 4,
+      };
+      const rpcStub = sinon.stub()
+        .onFirstCall()
+        .resolves({ data: [rowA], error: null })
+        .onSecondCall()
+        .resolves({ data: [rowB], error: null });
+      const rpcMock = { rpc: rpcStub };
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        categoryIds: '0178a3f0-1234-7000-8000-000000000001,0178a3f0-1234-7000-8000-000000000002',
+        startDate: '2025-01-01',
+        endDate: '2025-01-08',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.stats.total_executions).to.equal(40);
+      expect(body.stats.average_visibility_score).to.equal(3.5);
+      expect(rpcStub.callCount).to.equal(2);
+    });
+
     it('returns ok with stats when RPC succeeds (no showTrends)', async () => {
       const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
       mockContext.dataAccess.Site.postgrestService = rpcMock;
@@ -3789,6 +4337,25 @@ describe('llmo-brand-presence', () => {
       });
       expect(body.trends).to.be.undefined;
       expect(rpcMock.rpc).to.have.been.calledOnceWith('rpc_brand_presence_stats', sinon.match.object);
+    });
+
+    it('passes p_category_name to stats RPC when a single category name filter is used', async () => {
+      const rpcMock = createStatsRpcMock({ data: [statsRow], error: null });
+      mockContext.dataAccess.Site.postgrestService = rpcMock;
+      mockContext.data = {
+        categoryId: 'Acrobat',
+        startDate: '2025-01-01',
+        endDate: '2025-01-31',
+      };
+
+      const handler = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(rpcMock.rpc).to.have.been.calledOnceWith(
+        'rpc_brand_presence_stats',
+        sinon.match({ p_category_id: null, p_category_name: 'Acrobat' }),
+      );
     });
 
     it('handles null ctx.data (uses empty object fallback for showTrends)', async () => {
@@ -4616,6 +5183,17 @@ describe('llmo-brand-presence', () => {
       const result = await handler(mockContext);
 
       expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when multiple regionCodes are provided', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock();
+      mockContext.data = { regionCodes: 'US,DE' };
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Multiple categoryIds or regionCodes are not supported for this endpoint.');
     });
 
     it('returns forbidden when org access check fails', async () => {

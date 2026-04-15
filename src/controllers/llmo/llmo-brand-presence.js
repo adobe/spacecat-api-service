@@ -168,6 +168,263 @@ function parseTopicIds(q) {
 }
 
 /**
+ * Parses a list-style query param (array, comma-separated string, or scalar).
+ * Trims entries; drops empty and skip tokens (same semantics as shouldApplyFilter).
+ * @param {unknown} raw
+ * @returns {string[]}
+ * @internal Exported for testing
+ */
+export function parseListParam(raw) {
+  if (raw == null) {
+    return [];
+  }
+  let arr;
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === 'string') {
+    arr = raw.split(',').map((s) => s.trim());
+  } else {
+    arr = [raw];
+  }
+  return arr
+    .map((v) => (v == null ? '' : String(v).trim()))
+    .filter((s) => shouldApplyFilter(s));
+}
+
+/** @internal Exported for testing */
+export function mergeUniqueOrderedStrings(fromList, singular) {
+  const out = [];
+  const seen = new Set();
+  const push = (v) => {
+    if (v == null) {
+      return;
+    }
+    const t = String(v).trim();
+    if (!shouldApplyFilter(t)) {
+      return;
+    }
+    const key = t.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    out.push(t);
+  };
+  (fromList || []).forEach(push);
+  if (singular != null) {
+    push(singular);
+  }
+  return out;
+}
+
+const MULTI_CATEGORY_REGION_RPC_UNSUPPORTED = 'Multiple categoryIds or regionCodes are not supported for this endpoint.';
+const MIXED_CATEGORY_UUID_AND_NAME_STATS = 'Cannot combine category UUID(s) with category name(s) for aggregated stats.';
+
+/**
+ * Normalizes category + region filters from raw request data.
+ * Supports `categoryIds` / `category_ids` and `regionCodes` / `region_codes` (lists)
+ * alongside legacy singular `categoryId` / `regionCode` / `region`.
+ * @param {Object} q - Typically `context.data`
+ * @returns {{ categoryUuidIds: string[], categoryNames: string[], regionCodesList: string[] }}
+ * @internal Exported for testing
+ */
+export function extractCategoryRegionFromQuery(q) {
+  const categoryRaw = mergeUniqueOrderedStrings(
+    parseListParam(q.categoryIds ?? q.category_ids),
+    q.categoryId ?? q.category_id,
+  );
+  const regionRaw = mergeUniqueOrderedStrings(
+    parseListParam(q.regionCodes ?? q.region_codes),
+    q.regionCode ?? q.region_code ?? q.region,
+  );
+  const categoryUuidIds = [];
+  const categoryNames = [];
+  categoryRaw.forEach((v) => {
+    if (isValidUUID(v)) {
+      categoryUuidIds.push(v);
+    } else {
+      categoryNames.push(v);
+    }
+  });
+  return { categoryUuidIds, categoryNames, regionCodesList: regionRaw };
+}
+
+function hasMixedCategoryUuidAndName(params) {
+  return (params.categoryUuidIds?.length > 0) && (params.categoryNames?.length > 0);
+}
+
+function hasMultiValueCategoryFilter(params) {
+  return (params.categoryUuidIds?.length > 1) || (params.categoryNames?.length > 1);
+}
+
+function hasMultiValueRegionFilter(params) {
+  return (params.regionCodesList?.length > 1);
+}
+
+function brandPresenceRpcRejectsMultiCategoryOrRegion(params) {
+  return hasMultiValueCategoryFilter(params)
+    || hasMultiValueRegionFilter(params)
+    || hasMixedCategoryUuidAndName(params);
+}
+
+/**
+ * Single-value category + region fields for RPCs that only accept scalars
+ * (market tracking, topics, etc.).
+ * @param {Object} params - normalized brand presence params
+ * @returns {{ p_category_id: string|null, p_category_name: string|null,
+ *   p_region_code: string|null }}
+ */
+/** @internal Exported for testing */
+export function buildScalarRpcCategoryRegion(params) {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  const regions = params.regionCodesList || [];
+  return {
+    p_category_id: uuids.length === 1 ? uuids[0] : null,
+    p_category_name: names.length === 1 ? names[0] : null,
+    p_region_code: regions.length === 1 ? regions[0] : null,
+  };
+}
+
+function statsRequiresFanOutRpc(params) {
+  return hasMultiValueCategoryFilter(params) || hasMultiValueRegionFilter(params);
+}
+
+/**
+ * Cartesian slices for stats RPC when multiple categories or regions are requested.
+ * Caller must reject mixed UUID + name category filters before calling.
+ * @param {Object} params - normalized params
+ * @returns {Array<{ p_category_id: string|null, p_category_name: string|null,
+ *   p_region_code: string|null }>}
+ * @internal Exported for testing
+ */
+export function expandBrandPresenceStatsRpcSlices(params) {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  const regions = params.regionCodesList || [];
+
+  const catSlices = [];
+  if (uuids.length > 1) {
+    uuids.forEach((u) => catSlices.push({ p_category_id: u, p_category_name: null }));
+  } else if (uuids.length === 1) {
+    catSlices.push({ p_category_id: uuids[0], p_category_name: null });
+  } else if (names.length > 1) {
+    names.forEach((n) => catSlices.push({ p_category_id: null, p_category_name: n }));
+  } else if (names.length === 1) {
+    catSlices.push({ p_category_id: null, p_category_name: names[0] });
+  } else {
+    catSlices.push({ p_category_id: null, p_category_name: null });
+  }
+
+  const regSlices = regions.length > 1 ? [...regions] : [regions[0] ?? null];
+
+  const out = [];
+  for (const c of catSlices) {
+    for (const r of regSlices) {
+      out.push({
+        p_category_id: c.p_category_id,
+        p_category_name: c.p_category_name,
+        p_region_code: r,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Merges multiple `rpc_brand_presence_stats` result rows with OR semantics
+ * (disjoint slices). Weighted mean for average_visibility_score.
+ * If the same execution could match more than one slice, summed counts would
+ * double-count — callers assume slices partition the row set (no overlap).
+ * @param {Array<unknown>} rpcDataArray - each entry is RPC `data` (row or row array)
+ * @returns {Object} merged numeric fields
+ * @internal Exported for testing
+ */
+export function mergeBrandPresenceStatsRpcRows(rpcDataArray) {
+  const rows = (rpcDataArray || []).map((d) => {
+    if (Array.isArray(d)) {
+      return d.length > 0 ? d[0] : null;
+    }
+    return d;
+  }).filter(Boolean);
+  if (rows.length === 0) {
+    return {
+      total_executions: 0,
+      average_visibility_score: 0,
+      total_mentions: 0,
+      total_citations: 0,
+    };
+  }
+  let totalExec = 0;
+  let totalMentions = 0;
+  let totalCitations = 0;
+  let weightedVis = 0;
+  rows.forEach((row) => {
+    const exec = Number(row.total_executions ?? 0);
+    const avg = Number(row.average_visibility_score ?? 0);
+    const men = Number(row.total_mentions ?? 0);
+    const cit = Number(row.total_citations ?? 0);
+    totalExec += exec;
+    totalMentions += men;
+    totalCitations += cit;
+    weightedVis += avg * exec;
+  });
+  const avgVis = totalExec > 0 ? weightedVis / totalExec : 0;
+  return {
+    total_executions: totalExec,
+    average_visibility_score: avgVis,
+    total_mentions: totalMentions,
+    total_citations: totalCitations,
+  };
+}
+
+/**
+ * Applies category filters to a `brand_presence_executions` PostgREST chain.
+ * For mixed UUID + name filters, uses `.or(...)` with quoted `.in.(...)` tokens
+ * so values are literals in PostgREST filter grammar (not arbitrary expressions).
+ * @param {Object} q - query builder
+ * @param {Object} params - normalized params from parseFilterDimensionsParams
+ * @returns {Object} updated chain
+ * @internal Exported for testing
+ */
+export function applyExecutionCategoryFilter(q, params) {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  if (uuids.length === 0 && names.length === 0) {
+    return q;
+  }
+  if (uuids.length > 0 && names.length === 0) {
+    return uuids.length === 1 ? q.eq('category_id', uuids[0]) : q.in('category_id', uuids);
+  }
+  if (names.length > 0 && uuids.length === 0) {
+    return names.length === 1 ? q.eq('category_name', names[0]) : q.in('category_name', names);
+  }
+  const quoteOrToken = (v) => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const idPart = uuids.length === 1
+    ? `category_id.eq.${uuids[0]}`
+    : `category_id.in.(${uuids.map(quoteOrToken).join(',')})`;
+  const namePart = names.length === 1
+    ? `category_name.eq.${quoteOrToken(names[0])}`
+    : `category_name.in.(${names.map(quoteOrToken).join(',')})`;
+  return q.or(`${idPart},${namePart}`);
+}
+
+/**
+ * Applies region / market filters to a `brand_presence_executions` PostgREST chain.
+ * @param {Object} q - query builder
+ * @param {Object} params - normalized params from parseFilterDimensionsParams
+ * @returns {Object} updated chain
+ * @internal Exported for testing
+ */
+export function applyExecutionRegionFilter(q, params) {
+  const regions = params.regionCodesList || [];
+  if (regions.length === 0) {
+    return q;
+  }
+  return regions.length === 1 ? q.eq('region_code', regions[0]) : q.in('region_code', regions);
+}
+
+/**
  * PostgREST filter for URL path `:topicId` (after decodeURIComponent):
  * trimmed value is a UUID → topic_id; otherwise topics (display name).
  * @param {Object} query - PostgREST builder chain (from/select/org/date/model already applied)
@@ -216,15 +473,27 @@ export function topicIdForDetailResponse(rows, decodedTopicParam) {
 
 function parseFilterDimensionsParams(context) {
   const q = context.data || {};
+  const { categoryUuidIds, categoryNames, regionCodesList } = extractCategoryRegionFromQuery(q);
+  const categoryCount = categoryUuidIds.length + categoryNames.length;
+  const categoryId = categoryCount === 1 ? (categoryUuidIds[0] ?? categoryNames[0]) : undefined;
+  const regionCode = regionCodesList.length === 1 ? regionCodesList[0] : undefined;
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
     model: q.model || q.platform,
     siteId: q.siteId || q.site_id,
-    categoryId: q.categoryId || q.category_id,
+    categoryUuidIds,
+    categoryNames,
+    regionCodesList,
+    /**
+     * @deprecated for internal filters — use categoryUuidIds/categoryNames;
+     * kept for backward compat when exactly one category is selected
+     */
+    categoryId,
     topicIds: parseTopicIds(q),
     topic: q.topic,
-    regionCode: q.regionCode || q.region_code || q.region,
+    /** @deprecated for internal filters — use regionCodesList */
+    regionCode,
     origin: q.origin,
     user_intent: q.user_intent || q.userIntent,
     branding: q.branding || q.promptBranding || q.prompt_branding,
@@ -935,13 +1204,20 @@ function parseMarketTrackingTrendsParams(context) {
   if (rawNames) {
     competitorNames = Array.isArray(rawNames) ? rawNames : String(rawNames).split(',').map((s) => s.trim()).filter(Boolean);
   }
+  const { categoryUuidIds, categoryNames, regionCodesList } = extractCategoryRegionFromQuery(q);
+  const categoryCount = categoryUuidIds.length + categoryNames.length;
+  const categoryId = categoryCount === 1 ? (categoryUuidIds[0] ?? categoryNames[0]) : undefined;
+  const regionCode = regionCodesList.length === 1 ? regionCodesList[0] : undefined;
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
     model: q.model,
     siteId: q.siteId || q.site_id,
-    categoryId: q.categoryId || q.category_id,
-    regionCode: q.regionCode || q.region_code || q.region,
+    categoryUuidIds,
+    categoryNames,
+    regionCodesList,
+    categoryId,
+    regionCode,
     competitorNames,
   };
 }
@@ -950,6 +1226,7 @@ function parseMarketTrackingTrendsParams(context) {
 async function callMarketTrackingTrendsRpc(client, organizationId, params, defaults, filterByBrandId, log) {
   const competitorNames = params.competitorNames || null;
   const rpcName = competitorNames ? 'rpc_market_tracking_filtered' : 'rpc_market_tracking_trends';
+  const cr = buildScalarRpcCategoryRegion(params);
   const rpcParams = {
     p_organization_id: organizationId,
     p_start_date: params.startDate || defaults.startDate,
@@ -957,11 +1234,9 @@ async function callMarketTrackingTrendsRpc(client, organizationId, params, defau
     p_model: resolveModelFromRequest(params.model),
     p_brand_id: filterByBrandId || null,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_category_id: cr.p_category_id,
+    p_category_name: cr.p_category_name,
+    p_region_code: cr.p_region_code,
     ...(competitorNames && { p_competitor_names: competitorNames }),
   };
   log.info(`RPC ${rpcName} called with: ${JSON.stringify(rpcParams)}`);
@@ -974,6 +1249,7 @@ async function callMarketTrackingTrendsRpc(client, organizationId, params, defau
 
 // eslint-disable-next-line max-len
 async function callCompetitorSummaryRpc(client, organizationId, params, defaults, filterByBrandId, log) {
+  const cr = buildScalarRpcCategoryRegion(params);
   const rpcParams = {
     p_organization_id: organizationId,
     p_start_date: params.startDate || defaults.startDate,
@@ -981,11 +1257,9 @@ async function callCompetitorSummaryRpc(client, organizationId, params, defaults
     p_model: resolveModelFromRequest(params.model),
     p_brand_id: filterByBrandId || null,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_category_id: cr.p_category_id,
+    p_category_name: cr.p_category_name,
+    p_region_code: cr.p_region_code,
   };
   log.info(`RPC rpc_market_tracking_competitor_summary called with: ${JSON.stringify(rpcParams)}`);
   const start = performance.now();
@@ -1048,6 +1322,10 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -1099,6 +1377,10 @@ export function createCompetitorSummaryHandler(getOrgAndValidateAccess) {
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
 
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
@@ -1285,17 +1567,11 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       if (filterByBrandId) {
         q = q.eq('brand_id', filterByBrandId);
       }
-      if (shouldApplyFilter(params.categoryId)) {
-        q = isValidUUID(params.categoryId)
-          ? q.eq('category_id', params.categoryId)
-          : q.eq('category_name', params.categoryId);
-      }
+      q = applyExecutionCategoryFilter(q, params);
       if (params.topicIds?.length > 0) {
         q = q.in('topic_id', params.topicIds);
       }
-      if (shouldApplyFilter(params.regionCode)) {
-        q = q.eq('region_code', params.regionCode);
-      }
+      q = applyExecutionRegionFilter(q, params);
       if (shouldApplyFilter(params.origin)) {
         q = q.ilike('origin', params.origin);
       }
@@ -1593,6 +1869,10 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -1604,6 +1884,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         }
       }
 
+      const cr = buildScalarRpcCategoryRegion(params);
       const { data, error } = await client.rpc('rpc_brand_presence_topics', {
         p_organization_id: organizationId,
         p_start_date: params.startDate || defaults.startDate,
@@ -1611,13 +1892,11 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         p_model: resolveModelFromRequest(params.model),
         p_brand_id: filterByBrandId || null,
         p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-        p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-          ? params.categoryId : null,
-        p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
-          ? params.categoryId : null,
+        p_category_id: cr.p_category_id,
+        p_category_name: cr.p_category_name,
         p_topic: shouldApplyFilter(params.topic) ? params.topic : null,
         p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
-        p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+        p_region_code: cr.p_region_code,
         p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
         p_sort_by: pagination.sortBy,
         p_sort_order: pagination.sortOrder,
@@ -1656,6 +1935,9 @@ const PROMPTS_SELECT = 'topic_id, topics, prompt, region_code, mentions, citatio
 /**
  * Creates the getTopicPrompts handler.
  * Returns prompt-level data for a single topic (loaded on expansion).
+ * Applies the same category + region execution filters as sentiment overview,
+ * search, and topic/prompt detail (not region alone), so prompts respect
+ * dashboard filter dimensions when those query params are present.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createTopicPromptsHandler(getOrgAndValidateAccess) {
@@ -1697,9 +1979,8 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       if (filterByBrandId) {
         q = q.eq('brand_id', filterByBrandId);
       }
-      if (shouldApplyFilter(params.regionCode)) {
-        q = q.eq('region_code', params.regionCode);
-      }
+      q = applyExecutionCategoryFilter(q, params);
+      q = applyExecutionRegionFilter(q, params);
       if (shouldApplyFilter(params.origin)) {
         q = q.ilike('origin', params.origin);
       }
@@ -1822,17 +2103,11 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       if (filterByBrandId) {
         q = q.eq('brand_id', filterByBrandId);
       }
-      if (shouldApplyFilter(params.categoryId)) {
-        q = isValidUUID(params.categoryId)
-          ? q.eq('category_id', params.categoryId)
-          : q.eq('category_name', params.categoryId);
-      }
+      q = applyExecutionCategoryFilter(q, params);
       if (params.topicIds?.length > 0) {
         q = q.in('topic_id', params.topicIds);
       }
-      if (shouldApplyFilter(params.regionCode)) {
-        q = q.eq('region_code', params.regionCode);
-      }
+      q = applyExecutionRegionFilter(q, params);
       if (shouldApplyFilter(params.origin)) {
         q = q.ilike('origin', params.origin);
       }
@@ -2101,9 +2376,8 @@ function buildDetailExecQuery(client, organizationId, params, defaults, filterBy
   if (filterByBrandId) {
     q = q.eq('brand_id', filterByBrandId);
   }
-  if (shouldApplyFilter(params.regionCode)) {
-    q = q.eq('region_code', params.regionCode);
-  }
+  q = applyExecutionCategoryFilter(q, params);
+  q = applyExecutionRegionFilter(q, params);
   if (shouldApplyFilter(params.origin)) {
     q = q.ilike('origin', params.origin);
   }
@@ -2670,6 +2944,9 @@ function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByB
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const model = resolveModelFromRequest(params.model);
+  const cr = buildScalarRpcCategoryRegion(params);
+  // rpc_share_of_voice accepts p_category_id (UUID) and p_region_code only;
+  // name-based categories are not passed (same RPC contract as before).
 
   return client.rpc('rpc_share_of_voice', {
     p_organization_id: organizationId,
@@ -2678,11 +2955,10 @@ function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByB
     p_model: model,
     p_brand_id: filterByBrandId || null,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-      ? params.categoryId : null,
+    p_category_id: cr.p_category_id,
     p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
     p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_region_code: cr.p_region_code,
     p_max_competitors: params.maxCompetitors
       ? Number(params.maxCompetitors) : DEFAULT_MAX_COMPETITORS,
   });
@@ -2875,6 +3151,10 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -2950,6 +3230,10 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         return badRequest('Invalid type parameter. Must be "top" or "bottom".');
       }
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -2975,16 +3259,15 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
       if (shouldApplyFilter(params.siteId)) {
         rpcParams.p_site_id = params.siteId;
       }
-      if (shouldApplyFilter(params.categoryId)) {
-        rpcParams.p_category_id = isValidUUID(params.categoryId)
-          ? params.categoryId
-          : undefined;
+      const cr = buildScalarRpcCategoryRegion(params);
+      if (cr.p_category_id) {
+        rpcParams.p_category_id = cr.p_category_id;
       }
       if (shouldApplyFilter(params.origin)) {
         rpcParams.p_origin = params.origin;
       }
-      if (shouldApplyFilter(params.regionCode)) {
-        rpcParams.p_region_code = params.regionCode;
+      if (cr.p_region_code) {
+        rpcParams.p_region_code = cr.p_region_code;
       }
       if (params.topicIds?.length > 0) {
         rpcParams.p_topic_ids = params.topicIds;
@@ -3048,23 +3331,65 @@ function rowToStats(row) {
   };
 }
 
-function buildRpcParams(organizationId, startDate, endDate, model, filterByBrandId, params) {
+/**
+ * Parameters for `rpc_brand_presence_stats` (single call or one fan-out slice).
+ * Without `slice`: sets `p_category_id` when exactly one UUID category,
+ * `p_category_name` when exactly one name (and no UUID categories),
+ * `p_region_code` when exactly one region. With `slice`, copies all three from
+ * the slice (used when fan-out merging multi-category or multi-region requests).
+ */
+function buildRpcParams(
+  organizationId,
+  startDate,
+  endDate,
+  model,
+  filterByBrandId,
+  params,
+  slice = null,
+) {
   const topicIds = params.topicIds?.length ? params.topicIds : null;
-  const categoryId = shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-    ? params.categoryId
-    : null;
-  return {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  const regions = params.regionCodesList || [];
+
+  let pCategoryId = null;
+  let pCategoryName = null;
+  let pRegionCode = null;
+
+  if (slice) {
+    ({
+      p_category_id: pCategoryId,
+      p_category_name: pCategoryName,
+      p_region_code: pRegionCode,
+    } = slice);
+  } else {
+    if (uuids.length === 1 && names.length === 0) {
+      [pCategoryId] = uuids;
+    }
+    if (names.length === 1 && uuids.length === 0) {
+      [pCategoryName] = names;
+    }
+    if (regions.length === 1) {
+      [pRegionCode] = regions;
+    }
+  }
+
+  const rpc = {
     p_organization_id: organizationId,
     p_start_date: startDate,
     p_end_date: endDate,
     p_model: model,
     p_brand_id: filterByBrandId,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: categoryId,
+    p_category_id: pCategoryId,
     p_topic_ids: topicIds,
     p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_region_code: pRegionCode,
   };
+  if (pCategoryName != null) {
+    rpc.p_category_name = pCategoryName;
+  }
+  return rpc;
 }
 
 /**
@@ -3093,6 +3418,10 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
       const model = resolveModelFromRequest(params.model);
       const showTrends = parseShowTrends(q);
 
+      if (hasMixedCategoryUuidAndName(params)) {
+        return badRequest(MIXED_CATEGORY_UUID_AND_NAME_STATS);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -3104,16 +3433,44 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const rpcParams = buildRpcParams(
-        organizationId,
-        startDate,
-        endDate,
-        model,
-        filterByBrandId,
-        params,
-      );
+      const fanOut = statsRequiresFanOutRpc(params);
+      const slices = fanOut ? expandBrandPresenceStatsRpcSlices(params) : null;
 
-      const { data, error } = await client.rpc('rpc_brand_presence_stats', rpcParams);
+      const callStatsForRange = async (rangeStart, rangeEnd) => {
+        if (fanOut && slices?.length) {
+          const results = await Promise.all(slices.map((slice) => client.rpc(
+            'rpc_brand_presence_stats',
+            buildRpcParams(
+              organizationId,
+              rangeStart,
+              rangeEnd,
+              model,
+              filterByBrandId,
+              params,
+              slice,
+            ),
+          )));
+          const failed = results.find((r) => r.error);
+          if (failed) {
+            return { data: null, error: failed.error };
+          }
+          const merged = mergeBrandPresenceStatsRpcRows(results.map((r) => r.data));
+          return { data: merged, error: null };
+        }
+        return client.rpc(
+          'rpc_brand_presence_stats',
+          buildRpcParams(
+            organizationId,
+            rangeStart,
+            rangeEnd,
+            model,
+            filterByBrandId,
+            params,
+          ),
+        );
+      };
+
+      const { data, error } = await callStatsForRange(startDate, endDate);
 
       if (error) {
         ctx.log.error(`Brand presence stats RPC error: ${error.message}`);
@@ -3128,11 +3485,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         const weeks = splitDateRangeIntoWeeksBackward(startDate, endDate);
         if (weeks.length > 0) {
           const trendResults = await Promise.all(
-            weeks.map((w) => client.rpc('rpc_brand_presence_stats', {
-              ...rpcParams,
-              p_start_date: w.startDate,
-              p_end_date: w.endDate,
-            })),
+            weeks.map((w) => callStatsForRange(w.startDate, w.endDate)),
           );
 
           const failed = trendResults.find((r) => r.error);
