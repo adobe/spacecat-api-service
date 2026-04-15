@@ -526,8 +526,6 @@ paths:
     $ref: './plg-onboarding-api.yaml#/plg-onboard'
   /plg/sites:
     $ref: './plg-onboarding-api.yaml#/plg-sites'
-  /plg/onboard/{onboardingId}:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard-update'
   /plg/onboard/status/{imsOrgId}:
     $ref: './plg-onboarding-api.yaml#/plg-onboard-status'
 

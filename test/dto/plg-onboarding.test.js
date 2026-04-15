@@ -28,6 +28,7 @@ describe('PlgOnboardingDto', () => {
       getBotBlocker: () => null,
       getWaitlistReason: () => null,
       getReviews: () => null,
+      getUpdatedBy: () => 'user@example.com',
       getCompletedAt: () => '2026-03-09T15:00:00.000Z',
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
@@ -51,6 +52,7 @@ describe('PlgOnboardingDto', () => {
       completedAt: '2026-03-09T15:00:00.000Z',
       createdAt: '2026-03-09T12:00:00.000Z',
       updatedAt: '2026-03-09T15:00:00.000Z',
+      requestorEmail: 'user@example.com',
     });
   });
 
@@ -72,6 +74,7 @@ describe('PlgOnboardingDto', () => {
       }),
       getWaitlistReason: () => null,
       getReviews: () => null,
+      getUpdatedBy: () => 'system',
       getCompletedAt: () => null,
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T12:05:00.000Z',
@@ -87,5 +90,6 @@ describe('PlgOnboardingDto', () => {
     });
     expect(result.siteId).to.be.null;
     expect(result.completedAt).to.be.null;
+    expect(result.requestorEmail).to.be.null;
   });
 });
