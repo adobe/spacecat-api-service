@@ -507,7 +507,6 @@ async function performAsoPlgOnboarding({
       log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
-      onboarding.setUpdatedBy(imsOrgId || 'system');
       await onboarding.save();
       return onboarding;
     }
@@ -525,7 +524,6 @@ async function performAsoPlgOnboarding({
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setSteps(steps);
       onboarding.setCompletedAt(new Date().toISOString());
-      onboarding.setUpdatedBy(imsOrgId || 'system');
       await onboarding.save();
       return onboarding;
     }
@@ -562,7 +560,6 @@ async function performAsoPlgOnboarding({
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
         onboarding.setSteps(steps);
-        onboarding.setUpdatedBy(imsOrgId || 'system');
         await onboarding.save();
         return onboarding;
       }
@@ -596,7 +593,6 @@ async function performAsoPlgOnboarding({
         onboarding.setWaitlistReason(waitlistReason);
         onboarding.setSiteId(site.getId());
         onboarding.setSteps(steps);
-        onboarding.setUpdatedBy(imsOrgId || 'system');
         await onboarding.save();
         return onboarding;
       }
@@ -621,7 +617,6 @@ async function performAsoPlgOnboarding({
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
-      onboarding.setUpdatedBy(imsOrgId || 'system');
       await onboarding.save();
 
       return onboarding;
@@ -876,7 +871,6 @@ async function performAsoPlgOnboarding({
     onboarding.setStatus(STATUSES.ONBOARDED);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
-    onboarding.setUpdatedBy(imsOrgId || 'system');
     await onboarding.save();
 
     return onboarding;
@@ -888,7 +882,6 @@ async function performAsoPlgOnboarding({
       message: (error.clientError || error.conflict)
         ? error.message : 'An internal error occurred',
     });
-    onboarding.setUpdatedBy(imsOrgId || 'system');
     try {
       await onboarding.save();
     } catch (saveError) {
@@ -963,12 +956,9 @@ function PlgOnboardingController(ctx) {
       }
     }
 
-    /* c8 ignore next */
-    const requestorEmail = authInfo?.getProfile()?.email || null;
-
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
-      onboarding.setUpdatedBy(requestorEmail || imsOrgId || 'system');
+      onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
       await onboarding.save();
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
