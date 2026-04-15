@@ -1070,26 +1070,43 @@ function PlgOnboardingController(ctx) {
 
       // Resolve updatedBy IMS IDs to emails for the response
       const { imsClient } = context;
-      const uniqueUpdatedByIds = [...new Set(
-        records.map((r) => r.getUpdatedBy()).filter((v) => hasText(v) && v !== 'system'),
-      )];
+      // Collect all unique IMS IDs from updatedBy and reviewedBy fields
+      const imsIds = new Set();
+      for (const r of records) {
+        const updatedBy = r.getUpdatedBy();
+        if (hasText(updatedBy) && updatedBy !== 'system') {
+          imsIds.add(updatedBy);
+        }
+        for (const review of (r.getReviews() || [])) {
+          if (hasText(review.reviewedBy) && review.reviewedBy !== 'admin') {
+            imsIds.add(review.reviewedBy);
+          }
+        }
+      }
       const emailMap = {};
-      await Promise.all(uniqueUpdatedByIds.map(async (imsId) => {
+      await Promise.all([...imsIds].map(async (imsId) => {
         try {
           const imsProfile = await imsClient.getImsAdminProfile(imsId);
           emailMap[imsId] = imsProfile.email || null;
         } catch (e) {
-          log.warn(`Failed to resolve email for updatedBy ${imsId}: ${e.message}`);
+          log.warn(`Failed to resolve email for IMS ID ${imsId}: ${e.message}`);
           emailMap[imsId] = null;
         }
       }));
 
       let payload;
       try {
-        payload = records.map((record) => ({
-          ...PlgOnboardingDto.toJSON(record),
-          trialEmail: emailMap[record.getUpdatedBy()] ?? null,
-        }));
+        payload = records.map((record) => {
+          const json = PlgOnboardingDto.toJSON(record);
+          return {
+            ...json,
+            trialEmail: emailMap[record.getUpdatedBy()] ?? null,
+            reviews: (json.reviews || []).map((review) => ({
+              ...review,
+              reviewedBy: emailMap[review.reviewedBy] ?? review.reviewedBy,
+            })),
+          };
+        });
       } catch (serializationError) {
         const serMsg = serializationError instanceof Error
           ? serializationError.message

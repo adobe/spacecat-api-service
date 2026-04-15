@@ -3165,8 +3165,30 @@ describe('PlgOnboardingController', () => {
         expect(res.status).to.equal(200);
         expect(res.value[0].trialEmail).to.be.null;
         expect(mockLog.warn).to.have.been.calledWithMatch(
-          sinon.match(/Failed to resolve email for updatedBy bad-ims-id@AdobeID/),
+          sinon.match(/Failed to resolve email for IMS ID bad-ims-id@AdobeID/),
         );
+      });
+
+      it('resolves reviewedBy IMS IDs to emails in reviews array', async () => {
+        const record = createMockOnboarding({
+          reviews: [
+            { reviewedBy: 'reviewer-ims-id@AdobeID', decision: 'BYPASSED', reason: 'test' },
+          ],
+        });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'reviewer@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].reviews[0].reviewedBy).to.equal('reviewer@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('reviewer-ims-id@AdobeID');
       });
     });
   });
