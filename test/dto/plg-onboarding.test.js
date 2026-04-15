@@ -31,6 +31,7 @@ describe('PlgOnboardingDto', () => {
       getCompletedAt: () => '2026-03-09T15:00:00.000Z',
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
+      getUpdatedBy: () => 'user@example.com',
     };
 
     const result = PlgOnboardingDto.toJSON(onboarding);
@@ -51,6 +52,7 @@ describe('PlgOnboardingDto', () => {
       completedAt: '2026-03-09T15:00:00.000Z',
       createdAt: '2026-03-09T12:00:00.000Z',
       updatedAt: '2026-03-09T15:00:00.000Z',
+      updatedBy: 'user@example.com',
     });
   });
 
@@ -75,6 +77,7 @@ describe('PlgOnboardingDto', () => {
       getCompletedAt: () => null,
       getCreatedAt: () => '2026-03-09T12:00:00.000Z',
       getUpdatedAt: () => '2026-03-09T12:05:00.000Z',
+      getUpdatedBy: () => null,
     };
 
     const result = PlgOnboardingDto.toJSON(onboarding);
