@@ -37,6 +37,10 @@ describe('LLMO Onboarding Functions', () => {
       Site: {
         findByBaseURL: sinon.stub(),
         create: sinon.stub(),
+        // Default: no pre-cutoff sites → mode resolution returns v2 (the default).
+        // Tests that need v1 mode should set LLMO_ONBOARDING_DEFAULT_VERSION='v1'
+        // in context.env to use the global kill switch.
+        allByOrganizationId: sinon.stub().resolves([]),
       },
       Organization: {
         findByImsOrgId: sinon.stub(),
@@ -1208,8 +1212,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      // Note: save() is NOT called by createOrFindSite, it's the caller's responsibility
-      expect(mockSite.save).to.not.have.been.called;
+      // LLMO-4176: re-parent must be persisted before resolveLlmoOnboardingMode
+      // queries Site.allByOrganizationId, otherwise a legacy site moved into a
+      // brand-new org would be misclassified as v2.
+      expect(mockSite.save).to.have.been.calledOnce;
     });
 
     it('should not update organization ID when existing site has same organization', async () => {
@@ -1408,6 +1414,13 @@ describe('LLMO Onboarding Functions', () => {
         organizationId: 'org123',
       });
 
+      // LLMO-4176 regression guard: resolveLlmoOnboardingMode reads
+      // Site.allByOrganizationId, and that read MUST happen after the site
+      // has been created/re-parented — otherwise a legacy site moved into a
+      // brand-new org gets misclassified as v2.
+      expect(mockDataAccess.Site.allByOrganizationId)
+        .to.have.been.calledAfter(mockDataAccess.Site.findByBaseURL);
+
       // Verify site config was updated
       expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
       expect(mockSite.getConfig().updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
@@ -1446,7 +1459,7 @@ describe('LLMO Onboarding Functions', () => {
       });
       // Must use baseURL (matches sites.base_url), not overrideBaseURL
       expect(mockUpsertBrand.firstCall.args[0].brand.urls).to.deep.equal([
-        { value: 'https://example.com', type: 'url' },
+        { value: 'https://example.com', type: 'base' },
       ]);
       expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
 
@@ -1615,13 +1628,7 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: false }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
-      const eqProduct = sinon.stub().returns({ eq: eqFlag });
-      const eqOrg = sinon.stub().returns({ eq: eqProduct });
-      const select = sinon.stub().returns({ eq: eqOrg });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select });
-
+      // Force v1 mode via the global kill switch — no brandalf flag lookup needed.
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
       mockDataAccess.Site.create.resolves(mockSite);
@@ -1657,7 +1664,7 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: mockEnv,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
@@ -2725,7 +2732,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.status).to.equal('active');
       expect(brand.v1SiteId).to.equal('site-123');
       expect(brand.baseUrl).to.equal('https://www.example.com');
-      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
       expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
@@ -2918,7 +2925,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(newBrand.status).to.equal('active');
       expect(newBrand.origin).to.equal('system');
       expect(newBrand.regions).to.deep.equal(['gl']);
-      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
       expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
