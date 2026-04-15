@@ -1561,6 +1561,22 @@ describe('PlgOnboardingController', () => {
       expect(message).to.include('An internal error occurred');
     });
 
+    it('posts notification with waitlist reason for non-AEM site', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'WAITLISTED',
+        waitlistReason: `Domain ${TEST_DOMAIN} is not an AEM site`,
+      });
+      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
+      findDeliveryTypeStub.resolves('other');
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Waitlisted');
+      expect(message).to.include('is not an AEM site');
+    });
+
     it('logs error when postSlackMessage fails but does not propagate', async () => {
       postSlackMessageStub.rejects(new Error('Slack API unavailable'));
       const onboarding = createMockOnboarding({
