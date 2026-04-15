@@ -1,3 +1,10 @@
+# [1.440.0](https://github.com/adobe/spacecat-api-service/compare/v1.439.0...v1.440.0) (2026-04-15)
+
+
+### Features
+
+* add SkipAuthHandler for local dev authentication bypass ([#2181](https://github.com/adobe/spacecat-api-service/issues/2181)) ([8b7e3c6](https://github.com/adobe/spacecat-api-service/commit/8b7e3c6bea08784edeea34432d664693c44465e3))
+
 # [1.439.0](https://github.com/adobe/spacecat-api-service/compare/v1.438.0...v1.439.0) (2026-04-15)
 
 
