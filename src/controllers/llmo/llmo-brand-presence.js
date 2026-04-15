@@ -161,6 +161,53 @@ function parseTopicIds(q) {
   return arr.filter((id) => id != null && isValidUUID(String(id)));
 }
 
+/**
+ * PostgREST filter for URL path `:topicId` (after decodeURIComponent):
+ * trimmed value is a UUID → topic_id; otherwise topics (display name).
+ * @param {Object} query - PostgREST builder chain (from/select/org/date/model already applied)
+ * @param {string} decodedTopicParam - decoded path segment
+ * @returns {Object} query with .eq('topic_id' | 'topics', ...) applied
+ */
+export function applyTopicPathFilter(query, decodedTopicParam) {
+  const trimmed = String(decodedTopicParam).trim();
+  if (isValidUUID(trimmed)) {
+    return query.eq('topic_id', trimmed);
+  }
+  return query.eq('topics', decodedTopicParam);
+}
+
+/**
+ * Response topic label: use row topics when present, else the path param
+ * (e.g. UUID when no rows or null topics).
+ * @param {Array<Object>} rows - execution rows
+ * @param {string} decodedTopicParam - decoded :topicId
+ */
+function topicLabelForDetailResponse(rows, decodedTopicParam) {
+  if (!rows || rows.length === 0) {
+    return decodedTopicParam;
+  }
+  const label = rows[0].topics;
+  return hasText(label) ? label : decodedTopicParam;
+}
+
+/**
+ * Stable topic id for JSON: prefer DB topic_id on first row, else UUID path param if valid.
+ * @param {Array<Object>} rows - execution rows (may be empty)
+ * @param {string} decodedTopicParam - decoded :topicId
+ * @returns {string|null}
+ */
+export function topicIdForDetailResponse(rows, decodedTopicParam) {
+  const trimmedParam = String(decodedTopicParam).trim();
+  const rowId = rows?.[0]?.topic_id;
+  if (hasText(rowId)) {
+    return String(rowId).trim();
+  }
+  if (isValidUUID(trimmedParam)) {
+    return trimmedParam;
+  }
+  return null;
+}
+
 function parseFilterDimensionsParams(context) {
   const q = context.data || {};
   return {
@@ -1615,10 +1662,10 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         .from('brand_presence_executions')
         .select(PROMPTS_SELECT)
         .eq('organization_id', organizationId)
-        .eq('topics', topicName)
         .gte('execution_date', startDate)
         .lte('execution_date', endDate)
         .eq('model', model);
+      q = applyTopicPathFilter(q, topicName);
 
       if (shouldApplyFilter(params.siteId)) {
         q = q.eq('site_id', params.siteId);
@@ -1824,7 +1871,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // ── Topic Detail / Prompt Detail ─────────────────────────────────────────────
 
 // eslint-disable-next-line max-len
-const DETAIL_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
+const DETAIL_SELECT = 'id, topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
 /**
  * Derives the ISO week string from an execution_date using the shared toISOWeek helper.
@@ -2076,8 +2123,8 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
-        .eq('topics', topicName);
+      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      q = applyTopicPathFilter(q, topicName);
 
       const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
 
@@ -2087,9 +2134,12 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       }
 
       const rows = execRows || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
         return ok({
-          topic: topicName,
+          topic: topicResponseLabel,
+          topicId: topicIdResponse,
           stats: {
             averageVisibilityScore: 0,
             averagePosition: 0,
@@ -2153,7 +2203,8 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       const sources = aggregateDetailSources(flatSources);
 
       return ok({
-        topic: topicName,
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
         /* c8 ignore start */
         stats: {
           averageVisibilityScore: topicStats.averageVisibilityScore || 0,
@@ -2218,8 +2269,8 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
-        .eq('topics', topicName)
+      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      q = applyTopicPathFilter(q, topicName)
         .eq('prompt', promptText);
 
       if (shouldApplyFilter(regionCode)) {
@@ -2234,9 +2285,12 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       }
 
       const rows = execRows || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
         return ok({
-          topic: topicName,
+          topic: topicResponseLabel,
+          topicId: topicIdResponse,
           prompt: promptText,
           region: regionCode || '',
           stats: {
@@ -2339,7 +2393,8 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       const sources = aggregateDetailSources(flatSources);
 
       return ok({
-        topic: topicName,
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
         prompt: promptText,
         region: regionCode || '',
         stats: {
