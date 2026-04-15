@@ -57,7 +57,7 @@ describe('DrsBpPgAuditController tests', () => {
       gte: sinon.stub().returnsThis(),
       lt: sinon.stub().returnsThis(),
       order: sinon.stub().returnsThis(),
-      limit: sinon.stub().resolves({ data: sampleRows, error: null }),
+      range: sinon.stub().resolves({ data: sampleRows, error: null }),
     };
 
     postgrestFromStub = sinon.stub().returns(queryChain);
@@ -143,7 +143,7 @@ describe('DrsBpPgAuditController tests', () => {
         dataAccess: context.dataAccess,
       };
       await controller.getProjectionAudit(reqCtx);
-      expect(queryChain.limit).to.have.been.calledWith(500);
+      expect(queryChain.range).to.have.been.calledWith(0, 499);
     });
 
     it('defaults limit to 500 when non-numeric limit is provided', async () => {
@@ -152,7 +152,34 @@ describe('DrsBpPgAuditController tests', () => {
         dataAccess: context.dataAccess,
       };
       await controller.getProjectionAudit(reqCtx);
-      expect(queryChain.limit).to.have.been.calledWith(500);
+      expect(queryChain.range).to.have.been.calledWith(0, 499);
+    });
+
+    it('passes offset to range', async () => {
+      const reqCtx = {
+        url: `${BASE_URL}?siteId=abc&dateStart=2025-04-14&dateEnd=2025-04-15&offset=500`,
+        dataAccess: context.dataAccess,
+      };
+      await controller.getProjectionAudit(reqCtx);
+      expect(queryChain.range).to.have.been.calledWith(500, 999);
+    });
+
+    it('defaults offset to 0 when not provided', async () => {
+      const reqCtx = {
+        url: `${BASE_URL}?siteId=abc&dateStart=2025-04-14&dateEnd=2025-04-15`,
+        dataAccess: context.dataAccess,
+      };
+      await controller.getProjectionAudit(reqCtx);
+      expect(queryChain.range).to.have.been.calledWith(0, 499);
+    });
+
+    it('defaults offset to 0 when non-numeric offset is provided', async () => {
+      const reqCtx = {
+        url: `${BASE_URL}?siteId=abc&dateStart=2025-04-14&dateEnd=2025-04-15&offset=notanumber`,
+        dataAccess: context.dataAccess,
+      };
+      await controller.getProjectionAudit(reqCtx);
+      expect(queryChain.range).to.have.been.calledWith(0, 499);
     });
 
     it('applies correct date range filters', async () => {
@@ -166,7 +193,7 @@ describe('DrsBpPgAuditController tests', () => {
     });
 
     it('returns 500 when postgrest query returns an error', async () => {
-      queryChain.limit.resolves({ data: null, error: { message: 'DB connection failed' } });
+      queryChain.range.resolves({ data: null, error: { message: 'DB connection failed' } });
       const reqCtx = {
         url: `${BASE_URL}?siteId=abc&dateStart=2025-04-14&dateEnd=2025-04-15`,
         dataAccess: context.dataAccess,
@@ -176,7 +203,7 @@ describe('DrsBpPgAuditController tests', () => {
     });
 
     it('returns empty array when data is null', async () => {
-      queryChain.limit.resolves({ data: null, error: null });
+      queryChain.range.resolves({ data: null, error: null });
       const reqCtx = {
         url: `${BASE_URL}?siteId=abc&dateStart=2025-04-14&dateEnd=2025-04-15`,
         dataAccess: context.dataAccess,

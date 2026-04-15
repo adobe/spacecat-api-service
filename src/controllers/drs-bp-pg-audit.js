@@ -51,6 +51,8 @@ export default function DrsBpPgAuditController() {
     const handlerName = url.searchParams.get('handlerName') || DEFAULT_HANDLER_NAME;
     const limitParam = parseInt(url.searchParams.get('limit') || String(MAX_LIMIT), 10);
     const limit = Math.min(Number.isNaN(limitParam) ? MAX_LIMIT : limitParam, MAX_LIMIT);
+    const offsetParam = parseInt(url.searchParams.get('offset') || '0', 10);
+    const offset = Number.isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
 
     if (!siteId) {
       return badRequest('siteId is required');
@@ -71,7 +73,7 @@ export default function DrsBpPgAuditController() {
       .lt('projected_at', `${dateEnd}T00:00:00Z`)
       .eq('skipped', false)
       .order('projected_at', { ascending: false })
-      .limit(limit);
+      .range(offset, offset + limit - 1);
 
     if (error) {
       return internalServerError(`projection_audit query failed: ${error.message}`);
