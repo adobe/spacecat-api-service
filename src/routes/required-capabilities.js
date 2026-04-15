@@ -375,6 +375,7 @@ const routeRequiredCapabilities = {
   'POST /tools/api-keys': 'apiKey:write',
   'DELETE /tools/api-keys/:id': 'apiKey:write',
   'GET /tools/api-keys': 'apiKey:read',
+  'GET /tools/drs-bp-pg-audit': 'projectionAudit:read',
 
   // Import Jobs
   'POST /tools/import/jobs': 'importJob:write',
