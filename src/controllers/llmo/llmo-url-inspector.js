@@ -291,6 +291,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
+      const pagination = parsePaginationParams(ctx, { defaultPageSize: 50 });
       const defaults = defaultDateRange();
       const q = ctx.data || {};
 
@@ -312,6 +313,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
 
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const channel = q.channel || q.selectedChannel;
+      const offset = pagination.page * pagination.pageSize;
 
       const { data, error } = await client.rpc('rpc_url_inspector_cited_domains', {
         p_site_id: params.siteId,
@@ -322,6 +324,8 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         p_channel: shouldApplyFilter(channel) ? channel : null,
         p_platform: model,
         p_brand_id: filterByBrandId,
+        p_limit: pagination.pageSize,
+        p_offset: offset,
       });
 
       if (error) {
@@ -330,6 +334,8 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
       }
 
       const rows = data || [];
+      const totalCount = rows.length > 0
+        ? Number(rows[0].total_count ?? 0) : 0;
       const domains = rows.map((r) => ({
         domain: r.domain || '',
         totalCitations: Number(r.total_citations ?? 0),
@@ -340,7 +346,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         regions: r.regions || '',
       }));
 
-      return ok({ domains });
+      return ok({ domains, totalCount });
     },
   );
 }
