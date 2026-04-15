@@ -1390,6 +1390,198 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Slack notifications ---
+
+  describe('onboard - Slack notifications', () => {
+    let postSlackMessageStub;
+    let SlackController;
+
+    beforeEach(async () => {
+      postSlackMessageStub = sandbox.stub().resolves();
+
+      SlackController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({
+                retrieveDomainkey: rumRetrieveDomainkeyStub,
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: { createForSite: tierClientCreateForSiteStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+          },
+          '../../../src/support/access-control-util.js': {
+            default: {
+              fromContext: () => ({ hasAdminAccess: () => false }),
+            },
+          },
+        },
+      )).default;
+    });
+
+    function buildSlackContext(onboarding) {
+      return {
+        data: { domain: TEST_DOMAIN },
+        dataAccess: {
+          ...mockDataAccess,
+          PlgOnboarding: {
+            ...mockDataAccess.PlgOnboarding,
+            findByImsOrgIdAndDomain: sandbox.stub().resolves(null),
+            create: sandbox.stub().resolves(onboarding),
+          },
+        },
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST',
+          SLACK_BOT_TOKEN: 'xoxb-test-token',
+        },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+    }
+
+    it('posts notification with botBlocker type and ipsToAllowlist', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4', '5.6.7.8'] },
+      });
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4', '5.6.7.8'],
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [channelId, message] = postSlackMessageStub.firstCall.args;
+      expect(channelId).to.equal('C123TEST');
+      expect(message).to.include('Waiting for IP Allowlisting');
+      expect(message).to.include('cloudflare');
+      expect(message).to.include('1.2.3.4, 5.6.7.8');
+    });
+
+    it('posts notification with botBlocker type but no ipsToAllowlist', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        botBlocker: { type: 'akamai' },
+      });
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'akamai',
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('akamai');
+      expect(message).to.not.include('IPs to allowlist');
+    });
+
+    it('posts error notification including error message', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ERROR',
+        error: { message: 'An internal error occurred' },
+      });
+      createOrFindOrganizationStub.rejects(new Error('DB failure'));
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Error');
+      expect(message).to.include('An internal error occurred');
+    });
+
+    it('logs error when postSlackMessage fails but does not propagate', async () => {
+      postSlackMessageStub.rejects(new Error('Slack API unavailable'));
+      const onboarding = createMockOnboarding({
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'] },
+      });
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4'],
+      });
+
+      const res = await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Failed to post PLG onboarding notification to Slack/),
+      );
+    });
+  });
+
   // --- RUM check (informational, non-blocking) ---
 
   describe('onboard - RUM check', () => {
