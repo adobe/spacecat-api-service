@@ -6111,6 +6111,8 @@ describe('llmo-brand-presence', () => {
           answer: 'Some answer',
           url: 'https://a.com',
           error_code: null,
+          business_competitors: null,
+          detected_brand_mentions: null,
         },
         {
           id: 'exec-2',
@@ -6129,6 +6131,8 @@ describe('llmo-brand-presence', () => {
           answer: 'Another answer',
           url: 'https://b.com',
           error_code: 'E01',
+          business_competitors: 'CompA;CompB',
+          detected_brand_mentions: 'Our Brand, Other',
         },
       ];
       const client = createTableAwareMock({
@@ -6154,6 +6158,10 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[1].position).to.equal('');
       expect(body.executions[1].sentiment).to.equal('');
       expect(body.executions[1].category).to.equal('');
+      expect(body.executions[0].businessCompetitors).to.equal('CompA;CompB');
+      expect(body.executions[0].detectedBrandMentions).to.equal('Our Brand, Other');
+      expect(body.executions[1].businessCompetitors).to.equal('');
+      expect(body.executions[1].detectedBrandMentions).to.equal('');
       expect(body.weeklyStats.length).to.be.greaterThan(0);
     });
 
@@ -6321,6 +6329,8 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[0].prompt).to.equal('');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
+      expect(body.executions[0].businessCompetitors).to.equal('');
+      expect(body.executions[0].detectedBrandMentions).to.equal('');
     });
   });
 
@@ -6500,6 +6510,8 @@ describe('llmo-brand-presence', () => {
           answer: 'Answer A',
           url: 'https://a.com',
           error_code: null,
+          business_competitors: null,
+          detected_brand_mentions: null,
         },
         {
           id: 'e2',
@@ -6518,6 +6530,8 @@ describe('llmo-brand-presence', () => {
           answer: 'Answer B',
           url: '',
           error_code: null,
+          business_competitors: 'Rival;OtherCo',
+          detected_brand_mentions: 'Acme',
         },
       ];
       const client = createTableAwareMock({
@@ -6541,6 +6555,10 @@ describe('llmo-brand-presence', () => {
       // Sorted newest first
       expect(body.executions[0].executionDate).to.equal('2026-03-08');
       expect(body.executions[1].executionDate).to.equal('2026-03-01');
+      expect(body.executions[0].businessCompetitors).to.equal('Rival;OtherCo');
+      expect(body.executions[0].detectedBrandMentions).to.equal('Acme');
+      expect(body.executions[1].businessCompetitors).to.equal('');
+      expect(body.executions[1].detectedBrandMentions).to.equal('');
     });
 
     it('counts negative sentiment rows but scores them at 0', async () => {
@@ -6714,6 +6732,8 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[0].prompt).to.equal('');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
+      expect(body.executions[0].businessCompetitors).to.equal('');
+      expect(body.executions[0].detectedBrandMentions).to.equal('');
     });
 
     it('includes sources aggregated from fetchSourcesForExecutions', async () => {

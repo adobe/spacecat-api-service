@@ -1824,7 +1824,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // ── Topic Detail / Prompt Detail ─────────────────────────────────────────────
 
 // eslint-disable-next-line max-len
-const DETAIL_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code';
+const DETAIL_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
 /**
  * Derives the ISO week string from an execution_date using the shared toISOWeek helper.
@@ -2136,6 +2136,8 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
             category: r.category_name || '',
             sources: r.url || '',
             errorCode: r.error_code || '',
+            businessCompetitors: r.business_competitors || '',
+            detectedBrandMentions: r.detected_brand_mentions || '',
           };
         });
 
@@ -2320,6 +2322,8 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
             category: r.category_name || '',
             sources: r.url || '',
             errorCode: r.error_code || '',
+            businessCompetitors: r.business_competitors || '',
+            detectedBrandMentions: r.detected_brand_mentions || '',
           };
         });
 
