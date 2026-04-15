@@ -1422,9 +1422,7 @@ function PlgOnboardingController(ctx) {
       return notFound(`PLG onboarding record ${plgOnboardingId} not found`);
     }
 
-    const { authInfo } = context.attributes;
     onboarding.setStatus(status);
-    onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
     await onboarding.save();
     return ok(PlgOnboardingDto.toJSON(onboarding));
   };

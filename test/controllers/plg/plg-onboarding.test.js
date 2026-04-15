@@ -145,6 +145,8 @@ describe('PlgOnboardingController', () => {
       getCreatedAt: sandbox.stub().returns(record.createdAt),
       getUpdatedAt: sandbox.stub().returns(record.updatedAt),
       setStatus: sandbox.stub(),
+      setUpdatedBy: sandbox.stub(),
+      getUpdatedBy: sandbox.stub().returns(overrides.updatedBy || null),
       setSiteId: sandbox.stub(),
       setOrganizationId: sandbox.stub(),
       setSteps: sandbox.stub(),
