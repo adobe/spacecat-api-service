@@ -19,21 +19,25 @@ export const PlgOnboardingDto = {
    * @param {Readonly<PlgOnboarding>} onboarding - PlgOnboarding model instance.
    * @returns {object}
    */
-  toJSON: (onboarding) => ({
-    id: onboarding.getId(),
-    imsOrgId: onboarding.getImsOrgId(),
-    domain: onboarding.getDomain(),
-    baseURL: onboarding.getBaseURL(),
-    status: onboarding.getStatus(),
-    siteId: onboarding.getSiteId(),
-    organizationId: onboarding.getOrganizationId(),
-    steps: onboarding.getSteps(),
-    error: onboarding.getError(),
-    botBlocker: onboarding.getBotBlocker(),
-    waitlistReason: onboarding.getWaitlistReason(),
-    reviews: onboarding.getReviews(),
-    completedAt: onboarding.getCompletedAt(),
-    createdAt: onboarding.getCreatedAt(),
-    updatedAt: onboarding.getUpdatedAt(),
-  }),
+  toJSON: (onboarding) => {
+    const updatedBy = onboarding.getUpdatedBy();
+    return {
+      id: onboarding.getId(),
+      imsOrgId: onboarding.getImsOrgId(),
+      domain: onboarding.getDomain(),
+      baseURL: onboarding.getBaseURL(),
+      status: onboarding.getStatus(),
+      siteId: onboarding.getSiteId(),
+      organizationId: onboarding.getOrganizationId(),
+      steps: onboarding.getSteps(),
+      error: onboarding.getError(),
+      botBlocker: onboarding.getBotBlocker(),
+      waitlistReason: onboarding.getWaitlistReason(),
+      reviews: onboarding.getReviews(),
+      completedAt: onboarding.getCompletedAt(),
+      createdAt: onboarding.getCreatedAt(),
+      updatedAt: onboarding.getUpdatedAt(),
+      requestorEmail: updatedBy !== 'system' ? updatedBy : null,
+    };
+  },
 };
