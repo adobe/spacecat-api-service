@@ -463,7 +463,6 @@ async function performAsoPlgOnboarding({
       log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
       alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
       alreadyOnboarded.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`);
-      alreadyOnboarded.setUpdatedBy('system');
       await alreadyOnboarded.save();
       // NOTE: the underlying Site record is intentionally left unchanged. The Site model does
       // not carry PLG lifecycle state — PlgOnboarding is the sole source of truth for whether
@@ -1162,7 +1161,6 @@ function PlgOnboardingController(ctx) {
 
     // UPHOLD: just store the review and return
     if (decision === REVIEW_DECISIONS.UPHELD) {
-      onboarding.setUpdatedBy(reviewedBy);
       await onboarding.save();
       return ok(PlgOnboardingDto.toJSON(onboarding));
     }
@@ -1189,7 +1187,6 @@ function PlgOnboardingController(ctx) {
               reviewedAt: reviewEntry.reviewedAt,
               justification: `Offboarded to onboard ${onboarding.getDomain()} for same IMS org`,
             }]);
-            oldOnboarded.setUpdatedBy(reviewedBy);
             await oldOnboarded.save();
             try {
               await revokeAsoSiteEnrollments(oldOnboarded, context);
@@ -1199,7 +1196,6 @@ function PlgOnboardingController(ctx) {
             log.info(`Offboarded old domain ${oldOnboarded.getDomain()} for IMS org ${imsOrgId}`);
           }
           // Re-run PLG flow for the current domain
-          onboarding.setUpdatedBy(reviewedBy);
           await onboarding.save();
           const result = await performAsoPlgOnboarding(
             { domain: onboarding.getDomain(), imsOrgId },
@@ -1244,7 +1240,6 @@ function PlgOnboardingController(ctx) {
           }
 
           // Re-run PLG flow with pre-set delivery type and optional author URL
-          onboarding.setUpdatedBy(reviewedBy);
           await onboarding.save();
           const result = await performAsoPlgOnboarding(
             {
@@ -1277,7 +1272,6 @@ function PlgOnboardingController(ctx) {
               return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
             }
             onboarding.setStatus(STATUSES.INACTIVE);
-            onboarding.setUpdatedBy(reviewedBy);
             await onboarding.save();
             log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
             const result = await performAsoPlgOnboarding(
@@ -1330,7 +1324,6 @@ function PlgOnboardingController(ctx) {
 
           // Offboard the original record (OrgA's) since domain belongs to OrgB
           onboarding.setStatus(STATUSES.INACTIVE);
-          onboarding.setUpdatedBy(reviewedBy);
           await onboarding.save();
           log.info(`Offboarded onboarding ${onboarding.getId()} for domain ${domain} (belongs to org ${existingImsOrgId})`);
 
