@@ -1,3 +1,10 @@
+## [1.437.2](https://github.com/adobe/spacecat-api-service/compare/v1.437.1...v1.437.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* edge routing user profile validation ([#2211](https://github.com/adobe/spacecat-api-service/issues/2211)) ([1561c75](https://github.com/adobe/spacecat-api-service/commit/1561c75168677a2dfcbb1f3318a3b1ee1aad4bd7))
+
 ## [1.437.1](https://github.com/adobe/spacecat-api-service/compare/v1.437.0...v1.437.1) (2026-04-14)
 
 
