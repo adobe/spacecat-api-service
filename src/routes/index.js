@@ -355,7 +355,7 @@ export default function getRouteHandlers(
     'POST /tools/api-keys': apiKeyController.createApiKey,
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
-    'GET /tools/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
+    'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'DELETE /tools/import/jobs/:jobId': importController.deleteImportJob,

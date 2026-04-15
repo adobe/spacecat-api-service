@@ -1,0 +1,95 @@
+drs-bp-pg-audit:
+  get:
+    tags:
+      - monitoring
+    summary: Query projection_audit rows for DRS monitoring
+    description: |
+      Proxy endpoint used by DRS monitoring workers to query the `projection_audit` table in
+      PostgREST (which lives at `http://data-svc.internal`, a private Route53 hostname inside
+      the Mysticat VPC). DRS Lambda functions run in a separate AWS account and cannot reach
+      that hostname directly; this endpoint bridges the network gap.
+
+      Results are paginated. The caller should increment `offset` by `limit` (default 500)
+      and repeat until fewer than `limit` rows are returned.
+    operationId: getDrsBpPgAudit
+    security:
+      - admin_key: [ ]
+    parameters:
+      - in: query
+        name: siteId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Site UUID — maps to `scope_prefix` in `projection_audit`.
+        example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+      - in: query
+        name: dateStart
+        required: true
+        schema:
+          type: string
+          format: date
+        description: Start date (inclusive). Rows with `projected_at >= dateStartT00:00:00Z` are returned.
+        example: '2026-04-14'
+      - in: query
+        name: dateEnd
+        required: true
+        schema:
+          type: string
+          format: date
+        description: End date (exclusive). Rows with `projected_at < dateEndT00:00:00Z` are returned.
+        example: '2026-04-15'
+      - in: query
+        name: handlerName
+        required: false
+        schema:
+          type: string
+          default: wrpc_import_brand_presence
+        description: Filter by handler name.
+        example: wrpc_import_brand_presence
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 500
+        description: Maximum number of rows to return per page. Capped at 500.
+      - in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+        description: Row offset for pagination. Increment by `limit` to fetch subsequent pages.
+    responses:
+      '200':
+        description: Array of projection_audit rows matching the query.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  correlation_id:
+                    type: string
+                  scope_prefix:
+                    type: string
+                    format: uuid
+                  output_count:
+                    type: integer
+                  metadata:
+                    type: object
+                    additionalProperties: true
+                  projected_at:
+                    type: string
+                    format: date-time
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'

@@ -25,7 +25,7 @@ import {
 use(sinonChai);
 use(chaiAsPromised);
 
-const BASE_URL = 'https://spacecat.example.com/tools/drs-bp-pg-audit';
+const BASE_URL = 'https://spacecat.example.com/monitoring/drs-bp-pg-audit';
 
 describe('DrsBpPgAuditController tests', () => {
   let context;

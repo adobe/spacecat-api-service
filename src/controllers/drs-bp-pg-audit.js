@@ -26,14 +26,15 @@ const DEFAULT_HANDLER_NAME = 'wrpc_import_brand_presence';
  */
 export default function DrsBpPgAuditController() {
   /**
-   * GET /tools/drs-bp-pg-audit
+   * GET /monitoring/drs-bp-pg-audit
    *
    * Query parameters:
    *   siteId      {string}  required  - Site UUID (maps to scope_prefix in projection_audit)
    *   dateStart   {string}  required  - Start date YYYY-MM-DD (inclusive, as T00:00:00Z)
    *   dateEnd     {string}  required  - End date YYYY-MM-DD (exclusive, as T00:00:00Z)
    *   handlerName {string}  optional  - Handler name filter (default: wrpc_import_brand_presence)
-   *   limit       {number}  optional  - Max rows to return (default + max: 500)
+   *   limit       {number}  optional  - Page size (default + max: 500)
+   *   offset      {number}  optional  - Row offset for pagination (default: 0)
    *
    * @param {object} reqContext - Request context with params, url, dataAccess.
    * @returns {Response} JSON array of projection_audit rows.
