@@ -282,6 +282,7 @@ describe('getRouteHandlers', () => {
     getAgenticTrafficFilterDimensions: () => null,
     getAgenticTrafficWeeks: () => null,
     getAgenticTrafficMovers: () => null,
+    getAgenticTrafficUrlBrandPresence: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -884,6 +885,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/filter-dimensions',
       'GET /sites/:siteId/agentic-traffic/weeks',
       'GET /sites/:siteId/agentic-traffic/movers',
+      'GET /sites/:siteId/agentic-traffic/url-brand-presence',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
