@@ -18,6 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
+import { TierClient } from '@adobe/spacecat-shared-tier-client';
 import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
@@ -106,6 +107,41 @@ function PreflightController(ctx, log, env) {
    *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
    * @returns {Promise<Object>} The HTTP response object
    */
+  /**
+   * Checks if a handler type is enabled for a site, including product code
+   * entitlement verification. Mirrors the audit worker's isAuditEnabledForSite.
+   */
+  async function isAuditEnabledForSite(type, site, configuration) {
+    const handler = configuration.getHandlers()?.[type];
+    if (!handler) {
+      log.info(`Handler ${type} not found in Configuration`);
+      return false;
+    }
+    if (isNonEmptyArray(handler.productCodes)) {
+      const tierContext = { dataAccess, log };
+      const enrollmentChecks = await Promise.all(
+        handler.productCodes.map(async (productCode) => {
+          try {
+            const tierClient = await TierClient.createForSite(tierContext, site, productCode);
+            const tierResult = await tierClient.checkValidEntitlement();
+            return tierResult.siteEnrollment || false;
+          } catch (e) {
+            log.error(`Failed to check entitlement for ${productCode}: ${e.message}`);
+            return false;
+          }
+        }),
+      );
+      if (!enrollmentChecks.some((has) => has)) {
+        log.info(`No valid site enrollment for handler ${type} with product codes ${handler.productCodes} for site ${site.getId()}`);
+        return false;
+      }
+    } else {
+      log.info(`Handler ${type} has no product codes`);
+      return false;
+    }
+    return configuration.isHandlerEnabledForSite(type, site);
+  }
+
   async function checkEnableAuthentication(previewBaseURL) {
     const headResponse = await fetch(previewBaseURL, {
       method: 'HEAD',
@@ -405,7 +441,8 @@ function PreflightController(ctx, log, env) {
       }
 
       // Check that the preflight handler is enabled for this site
-      const preflightEnabled = configuration.isHandlerEnabledForSite('preflight', site);
+      // (includes product code entitlement check, matching the audit worker)
+      const preflightEnabled = await isAuditEnabledForSite('preflight', site, configuration);
 
       // Resolve individual preflight audits.
       // Convention: handler types are suffixed with -preflight (e.g. headings-preflight).
