@@ -33,7 +33,7 @@ import {
   LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
-import { listBrands, upsertBrand } from '../../support/brands-storage.js';
+import { upsertBrand } from '../../support/brands-storage.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -215,7 +215,7 @@ export function buildInitialCustomerConfigV2({
   brand.baseUrl = primaryUrl;
   brand.updatedAt = timestamp;
   brand.updatedBy = updatedBy;
-  brand.urls = [{ value: primaryUrl, type: 'url' }];
+  brand.urls = [{ value: primaryUrl, type: 'base' }];
   brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
 
   config.customer.customerName = brandName;
@@ -275,7 +275,7 @@ export async function ensureInitialCustomerConfigV2({
       regions: ['gl'],
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
-      urls: [{ value: primaryUrl, type: 'url' }],
+      urls: [{ value: primaryUrl, type: 'base' }],
       brandAliases: [{ name: trimmedName, regions: ['gl'] }],
     });
 
@@ -1363,7 +1363,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
             name: brandName.trim(),
             status: 'active',
             baseSiteId: site.getId(),
-            urls: [{ value: baseURL, type: 'url' }],
+            urls: [{ value: baseURL, type: 'base' }],
             brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
           },
           postgrestClient,
@@ -1406,53 +1406,10 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
     await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
 
-    // Submit DRS prompt generation job (non-blocking)
-    try {
-      const drsClient = DrsClient.createFrom(context);
-      if (drsClient.isConfigured()) {
-        // Try to get audience from brand profile, fall back to default
-        const brandProfile = siteConfig.getBrandProfile?.();
-        const audience = brandProfile?.main_profile?.target_audience
-          || `General consumers interested in ${brandName} products and services`;
-
-        // Read region from V2 normalized brands table (set by Brandalf), fall back to 'US'
-        let brandRegion = 'US';
-        try {
-          const postgrest = context.dataAccess?.services?.postgrestClient;
-          if (postgrest) {
-            const brands = await listBrands(organization.getId(), postgrest, { status: 'active' });
-            const matchingBrand = brands.find(
-              (b) => b.name === brandName.trim() || b.baseSiteId === site.getId(),
-            );
-            if (matchingBrand?.region?.length > 0) {
-              [brandRegion] = matchingBrand.region;
-              log.info(`Using brand region "${brandRegion}" from V2 brands table for prompt generation`);
-            }
-          }
-        } catch (regionError) {
-          log.warn(`Failed to read brand region, defaulting to US: ${regionError.message}`);
-        }
-
-        const drsJob = await submitOnboardingPromptGenerationJob({
-          drsClient,
-          baseUrl: baseURL,
-          brandName: brandName.trim(),
-          audience,
-          region: brandRegion,
-          numPrompts: 50,
-          siteId: site.getId(),
-          imsOrgId,
-          onboardingMode,
-        });
-        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
-        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
-      } else {
-        log.debug('DRS client not configured, skipping prompt generation');
-      }
-    } catch (drsError) {
-      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
-    }
+    // Prompt generation is deferred to DRS: when the Brandalf job completes
+    // and syncs brands (with correct regions) to SpaceCat, DRS automatically
+    // submits a prompt_generation_base_url job with the brand's region.
+    // This ensures prompts are generated in the correct language (LLMO-4258).
 
     return {
       site,
