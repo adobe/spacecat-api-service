@@ -40,6 +40,13 @@ const MAX_BY_URL_LIMIT = 2000;
  * Maps UI platform filter codes (PLATFORM_CODES) to the values stored in the
  * agentic_traffic.platform column. Both ChatGPT paid/free codes map to the
  * same DB value; 'all' and unknown codes resolve to null (no filter).
+ *
+ * NOTE: This mapping is applied in parseAgenticTrafficParams and therefore
+ * affects ALL site-scoped agentic traffic endpoints (kpis, kpis-trend,
+ * by-region, by-category, by-page-type, by-status, by-user-agent, by-url,
+ * filter-dimensions, weeks, movers, url-brand-presence). Before this mapping
+ * existed, the raw UI code (e.g. "openai") was passed to the DB verbatim,
+ * which never matched any rows. This is the intentional behavioural fix.
  */
 const PLATFORM_CODE_TO_DB = {
   openai: 'ChatGPT',
@@ -101,7 +108,9 @@ function buildRpcParams(siteId, parsed) {
  * @param {Object} context - Request context
  * @param {Function} getSiteAndValidateAccess - Async (context) => { site, organization }
  * @param {string} handlerName - For error logging
- * @param {Function} handlerFn - Async (context, client, siteId) => response
+ * @param {Function} handlerFn - Async (context, client, siteId, siteContext) => response
+ *   siteContext = { site, organization } — forwarded from getSiteAndValidateAccess so
+ *   handlers that need org data (e.g. url-brand-presence) avoid a second DB lookup.
  * @returns {Promise<Response>}
  */
 async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handlerName, handlerFn) {
@@ -115,8 +124,9 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
 
   const { siteId } = context.params;
 
+  let siteContext;
   try {
-    await getSiteAndValidateAccess(context);
+    siteContext = await getSiteAndValidateAccess(context);
   } catch (error) {
     if (error.message?.includes(ERR_SITE_ACCESS)) {
       return forbidden('Only users belonging to the organization can view agentic traffic data');
@@ -128,7 +138,7 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
     return badRequest(error.message);
   }
 
-  return handlerFn(context, Site.postgrestService, siteId);
+  return handlerFn(context, Site.postgrestService, siteId, siteContext);
 }
 
 /**
@@ -584,7 +594,7 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
       context,
       getSiteAndValidateAccess,
       'url-brand-presence',
-      async (ctx, client, siteId) => {
+      async (ctx, client, siteId, siteContext) => {
         const parsed = parseAgenticTrafficParams(ctx);
         const rawUrl = ctx.data?.url;
 
@@ -592,15 +602,9 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
           return badRequest('url parameter is required');
         }
 
-        // Resolve organisationId directly from the site (no extra org lookup needed)
-        const { dataAccess } = ctx;
-        const { Site } = dataAccess;
-        const site = await Site.findById(siteId);
-        /* c8 ignore next 3 */
-        if (!site) {
-          return badRequest(`Site not found: ${siteId}`);
-        }
-        const organizationId = site.getOrganizationId();
+        // organisationId comes from siteContext forwarded by withAgenticTrafficAuth —
+        // getSiteAndValidateAccess already fetched the site, so no second DB roundtrip.
+        const organizationId = siteContext?.site?.getOrganizationId();
 
         const rpcParams = {
           p_organization_id: organizationId,
@@ -621,7 +625,6 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
           return internalServerError('Failed to fetch brand presence data for URL');
         }
 
-        // RPC returns a single JSONB row; data is an array with one element
         // RETURNS JSONB → PostgREST delivers the object directly, not wrapped in an array
         /* c8 ignore next */ const result = data ?? {};
         return ok({

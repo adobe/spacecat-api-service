@@ -81,14 +81,25 @@ function makeContext(overrides = {}) {
   };
 }
 
-const stubbedValidateAccess = sinon.stub().resolves();
+// Resolves with the same shape as the real getSiteAndValidateAccess so that
+// withAgenticTrafficAuth forwards { site, organization } to handlerFn as siteContext.
+const stubbedValidateAccess = sinon.stub().resolves({
+  site: { getOrganizationId: () => 'org-1' },
+  organization: { getId: () => 'org-1' },
+});
 
 describe('llmo-agentic-traffic', () => {
   const sandbox = sinon.createSandbox();
 
   afterEach(() => {
     sandbox.restore();
+    // reset() clears call history AND any per-test behaviour overrides;
+    // then re-apply the default so subsequent tests get the site context.
     stubbedValidateAccess.reset();
+    stubbedValidateAccess.resolves({
+      site: { getOrganizationId: () => 'org-1' },
+      organization: { getId: () => 'org-1' },
+    });
   });
 
   // ── Shared: PostgREST availability ──────────────────────────────────────────
@@ -996,9 +1007,9 @@ describe('llmo-agentic-traffic', () => {
     it('passes organizationId from site to the RPC', async () => {
       const client = createMockClient({
         [RPC]: {
-          data: [{
+          data: {
             totalCitations: 0, totalMentions: 0, uniquePrompts: 0, weeklyTrends: [], prompts: [],
-          }],
+          },
           error: null,
         },
       });
