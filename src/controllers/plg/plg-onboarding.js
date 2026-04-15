@@ -1101,7 +1101,7 @@ function PlgOnboardingController(ctx) {
           return {
             ...json,
             trialEmail: emailMap[record.getUpdatedBy()] ?? null,
-            reviews: (json.reviews || []).map((review) => ({
+            reviews: json.reviews.map((review) => ({
               ...review,
               reviewedBy: emailMap[review.reviewedBy] ?? review.reviewedBy,
             })),
