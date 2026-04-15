@@ -21,6 +21,7 @@ use(chaiAsPromised);
 
 describe('llmo-query-handler', () => {
   let queryLlmoFiles;
+  let UpstreamError;
   let tracingFetchStub;
   let mockContext;
   let mockLlmoConfig;
@@ -95,6 +96,7 @@ describe('llmo-query-handler', () => {
     });
 
     queryLlmoFiles = module.queryLlmoFiles;
+    UpstreamError = module.UpstreamError;
   });
 
   afterEach(() => {
@@ -180,25 +182,76 @@ describe('llmo-query-handler', () => {
       ).to.be.rejectedWith('Network error');
     });
 
-    it('should handle non-OK HTTP responses', async () => {
+    it('should handle non-OK HTTP responses with UpstreamError', async () => {
       tracingFetchStub.resolves(createMockResponse({}, false, 500));
 
-      await expect(
-        queryLlmoFiles(mockContext, mockLlmoConfig),
-      ).to.be.rejectedWith('External API returned 500');
-      expect(mockLog.debug).to.have.been.calledWith(
+      try {
+        await queryLlmoFiles(mockContext, mockLlmoConfig);
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error).to.be.instanceOf(UpstreamError);
+        expect(error.upstreamStatus).to.equal(500);
+        expect(error.message).to.include('External API returned 500');
+      }
+      expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Failed to fetch data from external endpoint/),
       );
     });
 
-    it('should handle timeout errors', async () => {
+    it('should handle 404 from upstream with correct status', async () => {
+      tracingFetchStub.resolves(createMockResponse({}, false, 404));
+
+      try {
+        await queryLlmoFiles(mockContext, mockLlmoConfig);
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error).to.be.instanceOf(UpstreamError);
+        expect(error.upstreamStatus).to.equal(404);
+      }
+    });
+
+    it('should retry once on 503 then succeed', async () => {
+      const successData = createSheetData([{ id: 1 }]);
+      tracingFetchStub
+        .onFirstCall().resolves(createMockResponse({}, false, 503))
+        .onSecondCall().resolves(createMockResponse(successData));
+
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
+
+      expect(tracingFetchStub).to.have.been.calledTwice;
+      expect(result.data).to.deep.equal(successData);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/Helix returned 503.*retrying/),
+      );
+    });
+
+    it('should throw UpstreamError after 503 retry exhausted', async () => {
+      tracingFetchStub.resolves(createMockResponse({}, false, 503));
+
+      try {
+        await queryLlmoFiles(mockContext, mockLlmoConfig);
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error).to.be.instanceOf(UpstreamError);
+        expect(error.upstreamStatus).to.equal(503);
+      }
+      // First attempt + 1 retry = 2 calls
+      expect(tracingFetchStub).to.have.been.calledTwice;
+    });
+
+    it('should handle timeout errors with UpstreamError', async () => {
       const abortError = new Error('The operation was aborted');
       abortError.name = 'AbortError';
       tracingFetchStub.rejects(abortError);
 
-      await expect(
-        queryLlmoFiles(mockContext, mockLlmoConfig),
-      ).to.be.rejectedWith('Request timeout after 15000ms');
+      try {
+        await queryLlmoFiles(mockContext, mockLlmoConfig);
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect(error).to.be.instanceOf(UpstreamError);
+        expect(error.upstreamStatus).to.equal(504);
+        expect(error.message).to.include('Request timeout after 15000ms');
+      }
       expect(mockLog.debug).to.have.been.calledWith(
         sinon.match(/Request timeout after 15000ms/),
       );
@@ -465,6 +518,26 @@ describe('llmo-query-handler', () => {
 
       const fetchUrl = getFetchUrl();
       expect(fetchUrl).to.include('limit=50');
+    });
+
+    it('should use default limit of 100000 when not specified', async () => {
+      setupFetchTest(createSheetData([]));
+
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
+
+      const fetchUrl = getFetchUrl();
+      expect(fetchUrl).to.include('limit=100000');
+    });
+
+    it('should cap user-supplied limit at 100000', async () => {
+      setupFetchTest(createSheetData([]));
+      mockContext.data = { limit: '999999' };
+
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
+
+      const fetchUrl = getFetchUrl();
+      expect(fetchUrl).to.include('limit=100000');
+      expect(fetchUrl).to.not.include('limit=999999');
     });
 
     it('should combine multiple query parameters', async () => {

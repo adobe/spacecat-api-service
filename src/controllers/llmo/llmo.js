@@ -66,7 +66,7 @@ import {
   appendRowsToQueryIndex,
   previewAndPublishQueryIndex,
 } from './llmo-onboarding.js';
-import { queryLlmoFiles } from './llmo-query-handler.js';
+import { queryLlmoFiles, UpstreamError } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
@@ -1092,8 +1092,19 @@ function LlmoController(ctx) {
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
+      const msg = cleanupHeaderValue(error.message);
+      if (error instanceof UpstreamError) {
+        const { upstreamStatus } = error;
+        log.error(`LLMO data fetch failed for site ${siteId} (upstream ${upstreamStatus}): ${error.message}`);
+        if (upstreamStatus === 404) {
+          return notFound(msg);
+        }
+        // 503/5xx from upstream → 502 Bad Gateway; timeout → 504
+        const status = upstreamStatus === 504 ? 504 : 502;
+        return createResponse({ message: msg }, status);
+      }
       log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
-      return badRequest(cleanupHeaderValue(error.message));
+      return badRequest(msg);
     }
   };
 

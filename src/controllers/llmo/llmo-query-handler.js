@@ -18,6 +18,25 @@ import {
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 
+/**
+ * Error thrown when the upstream Helix/EDS API returns a non-OK response.
+ * Carries the upstream HTTP status so callers can map it to an appropriate response.
+ */
+export class UpstreamError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.name = 'UpstreamError';
+    this.upstreamStatus = status;
+  }
+}
+
+const RETRY_DELAY_MS = 1000;
+const MAX_RETRIES = 1;
+
+const delay = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
 const processData = (data, queryParams) => {
   let processedData = data;
 
@@ -74,14 +93,32 @@ const processData = (data, queryParams) => {
   return processedData;
 };
 
+const TIMEOUT_MS = 15000;
+const DEFAULT_LIMIT = 100000;
+
+/**
+ * Perform a single fetch attempt against the Helix/EDS backend.
+ * Returns the Response object (caller checks .ok).
+ */
+const fetchFromHelix = async (url, env, signal) => fetch(url.toString(), {
+  headers: {
+    Authorization: `token ${env.LLMO_HLX_API_KEY}`,
+    'User-Agent': SPACECAT_USER_AGENT,
+    'Accept-Encoding': 'br',
+  },
+  signal,
+});
+
 const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryParams) => {
   const { log, env } = context;
   const { sheet } = context.data;
 
   const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${filePath}`);
 
-  // Apply pagination parameters when calling the source URL
-  const limit = queryParams.limit ? parseInt(queryParams.limit, 10) : 10000000;
+  // Apply pagination parameters when calling the source URL.
+  // Cap at DEFAULT_LIMIT to prevent oversized responses that overwhelm Helix.
+  const parsedLimit = queryParams.limit ? parseInt(queryParams.limit, 10) : DEFAULT_LIMIT;
+  const limit = Math.min(parsedLimit, DEFAULT_LIMIT);
   const offset = queryParams.offset ? parseInt(queryParams.offset, 10) : 0;
 
   url.searchParams.set('limit', limit.toString());
@@ -92,39 +129,42 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
     url.searchParams.set('sheet', sheet);
   }
 
-  const urlAsString = url.toString();
-  log.info(`Fetching single file with path: ${urlAsString}`);
-
-  // Create an AbortController with a 15-second timeout
-  // to prevent large data fetches keeping the Lambda running for too long
-  const TIMEOUT_MS = 15000;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS); // 15 seconds
+  log.info(`Fetching single file with path: ${url.toString()}`);
 
   // Validate API key exists before making the request
   if (!env.LLMO_HLX_API_KEY) {
-    clearTimeout(timeoutId);
     throw new Error('LLMO_HLX_API_KEY environment variable is not configured');
   }
+
+  // Each attempt gets its own AbortController with a fresh timeout
+  // so retries are not starved by time consumed by the first attempt.
+  let controller = new AbortController();
+  let timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   // Start timing the source fetch
   const sourceFetchStartTime = Date.now();
 
   try {
-    // Fetch data from the external endpoint using the dataFolder from config
-    const response = await fetch(url.toString(), {
-      headers: {
-        Authorization: `token ${env.LLMO_HLX_API_KEY}`,
-        'User-Agent': SPACECAT_USER_AGENT,
-        'Accept-Encoding': 'br',
-      },
-      signal: controller.signal,
-    });
+    let response = await fetchFromHelix(url, env, controller.signal);
+
+    // Retry once on 503 (Helix transiently overloaded)
+    if (response.status === 503 && MAX_RETRIES > 0) {
+      clearTimeout(timeoutId);
+      log.info(`Helix returned 503 for ${filePath}, retrying after ${RETRY_DELAY_MS}ms`);
+      await delay(RETRY_DELAY_MS);
+      controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      response = await fetchFromHelix(url, env, controller.signal);
+    }
+
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-      throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      log.warn(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+      throw new UpstreamError(
+        response.status,
+        `External API returned ${response.status}: ${response.statusText}`,
+      );
     }
 
     // Get the raw response data
@@ -148,7 +188,7 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
       log.debug(`Request timeout after ${TIMEOUT_MS}ms for file: ${filePath}`);
-      throw new Error(`Request timeout after ${TIMEOUT_MS}ms`);
+      throw new UpstreamError(504, `Request timeout after ${TIMEOUT_MS}ms`);
     }
     throw error;
   }

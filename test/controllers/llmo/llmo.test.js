@@ -17,6 +17,7 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { UpstreamError } from '../../../src/controllers/llmo/llmo-query-handler.js';
 import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
 use(sinonChai);
@@ -3380,6 +3381,7 @@ describe('LlmoController', () => {
       const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/controllers/llmo/llmo-query-handler.js': {
           queryLlmoFiles: queryLlmoFilesStub,
+          UpstreamError,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         ...getCommonMocks(),
@@ -3389,6 +3391,21 @@ describe('LlmoController', () => {
         controller: LlmoControllerWithCache(mockContext),
         stub: queryLlmoFilesStub,
       };
+    };
+
+    const createControllerWithError = async (error) => {
+      const queryLlmoFilesStub = sinon.stub().rejects(error);
+
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+          UpstreamError,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
+      });
+
+      return LlmoControllerWithCache(mockContext);
     };
 
     it('should successfully fetch and return files data', async () => {
@@ -3411,18 +3428,8 @@ describe('LlmoController', () => {
       expect(stub).to.have.been.calledWith(mockContext, mockLlmoConfig);
     });
 
-    it('should handle errors and return bad request', async () => {
-      const queryLlmoFilesStub = sinon.stub().rejects(new Error('Cache query failed'));
-
-      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/controllers/llmo/llmo-query-handler.js': {
-          queryLlmoFiles: queryLlmoFilesStub,
-        },
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
-        ...getCommonMocks(),
-      });
-
-      const errorController = LlmoControllerWithCache(mockContext);
+    it('should handle non-upstream errors and return bad request', async () => {
+      const errorController = await createControllerWithError(new Error('Cache query failed'));
       const result = await errorController.queryFiles(mockContext);
 
       expect(result.status).to.equal(400);
@@ -3431,6 +3438,39 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
+    });
+
+    it('should return 404 when upstream returns 404', async () => {
+      const errorController = await createControllerWithError(
+        new UpstreamError(404, 'External API returned 404: Not Found'),
+      );
+      const result = await errorController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('404');
+    });
+
+    it('should return 502 when upstream returns 503', async () => {
+      const errorController = await createControllerWithError(
+        new UpstreamError(503, 'External API returned 503: Service Unavailable'),
+      );
+      const result = await errorController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(502);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('503');
+    });
+
+    it('should return 504 on upstream timeout', async () => {
+      const errorController = await createControllerWithError(
+        new UpstreamError(504, 'Request timeout after 15000ms'),
+      );
+      const result = await errorController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(504);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('timeout');
     });
 
     it('should return 404 when site is not found', async () => {
