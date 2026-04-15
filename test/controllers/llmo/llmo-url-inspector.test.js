@@ -19,6 +19,8 @@ import {
   createUrlInspectorOwnedUrlsHandler,
   createUrlInspectorTrendingUrlsHandler,
   createUrlInspectorCitedDomainsHandler,
+  createUrlInspectorDomainUrlsHandler,
+  createUrlInspectorUrlPromptsHandler,
 } from '../../../src/controllers/llmo/llmo-url-inspector.js';
 
 use(sinonChai);
@@ -458,6 +460,206 @@ describe('URL Inspector Handlers', () => {
       };
 
       const response = await handler(context);
+      expect(response.status).to.equal(400);
+    });
+  });
+
+  describe('createUrlInspectorDomainUrlsHandler', () => {
+    it('returns paginated URLs for a domain', async () => {
+      const rpcData = [
+        {
+          url: 'https://example.com/page1',
+          content_type: 'earned',
+          citations: 42,
+          total_count: 100,
+        },
+        {
+          url: 'https://example.com/page2',
+          content_type: 'earned',
+          citations: 30,
+          total_count: 100,
+        },
+      ];
+
+      const { context } = createContext(
+        {},
+        { hostname: 'example.com' },
+        {
+          rpcResults: {
+            rpc_url_inspector_domain_urls: {
+              data: rpcData,
+              error: null,
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorDomainUrlsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = parseBody(response);
+
+      expect(response.status).to.equal(200);
+      expect(body.urls).to.have.length(2);
+      expect(body.totalCount).to.equal(100);
+      expect(body.urls[0].url).to.equal('https://example.com/page1');
+      expect(body.urls[0].citations).to.equal(42);
+    });
+
+    it('returns badRequest when hostname is missing', async () => {
+      const { context } = createContext({}, { hostname: undefined });
+
+      const handler = createUrlInspectorDomainUrlsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest when siteId is missing', async () => {
+      const { context } = createContext(
+        {},
+        { siteId: undefined, hostname: 'example.com' },
+      );
+
+      const handler = createUrlInspectorDomainUrlsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns forbidden when site not in org', async () => {
+      const { context, limitStub } = createContext(
+        {},
+        { hostname: 'example.com' },
+      );
+      limitStub.resolves({ data: [], error: null });
+
+      const handler = createUrlInspectorDomainUrlsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns badRequest on RPC error', async () => {
+      const { context } = createContext(
+        {},
+        { hostname: 'example.com' },
+        {
+          rpcResults: {
+            rpc_url_inspector_domain_urls: {
+              data: null,
+              error: { message: 'RPC failed' },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorDomainUrlsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+  });
+
+  describe('createUrlInspectorUrlPromptsHandler', () => {
+    it('returns prompt breakdown for a URL', async () => {
+      const rpcData = [
+        {
+          prompt: 'What is X?',
+          category: 'Cat A',
+          region: 'US',
+          topics: 'Topic 1',
+          citations: 15,
+        },
+        {
+          prompt: 'How does Y work?',
+          category: 'Cat B',
+          region: 'DE',
+          topics: 'Topic 2',
+          citations: 8,
+        },
+      ];
+
+      const urlId = '44444444-4444-4444-4444-444444444444';
+      const { context } = createContext(
+        {},
+        { urlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: rpcData,
+              error: null,
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = parseBody(response);
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts).to.have.length(2);
+      expect(body.prompts[0].prompt).to.equal('What is X?');
+      expect(body.prompts[0].citations).to.equal(15);
+    });
+
+    it('returns badRequest when urlId is missing', async () => {
+      const { context } = createContext({}, { urlId: undefined });
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns forbidden when site not in org', async () => {
+      const urlId = '44444444-4444-4444-4444-444444444444';
+      const { context, limitStub } = createContext({}, { urlId });
+      limitStub.resolves({ data: [], error: null });
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+  });
+
+  describe('platform validation', () => {
+    it('returns badRequest for invalid platform value', async () => {
+      const { context } = createContext(
+        {},
+        { platform: 'invalid-model-name' },
+        {
+          rpcResults: {
+            rpc_url_inspector_stats: {
+              data: [],
+              error: null,
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorStatsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
       expect(response.status).to.equal(400);
     });
   });
