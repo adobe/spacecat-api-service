@@ -1,3 +1,10 @@
+## [1.442.1](https://github.com/adobe/spacecat-api-service/compare/v1.442.0...v1.442.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* **deps:** update @adobe/spacecat-shared-vault-secrets to 1.3.4 ([#2222](https://github.com/adobe/spacecat-api-service/issues/2222)) ([b4d13dd](https://github.com/adobe/spacecat-api-service/commit/b4d13dd7756074c66cde183f07eeff13c4f46caf)), closes [adobe/spacecat-shared#1543](https://github.com/adobe/spacecat-shared/issues/1543)
+
 # [1.442.0](https://github.com/adobe/spacecat-api-service/compare/v1.441.0...v1.442.0) (2026-04-15)
 
 
