@@ -76,7 +76,6 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
-import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -227,7 +226,6 @@ async function run(request, context) {
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
     const tokensController = TokensController(context);
-    const plgOnboardingController = PlgOnboardingController(context);
     const imsOrgAccessController = ImsOrgAccessController(context);
     const contactSalesLeadsController = ContactSalesLeadsController(context);
     const featureFlagsController = FeatureFlagsController(context);
@@ -277,7 +275,6 @@ async function run(request, context) {
       sentimentController,
       consumersController,
       tokensController,
-      plgOnboardingController,
       imsOrgAccessController,
       contactSalesLeadsController,
       featureFlagsController,
@@ -293,9 +290,6 @@ async function run(request, context) {
 
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
-      }
-      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
-        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
       if (params.organizationId
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
