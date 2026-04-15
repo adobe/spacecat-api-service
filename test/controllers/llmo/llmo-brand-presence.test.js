@@ -37,6 +37,7 @@ import {
   fetchBrandsForOrgSite,
   resolveSiteIdsForConfigPageIntents,
   createPromptDetailHandler,
+  createExecutionSourcesHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
   createCompetitorSummaryHandler,
@@ -7205,6 +7206,493 @@ describe('llmo-brand-presence', () => {
       expect(body.sources).to.have.lengthOf(1);
       expect(body.sources[0].hostname).to.equal('docs.example.com');
       expect(body.sources[0].contentType).to.equal('pdf');
+    });
+  });
+
+  // ── createExecutionSourcesHandler ───────────────────────────────────────────
+  describe('createExecutionSourcesHandler', () => {
+    const execUuid = '001b5813-283f-4563-9b94-3f32727f6051';
+    const fullExecRow = {
+      id: execUuid,
+      topic_id: null,
+      topics: 'T',
+      prompt: 'p',
+      prompt_id: null,
+      region_code: 'US',
+      mentions: false,
+      citations: false,
+      visibility_score: 1,
+      position: '1',
+      sentiment: 'Positive',
+      volume: '1',
+      origin: 'o',
+      category_name: 'C',
+      execution_date: '2026-03-02',
+      answer: '',
+      url: '',
+      error_code: null,
+      business_competitors: '',
+      detected_brand_mentions: '',
+      brand_id: '0178a3f0-1234-7000-8000-000000000099',
+      site_id: '0178a3f0-1234-7000-8000-000000000088',
+      model: 'chatgpt-free',
+    };
+
+    beforeEach(() => {
+      mockContext.params.executionId = execUuid;
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+      };
+    });
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden when org access check fails', async () => {
+      getOrgAndValidateAccess.rejects(
+        new Error('Only users belonging to the organization can view brand presence data'),
+      );
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest for invalid execution id', async () => {
+      mockContext.params.executionId = 'not-a-uuid';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when startDate is missing', async () => {
+      mockContext.data = { endDate: '2026-04-15', platform: 'chatgpt-free' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: startDate');
+    });
+
+    it('treats null context.data as empty query for required params', async () => {
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: startDate');
+    });
+
+    it('returns badRequest when endDate is missing', async () => {
+      mockContext.data = { startDate: '2026-02-01', platform: 'chatgpt-free' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: endDate');
+    });
+
+    it('returns badRequest when platform is missing', async () => {
+      mockContext.data = { startDate: '2026-02-01', endDate: '2026-04-15' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock();
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Missing required query parameter: platform');
+    });
+
+    it('accepts start_date, end_date, and model as required query aliases', async () => {
+      mockContext.data = {
+        start_date: '2026-02-01',
+        end_date: '2026-04-15',
+        model: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts null startDate when start_date is provided', async () => {
+      mockContext.data = {
+        startDate: null,
+        start_date: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts null endDate when end_date is provided', async () => {
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: null,
+        end_date: '2026-04-15',
+        platform: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts null model when platform is provided', async () => {
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        model: null,
+        platform: 'chatgpt-free',
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns forbidden when siteId is provided but does not belong to org', async () => {
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+        siteId: 'site-xyz',
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns notFound when execution row is missing', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns notFound when execution_date is empty on the row', async () => {
+      const row = { ...fullExecRow, execution_date: '' };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [row], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns internalServerError when execution query returns PostgREST error', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: null, error: { message: 'exec failed' } },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(500);
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence execution-sources PostgREST error: exec failed',
+      );
+    });
+
+    it('returns internalServerError when sources query returns PostgREST error', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: null, error: { message: 'sources failed' } },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(500);
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence execution-sources PostgREST error: sources failed',
+      );
+    });
+
+    it('returns execution summary and flattened sources with URLs', async () => {
+      const sourceRows = [
+        {
+          id: 'cfe1f711-75b5-4c8d-baf6-5c572e091f05',
+          execution_id: execUuid,
+          site_id: fullExecRow.site_id,
+          execution_date: '2026-03-02',
+          model: 'chatgpt-free',
+          url_id: '019cba12-b404-7077-9aa1-2992346a1767',
+          content_type: 'earned',
+          is_owned: false,
+          created_at: '2026-03-04T18:18:33.59105+00:00',
+          updated_at: '2026-03-16T15:49:40.163025+00:00',
+          organization_id: mockContext.params.spaceCatId,
+          source_urls: { url: 'https://cited.example/path', hostname: 'cited.example' },
+        },
+        {
+          id: 'cfe1f711-75b5-4c8d-baf6-5c572e091f06',
+          execution_id: execUuid,
+          site_id: fullExecRow.site_id,
+          execution_date: '2026-03-02',
+          model: 'chatgpt-free',
+          url_id: '019cba12-b404-7077-9aa1-2992346a1768',
+          content_type: 'owned',
+          is_owned: true,
+          created_at: '2026-03-04T18:18:33.59105+00:00',
+          updated_at: '2026-03-16T15:49:40.163025+00:00',
+          organization_id: mockContext.params.spaceCatId,
+          source_urls: null,
+        },
+        {
+          id: null,
+          execution_id: null,
+          site_id: null,
+          execution_date: '2026-03-02',
+          model: 'chatgpt-free',
+          url_id: null,
+          content_type: null,
+          is_owned: 'true',
+          created_at: null,
+          updated_at: null,
+          organization_id: null,
+          source_urls: { url: 'https://edge.example/', hostname: null },
+        },
+        {
+          id: 'cfe1f711-75b5-4c8d-baf6-5c572e091f07',
+          execution_id: execUuid,
+          site_id: fullExecRow.site_id,
+          execution_date: null,
+          model: null,
+          url_id: '019cba12-b404-7077-9aa1-2992346a1769',
+          content_type: 'social',
+          is_owned: false,
+          created_at: '2026-03-04T18:18:33.59105+00:00',
+          updated_at: '2026-03-16T15:49:40.163025+00:00',
+          organization_id: mockContext.params.spaceCatId,
+          source_urls: {},
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: sourceRows, error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.execution.executionId).to.equal(execUuid);
+      expect(body.execution.brandId).to.equal(fullExecRow.brand_id);
+      expect(body.execution.siteId).to.equal(fullExecRow.site_id);
+      expect(body.execution.model).to.equal('chatgpt-free');
+      expect(body.sources).to.have.lengthOf(4);
+      expect(body.sources[0].urlId).to.equal('019cba12-b404-7077-9aa1-2992346a1767');
+      expect(body.sources[0].url).to.equal('https://cited.example/path');
+      expect(body.sources[0].hostname).to.equal('cited.example');
+      expect(body.sources[0].contentType).to.equal('earned');
+      expect(body.sources[0].isOwned).to.equal(false);
+      expect(body.sources[1].urlId).to.equal('019cba12-b404-7077-9aa1-2992346a1768');
+      expect(body.sources[1].url).to.equal('');
+      expect(body.sources[1].hostname).to.equal('');
+      expect(body.sources[1].contentType).to.equal('owned');
+      expect(body.sources[1].isOwned).to.equal(true);
+      expect(body.sources[2].urlId).to.equal('');
+      expect(body.sources[2].contentType).to.equal('');
+      expect(body.sources[2].isOwned).to.equal(true);
+      expect(body.sources[2].url).to.equal('https://edge.example/');
+      expect(body.sources[2].hostname).to.equal('');
+      expect(body.sources[3].urlId).to.equal('019cba12-b404-7077-9aa1-2992346a1769');
+      expect(body.sources[3].contentType).to.equal('social');
+      expect(body.sources[3].isOwned).to.equal(false);
+      expect(body.sources[3].url).to.equal('');
+      expect(body.sources[3].hostname).to.equal('');
+      expect(client.eq).to.have.been.calledWith('execution_date', '2026-03-02');
+    });
+
+    it('returns empty brandId and siteId on execution when null on row', async () => {
+      const execRow = {
+        ...fullExecRow,
+        brand_id: null,
+        site_id: null,
+      };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [execRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.execution.brandId).to.equal('');
+      expect(body.execution.siteId).to.equal('');
+    });
+
+    it('returns empty executionId on execution summary when id is null on row', async () => {
+      const execRow = { ...fullExecRow, id: null };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [execRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.execution.executionId).to.equal('');
+    });
+
+    it('returns empty model on execution summary when model is null on row', async () => {
+      const execRow = { ...fullExecRow, model: null };
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [execRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.execution.model).to.equal('');
+    });
+
+    it('returns empty sources when none exist for the execution', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.sources).to.deep.equal([]);
+    });
+
+    it('filters by brand_id when brandId is a UUID', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000001';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000001');
+    });
+
+    it('applies regionCode and origin filters from ctx.data', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+        region: 'US',
+        origin: 'organic',
+      };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'US');
+      expect(client.ilike).to.have.been.calledWith('origin', 'organic');
+    });
+
+    it('applies site_id filter when siteId passes org validation', async () => {
+      const client = createChainableMock(
+        { data: [], error: null },
+        [
+          { data: [{ id: 'site-123' }], error: null },
+          { data: [], error: null },
+        ],
+      );
+      mockContext.data = {
+        startDate: '2026-02-01',
+        endDate: '2026-04-15',
+        platform: 'chatgpt-free',
+        siteId: 'site-123',
+      };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(404);
+      expect(client.eq).to.have.been.calledWith('site_id', 'site-123');
     });
   });
 

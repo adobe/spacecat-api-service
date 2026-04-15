@@ -7517,6 +7517,86 @@ PageRelationshipsSearchResponse:
     errors:
       $ref: '#/PageRelationshipsErrorMapping'
 
+BrandPresenceLlmModel:
+  type: string
+  description: |
+    LLM model key for brand presence executions (`llm_model` in mysticat-data-service).
+    The HTTP API also accepts query aliases and legacy names via `resolveModelFromRequest`.
+  enum:
+    - chatgpt-paid
+    - chatgpt-free
+    - google-ai-overview
+    - perplexity
+    - google-ai-mode
+    - copilot
+    - gemini
+    - google
+    - microsoft
+    - mistral
+    - anthropic
+    - amazon
+
+BrandPresenceExecutionSourceItem:
+  type: object
+  description: One cited source row for a brand presence execution (slim shape).
+  required:
+    - urlId
+    - contentType
+    - isOwned
+    - url
+    - hostname
+  properties:
+    urlId:
+      type: string
+      description: FK to `source_urls.id` (stringified UUID or empty when unknown)
+    contentType:
+      type: string
+    isOwned:
+      type: boolean
+    url:
+      type: string
+      description: Resolved URL from embedded `source_urls`
+    hostname:
+      type: string
+      description: Resolved hostname from embedded `source_urls`
+
+BrandPresenceExecutionSummary:
+  type: object
+  description: Minimal execution metadata returned with execution-sources.
+  required:
+    - executionId
+    - executionDate
+    - brandId
+    - siteId
+    - model
+  properties:
+    executionId:
+      type: string
+    executionDate:
+      type: string
+      format: date
+      description: Partition key date for `brand_presence_sources`
+    brandId:
+      type: string
+    siteId:
+      type: string
+    model:
+      type: string
+      description: Model key on the execution row
+
+BrandPresenceExecutionSourcesResponse:
+  type: object
+  required:
+    - execution
+    - sources
+  properties:
+    execution:
+      $ref: '#/BrandPresenceExecutionSummary'
+    sources:
+      type: array
+      items:
+        $ref: '#/BrandPresenceExecutionSourceItem'
+
 AgenticTrafficUrlBrandPresencePrompt:
   type: object
   description: A prompt that cited the URL as a source in a brand presence LLM execution
