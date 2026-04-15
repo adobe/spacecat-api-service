@@ -3190,6 +3190,26 @@ describe('PlgOnboardingController', () => {
         expect(res.value[0].reviews[0].reviewedBy).to.equal('reviewer@example.com');
         expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('reviewer-ims-id@AdobeID');
       });
+
+      it('keeps reviewedBy as-is when not resolvable (e.g. "admin")', async () => {
+        const record = createMockOnboarding({
+          reviews: [
+            { reviewedBy: 'admin', decision: 'UPHELD', reason: 'test' },
+          ],
+        });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = { getImsAdminProfile: sandbox.stub() };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].reviews[0].reviewedBy).to.equal('admin');
+        expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
     });
   });
 
