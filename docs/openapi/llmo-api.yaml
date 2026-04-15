@@ -2402,10 +2402,12 @@ llmo-agentic-traffic-by-url:
   get:
     tags:
       - llmo
-    summary: Per-URL agentic traffic performance analysis
+    summary: Per-URL agentic traffic performance analysis (paginated)
     description: |
-      Queries `rpc_agentic_traffic_by_url`. Powers the URL Performance table.
-      Returns up to `limit` URLs (default and max 2000) ordered by `sortBy`/`sortOrder`.
+      Queries `rpc_agentic_traffic_by_url`. Powers the URL Performance table with
+      infinite-scroll pagination. Returns a page of `pageSize` rows (default 50, max 500)
+      plus `totalCount` for pagination context.
+      Supports server-side substring search via `urlPathSearch`.
     operationId: getAgenticTrafficByUrl
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
@@ -2415,13 +2417,27 @@ llmo-agentic-traffic-by-url:
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
       - { name: contentType, in: query, schema: { type: string } }
-      - name: limit
+      - name: pageSize
         in: query
+        description: Number of rows per page (default 50, max 500)
         schema:
           type: integer
           minimum: 1
-          maximum: 2000
-          default: 2000
+          maximum: 500
+          default: 50
+      - name: pageOffset
+        in: query
+        description: Zero-based row offset for pagination
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: urlPathSearch
+        in: query
+        description: Substring filter applied to `url_path` server-side
+        schema:
+          type: string
+          example: '/express/create'
       - name: sortBy
         in: query
         schema:
@@ -2436,7 +2452,7 @@ llmo-agentic-traffic-by-url:
           default: desc
     responses:
       '200':
-        description: Per-URL performance analysis
+        description: Paginated per-URL performance analysis
         content:
           application/json:
             schema:
