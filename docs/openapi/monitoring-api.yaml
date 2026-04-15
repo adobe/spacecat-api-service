@@ -9,8 +9,21 @@ drs-bp-pg-audit:
       the Mysticat VPC). DRS Lambda functions run in a separate AWS account and cannot reach
       that hostname directly; this endpoint bridges the network gap.
 
-      Results are paginated. The caller should increment `offset` by `limit` (default 500)
-      and repeat until fewer than `limit` rows are returned.
+      Server-side filters applied to every request (not reflected as query params):
+      - `skipped = false` — only non-skipped projection rows are returned
+      - Results are ordered by `projected_at DESC`
+
+      Performance note: the underlying PostgREST query filters on
+      `(scope_prefix, handler_name, projected_at, skipped)`. A composite index on these
+      columns is required for acceptable query performance on large tables.
+
+      Auth note: DRS workers call this endpoint via admin `x-api-key`. The `drsBpPgAudit:read`
+      capability gates S2S JWT callers only; admin key access bypasses capability checks. This
+      is intentional — DRS runs in a separate AWS account without an S2S consumer registration.
+
+      Results are paginated. Inspect `hasMore` in the response to determine whether additional
+      pages exist. Increment `offset` by `limit` (default 500) and repeat while `hasMore` is
+      `true`.
     operationId: getDrsBpPgAudit
     security:
       - admin_key: [ ]
@@ -29,7 +42,9 @@ drs-bp-pg-audit:
         schema:
           type: string
           format: date
-        description: Start date (inclusive). Rows with `projected_at >= dateStartT00:00:00Z` are returned.
+        description: |
+          Start date (inclusive) in YYYY-MM-DD format.
+          Rows with `projected_at >= dateStartT00:00:00Z` are returned.
         example: '2026-04-14'
       - in: query
         name: dateEnd
@@ -37,7 +52,9 @@ drs-bp-pg-audit:
         schema:
           type: string
           format: date
-        description: End date (exclusive). Rows with `projected_at < dateEndT00:00:00Z` are returned.
+        description: |
+          End date (exclusive) in YYYY-MM-DD format. Must be after `dateStart`.
+          Rows with `projected_at < dateEndT00:00:00Z` are returned.
         example: '2026-04-15'
       - in: query
         name: handlerName
@@ -55,7 +72,7 @@ drs-bp-pg-audit:
           minimum: 1
           maximum: 500
           default: 500
-        description: Maximum number of rows to return per page. Capped at 500.
+        description: Maximum number of rows to return per page. Capped at 500, floored at 1.
       - in: query
         name: offset
         required: false
@@ -63,30 +80,44 @@ drs-bp-pg-audit:
           type: integer
           minimum: 0
           default: 0
-        description: Row offset for pagination. Increment by `limit` to fetch subsequent pages.
+        description: |
+          Row offset for pagination. Increment by `limit` to fetch subsequent pages.
+          Ignored when `hasMore` is `false` in the previous response.
     responses:
       '200':
-        description: Array of projection_audit rows matching the query.
+        description: Paginated projection_audit rows matching the query.
         content:
           application/json:
             schema:
-              type: array
-              items:
-                type: object
-                properties:
-                  correlation_id:
-                    type: string
-                  scope_prefix:
-                    type: string
-                    format: uuid
-                  output_count:
-                    type: integer
-                  metadata:
+              type: object
+              required:
+                - rows
+                - hasMore
+              properties:
+                rows:
+                  type: array
+                  description: Projection audit rows for this page, ordered by `projected_at DESC`.
+                  items:
                     type: object
-                    additionalProperties: true
-                  projected_at:
-                    type: string
-                    format: date-time
+                    properties:
+                      correlation_id:
+                        type: string
+                      scope_prefix:
+                        type: string
+                        format: uuid
+                      output_count:
+                        type: integer
+                      metadata:
+                        type: object
+                        additionalProperties: true
+                      projected_at:
+                        type: string
+                        format: date-time
+                hasMore:
+                  type: boolean
+                  description: |
+                    `true` when the number of rows returned equals `limit`, indicating that
+                    a subsequent page may exist. `false` when the final page has been reached.
       '400':
         $ref: './responses.yaml#/400'
       '401':

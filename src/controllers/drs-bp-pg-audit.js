@@ -14,6 +14,8 @@ import { badRequest, internalServerError, ok } from '@adobe/spacecat-shared-http
 
 const MAX_LIMIT = 500;
 const DEFAULT_HANDLER_NAME = 'wrpc_import_brand_presence';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * DRS Brand Presence PostgREST Audit Controller.
@@ -21,6 +23,14 @@ const DEFAULT_HANDLER_NAME = 'wrpc_import_brand_presence';
  * Proxies queries from DRS monitoring workers to the `projection_audit` table in PostgREST.
  * DRS Lambdas run in a separate AWS account and cannot reach the private PostgREST endpoint
  * (`http://data-svc.internal`). This endpoint bridges the network gap.
+ *
+ * Auth note: DRS workers authenticate via admin x-api-key (not scoped S2S JWT). The
+ * `drsBpPgAudit:read` capability in routeRequiredCapabilities gates the S2S JWT path only;
+ * admin key callers bypass capability checks via LegacyApiKeyHandler. This is intentional —
+ * DRS runs in a separate AWS account and does not hold an S2S consumer registration.
+ *
+ * DB note: the PostgREST query filters on (scope_prefix, handler_name, projected_at, skipped).
+ * A composite index on these columns is required for acceptable query performance on large tables.
  *
  * @returns {{ getProjectionAudit: Function }}
  */
@@ -51,18 +61,31 @@ export default function DrsBpPgAuditController() {
     const dateEnd = url.searchParams.get('dateEnd');
     const handlerName = url.searchParams.get('handlerName') || DEFAULT_HANDLER_NAME;
     const limitParam = parseInt(url.searchParams.get('limit') || String(MAX_LIMIT), 10);
-    const limit = Math.min(Number.isNaN(limitParam) ? MAX_LIMIT : limitParam, MAX_LIMIT);
+    const clampedLimit = Math.min(Number.isNaN(limitParam) ? MAX_LIMIT : limitParam, MAX_LIMIT);
+    const limit = Math.max(1, clampedLimit);
     const offsetParam = parseInt(url.searchParams.get('offset') || '0', 10);
     const offset = Number.isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
 
     if (!siteId) {
       return badRequest('siteId is required');
     }
+    if (!UUID_RE.test(siteId)) {
+      return badRequest('siteId must be a valid UUID');
+    }
     if (!dateStart) {
       return badRequest('dateStart is required');
     }
+    if (!DATE_RE.test(dateStart)) {
+      return badRequest('dateStart must be a valid date in YYYY-MM-DD format');
+    }
     if (!dateEnd) {
       return badRequest('dateEnd is required');
+    }
+    if (!DATE_RE.test(dateEnd)) {
+      return badRequest('dateEnd must be a valid date in YYYY-MM-DD format');
+    }
+    if (dateEnd <= dateStart) {
+      return badRequest('dateEnd must be after dateStart');
     }
 
     const { data, error } = await postgrestClient
@@ -77,10 +100,12 @@ export default function DrsBpPgAuditController() {
       .range(offset, offset + limit - 1);
 
     if (error) {
-      return internalServerError(`projection_audit query failed: ${error.message}`);
+      reqContext.log?.error('projection_audit query failed', { errorMessage: error.message });
+      return internalServerError('projection_audit query failed');
     }
 
-    return ok(data ?? []);
+    const rows = data ?? [];
+    return ok({ rows, hasMore: rows.length >= limit });
   };
 
   return { getProjectionAudit };
