@@ -426,6 +426,24 @@ export async function fetchRegionsForConfig(client) {
   return data.map((r) => toFilterOption(r.code, r.name));
 }
 
+export function createRegionsHandler() {
+  return async (context) => {
+    const { log, dataAccess } = context;
+    const { Site } = dataAccess;
+    if (!Site?.postgrestService) {
+      log.error('Regions API requires PostgREST (DATA_SERVICE_PROVIDER=postgres)');
+      return badRequest('Region data is not available. PostgreSQL data service is required.');
+    }
+    try {
+      const regions = await fetchRegionsForConfig(Site.postgrestService);
+      return ok(regions);
+    } catch (error) {
+      log.error(`Regions handler error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+}
+
 /**
  * Brands linked to one site: rows in `brand_sites` for this org + site, with embedded `brands`.
  * @internal Exported for tests
