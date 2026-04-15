@@ -6,10 +6,10 @@
   ],
   "packageRules": [
     {
-        "matchPackageNames": [
-            "jsdom"
-        ],
-        "allowedVersions": "<27.0.0"
+      "matchPackageNames": [
+        "jsdom"
+      ],
+      "allowedVersions": "<27.0.0"
     },
     {
       "matchPackageNames": [
@@ -26,6 +26,21 @@
     {
       "matchPackageNames": [
         "@adobe/spacecat-shared-data-access"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "matchPackageNames": [
+        "eslint"
+      ],
+      "allowedVersions": "<10.0.0"
+    },
+    {
+      "matchPackagePatterns": [
+        "^@langchain/"
       ],
       "matchUpdateTypes": [
         "major"

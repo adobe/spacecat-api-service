@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -48,9 +48,13 @@ describe('PlgOnboardingController', () => {
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
   let loadProfileConfigStub;
+  let queueDeliveryConfigWriterStub;
   let triggerBrandProfileAgentStub;
   let tierClientCreateForSiteStub;
   let tierClientCreateEntitlementStub;
+  let ldGetFeatureFlagStub;
+  let ldUpdateVariationValueStub;
+  let ldCreateFromStub;
   let configToDynamoItemStub;
 
   // Mock objects
@@ -97,6 +101,10 @@ describe('PlgOnboardingController', () => {
       setHlxConfig: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
+      getAuthoringType: sandbox.stub().returns(overrides.authoringType ?? null),
+      getDeliveryType: sandbox.stub().returns(overrides.deliveryType ?? null),
+      setDeliveryType: sandbox.stub(),
+      getSiteEnrollments: sandbox.stub().resolves(overrides.siteEnrollments ?? []),
       save: sandbox.stub().resolves(),
     };
   }
@@ -114,6 +122,7 @@ describe('PlgOnboardingController', () => {
       error: overrides.error || null,
       botBlocker: overrides.botBlocker || null,
       waitlistReason: overrides.waitlistReason || null,
+      reviews: overrides.reviews || null,
       completedAt: overrides.completedAt || null,
       createdAt: overrides.createdAt || '2026-03-09T12:00:00.000Z',
       updatedAt: overrides.updatedAt || '2026-03-09T12:00:00.000Z',
@@ -131,6 +140,7 @@ describe('PlgOnboardingController', () => {
       getError: sandbox.stub().returns(record.error),
       getBotBlocker: sandbox.stub().returns(record.botBlocker),
       getWaitlistReason: sandbox.stub().returns(record.waitlistReason),
+      getReviews: sandbox.stub().returns(record.reviews),
       getCompletedAt: sandbox.stub().returns(record.completedAt),
       getCreatedAt: sandbox.stub().returns(record.createdAt),
       getUpdatedAt: sandbox.stub().returns(record.updatedAt),
@@ -141,8 +151,10 @@ describe('PlgOnboardingController', () => {
       setError: sandbox.stub(),
       setBotBlocker: sandbox.stub(),
       setWaitlistReason: sandbox.stub(),
+      setReviews: sandbox.stub(),
       setCompletedAt: sandbox.stub(),
       save: sandbox.stub().resolves(),
+      remove: sandbox.stub().resolves(),
     };
   }
 
@@ -161,6 +173,8 @@ describe('PlgOnboardingController', () => {
     // LLMO onboarding stubs
     mockOrganization = {
       getId: sandbox.stub().returns(TEST_ORG_ID),
+      getImsOrgId: sandbox.stub().returns(TEST_IMS_ORG_ID),
+      getName: sandbox.stub().returns('Test Org'),
     };
     createOrFindOrganizationStub = sandbox.stub().resolves(mockOrganization);
     enableAuditsStub = sandbox.stub().resolves();
@@ -172,12 +186,23 @@ describe('PlgOnboardingController', () => {
     updateCodeConfigStub = sandbox.stub().resolves();
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
+    queueDeliveryConfigWriterStub = sandbox.stub().resolves({ ok: true });
 
     // Profile config
     loadProfileConfigStub = sandbox.stub().returns(PLG_PROFILE);
 
     // Brand profile
     triggerBrandProfileAgentStub = sandbox.stub().resolves('exec-123');
+
+    // LaunchDarkly
+    ldGetFeatureFlagStub = sandbox.stub().resolves({
+      variations: [{ value: {} }],
+    });
+    ldUpdateVariationValueStub = sandbox.stub().resolves({});
+    ldCreateFromStub = sandbox.stub().returns({
+      getFeatureFlag: ldGetFeatureFlagStub,
+      updateVariationValue: ldUpdateVariationValueStub,
+    });
 
     // TierClient
     tierClientCreateEntitlementStub = sandbox.stub().resolves({
@@ -186,6 +211,10 @@ describe('PlgOnboardingController', () => {
     });
     tierClientCreateForSiteStub = sandbox.stub().resolves({
       createEntitlement: tierClientCreateEntitlementStub,
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: { getId: () => 'ent-1' },
+        siteEnrollment: { getId: () => 'enroll-1' },
+      }),
     });
 
     // Config
@@ -220,6 +249,7 @@ describe('PlgOnboardingController', () => {
       },
       Organization: {
         findByImsOrgId: sandbox.stub().resolves(mockOrganization),
+        findById: sandbox.stub().resolves(mockOrganization),
       },
       Project: {
         allByOrganizationId: sandbox.stub().resolves([]),
@@ -234,8 +264,22 @@ describe('PlgOnboardingController', () => {
       },
       PlgOnboarding: {
         findByImsOrgIdAndDomain: sandbox.stub().resolves(null),
+        findById: sandbox.stub().resolves(null),
         create: sandbox.stub().resolves(mockOnboarding),
         allByImsOrgId: sandbox.stub().resolves([]),
+        all: sandbox.stub().resolves([]),
+      },
+      SiteEnrollment: {
+        allByEntitlementId: sandbox.stub().resolves([]),
+      },
+      Entitlement: {
+        allByOrganizationId: sandbox.stub().resolves([]),
+      },
+      Opportunity: {
+        allBySiteId: sandbox.stub().resolves([]),
+      },
+      Suggestion: {
+        allByOpportunityId: sandbox.stub().resolves([]),
       },
     };
 
@@ -248,6 +292,8 @@ describe('PlgOnboardingController', () => {
 
     mockEnv = {
       DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID,
+      ASO_PLG_EXCLUDED_ORGS: DEMO_ORG_ID,
+      LD_EXPERIENCE_SUCCESS_API_TOKEN: 'test-ld-token',
     };
 
     PlgOnboardingController = (await esmock(
@@ -269,6 +315,9 @@ describe('PlgOnboardingController', () => {
           notFound: (msg) => ({ status: 404, value: msg }),
           ok: (data) => ({ status: 200, value: data }),
         },
+        '@adobe/spacecat-shared-launchdarkly-client': {
+          default: ldCreateFromStub,
+        },
         '@adobe/spacecat-shared-rum-api-client': {
           default: {
             createFrom: sandbox.stub().returns({
@@ -285,7 +334,7 @@ describe('PlgOnboardingController', () => {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
             PRODUCT_CODES: { ASO: 'aso_optimizer' },
-            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
           },
         },
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -297,6 +346,17 @@ describe('PlgOnboardingController', () => {
               ERROR: 'ERROR',
               WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
               WAITLISTED: 'WAITLISTED',
+              INACTIVE: 'INACTIVE',
+            },
+            REVIEW_REASONS: {
+              DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
+              AEM_SITE_CHECK: 'AEM_SITE_CHECK',
+              DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
+              BOT_BLOCKER: 'BOT_BLOCKER',
+            },
+            REVIEW_DECISIONS: {
+              BYPASSED: 'BYPASSED',
+              UPHELD: 'UPHELD',
             },
           },
         },
@@ -305,13 +365,13 @@ describe('PlgOnboardingController', () => {
           enableAudits: enableAuditsStub,
           enableImports: enableImportsStub,
           triggerAudits: triggerAuditsStub,
-          ASO_DEMO_ORG: DEMO_ORG_ID,
         },
         '../../../src/support/utils.js': {
           autoResolveAuthorUrl: autoResolveAuthorUrlStub,
           updateCodeConfig: updateCodeConfigStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
+          queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
         },
         '../../../src/utils/slack/base.js': {
           loadProfileConfig: loadProfileConfigStub,
@@ -439,6 +499,131 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Admin onboard access ---
+
+  describe('onboard - admin access', () => {
+    let adminController;
+
+    beforeEach(async () => {
+      const AdminPlgOnboardingController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({
+                retrieveDomainkey: rumRetrieveDomainkeyStub,
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: { createForSite: tierClientCreateForSiteStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_REASONS: {
+                DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
+                AEM_SITE_CHECK: 'AEM_SITE_CHECK',
+                DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
+                BOT_BLOCKER: 'BOT_BLOCKER',
+              },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED',
+                UPHELD: 'UPHELD',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+          },
+          '../../../src/support/access-control-util.js': {
+            default: {
+              fromContext: () => ({ hasAdminAccess: () => true }),
+            },
+          },
+        },
+      )).default;
+
+      adminController = AdminPlgOnboardingController({ log: mockLog });
+    });
+
+    it('returns 400 when imsOrgId is missing in admin onboard call', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await adminController.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Valid imsOrgId is required when onboarding as admin');
+    });
+
+    it('returns 400 when imsOrgId is empty string in admin onboard call', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN, imsOrgId: '' });
+      const res = await adminController.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Valid imsOrgId is required when onboarding as admin');
+    });
+
+    it('onboards successfully when admin provides imsOrgId', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN, imsOrgId: TEST_IMS_ORG_ID });
+      const res = await adminController.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.calledWith(
+        TEST_IMS_ORG_ID,
+        sinon.match.any,
+      );
+    });
+  });
+
   // --- SSRF protection ---
 
   describe('onboard - SSRF protection', () => {
@@ -509,6 +694,26 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Idempotency: already onboarded ---
+
+  describe('onboard - already ONBOARDED domain', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('returns existing record without calling Site.create when domain is already ONBOARDED', async () => {
+      const onboardedRecord = createMockOnboarding({ status: 'ONBOARDED' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(onboardedRecord);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+    });
+  });
+
   // --- Race condition handling ---
 
   describe('onboard - race condition on create', () => {
@@ -545,6 +750,21 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(500);
+    });
+
+    it('returns existing record without re-running flow when concurrent create finds ONBOARDED record', async () => {
+      const onboardedRecord = createMockOnboarding({ status: 'ONBOARDED' });
+      mockDataAccess.PlgOnboarding.create.rejects(new Error('unique constraint violation'));
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .onFirstCall().resolves(null)
+        .onSecondCall().resolves(onboardedRecord);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
   });
 
@@ -859,6 +1079,7 @@ describe('PlgOnboardingController', () => {
         programId: '123',
         environmentId: '456',
         preferContentApi: true,
+        enableDAMAltTextUpdate: true,
         imsOrgId: TEST_IMS_ORG_ID,
       });
     });
@@ -885,6 +1106,7 @@ describe('PlgOnboardingController', () => {
         programId: '123',
         environmentId: '456',
         preferContentApi: true,
+        enableDAMAltTextUpdate: true,
         imsOrgId: TEST_IMS_ORG_ID,
       });
     });
@@ -1126,8 +1348,8 @@ describe('PlgOnboardingController', () => {
       expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
 
-    it('returns WAITING_FOR_IP_ALLOWLISTING for existing site and saves org change', async () => {
-      const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
+    it('returns WAITING_FOR_IP_ALLOWLISTING for existing site in same org', async () => {
+      const existingSite = createMockSite({ orgId: TEST_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
       detectBotBlockerStub.resolves({
@@ -1143,8 +1365,6 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus)
         .to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      expect(existingSite.save).to.have.been.called;
     });
 
     it('uses ipsToWhitelist fallback for bot blocker', async () => {
@@ -1231,7 +1451,7 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('reassigns site from DEFAULT_ORGANIZATION_ID to customer org', async () => {
+    it('waitlists when site belongs to DEFAULT_ORGANIZATION_ID', async () => {
       const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1240,11 +1460,13 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(existingSite.setOrganizationId).to.not.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
     });
 
-    it('reassigns site from ASO_DEMO_ORG to customer org', async () => {
+    it('waitlists when site belongs to ASO_DEMO_ORG with no enrollments', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1253,7 +1475,41 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(existingSite.setOrganizationId).to.not.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
+    });
+
+    it('includes demo org message in waitlist reason when site in demo org has enrollments', async () => {
+      const existingSite = createMockSite({
+        orgId: DEMO_ORG_ID,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/demo org.*can be moved to/);
+    });
+
+    it('treats org as non-internal when ASO_PLG_EXCLUDED_ORGS is not set', async () => {
+      const existingSite = createMockSite({
+        orgId: DEMO_ORG_ID,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = { ...buildContext({ domain: TEST_DOMAIN }), env: {} };
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/cannot be moved/);
     });
   });
 
@@ -1272,7 +1528,6 @@ describe('PlgOnboardingController', () => {
       const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
-
       expect(res.status).to.equal(200);
       // Should NOT modify the site
       expect(existingSite.setOrganizationId).to.not.have.been.called;
@@ -1285,6 +1540,56 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.save).to.have.been.called;
       // Should NOT proceed to bot blocker or site creation
       expect(detectBotBlockerStub).to.not.have.been.called;
+    });
+
+    it('uses org ID as fallback in waitlist reason when Organization.findById returns null', async () => {
+      const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Organization.findById.resolves(null); // triggers || existingOrgId fallback
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
+      // Falls back to org UUID in the reason since no org was found
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(new RegExp(OTHER_CUSTOMER_ORG_ID));
+    });
+
+    it('appends move suggestion to waitlist reason when site has no enrollments', async () => {
+      const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID, siteEnrollments: [] });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/no active products in its existing org/);
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/safely moved to 'Test Org'/);
+    });
+
+    it('does not append move suggestion to waitlist reason when site has active enrollments', async () => {
+      const existingSite = createMockSite({
+        orgId: OTHER_CUSTOMER_ORG_ID,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/cannot be moved.*active products/);
     });
   });
 
@@ -1359,6 +1664,25 @@ describe('PlgOnboardingController', () => {
       expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
 
+    it('waitlists and uses org ID as fallback name when Organization.findById returns null for already-onboarded record', async () => {
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        organizationId: OTHER_CUSTOMER_ORG_ID, // has org ID so findById is called
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Organization.findById.resolves(null); // org not found — fallback to org ID
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
     it('allows onboarding when the same domain is already onboarded (re-onboard)', async () => {
       const onboardedRecord = createMockOnboarding({
         domain: TEST_DOMAIN,
@@ -1385,6 +1709,411 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('displaces already-onboarded domain when it has no open PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no opportunities → no suggestions
+
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'), // matches mocked PRODUCT_CODES.ASO
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+
+      const mockEnrollmentToRevoke = {
+        getId: sandbox.stub().returns('enroll-old-1'),
+        getSiteId: sandbox.stub().returns(OLD_SITE_ID),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollmentToRevoke]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is waitlisted with displacement reason
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setWaitlistReason)
+        .to.have.been.calledWithMatch(/was replaced by.*no active suggestions.*new domain.*current org/);
+      expect(onboardedRecord.save).to.have.been.called;
+
+      // Only the ASO enrollment is revoked
+      expect(mockDataAccess.Entitlement.allByOrganizationId).to.have.been.calledWith(OLD_ORG_ID);
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
+        .to.have.been.calledWith(ASO_ENTITLEMENT_ID);
+      expect(mockEnrollmentToRevoke.remove).to.have.been.called;
+
+      // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('waitlists new domain when already-onboarded site has NEW PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('NEW') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('waitlists new domain when already-onboarded site has IN_PROGRESS PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('alt-text'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('IN_PROGRESS') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('waitlists new domain when already-onboarded site has FIXED PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('broken-backlinks'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('FIXED') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('waitlists new domain when already-onboarded site has SKIPPED PLG suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('SKIPPED') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('displaces when all PLG suggestions are PENDING_VALIDATION', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('PENDING_VALIDATION') },
+      ]);
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('displaces when all PLG suggestions are OUTDATED', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([{
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns(null),
+      }]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        { getStatus: sandbox.stub().returns('OUTDATED') },
+      ]);
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('conservatively waitlists new domain when suggestion check throws', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.rejects(new Error('DB unavailable'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is NOT displaced
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+
+      // New domain is waitlisted (conservative fallback)
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('displaces already-onboarded domain when audit completed with no open suggestions', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      // Audit ran (lastAuditedAt set) but no open suggestions — nothing left to protect
+      const mockOpportunity = {
+        getId: sandbox.stub().returns('oppty-1'),
+        getType: sandbox.stub().returns('cwv'),
+        getLastAuditedAt: sandbox.stub().returns('2026-04-01T10:00:00.000Z'),
+      };
+      mockDataAccess.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([]);
+
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('waitlists new domain when already-onboarded record has no siteId', async () => {
+      // When the onboarded record has no siteId, displacement is skipped entirely
+      // (canDisplace is false because alreadyOnboardedSiteId is falsy). Opportunity
+      // lookup must not be called with a null/undefined siteId.
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: null,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Displacement skipped — Opportunity lookup never called with null siteId
+      expect(mockDataAccess.Opportunity.allBySiteId).not.to.have.been.called;
+      expect(onboardedRecord.setStatus).not.to.have.been.called;
+
+      // New domain is waitlisted
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
+    });
+
+    it('displaces already-onboarded domain when displaced site has no organizationId', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: null, // no org ID
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is waitlisted
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.save).to.have.been.called;
+
+      // No enrollment revocation attempted (no org ID)
+      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
+
+      // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('displaces already-onboarded domain when no ASO entitlement found for old org', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+      const NON_ASO_ENT_ID = 'non-aso-ent-id';
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
+
+      // Entitlement exists but is not ASO — no enrollment revocation should happen for old site
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([
+        { getId: sandbox.stub().returns(NON_ASO_ENT_ID), getProductCode: sandbox.stub().returns('other_product') },
+      ]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Displacement proceeds; enrollment for the non-ASO entitlement was never queried
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
+        .not.to.have.been.calledWith(NON_ASO_ENT_ID);
+
+      // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('continues onboarding new domain even when enrollment revocation fails', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
+
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([
+        { getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID), getProductCode: sandbox.stub().returns('aso_optimizer') },
+      ]);
+
+      // Simulate enrollment revocation failure on the first call (displacement),
+      // but succeed on subsequent calls (normal onboarding flow)
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .onFirstCall().rejects(new Error('DB timeout'))
+        .resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      // Displacement still completes — revocation failure is non-fatal
+      expect(res.status).to.equal(200);
+
+      // Old domain is waitlisted
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.save).to.have.been.called;
+
+      // Revocation failure was logged as error
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to revoke ASO enrollment/);
+
+      // New domain is still onboarded
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
   });
@@ -1426,6 +2155,289 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setError).to.have.been.calledWith({
         message: 'An internal error occurred',
       });
+    });
+  });
+
+  // --- ASO enrollment revocation ---
+
+  describe('onboard - ASO enrollment revocation', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('revokes pre-onboarded site enrollment when another site exists under same entitlement', async () => {
+      const OTHER_SITE_ID = 'other-site-uuid';
+      const mockEnrollment = {
+        getId: sandbox.stub().returns('enroll-old'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockEnrollment.remove).to.have.been.calledOnce;
+    });
+
+    it('revokes all other enrollments when multiple exist under same entitlement', async () => {
+      const mockEnrollment1 = {
+        getId: sandbox.stub().returns('enroll-old-1'),
+        getSiteId: sandbox.stub().returns('other-site-1'),
+        remove: sandbox.stub().resolves(),
+      };
+      const mockEnrollment2 = {
+        getId: sandbox.stub().returns('enroll-old-2'),
+        getSiteId: sandbox.stub().returns('other-site-2'),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment1, mockEnrollment2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockEnrollment1.remove).to.have.been.calledOnce;
+      expect(mockEnrollment2.remove).to.have.been.calledOnce;
+    });
+
+    it('does not revoke when no other enrollment exists', async () => {
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns error status when enrollment removal fails', async () => {
+      const mockEnrollment = {
+        getId: sandbox.stub().returns('enroll-old'),
+        getSiteId: sandbox.stub().returns('other-site-uuid'),
+        remove: sandbox.stub().rejects(new Error('DB remove failed')),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(500);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
+    });
+  });
+
+  // --- LaunchDarkly feature flag update ---
+
+  describe('onboard - LaunchDarkly flag update', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('adds org and site to all 3 auto-fix flags in variation 0', async () => {
+      ldGetFeatureFlagStub.resolves({ variations: [{ value: {} }] });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      const expectedFlags = ['FF_cwv-auto-fix', 'FF_alt-text-auto-fix', 'FF_broken-backlinks-auto-fix'];
+      expectedFlags.forEach((flagKey) => {
+        expect(ldGetFeatureFlagStub).to.have.been.calledWith('experience-success-studio', flagKey);
+      });
+      expect(ldUpdateVariationValueStub.callCount).to.equal(3);
+      const cwvCall = ldUpdateVariationValueStub.getCalls().find((c) => c.args[1] === 'FF_cwv-auto-fix');
+      expect(cwvCall).to.exist;
+      expect(cwvCall.args[0]).to.equal('experience-success-studio');
+      expect(cwvCall.args[2]).to.equal(0);
+      expect(cwvCall.args[3]).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_SITE_ID] });
+    });
+
+    it('skips duplicate site already present in variation 0', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: { [TEST_IMS_ORG_ID]: [TEST_SITE_ID] } }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('continues onboarding when LD flag update fails', async () => {
+      ldGetFeatureFlagStub.rejects(new Error('LD service unavailable'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips LD update when LD_EXPERIENCE_SUCCESS_API_TOKEN is not set', async () => {
+      const context = {
+        ...buildContext({ domain: TEST_DOMAIN }),
+        env: { DEFAULT_ORGANIZATION_ID: DEFAULT_ORG_ID },
+      };
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldGetFeatureFlagStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/LD_EXPERIENCE_SUCCESS_API_TOKEN/);
+    });
+
+    it('skips LD update when org has no IMS org ID', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('skips LD update when flag has no variations', async () => {
+      ldGetFeatureFlagStub.resolves({ variations: [] });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+    });
+
+    it('handles string-wrapped variation 0 value', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: JSON.stringify({}) }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(ldUpdateVariationValueStub.callCount).to.equal(3);
+      ldUpdateVariationValueStub.getCalls().forEach((call) => {
+        const newValue = call.args[3];
+        expect(typeof newValue).to.equal('string');
+        expect(JSON.parse(newValue)).to.deep.equal({ [TEST_IMS_ORG_ID]: [TEST_SITE_ID] });
+      });
+    });
+
+    it('skips flag and warns when variation 0 contains malformed JSON string', async () => {
+      ldGetFeatureFlagStub.resolves({
+        variations: [{ value: 'not-valid-json{{{' }],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(ldUpdateVariationValueStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/malformed JSON/);
+    });
+  });
+
+  // --- Delivery config writer (CDN + optional redirect params) ---
+
+  describe('onboard - delivery config writer', () => {
+    const redirectReadyDeliveryConfig = {
+      programId: 'test-program-id',
+      environmentId: 'test-environment-id',
+    };
+
+    /** Built at assertion time so `site` is the mock created in each test. */
+    function expectedRedirectQueuePayload() {
+      return {
+        site: mockSite,
+        baseURL: TEST_BASE_URL,
+        minutes: 2000,
+        updateRedirects: true,
+        slackContext: {},
+      };
+    }
+
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    // happy path for AEM CS/CW site
+    it('queues delivery config writer for CS site with program and environment', async () => {
+      queueDeliveryConfigWriterStub.resolves({ ok: true });
+      mockSite = createMockSite({
+        authoringType: SiteModel.AUTHORING_TYPES.CS,
+        deliveryConfig: redirectReadyDeliveryConfig,
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledOnce;
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledWith(
+        expectedRedirectQueuePayload(),
+        context,
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match.hasNested('deliveryConfigQueued', true),
+      );
+      expect(mockLog.warn).to.not.have.been.calledWithMatch(
+        /Failed to queue delivery config writer/,
+      );
+    });
+
+    it('continues onboarding when delivery config writer returns ok: false with error', async () => {
+      queueDeliveryConfigWriterStub.resolves({ ok: false, error: 'mock error' });
+      mockSite = createMockSite({
+        authoringType: SiteModel.AUTHORING_TYPES.CS,
+        deliveryConfig: redirectReadyDeliveryConfig,
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledOnce;
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledWith(
+        expectedRedirectQueuePayload(),
+        context,
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match.hasNested('deliveryConfigQueued', false),
+      );
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /Failed to queue delivery config writer for site .*mock error/,
+      );
+    });
+
+    it('continues onboarding when delivery config writer returns ok: false without error string', async () => {
+      queueDeliveryConfigWriterStub.resolves({ ok: false });
+      mockSite = createMockSite({
+        authoringType: SiteModel.AUTHORING_TYPES.CS,
+        deliveryConfig: redirectReadyDeliveryConfig,
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledOnce;
+      expect(queueDeliveryConfigWriterStub).to.have.been.calledWith(
+        expectedRedirectQueuePayload(),
+        context,
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match.hasNested('deliveryConfigQueued', false),
+      );
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /Failed to queue delivery config writer/,
+      );
     });
   });
 
@@ -1541,6 +2553,9 @@ describe('PlgOnboardingController', () => {
           entitlementCreated: true,
         }),
       );
+      // Revocation and LD flag steps must run in the fast path
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
+      expect(ldGetFeatureFlagStub).to.have.been.called;
       // Should NOT run full onboarding steps
       expect(createOrFindOrganizationStub).to.not.have.been.called;
       expect(detectBotBlockerStub).to.not.have.been.called;
@@ -1741,9 +2756,11 @@ describe('PlgOnboardingController', () => {
           },
           '@adobe/spacecat-shared-http-utils': {
             badRequest: (msg) => ({ status: 400, value: msg }),
+            created: (data) => ({ status: 201, value: data }),
             createResponse: (body, status) => ({ status, value: body }),
             forbidden: (msg) => ({ status: 403, value: msg }),
             internalServerError: (msg) => ({ status: 500, value: msg }),
+            noContent: () => ({ status: 204 }),
             notFound: (msg) => ({ status: 404, value: msg }),
             ok: (data) => ({ status: 200, value: data }),
           },
@@ -1754,6 +2771,9 @@ describe('PlgOnboardingController', () => {
               }),
             },
           },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
           '@adobe/spacecat-shared-tier-client': {
             default: { createForSite: tierClientCreateForSiteStub },
           },
@@ -1763,7 +2783,7 @@ describe('PlgOnboardingController', () => {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -1775,6 +2795,7 @@ describe('PlgOnboardingController', () => {
                 ERROR: 'ERROR',
                 WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
                 WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
               },
             },
           },
@@ -1783,7 +2804,6 @@ describe('PlgOnboardingController', () => {
             enableAudits: enableAuditsStub,
             enableImports: enableImportsStub,
             triggerAudits: triggerAuditsStub,
-            ASO_DEMO_ORG: DEMO_ORG_ID,
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
@@ -1850,6 +2870,1604 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Authentication information is required');
+    });
+
+    describe('getAllOnboardings', () => {
+      beforeEach(() => {
+        mockDataAccess.PlgOnboarding.all.reset();
+        mockDataAccess.PlgOnboarding.all.resolves([]);
+      });
+
+      it('returns 403 when caller is not admin', async () => {
+        const nonAdminController = PlgOnboardingController({ log: mockLog });
+        const res = await nonAdminController.getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(403);
+        expect(res.value).to.equal('Only admins can list all PLG onboarding records');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 200 with all records when admin', async () => {
+        const record = createMockOnboarding({
+          id: 'all-rec-1',
+          domain: 'plg-all.example.com',
+          status: 'ONBOARDED',
+        });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').with.length(1);
+        expect(res.value[0].id).to.equal('all-rec-1');
+        expect(res.value[0].domain).to.equal('plg-all.example.com');
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { fetchAllPages: true },
+        );
+      });
+
+      it('returns 200 and passes limit when admin sends limit', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves([]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '50' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { limit: 50 },
+        );
+      });
+
+      it('returns 200 with one-item array when limit is 1 (data access returns single instance)', async () => {
+        const record = createMockOnboarding({
+          id: 'limit-1-rec',
+          domain: 'one.example.com',
+          status: 'ONBOARDED',
+        });
+        mockDataAccess.PlgOnboarding.all.resolves(record);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').with.length(1);
+        expect(res.value[0].id).to.equal('limit-1-rec');
+        expect(mockDataAccess.PlgOnboarding.all).to.have.been.calledOnceWith(
+          {},
+          { limit: 1 },
+        );
+      });
+
+      it('returns 200 with empty array when limit is 1 and data access returns null', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves(null);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').that.is.empty;
+      });
+
+      it('returns 200 with empty array when limit is 1 and data access returns undefined', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves(undefined);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value).to.be.an('array').that.is.empty;
+      });
+
+      it('returns 500 when data access returns a non-model value', async () => {
+        mockDataAccess.PlgOnboarding.all.resolves(0);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1' },
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to list PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Unexpected PLG onboarding list result shape/),
+        );
+      });
+
+      it('returns 500 when DTO serialization throws an Error', async () => {
+        const record = createMockOnboarding({ id: 'bad-ser' });
+        record.getId.throws(new Error('broken model'));
+
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to serialize PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to serialize PLG onboarding records: broken model/),
+        );
+      });
+
+      it('returns 500 when DTO serialization throws a non-Error', async () => {
+        const record = createMockOnboarding();
+        record.getId.callsFake(() => {
+          // eslint-disable-next-line no-throw-literal -- non-Error catch branch in controller
+          throw 'not an Error object';
+        });
+
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to serialize PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to serialize PLG onboarding records: not an Error object/),
+        );
+      });
+
+      it('returns 400 when limit is not a positive integer', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '0' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 400 when limit is a decimal string (not an integer token)', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '1.5' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 400 when limit has trailing non-digits', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '50abc' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 400 when limit is negative', async () => {
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+          data: { limit: '-1' },
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('limit must be a positive integer');
+        expect(mockDataAccess.PlgOnboarding.all).to.not.have.been.called;
+      });
+
+      it('returns 500 when data access fails', async () => {
+        mockDataAccess.PlgOnboarding.all.rejects(new Error('db unavailable'));
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to list PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to list PLG onboardings: db unavailable/),
+        );
+      });
+
+      it('returns 500 when data access rejects with a non-Error', async () => {
+        /* eslint-disable-next-line prefer-promise-reject-errors -- non-Error catch in controller */
+        mockDataAccess.PlgOnboarding.all.returns(Promise.reject('connection reset'));
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Failed to list PLG onboarding records');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          sinon.match(/^Failed to list PLG onboardings: connection reset/),
+        );
+      });
+    });
+  });
+
+  // --- PATCH /plg/onboard/:onboardingId (update) + admin PLG record APIs ---
+
+  describe('update and admin PLG record APIs', () => {
+    let AdminAccessPlgController;
+
+    beforeEach(async () => {
+      AdminAccessPlgController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            created: (data) => ({ status: 201, value: data }),
+            createResponse: (body, status) => ({ status, value: body }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            noContent: () => ({ status: 204 }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({
+                retrieveDomainkey: rumRetrieveDomainkeyStub,
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: { createForSite: tierClientCreateForSiteStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_REASONS: {
+                DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
+                AEM_SITE_CHECK: 'AEM_SITE_CHECK',
+                DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
+              },
+              REVIEW_DECISIONS: {
+                BYPASSED: 'BYPASSED',
+                UPHELD: 'UPHELD',
+              },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': { loadProfileConfig: loadProfileConfigStub },
+          '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: triggerBrandProfileAgentStub },
+          '../../../src/support/access-control-util.js': {
+            default: { fromContext: () => ({ hasAdminAccess: () => true }) },
+          },
+        },
+      )).default;
+    });
+
+    describe('update', () => {
+      const adminAuthAttributes = {
+        authInfo: {
+          getProfile: () => ({ email: 'ese@adobe.com' }),
+        },
+      };
+
+      it('returns 403 for non-admin users', async () => {
+        const NonAdminController = (await esmock(
+          '../../../src/controllers/plg/plg-onboarding.js',
+          {
+            '@adobe/spacecat-shared-utils': {
+              composeBaseURL: composeBaseURLStub,
+              detectBotBlocker: detectBotBlockerStub,
+              detectLocale: detectLocaleStub,
+              hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+              isValidIMSOrgId: () => true,
+              resolveCanonicalUrl: resolveCanonicalUrlStub,
+            },
+            '@adobe/spacecat-shared-http-utils': {
+              badRequest: (msg) => ({ status: 400, value: msg }),
+              createResponse: (body, status) => ({ status, value: body }),
+              forbidden: (msg) => ({ status: 403, value: msg }),
+              internalServerError: (msg) => ({ status: 500, value: msg }),
+              notFound: (msg) => ({ status: 404, value: msg }),
+              ok: (data) => ({ status: 200, value: data }),
+            },
+            '@adobe/spacecat-shared-rum-api-client': {
+              default: {
+                createFrom: sandbox.stub().returns({
+                  retrieveDomainkey: sandbox.stub(),
+                }),
+              },
+            },
+            '@adobe/spacecat-shared-launchdarkly-client': {
+              default: ldCreateFromStub,
+            },
+            '@adobe/spacecat-shared-tier-client': {
+              default: { createForSite: sandbox.stub() },
+            },
+            '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+              Config: { toDynamoItem: sandbox.stub() },
+            },
+            '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+              Entitlement: { PRODUCT_CODES: { ASO: 'aso_optimizer' }, TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' } },
+            },
+            '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+              default: {
+                STATUSES: {
+                  IN_PROGRESS: 'IN_PROGRESS',
+                  ONBOARDED: 'ONBOARDED',
+                  PRE_ONBOARDING: 'PRE_ONBOARDING',
+                  ERROR: 'ERROR',
+                  WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                  WAITLISTED: 'WAITLISTED',
+                  INACTIVE: 'INACTIVE',
+                },
+                REVIEW_REASONS: {
+                  DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
+                  AEM_SITE_CHECK: 'AEM_SITE_CHECK',
+                  DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
+                },
+                REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+              },
+            },
+            '../../../src/controllers/llmo/llmo-onboarding.js': {
+              createOrFindOrganization: sandbox.stub(),
+              enableAudits: sandbox.stub(),
+              enableImports: sandbox.stub(),
+              triggerAudits: sandbox.stub(),
+            },
+            '../../../src/support/utils.js': {
+              autoResolveAuthorUrl: sandbox.stub(),
+              updateCodeConfig: sandbox.stub(),
+              findDeliveryType: sandbox.stub(),
+              deriveProjectName: sandbox.stub(),
+              queueDeliveryConfigWriter: sandbox.stub(),
+            },
+            '../../../src/utils/slack/base.js': { loadProfileConfig: sandbox.stub().returns(PLG_PROFILE) },
+            '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: sandbox.stub() },
+            '../../../src/support/access-control-util.js': {
+              default: { fromContext: () => ({ hasAdminAccess: () => false }) },
+            },
+          },
+        )).default;
+
+        const res = await NonAdminController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 for missing onboardingId', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: {},
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for missing request body', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: null,
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for invalid decision', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'INVALID', justification: 'test' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for missing justification', async () => {
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 404 when onboarding record not found', async () => {
+        mockDataAccess.PlgOnboarding.findById.resolves(null);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 when onboarding is not in a blocked state', async () => {
+        const record = createMockOnboarding({ status: 'ONBOARDED' });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Onboarding record is not in a waitlisted state');
+      });
+
+      it('stores UPHOLD review and keeps status unchanged', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'UPHELD', justification: 'Not ready to proceed' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setReviews).to.have.been.calledOnce;
+        const reviews = record.setReviews.firstCall.args[0];
+        expect(reviews).to.have.length(1);
+        expect(reviews[0].reason).to.equal('Domain site-a.com is another domain is already onboarded for this IMS org');
+        expect(reviews[0].decision).to.equal('UPHELD');
+        expect(reviews[0].justification).to.equal('Not ready to proceed');
+        expect(record.setStatus).to.not.have.been.called;
+        expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: replaces old domain and re-runs flow', async () => {
+        const waitlistedRecord = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        const oldOnboardedRecord = createMockOnboarding({
+          id: 'old-onboarding-id',
+          domain: 'site-a.com',
+          status: 'ONBOARDED',
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, oldOnboardedRecord]);
+        // After INACTIVE, the re-run finds the existing record
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(waitlistedRecord);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Customer wants new domain' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(oldOnboardedRecord.setReviews).to.have.been.calledOnce;
+        const oldReviews = oldOnboardedRecord.setReviews.firstCall.args[0];
+        expect(oldReviews).to.have.length(1);
+        expect(oldReviews[0].reason).to.include('Offboarded to onboard');
+        expect(oldReviews[0].justification).to.include('Offboarded to onboard');
+        expect(oldOnboardedRecord.save).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: revokes ASO enrollments when old domain has a linked site', async () => {
+        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const mockEnrollment = {
+          getId: () => 'enroll-1',
+          remove: sandbox.stub().resolves(),
+          getEntitlement: sandbox.stub().resolves(asoEntitlement),
+        };
+        const oldSite = createMockSite({ siteEnrollments: [mockEnrollment] });
+        const waitlistedRecord = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        const oldOnboardedRecord = createMockOnboarding({
+          id: 'old-onboarding-id',
+          domain: 'site-a.com',
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, oldOnboardedRecord]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(waitlistedRecord);
+        mockDataAccess.Site.findById.resolves(oldSite);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Customer wants new domain' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(mockEnrollment.remove).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: skips enrollment revocation when site not found', async () => {
+        const waitlistedRecord = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        const oldOnboardedRecord = createMockOnboarding({
+          id: 'old-onboarding-id',
+          domain: 'site-a.com',
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, oldOnboardedRecord]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(waitlistedRecord);
+        mockDataAccess.Site.findById.resolves(null); // site not found
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Customer wants new domain' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: skips enrollment revocation when no enrollments', async () => {
+        const oldSite = createMockSite({ siteEnrollments: [] });
+        const waitlistedRecord = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        const oldOnboardedRecord = createMockOnboarding({
+          id: 'old-onboarding-id',
+          domain: 'site-a.com',
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, oldOnboardedRecord]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(waitlistedRecord);
+        mockDataAccess.Site.findById.resolves(oldSite);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Customer wants new domain' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: skips revocation when no ASO enrollments found', async () => {
+        const nonAsoEntitlement = { getProductCode: () => 'other_product' };
+        const nonAsoEnrollment = {
+          getId: () => 'enroll-2',
+          remove: sandbox.stub().resolves(),
+          getEntitlement: sandbox.stub().resolves(nonAsoEntitlement),
+        };
+        const oldSite = createMockSite({ siteEnrollments: [nonAsoEnrollment] });
+        const waitlistedRecord = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        const oldOnboardedRecord = createMockOnboarding({
+          id: 'old-onboarding-id',
+          domain: 'site-a.com',
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, oldOnboardedRecord]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(waitlistedRecord);
+        mockDataAccess.Site.findById.resolves(oldSite);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Customer wants new domain' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(nonAsoEnrollment.remove).to.not.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: continues and logs warn when enrollment revocation throws', async () => {
+        const failingEnrollment = {
+          getId: () => 'enroll-fail',
+          getEntitlement: sandbox.stub().resolves({ getProductCode: () => 'aso_optimizer' }),
+          remove: sandbox.stub().rejects(new Error('DB error')),
+        };
+        const oldSite = createMockSite({ siteEnrollments: [failingEnrollment] });
+        const waitlistedRecord = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        const oldOnboardedRecord = createMockOnboarding({
+          id: 'old-onboarding-id',
+          domain: 'site-a.com',
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, oldOnboardedRecord]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(waitlistedRecord);
+        mockDataAccess.Site.findById.resolves(oldSite);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Customer wants new domain' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke enrollments/);
+      });
+
+      it('BYPASS AEM_SITE_CHECK: returns 400 when siteConfig is missing', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'AEM migration confirmed' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('deliveryType');
+      });
+
+      it('BYPASS AEM_SITE_CHECK: returns 400 when deliveryType is invalid', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'AEM migration confirmed',
+            siteConfig: { deliveryType: 'OTHER' },
+          },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('deliveryType must be one of');
+      });
+
+      it('BYPASS AEM_SITE_CHECK: re-runs flow with preset deliveryType aem_cs and author URL', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'AEM migration confirmed',
+            siteConfig: {
+              deliveryType: 'aem_cs',
+              authorUrl: 'https://author-p152454-e345003.adobeaemcloud.com',
+            },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockSite.setDeliveryConfig).to.have.been.calledWithMatch({
+          authorURL: 'https://author-p152454-e345003.adobeaemcloud.com',
+          preferContentApi: true,
+          enableDAMAltTextUpdate: true,
+        });
+      });
+
+      it('BYPASS AEM_SITE_CHECK: sets hlxConfig when deliveryType is aem_edge with EDS author URL', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'EDS site confirmed',
+            siteConfig: {
+              deliveryType: 'aem_edge',
+              authorUrl: 'main--repo--owner.aem.live',
+            },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockSite.setHlxConfig).to.have.been.calledWithMatch({ hlxVersion: 5 });
+      });
+
+      it('BYPASS AEM_SITE_CHECK: sets authorURL when deliveryType is aem_ams', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'AMS site confirmed',
+            siteConfig: {
+              deliveryType: 'aem_ams',
+              authorUrl: 'https://author.example.com',
+            },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockSite.setDeliveryConfig).to.have.been.calledWithMatch({ authorURL: 'https://author.example.com' });
+      });
+
+      it('BYPASS AEM_SITE_CHECK: returns 400 when AEM_CS authorUrl does not match expected pattern', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'AEM CS site',
+            siteConfig: { deliveryType: 'aem_cs', authorUrl: 'https://not-an-aem-cs-host.com' },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('AEM_CS');
+      });
+
+      it('BYPASS AEM_SITE_CHECK: prepends https:// to bare AEM_CS authorUrl before validating', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'AEM CS site confirmed',
+            siteConfig: {
+              deliveryType: 'aem_cs',
+              authorUrl: 'author-p12345-e67890.adobeaemcloud.com',
+            },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockSite.setDeliveryConfig).to.have.been.calledWithMatch({
+          authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
+        });
+      });
+
+      it('BYPASS AEM_SITE_CHECK: returns 400 when AEM_EDGE authorUrl is not a valid EDS host', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'EDS site',
+            siteConfig: { deliveryType: 'aem_edge', authorUrl: 'https://not-an-eds-host.example.com' },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('AEM_EDGE');
+      });
+
+      it('BYPASS AEM_SITE_CHECK: returns 400 when authorUrl for non-CS/EDGE type is not an HTTP(S) URL', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is not an AEM site',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'AMS site',
+            siteConfig: { deliveryType: 'aem_ams', authorUrl: 'not-a-url' },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('HTTP(S)');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED: returns existing onboarding when domain already onboarded for existing org', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        const existingOrg = {
+          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
+          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
+          getName: sandbox.stub().returns('Other Org'),
+        };
+        const existingPlgOnboarding = createMockOnboarding({
+          imsOrgId: 'OTHERORG123@AdobeOrg',
+          status: 'ONBOARDED',
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.Organization.findById.resolves(existingOrg);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingPlgOnboarding);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Run under existing org' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED: offboards original and runs flow under existing org', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        const existingOrg = {
+          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
+          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
+        };
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.Organization.findById.resolves(existingOrg);
+        // No existing PLG onboarding for (domain, OrgB)
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Run under existing org' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        // Original record should be offboarded
+        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(record.save).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED: returns 400 when site no longer exists', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(null);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Run under existing org' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Site no longer exists for this domain');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED: returns 400 when existing org has no IMS org ID', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        const orgWithoutIms = {
+          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
+          getImsOrgId: sandbox.stub().returns(null),
+        };
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.Organization.findById.resolves(orgWithoutIms);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Run under existing org' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Cannot determine IMS org for the existing site owner');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: returns 400 when alternate domain is invalid', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Use alternate', siteConfig: { alternateDomain: 'localhost' } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid alternate domain');
+        expect(record.setStatus).to.not.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current domain and onboards alternate domain', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: {
+            decision: 'BYPASSED',
+            justification: 'Use alternate domain',
+            siteConfig: { alternateDomain: 'other-example.com' },
+          },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(record.save).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: removes all enrollments when existing org is internal/demo', async () => {
+        const enrollment1 = { getId: () => 'enroll-1', remove: sandbox.stub().resolves() };
+        const enrollment2 = { getId: () => 'enroll-2', remove: sandbox.stub().resolves() };
+        const existingSite = createMockSite({
+          orgId: DEMO_ORG_ID,
+          siteEnrollments: [enrollment1, enrollment2],
+        });
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+          organizationId: TEST_ORG_ID,
+        });
+        const newSite = createMockSite({ orgId: TEST_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+        mockDataAccess.Site.create.resolves(newSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Move from demo', siteConfig: { moveSite: true } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(enrollment1.remove).to.have.been.called;
+        expect(enrollment2.remove).to.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: returns 400 when onboarding has no organizationId', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+          organizationId: null,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Move site', siteConfig: { moveSite: true } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('no associated organization');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: returns 400 when site has active enrollments', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+        });
+        const existingSite = createMockSite({
+          orgId: OTHER_CUSTOMER_ORG_ID,
+          siteEnrollments: [{ getId: () => 'enroll-1' }],
+        });
+        const existingOrg = {
+          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
+          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
+          getName: sandbox.stub().returns('Other Org'),
+        };
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.Organization.findById.resolves(existingOrg);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Move site', siteConfig: { moveSite: true } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('active products');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: moves site to current org and runs flow', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+          organizationId: TEST_ORG_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        const existingOrg = {
+          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
+          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
+          getName: sandbox.stub().returns('Other Org'),
+        };
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.Organization.findById.resolves(existingOrg);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Move site', siteConfig: { moveSite: true } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        // Site should be reassigned to the current org
+        expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+        expect(existingSite.save).to.have.been.called;
+        // Original record should NOT be offboarded (different from default flow)
+        expect(record.setStatus).to.not.have.been.calledWith('INACTIVE');
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: updates imsOrgId in delivery config when present', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+          organizationId: TEST_ORG_ID,
+        });
+        const existingSite = createMockSite({
+          orgId: OTHER_CUSTOMER_ORG_ID,
+          deliveryConfig: { authorURL: 'https://author.example.com', imsOrgId: 'OTHERORG123@AdobeOrg' },
+        });
+        const existingOrg = {
+          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
+          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
+          getName: sandbox.stub().returns('Other Org'),
+        };
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        mockDataAccess.Organization.findById.resolves(existingOrg);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Move site', siteConfig: { moveSite: true } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(existingSite.setDeliveryConfig).to.have.been.calledWithMatch({
+          imsOrgId: TEST_IMS_ORG_ID,
+          authorURL: 'https://author.example.com',
+        });
+      });
+
+      it('returns 400 for unknown waitlist reason', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Some completely unknown reason',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Unable to determine the review reason from the onboarding record');
+      });
+
+      it('BYPASS returns 409 on conflict error during flow', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.rejects(
+          Object.assign(new Error('Org conflict'), { conflict: true }),
+        );
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(409);
+        expect(res.value.message).to.equal('Org conflict');
+      });
+
+      it('BYPASS returns 400 on client error during flow', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.rejects(
+          Object.assign(new Error('Bad domain'), { clientError: true }),
+        );
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Bad domain');
+      });
+
+      it('BYPASS returns 500 on unexpected error during flow', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
+        mockDataAccess.Site.create.rejects(new Error('DB connection failed'));
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'test' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(500);
+        expect(res.value).to.equal('Onboarding bypass failed. Please try again later.');
+      });
+    });
+
+    describe('admin onboarding management', () => {
+      describe('createOnboarding', () => {
+        it('returns 403 when caller is not admin', async () => {
+          const res = await PlgOnboardingController({ log: mockLog }).createOnboarding({
+            data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(403);
+        });
+
+        it('returns 400 when data is null', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: null,
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 400 when imsOrgId is missing', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: { domain: TEST_DOMAIN },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 400 when domain is missing', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: { imsOrgId: TEST_IMS_ORG_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 400 when status is invalid', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN, status: 'BOGUS' },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 409 when record already exists', async () => {
+          mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(mockOnboarding);
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(409);
+        });
+
+        it('creates record with INACTIVE status by default and returns 201', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(201);
+          expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+            sinon.match({ imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN, status: 'INACTIVE' }),
+          );
+        });
+
+        it('creates record with explicit status when provided', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: { imsOrgId: TEST_IMS_ORG_ID, domain: TEST_DOMAIN, status: 'PRE_ONBOARDING' },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(201);
+          expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
+            sinon.match({ status: 'PRE_ONBOARDING' }),
+          );
+        });
+      });
+
+      describe('updateOnboardingStatus', () => {
+        it('returns 403 when caller is not admin', async () => {
+          const res = await PlgOnboardingController({ log: mockLog }).updateOnboardingStatus({
+            data: { status: 'INACTIVE' },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(403);
+        });
+
+        it('returns 400 when data is null', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+            data: null,
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 400 when status is missing', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+            data: {},
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 400 when status is invalid', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+            data: { status: 'BOGUS' },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 404 when record not found', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+            data: { status: 'INACTIVE' },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(404);
+        });
+
+        it('updates status and returns 200', async () => {
+          mockDataAccess.PlgOnboarding.findById.resolves(mockOnboarding);
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+            data: { status: 'INACTIVE' },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(200);
+          expect(mockOnboarding.setStatus).to.have.been.calledWith('INACTIVE');
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+      });
+
+      describe('deleteOnboarding', () => {
+        it('returns 403 when caller is not admin', async () => {
+          const res = await PlgOnboardingController({ log: mockLog }).deleteOnboarding({
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(403);
+        });
+
+        it('returns 404 when record not found', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).deleteOnboarding({
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(404);
+        });
+
+        it('deletes record and returns 204', async () => {
+          mockDataAccess.PlgOnboarding.findById.resolves(mockOnboarding);
+          const res = await AdminAccessPlgController({ log: mockLog }).deleteOnboarding({
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(204);
+          expect(mockOnboarding.remove).to.have.been.called;
+        });
+      });
     });
   });
 });

@@ -16,8 +16,6 @@ import nock from 'nock';
 import RunImportCommand from '../../../../src/support/slack/commands/run-import.js';
 import * as utils from '../../../../src/support/utils.js';
 
-/* eslint-env mocha */
-
 describe('RunImportCommand - Top Forms Integration', () => {
   let context;
   let slackContext;

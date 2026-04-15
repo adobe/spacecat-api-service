@@ -33,6 +33,7 @@ import { asyncJobs } from './seed-data/async-jobs.js';
 import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
 import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
+import { brands } from './seed-data/brands.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -110,6 +111,7 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
+    insertRows('brands', brands),
   ]);
 
   // Level 1b: depend on projects

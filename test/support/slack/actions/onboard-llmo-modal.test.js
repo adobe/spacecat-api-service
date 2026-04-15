@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -355,7 +354,6 @@ describe('onboard-llmo-modal', () => {
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
-        brandPresenceCadence: 'weekly',
       };
 
       // Use default mocks
@@ -377,7 +375,6 @@ describe('onboard-llmo-modal', () => {
       expect(sayStub).to.have.been.calledWith(sinon.match(':file_folder: *Data Folder:* example-com'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':label: *Brand:* Test Brand'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':identification_card: *IMS Org ID:* ABC123@AdobeOrg'));
-      expect(sayStub).to.have.been.calledWith(sinon.match(':calendar: *Brand Presence Cadence:* weekly'));
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(lambdaCtx.dataAccess.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com',
@@ -402,12 +399,6 @@ describe('onboard-llmo-modal', () => {
       const config = await lambdaCtx.dataAccess.Configuration.findLatest();
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
-
-      // Verify brand presence cadence configuration (Slack-specific)
-      // With splits, the first empty split (geo-brand-presence-free-1) is chosen
-      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free-1', mockSite);
-      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
-      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
 
       // Verify that octokit was called to update the helix query config
       expect(octokitMock).to.have.been.called;
@@ -440,7 +431,6 @@ describe('onboard-llmo-modal', () => {
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
-        brandPresenceCadence: 'weekly',
         tempOnboarding: true,
       };
 
@@ -1144,11 +1134,6 @@ example-com:
                   selected_option: { value: 'aem_edge' },
                 },
               },
-              brand_presence_cadence_input: {
-                brand_presence_cadence: {
-                  selected_option: { value: 'weekly' },
-                },
-              },
             },
           },
           private_metadata: JSON.stringify({
@@ -1179,7 +1164,6 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
-        brandPresenceCadence: 'weekly',
         brandURL: 'https://example.com',
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
@@ -1203,11 +1187,6 @@ example-com:
               delivery_type_input: {
                 delivery_type: {
                   selected_option: { value: 'aem_edge' },
-                },
-              },
-              brand_presence_cadence_input: {
-                brand_presence_cadence: {
-                  selected_option: { value: 'weekly' },
                 },
               },
             },
@@ -1240,180 +1219,11 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
-        brandPresenceCadence: 'weekly',
         brandURL: 'https://example.com',
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
         tempOnboarding: true,
       });
-    });
-
-    it('should handle modal submission with daily cadence and log expected messages', async () => {
-      const mockBody = {
-        view: {
-          state: {
-            values: {
-              brand_name_input: {
-                brand_name: { value: 'Test Brand' },
-              },
-              ims_org_input: {
-                ims_org_id: { value: 'ABC123@AdobeOrg' },
-              },
-              delivery_type_input: {
-                delivery_type: {
-                  selected_option: { value: 'aem_edge' },
-                },
-              },
-              brand_presence_cadence_input: {
-                brand_presence_cadence: {
-                  selected_option: { value: 'daily' },
-                },
-              },
-            },
-          },
-          private_metadata: JSON.stringify({
-            originalChannel: 'C1234567890',
-            originalThreadTs: '1234567890.123456',
-            brandURL: 'https://example.com',
-          }),
-        },
-        user: { id: 'U1234567890' },
-      };
-
-      const mockAck = sandbox.stub();
-      const mockClient = {
-        chat: {
-          postMessage: sandbox.stub().resolves(),
-        },
-      };
-
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
-
-      const { onboardLLMOModal } = mockedModule;
-      const handler = onboardLLMOModal(lambdaCtx);
-
-      await handler({ ack: mockAck, body: mockBody, client: mockClient });
-
-      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', {
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-        brandPresenceCadence: 'daily',
-        brandURL: 'https://example.com',
-        originalChannel: 'C1234567890',
-        originalThreadTs: '1234567890.123456',
-        tempOnboarding: false,
-      });
-    });
-
-    it('should handle weekly-paid cadence and enable correct handlers', async () => {
-      const input = {
-        baseURL: 'https://example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-        brandPresenceCadence: 'weekly-paid',
-      };
-
-      const mockSite = createDefaultMockSite(sandbox);
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
-      const slackCtx = createDefaultMockSlackCtx(sandbox);
-      global.fetch = createDefaultMockFetch(sandbox);
-
-      await onboardSite(input, lambdaCtx, slackCtx);
-
-      // Verify that the correct handlers were enabled/disabled
-      const config = await lambdaCtx.dataAccess.Configuration.findLatest();
-      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
-      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
-      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
-
-      // Verify log message uses new format
-      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabled brand presence (geo-brand-presence-paid)'));
-    });
-
-    it('should handle daily cadence and enable correct handlers', async () => {
-      // Mock data
-      const input = {
-        baseURL: 'https://example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-        brandPresenceCadence: 'daily',
-      };
-
-      // Use default mocks
-      const mockSite = createDefaultMockSite(sandbox);
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
-      const slackCtx = createDefaultMockSlackCtx(sandbox);
-      const sayStub = slackCtx.say;
-
-      // Mock fetch for admin.hlx.page calls
-      global.fetch = createDefaultMockFetch(sandbox);
-
-      // Execute the function
-      await onboardSite(input, lambdaCtx, slackCtx);
-
-      expect(sayStub).to.have.been.calledWith(':gear: Test Brand onboarding started...');
-      expect(sayStub).to.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
-      expect(sayStub).to.have.been.calledWith(sinon.match(':calendar: *Brand Presence Cadence:* daily'));
-
-      // Verify that the correct handlers were enabled/disabled
-      const config = await lambdaCtx.dataAccess.Configuration.findLatest();
-      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
-      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
-      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
-
-      // Verify log message
-      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabled brand presence (geo-brand-presence-daily)'));
-    });
-
-    it('should default to weekly when brand presence cadence is not provided', async () => {
-      const mockBody = {
-        view: {
-          state: {
-            values: {
-              brand_name_input: {
-                brand_name: { value: 'Test Brand' },
-              },
-              ims_org_input: {
-                ims_org_id: { value: 'ABC123@AdobeOrg' },
-              },
-              delivery_type_input: {
-                delivery_type: {
-                  selected_option: { value: 'aem_edge' },
-                },
-              },
-              // No brand_presence_cadence_input
-            },
-          },
-          private_metadata: JSON.stringify({
-            originalChannel: 'C1234567890',
-            originalThreadTs: '1234567890.123456',
-            brandURL: 'https://example.com',
-          }),
-        },
-        user: { id: 'U1234567890' },
-      };
-
-      const mockAck = sandbox.stub();
-      const mockClient = {
-        chat: {
-          postMessage: sandbox.stub().resolves(),
-        },
-      };
-
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
-
-      const { onboardLLMOModal } = mockedModule;
-      const handler = onboardLLMOModal(lambdaCtx);
-
-      await handler({ ack: mockAck, body: mockBody, client: mockClient });
-
-      // Should default to weekly
-      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', sinon.match({
-        brandPresenceCadence: 'weekly',
-      }));
     });
 
     it('should print error message if onboarding throws an error', async () => {
@@ -1604,7 +1414,6 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
-        brandPresenceCadence: 'weekly',
         brandURL: undefined, // Should be undefined when parsing fails
         originalChannel: undefined,
         originalThreadTs: undefined,
@@ -1861,72 +1670,6 @@ example-com:
       expect(lambdaCtx.log.debug).to.have.been.calledWith('User user123 started LLMO onboarding process for https://example.com with existing site site123.');
     });
 
-    it('should detect daily cadence when site has daily brand presence enabled', async () => {
-      const mockBody = {
-        user: { id: 'user123' },
-        actions: [{ value: 'https://example.com' }],
-        trigger_id: 'trigger123',
-        channel: { id: 'channel123' },
-        message: { ts: 'message123' },
-      };
-
-      const mockAck = sandbox.stub();
-      const mockClient = {
-        chat: {
-          postMessage: sandbox.stub().resolves(),
-        },
-        views: {
-          open: sandbox.stub().resolves(),
-        },
-      };
-      const mockRespond = sandbox.stub();
-
-      // Mock site with brand configuration
-      const mockSite = createDefaultMockSite(sandbox);
-      const mockConfig = {
-        getLlmoBrand: sandbox.stub().returns('Test Brand'),
-      };
-      mockSite.getConfig.returns(mockConfig);
-
-      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
-      mockSiteModel.findByBaseURL.resolves(mockSite);
-
-      // Mock configuration to return that daily is enabled
-      const mockConfiguration = createDefaultMockConfiguration(sandbox);
-      const configurationInstance = {
-        isHandlerEnabledForSite: sandbox.stub().callsFake((auditType) => {
-          if (auditType === 'geo-brand-presence-daily') {
-            return true; // Daily is enabled
-          }
-          return false;
-        }),
-      };
-      mockConfiguration.findLatest.resolves(configurationInstance);
-
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
-        mockSiteModel,
-        mockConfiguration,
-      });
-
-      const { startLLMOOnboarding } = mockedModule;
-      const handler = startLLMOOnboarding(lambdaCtx);
-
-      await handler({
-        ack: mockAck, body: mockBody, client: mockClient, respond: mockRespond,
-      });
-
-      expect(mockAck).to.have.been.called;
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Site site123 current brand presence config: weekly-free=false, weekly-paid=false, daily=true, detected cadence=daily');
-      expect(mockClient.views.open).to.have.been.called;
-
-      // Verify that the modal was opened with daily as the initial option
-      const openCall = mockClient.views.open.getCall(0);
-      const { view } = openCall.args[0];
-      const cadenceBlock = view.blocks.find((block) => block.block_id === 'brand_presence_cadence_input');
-      expect(cadenceBlock.element.initial_option.value).to.equal('daily');
-      expect(cadenceBlock.element.initial_option.text.text).to.equal('Daily');
-    });
-
     it('should handle errors gracefully', async () => {
       const mockBody = {
         user: { id: 'user123' },
@@ -2148,7 +1891,7 @@ example-com:
       };
     });
 
-    it('should enable geo-brand-presence-free when no variant is enabled', async () => {
+    it('should re-enable default audits and imports', async () => {
       const mockSite = createDefaultMockSite(sandbox);
       const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
       mockSiteModel.findById.resolves(mockSite);
@@ -2159,38 +1902,9 @@ example-com:
       const handler = mockedModule.reEnableDefaultsAction(lambdaCtx);
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
-      expect(mockConfig.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free-1', mockSite);
+      expect(mockConfig.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(mockClient.chat.postMessage).to.have.been.calledWith(
-        sinon.match({ text: sinon.match('geo-brand-presence-free-1') }),
-      );
-    });
-
-    it('should preserve existing geo-brand-presence configuration', async () => {
-      const mockSite = createDefaultMockSite(sandbox);
-      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
-      mockSiteModel.findById.resolves(mockSite);
-
-      const mockConfig = {
-        save: sandbox.stub().resolves(),
-        enableHandlerForSite: sandbox.stub(),
-        disableHandlerForSite: sandbox.stub(),
-        isHandlerEnabledForSite: sandbox.stub().callsFake((h) => h === 'geo-brand-presence-daily'),
-        getQueues: sandbox.stub().returns({ audits: 'audit-queue' }),
-        getSlackConfig: sandbox.stub().returns({ channel: 'test-channel', token: 'test-token' }),
-      };
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
-        mockSiteModel,
-        mockConfiguration: { findLatest: sandbox.stub().resolves(mockConfig) },
-      });
-
-      const handler = mockedModule.reEnableDefaultsAction(lambdaCtx);
-      await handler({ ack: mockAck, body: mockBody, client: mockClient });
-
-      const geoCalls = mockConfig.enableHandlerForSite.getCalls()
-        .filter((c) => c.args[0].startsWith('geo-brand-presence'));
-      expect(geoCalls).to.have.lengthOf(0);
-      expect(mockClient.chat.postMessage).to.have.been.calledWith(
-        sinon.match({ text: sinon.match('existing configuration preserved') }),
+        sinon.match({ text: sinon.match('Audits enabled') }),
       );
     });
 

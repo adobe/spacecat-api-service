@@ -45,7 +45,9 @@ function validateTemporalParams({ year, week, month }) {
 
   // Helper to parse integer with validation
   const parseInteger = (value, name) => {
-    if (isNullish(value)) return 0;
+    if (isNullish(value)) {
+      return 0;
+    }
 
     const parsed = parseInt(value, 10);
     if (Number.isNaN(parsed)) {

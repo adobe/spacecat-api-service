@@ -39,7 +39,9 @@ export function formatAuditStatus(enabledAudits, disabledAudits) {
   }
 
   if (disabledAudits.length > 0) {
-    if (output) output += '\n';
+    if (output) {
+      output += '\n';
+    }
     output += '*Disabled Audits:* ❌\n';
     disabledAudits.forEach(({ auditType }) => {
       output += `• ${auditType}\n`;

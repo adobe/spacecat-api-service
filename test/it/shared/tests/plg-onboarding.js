@@ -17,6 +17,7 @@ import {
   ORG_2_IMS_ORG_ID,
   PLG_ONBOARDING_1_ID,
   PLG_ONBOARDING_1_DOMAIN,
+  PLG_ONBOARDING_2_ID,
   NON_EXISTENT_IMS_ORG_ID,
 } from '../seed-ids.js';
 
@@ -38,6 +39,7 @@ function expectPlgOnboardingDto(onboarding) {
  * Shared PLG Onboarding endpoint tests.
  *
  * POST /plg/onboard — validation tests only (happy path needs external services).
+ * GET /plg/sites — admin-only list of PLG onboarding rows.
  * GET /plg/onboard/status/:imsOrgId — validation + lookup.
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
@@ -92,6 +94,61 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
       });
     });
 
+    // ── GET /plg/sites ──
+
+    describe('GET /plg/sites', () => {
+      it('returns 403 for non-admin user', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/plg/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      if (!skipPlgOnboardingTests) {
+        it('admin: returns 200 with all seeded onboardings', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites');
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array').with.length.of.at.least(1);
+          const match = res.body.find((r) => r.id === PLG_ONBOARDING_1_ID);
+          expect(match).to.be.an('object');
+          expectPlgOnboardingDto(match);
+          expect(match.domain).to.equal(PLG_ONBOARDING_1_DOMAIN);
+        });
+
+        it('admin: returns 400 for invalid limit query', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=0');
+          expect(res.status).to.equal(400);
+        });
+
+        it('admin: returns 400 for limit that is not an integer token', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=1.5');
+          expect(res.status).to.equal(400);
+        });
+
+        it('admin: returns 400 for limit with trailing junk', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=50abc');
+          expect(res.status).to.equal(400);
+        });
+
+        it('admin: returns 400 for negative limit', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=-1');
+          expect(res.status).to.equal(400);
+        });
+
+        it('admin: respects limit query when listing', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.get('/plg/sites?limit=1');
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array');
+          expect(res.body.length).to.be.at.most(1);
+        });
+      }
+    });
+
     // ── GET /plg/onboard/status/:imsOrgId ──
 
     describe('GET /plg/onboard/status/:imsOrgId', () => {
@@ -127,10 +184,9 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           const res = await http.admin.get(`/plg/onboard/status/${ORG_1_IMS_ORG_ID}`);
           expect(res.status).to.equal(200);
 
-          expect(res.body).to.be.an('array').with.lengthOf(1);
-          const record = res.body[0];
+          expect(res.body).to.be.an('array').with.length.of.at.least(2);
+          const record = res.body.find((r) => r.id === PLG_ONBOARDING_1_ID);
           expectPlgOnboardingDto(record);
-          expect(record.id).to.equal(PLG_ONBOARDING_1_ID);
           expect(record.imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
           expect(record.domain).to.equal(PLG_ONBOARDING_1_DOMAIN);
           expect(record.status).to.equal('ONBOARDED');
@@ -142,7 +198,83 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           const http = getHttpClient();
           const res = await http.user.get(`/plg/onboard/status/${ORG_1_IMS_ORG_ID}`);
           expect(res.status).to.equal(200);
-          expect(res.body).to.be.an('array').with.lengthOf(1);
+          expect(res.body).to.be.an('array').with.length.of.at.least(2);
+        });
+      }
+    });
+
+    // ── PATCH /plg/onboard/:onboardingId ──
+
+    describe('PATCH /plg/onboard/:onboardingId', () => {
+      it('returns 403 for non-admin user', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}`, {
+          decision: 'BYPASSED',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 for missing decision', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}`, {
+          justification: 'test',
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for missing justification', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}`, {
+          decision: 'BYPASSED',
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for invalid decision value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}`, {
+          decision: 'INVALID',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 404 for non-existent onboardingId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch('/plg/onboard/aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee', {
+          decision: 'BYPASSED',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 when onboarding is not waitlisted', async () => {
+        const http = getHttpClient();
+        // PLG_ONBOARDING_1 is ONBOARDED, not WAITLISTED
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_1_ID}`, {
+          decision: 'BYPASSED',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      if (!skipPlgOnboardingTests) {
+        it('UPHELD: stores review and keeps WAITLISTED status', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}`, {
+            decision: 'UPHELD',
+            justification: 'Not ready to proceed',
+          });
+          expect(res.status).to.equal(200);
+          expectPlgOnboardingDto(res.body);
+          expect(res.body.status).to.equal('WAITLISTED');
+          expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
+          expect(res.body.reviews[0].decision).to.equal('UPHELD');
+          expect(res.body.reviews[0].justification).to.equal('Not ready to proceed');
+          expect(res.body.reviews[0].reason).to.include('already onboarded');
+          expect(res.body.reviews[0].reviewedBy).to.be.a('string');
+          expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
         });
       }
     });

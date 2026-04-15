@@ -653,6 +653,105 @@ llmo-global-sheet-data:
     security:
       - api_key: [ ]
 
+llmo-agentic-traffic-global:
+  get:
+    tags:
+      - llmo
+    summary: List global weekly agentic traffic totals
+    description: |
+      Returns weekly aggregate global agentic traffic rows from mysticat `agentic_traffic_global`,
+      ordered by newest `(year, week)` first.
+
+      Query parameters:
+      - `year`: optional 4-digit year filter
+      - `week`: optional ISO week filter (`1-53`)
+      - `limit`: optional max rows to return (`1-520`, defaults to `52`)
+
+      Human access requires either admin access or membership in an organization with LLMO access.
+      S2S consumers may call this endpoint when granted the mapped route capability.
+    operationId: getLlmoAgenticTrafficGlobal
+    parameters:
+      - name: year
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 2000
+          maximum: 9999
+      - name: week
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 53
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 520
+    responses:
+      '200':
+        description: Weekly global agentic traffic rows
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficGlobalWeekList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Create or update a weekly global agentic traffic row
+    description: |
+      Idempotently upserts a weekly aggregate row in mysticat `agentic_traffic_global`
+      using the unique `(year, week)` key.
+
+      If the week already exists, `hits` and `updatedBy` are updated in place.
+      Human access is admin-only. S2S consumers may call this endpoint when granted the mapped route capability.
+    operationId: postLlmoAgenticTrafficGlobal
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/AgenticTrafficGlobalWeekUpsert'
+    responses:
+      '200':
+        description: Upserted weekly global agentic traffic row
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficGlobalWeek'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
 llmo-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -775,17 +874,6 @@ llmo-onboard:
                 description: |
                   When true, skips updating helix-query.yaml in the project-elmo-ui-data GitHub repo
                   (temporary onboarding; default is false).
-              cadence:
-                type: string
-                enum:
-                  - daily
-                  - weekly-paid
-                  - weekly-free
-                default: weekly-free
-                description: >
-                  Brand presence monitoring cadence. Controls how often brand
-                  presence data is collected via geo-brand-presence handlers.
-                example: "weekly-free"
             required:
               - domain
               - brandName
@@ -1960,3 +2048,520 @@ llmo-edge-optimize-status:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-agentic-traffic-url-brand-presence:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Brand presence citation detail for a URL
+    description: |
+      Returns brand presence citation data for a specific URL from the Postgres-backed
+      mysticat data service (`rpc_brand_presence_url_detail`). Used by the Agentic
+      Traffic PG dashboard URL details dialog.
+
+      Finds all brand presence LLM executions where the given URL was cited as a source,
+      then aggregates citation stats, a weekly trend, and the top 50 prompts that cited it.
+
+      URL matching tries four variants (with/without `https://`, with/without trailing slash)
+      so the caller can pass the URL exactly as it appears in the agentic traffic table.
+
+      Query parameters:
+      - `url` (**required**): full URL to look up, e.g. `https://www.adobe.com/express/page`
+      - `startDate`: date range start (`YYYY-MM-DD`); defaults to 28 days ago
+      - `endDate`: date range end (`YYYY-MM-DD`); defaults to today
+      - `platform`: UI platform code (e.g. `openai`, `perplexity`); omit for all models
+    operationId: getAgenticTrafficUrlBrandPresence
+    parameters:
+      - name: url
+        in: query
+        required: true
+        description: Full URL to look up brand presence citations for
+        schema:
+          type: string
+          example: 'https://www.adobe.com/express/create/poster'
+      - name: startDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+          example: '2026-01-01'
+      - name: endDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+          example: '2026-03-31'
+      - name: platform
+        in: query
+        required: false
+        description: UI platform code mapped to the DB model value
+        schema:
+          type: string
+          example: 'openai'
+    responses:
+      '200':
+        description: Brand presence citation detail for the URL
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficUrlBrandPresence'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+# ── Common parameter fragment (referenced inline below) ───────────────────────
+# All site-scoped agentic traffic endpoints share these optional query filters.
+# siteId path param is declared at path level via parameters.yaml#/siteId.
+
+llmo-agentic-traffic-kpis:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Aggregated agentic traffic KPIs for a site
+    description: |
+      Returns a single row of aggregated KPI metrics for the site's agentic traffic
+      over the requested date range. Queries `rpc_agentic_traffic_kpis`.
+    operationId: getAgenticTrafficKpis
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Aggregated KPI metrics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficKpis'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-kpis-trend:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic KPI time series for a site
+    description: |
+      Returns KPI metrics per time period (day / week / month) over the requested
+      date range. Queries `rpc_agentic_traffic_kpis_trend`.
+    operationId: getAgenticTrafficKpisTrend
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: interval
+        in: query
+        description: Bucketing interval; defaults to `week`
+        schema:
+          type: string
+          enum: [day, week, month]
+          default: week
+    responses:
+      '200':
+        description: KPI time series
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficKpisTrend'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-region:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by region
+    description: Queries `rpc_agentic_traffic_by_region`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByRegion
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by region
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByRegion'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-category:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by category
+    description: Queries `rpc_agentic_traffic_by_category`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByCategory
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by category
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByCategory'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-page-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by page type
+    description: Queries `rpc_agentic_traffic_by_page_type`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByPageType
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by page type
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByPageType'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by HTTP status code
+    description: Queries `rpc_agentic_traffic_by_status`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByStatus
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by HTTP status code
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByStatus'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-user-agent:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by page type and agent type
+    description: |
+      Queries `rpc_agentic_traffic_by_user_agent`. Powers the User Agent Analysis table.
+      Note: `userAgent` filter is not supported by this RPC.
+    operationId: getAgenticTrafficByUserAgent
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: sortBy
+        in: query
+        schema:
+          type: string
+          enum: [page_type, agent_type, unique_agents, total_hits]
+          default: total_hits
+      - name: sortOrder
+        in: query
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+    responses:
+      '200':
+        description: Traffic by page type and agent type
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByUserAgent'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Per-URL agentic traffic performance analysis
+    description: |
+      Queries `rpc_agentic_traffic_by_url`. Powers the URL Performance table.
+      Returns up to `limit` URLs (default and max 2000) ordered by `sortBy`/`sortOrder`.
+    operationId: getAgenticTrafficByUrl
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 2000
+          default: 2000
+      - name: sortBy
+        in: query
+        schema:
+          type: string
+          enum: [host, url_path, unique_agents, success_rate, avg_ttfb_ms, category_name, total_hits]
+          default: total_hits
+      - name: sortOrder
+        in: query
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+    responses:
+      '200':
+        description: Per-URL performance analysis
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByUrl'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-filter-dimensions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Distinct filter dimension values for agentic traffic
+    description: |
+      Returns cascading distinct filter values for the agentic traffic dashboard dropdowns.
+      Queries `rpc_agentic_traffic_distinct_filters` — each dimension list respects the
+      other active filters but ignores its own to avoid self-limiting dropdowns.
+    operationId: getAgenticTrafficFilterDimensions
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Distinct filter values
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficFilterDimensions'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-weeks:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Available ISO weeks for a site's agentic traffic data
+    description: |
+      Returns the list of ISO weeks for which the site has agentic traffic data,
+      derived from the min/max `traffic_date` in `agentic_traffic`. Used to populate
+      the Custom Weeks date picker in the dashboard.
+    operationId: getAgenticTrafficWeeks
+    responses:
+      '200':
+        description: Available ISO weeks
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficWeeks'
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-movers:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Top and bottom agentic traffic URL movers
+    description: |
+      Returns URLs with the largest hit changes between the oldest and newest traffic
+      dates in the selected range. Queries `rpc_agentic_traffic_movers`.
+      Returns up to `limit` rows each for `direction=up` (top movers) and
+      `direction=down` (bottom movers). Requires at least 2 distinct dates in the range.
+    operationId: getAgenticTrafficMovers
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: limit
+        in: query
+        description: Max rows per direction (default 5, max 50)
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+    responses:
+      '200':
+        description: Top and bottom URL movers
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficMovers'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []

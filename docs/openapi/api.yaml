@@ -119,14 +119,6 @@ paths:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
     $ref: './brands-api.yaml#/brands-for-organization'
-  /v2/orgs/{spaceCatId}/llmo-customer-config:
-    $ref: './customer-config-api.yaml#/llmo-customer-config-by-space-cat-id-v2'
-  /v2/orgs/{spaceCatId}/llmo-customer-config-lean:
-    $ref: './customer-config-api.yaml#/llmo-customer-config-lean-by-space-cat-id-v2'
-  /v2/orgs/{spaceCatId}/llmo-topics:
-    $ref: './customer-config-api.yaml#/llmo-topics-by-space-cat-id-v2'
-  /v2/orgs/{spaceCatId}/llmo-prompts:
-    $ref: './customer-config-api.yaml#/llmo-prompts-by-space-cat-id-v2'
   /v2/orgs/{spaceCatId}/brands:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
@@ -136,11 +128,11 @@ paths:
   /v2/orgs/{spaceCatId}/topics/{topicId}:
     $ref: './topics-v2-api.yaml#/v2-topic-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts:
-    $ref: './customer-config-api.yaml#/v2-prompts-by-brand'
+    $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/{promptId}:
-    $ref: './customer-config-api.yaml#/v2-prompts-by-brand-and-id'
+    $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-and-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
-    $ref: './customer-config-api.yaml#/v2-prompts-by-brand-bulk-delete'
+    $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -232,6 +224,8 @@ paths:
     $ref: './sites-api.yaml#/site-brand-profile'
   /sites/{siteId}/config/cdn-logs:
     $ref: './site-api.yaml#/site-cdn-logs-config'
+  /sites/{siteId}/page-relationships/search:
+    $ref: './site-api.yaml#/site-page-relationships-search'
   /sites/{siteId}/opportunities:
     $ref: './site-opportunities.yaml#/site-opportunities'
   /sites/{siteId}/opportunities/by-status/{status}:
@@ -258,6 +252,12 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/edge-deploy:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-edge-deploy'
+  /sites/{siteId}/geo-experiments:
+    $ref: './site-opportunities.yaml#/site-geo-experiments'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}:
+    $ref: './site-opportunities.yaml#/site-geo-experiment'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
@@ -460,6 +460,32 @@ paths:
     $ref: './llmo-api.yaml#/llmo-sheet-data-with-type-and-week'
   /sites/{siteId}/llmo/global-sheet-data/{configName}:
     $ref: './llmo-api.yaml#/llmo-global-sheet-data'
+  /llmo/agentic-traffic/global:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-global'
+  /sites/{siteId}/agentic-traffic/kpis:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-kpis'
+  /sites/{siteId}/agentic-traffic/kpis-trend:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-kpis-trend'
+  /sites/{siteId}/agentic-traffic/by-region:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-region'
+  /sites/{siteId}/agentic-traffic/by-category:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-category'
+  /sites/{siteId}/agentic-traffic/by-page-type:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-page-type'
+  /sites/{siteId}/agentic-traffic/by-status:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-status'
+  /sites/{siteId}/agentic-traffic/by-user-agent:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-user-agent'
+  /sites/{siteId}/agentic-traffic/by-url:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-url'
+  /sites/{siteId}/agentic-traffic/filter-dimensions:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-filter-dimensions'
+  /sites/{siteId}/agentic-traffic/weeks:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
+  /sites/{siteId}/agentic-traffic/movers:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /sites/{siteId}/agentic-traffic/url-brand-presence:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-url-brand-presence'
   /sites/{siteId}/llmo/config:
     $ref: './llmo-api.yaml#/llmo-config'
   /sites/{siteId}/llmo/questions:
@@ -522,6 +548,10 @@ paths:
     $ref: './tokens-api.yaml#/site-token-by-type'
   /plg/onboard:
     $ref: './plg-onboarding-api.yaml#/plg-onboard'
+  /plg/sites:
+    $ref: './plg-onboarding-api.yaml#/plg-sites'
+  /plg/onboard/{onboardingId}:
+    $ref: './plg-onboarding-api.yaml#/plg-onboard-update'
   /plg/onboard/status/{imsOrgId}:
     $ref: './plg-onboarding-api.yaml#/plg-onboard-status'
 

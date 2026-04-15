@@ -10,27 +10,30 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 use(sinonChai);
 
 describe('LlmoMysticatController', () => {
   let sandbox;
   let mockContext;
+  let mockAccessControlUtil;
+  let mockOrganization;
   let LlmoMysticatController;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
-    const mockOrganization = { getId: sandbox.stub().returns('org-123') };
+    mockOrganization = { getId: sandbox.stub().returns('org-123') };
 
     const chainableMock = () => {
       const c = {};
       c.from = sandbox.stub().returns(c);
       c.select = sandbox.stub().returns(c);
+      c.order = sandbox.stub().returns(c);
       c.eq = sandbox.stub().returns(c);
       c.gte = sandbox.stub().returns(c);
       c.lte = sandbox.stub().returns(c);
@@ -53,23 +56,36 @@ describe('LlmoMysticatController', () => {
 
     mockContext = {
       params: { spaceCatId: '0178a3f0-1234-7000-8000-000000000001', brandId: 'all' },
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('ims')
+          .withProfile({ tenants: [{ id: 'tenant-1' }] })
+          .withAuthenticated(true),
+      },
       dataAccess: {
         Site: {
           postgrestService: chainableMock(),
         },
         Organization: {
           findById: sandbox.stub().resolves(mockOrganization),
+          findByImsOrgId: sandbox.stub().resolves(mockOrganization),
+        },
+        services: {
+          postgrestClient: chainableMock(),
         },
       },
       log: { info: sandbox.stub(), error: sandbox.stub(), warn: sandbox.stub() },
     };
 
+    mockAccessControlUtil = {
+      hasAccess: sandbox.stub().resolves(true),
+      hasAdminAccess: sandbox.stub().returns(false),
+    };
+
     LlmoMysticatController = await esmock('../../../src/controllers/llmo/llmo-mysticat-controller.js', {
       '../../../src/support/access-control-util.js': {
         default: {
-          fromContext: () => ({
-            hasAccess: sandbox.stub().resolves(true),
-          }),
+          fromContext: () => mockAccessControlUtil,
         },
       },
     });
@@ -83,6 +99,8 @@ describe('LlmoMysticatController', () => {
     const controller = LlmoMysticatController(mockContext);
 
     expect(controller.getFilterDimensions).to.be.a('function');
+    expect(controller.getAgenticTrafficGlobal).to.be.a('function');
+    expect(controller.postAgenticTrafficGlobal).to.be.a('function');
   });
 
   it('getFilterDimensions validates org and returns data', async () => {
@@ -95,20 +113,71 @@ describe('LlmoMysticatController', () => {
   });
 
   it('getFilterDimensions returns 403 when user has no org access', async () => {
-    LlmoMysticatController = await esmock('../../../src/controllers/llmo/llmo-mysticat-controller.js', {
-      '../../../src/support/access-control-util.js': {
-        default: {
-          fromContext: () => ({
-            hasAccess: sandbox.stub().resolves(false),
-          }),
-        },
-      },
-    });
+    mockAccessControlUtil.hasAccess.resolves(false);
 
     const controller = LlmoMysticatController(mockContext);
     const result = await controller.getFilterDimensions(mockContext);
 
     expect(result.status).to.equal(403);
+  });
+
+  it('getAgenticTrafficGlobal allows UI users with LLMO org access', async () => {
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficGlobal(mockContext);
+
+    expect(result.status).to.equal(200);
+    expect(mockContext.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith('tenant-1@AdobeOrg');
+    expect(mockAccessControlUtil.hasAccess).to.have.been.calledWith(mockOrganization, '', 'LLMO');
+  });
+
+  it('getAgenticTrafficGlobal allows S2S consumers without org lookup', async () => {
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficGlobal({
+      ...mockContext,
+      s2sConsumer: { getCapabilities: () => ['report:read'] },
+    });
+
+    expect(result.status).to.equal(200);
+    expect(mockContext.dataAccess.Organization.findByImsOrgId).not.to.have.been.called;
+  });
+
+  it('getAgenticTrafficGlobal returns 403 when user has no global org access', async () => {
+    mockAccessControlUtil.hasAccess.resolves(false);
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficGlobal(mockContext);
+
+    expect(result.status).to.equal(403);
+  });
+
+  it('getAgenticTrafficGlobal supports authInfo.profile tenant fallback without getProfile/getTenantIds', async () => {
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficGlobal({
+      ...mockContext,
+      attributes: {
+        authInfo: {
+          profile: { tenants: [{ id: 'tenant-2@AdobeOrg' }] },
+        },
+      },
+    });
+
+    expect(result.status).to.equal(200);
+    expect(mockContext.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith('tenant-2@AdobeOrg');
+  });
+
+  it('getAgenticTrafficGlobal returns 403 when authInfo has no tenants', async () => {
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficGlobal({
+      ...mockContext,
+      attributes: {
+        authInfo: {
+          profile: {},
+        },
+      },
+    });
+
+    expect(result.status).to.equal(403);
+    expect(mockContext.dataAccess.Organization.findByImsOrgId).not.to.have.been.called;
   });
 
   it('getFilterDimensions returns 400 when organization not found', async () => {
@@ -118,5 +187,56 @@ describe('LlmoMysticatController', () => {
     const result = await controller.getFilterDimensions(mockContext);
 
     expect(result.status).to.equal(400);
+  });
+
+  // ── getSiteAndValidateAccess (used by agentic traffic site-scoped handlers) ──
+
+  it('getAgenticTrafficKpis validates site and returns data', async () => {
+    const mockSite = {
+      getOrganizationId: () => 'org-123',
+    };
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(mockSite);
+    mockContext.params = { ...mockContext.params, siteId: 'site-123' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(mockContext.dataAccess.Site.findById).to.have.been.calledWith('site-123');
+    expect(mockContext.dataAccess.Organization.findById).to.have.been.calledWith('org-123');
+    expect(result.status).to.equal(200);
+  });
+
+  it('getAgenticTrafficKpis returns 400 when site not found', async () => {
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(null);
+    mockContext.params = { ...mockContext.params, siteId: 'missing-site' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(result.status).to.equal(400);
+  });
+
+  it('getAgenticTrafficKpis returns 400 when organization not found for site', async () => {
+    const mockSite = { getOrganizationId: () => 'org-unknown' };
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(mockSite);
+    mockContext.dataAccess.Organization.findById.resolves(null);
+    mockContext.params = { ...mockContext.params, siteId: 'site-123' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(result.status).to.equal(400);
+  });
+
+  it('getAgenticTrafficKpis returns 403 when user has no LLMO org access', async () => {
+    const mockSite = { getOrganizationId: () => 'org-123' };
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(mockSite);
+    mockAccessControlUtil.hasAccess.resolves(false);
+    mockContext.params = { ...mockContext.params, siteId: 'site-123' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(result.status).to.equal(403);
   });
 });

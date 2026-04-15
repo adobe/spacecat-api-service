@@ -159,7 +159,9 @@ describe('prompts-storage', () => {
     it('returns empty items with total when no rows match', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [], error: null, count: 0 });
         },
       };
@@ -194,7 +196,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -205,7 +209,6 @@ describe('prompts-storage', () => {
       });
       expect(result.items).to.have.lengthOf(1);
       expect(result.items[0].id).to.equal(PROMPT_ID);
-      expect(result.items[0].uuid).to.equal('prompt-pk-uuid');
       expect(result.items[0].createdAt).to.equal('2026-01-01T00:00:00Z');
       expect(result.items[0].createdBy).to.equal('admin@test.com');
       expect(result.items[0].updatedAt).to.equal('2026-02-01T00:00:00Z');
@@ -231,8 +234,12 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'topics') return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -248,7 +255,9 @@ describe('prompts-storage', () => {
     it('defaults limit and page when falsy values are passed', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [], error: null, count: 0 });
         },
       };
@@ -279,7 +288,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -297,7 +308,9 @@ describe('prompts-storage', () => {
     it('falls back to 0 when count is null and rows are empty', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [], error: null, count: null });
         },
       };
@@ -326,9 +339,15 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'categories') return makeChain({ data: [], error: null });
-          if (table === 'topics') return makeChain({ data: [], error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'categories') {
+            return makeChain({ data: [], error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: [], error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -358,7 +377,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: null });
         },
       };
@@ -399,7 +420,9 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -429,8 +452,12 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'categories') return makeChain({ data: null, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'categories') {
+            return makeChain({ data: null, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -464,9 +491,15 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'categories') return makeChain({ data: { id: 'cat-uuid' }, error: null });
-          if (table === 'topics') return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'categories') {
+            return makeChain({ data: { id: 'cat-uuid' }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          }
           return makeChain({ data: [row], error: null, count: 1 });
         },
       };
@@ -479,17 +512,19 @@ describe('prompts-storage', () => {
       });
       expect(result.items).to.have.lengthOf(1);
       expect(result.items[0].category).to.deep.include({
-        id: 'photoshop', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
+        id: 'cat-uuid', name: 'Photoshop', origin: 'human',
       });
       expect(result.items[0].topic).to.deep.include({
-        id: 'editing', uuid: 'topic-uuid', name: 'Editing', categoryId: 'photoshop',
+        id: 'topic-uuid', name: 'Editing',
       });
     });
 
     it('throws on query error', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: null, error: { message: 'DB error' } });
         },
       };
@@ -547,7 +582,6 @@ describe('prompts-storage', () => {
       });
       expect(result).to.not.be.null;
       expect(result.id).to.equal(PROMPT_ID);
-      expect(result.uuid).to.equal('prompt-pk-uuid');
       expect(result.prompt).to.equal('Prompt');
       expect(result.source).to.equal('sheet');
       expect(result.createdAt).to.equal('2026-01-01T00:00:00Z');
@@ -583,12 +617,11 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result).to.not.be.null;
-      expect(result.uuid).to.equal('prompt-pk-uuid-3');
       expect(result.category).to.deep.equal({
-        id: 'photoshop', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
+        id: 'cat-uuid', name: 'Photoshop', origin: 'human',
       });
       expect(result.topic).to.deep.equal({
-        id: 'editing', uuid: 'topic-uuid', name: 'Editing', categoryId: 'photoshop',
+        id: 'topic-uuid', name: 'Editing',
       });
     });
 
@@ -617,8 +650,6 @@ describe('prompts-storage', () => {
       expect(result.status).to.equal('active');
       expect(result.origin).to.equal('human');
       expect(result.source).to.equal('config');
-      expect(result.categoryId).to.be.null;
-      expect(result.topicId).to.be.null;
       expect(result.category).to.be.null;
       expect(result.topic).to.be.null;
       expect(result.brandId).to.be.null;
@@ -802,7 +833,7 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(1);
     });
 
-    it('resolves categoryId and topicId when upserting', async () => {
+    it('resolves category and topic names when upserting', async () => {
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -812,8 +843,12 @@ describe('prompts-storage', () => {
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
           }
-          if (table === 'categories') return makeChain({ data: [{ id: 'cat-uuid', category_id: 'photoshop' }], error: null });
-          if (table === 'topics') return makeChain({ data: [{ id: 'topic-uuid', topic_id: 'editing' }], error: null });
+          if (table === 'categories') {
+            return makeChain({ data: [{ id: 'cat-uuid', name: 'Photoshop' }], error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: [{ id: 'topic-uuid', name: 'Editing' }], error: null });
+          }
           return makeChain({});
         },
       };
@@ -821,16 +856,15 @@ describe('prompts-storage', () => {
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
         prompts: [{
-          prompt: 'New', regions: ['us'], categoryId: 'photoshop', topicId: 'editing',
+          prompt: 'New', regions: ['us'], category: 'Photoshop', topic: 'Editing',
         }],
         postgrestClient: client,
       });
       expect(result.created).to.equal(1);
-      expect(result.prompts[0].categoryId).to.equal('photoshop');
-      expect(result.prompts[0].topicId).to.equal('editing');
     });
 
     it('auto-creates missing categories and topics via ensureLookupEntries', async () => {
+      const upsertedRows = {};
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -841,36 +875,273 @@ describe('prompts-storage', () => {
             };
           }
           // buildLookupMaps returns empty arrays → maps will be empty
-          // ensureLookupEntries will upsert the missing entries
-          if (table === 'categories') {
-            return makeChain({
-              data: [{ id: 'new-cat-uuid', category_id: 'new-cat' }],
-              error: null,
-            });
-          }
-          if (table === 'topics') {
-            return makeChain({
-              data: [{ id: 'new-topic-uuid', topic_id: 'new-topic' }],
-              error: null,
-            });
-          }
-          return makeChain({});
+          // ensureLookupEntries will upsert the missing entries by name
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            upsert: (rows) => {
+              if (rows[0]?.category_id !== undefined) {
+                upsertedRows.categories = rows;
+              }
+              if (rows[0]?.topic_id !== undefined) {
+                upsertedRows.topics = rows;
+              }
+              const data = rows.map((r) => ({
+                id: `uuid-${r.name}`,
+                name: r.name,
+              }));
+              return {
+                select: () => ({
+                  then: (resolve) => resolve({ data, error: null }),
+                  catch: () => {},
+                }),
+              };
+            },
+          };
         },
       };
       const result = await upsertPrompts({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
         prompts: [{
-          prompt: 'New prompt', regions: ['us'], categoryId: 'new-cat', topicId: 'new-topic',
+          prompt: 'New prompt', regions: ['us'], category: 'New Cat', topic: 'New Topic',
         }],
         postgrestClient: client,
       });
       expect(result.created).to.equal(1);
-      expect(result.prompts[0].categoryId).to.equal('new-cat');
-      expect(result.prompts[0].topicId).to.equal('new-topic');
+      // Verify the upserted rows use the name as both category_id/topic_id and name
+      expect(upsertedRows.categories[0].name).to.equal('New Cat');
+      expect(upsertedRows.categories[0].category_id).to.equal('New Cat');
+      expect(upsertedRows.topics[0].name).to.equal('New Topic');
+      expect(upsertedRows.topics[0].topic_id).to.equal('New Topic');
     });
 
-    it('throws when auto-creating categories fails', async () => {
+    it('ensureLookupEntries uses normalized name for case-insensitive deduplication', async () => {
+      const upsertedRows = {};
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return {
+            // buildLookupMaps: return existing category with title-cased name (legacy)
+            // The call is: from(table).select('id,name').eq('organization_id', orgId)
+            select: () => ({
+              eq: () => thenable({
+                data: table === 'categories'
+                  ? [{ id: 'existing-uuid', name: 'Brand Awareness' }]
+                  : [],
+                error: null,
+              }),
+            }),
+            upsert: (rows) => {
+              upsertedRows[table] = rows;
+              const data = rows.map((r) => ({ id: `uuid-${r.name}`, name: r.name }));
+              return {
+                select: () => ({
+                  then: (resolve) => resolve({ data, error: null }),
+                  catch: () => {},
+                }),
+              };
+            },
+          };
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [
+          // "brand awareness" (lowercase) should match existing "Brand Awareness" (title-case)
+          { prompt: 'Q1', regions: ['us'], category: 'brand awareness' },
+          // "New Topic" doesn't exist yet — should be created
+          { prompt: 'Q2', regions: ['us'], topic: 'New Topic' },
+        ],
+        postgrestClient: client,
+      });
+
+      expect(upsertedRows.categories).to.be.undefined;
+      // Topic "New Topic" is new — should be upserted with name as topic_id
+      expect(upsertedRows.topics).to.be.an('array').with.lengthOf(1);
+      expect(upsertedRows.topics[0].name).to.equal('New Topic');
+      expect(upsertedRows.topics[0].topic_id).to.equal('New Topic');
+    });
+
+    it('falls back to unprefixed slug lookup when category upsert fails', async () => {
+      let catCallCount = 0;
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'categories') {
+            catCallCount += 1;
+            if (catCallCount === 1) {
+              // First call: buildLookupMaps — no existing categories
+              return makeChain({ data: [], error: null });
+            }
+            if (catCallCount === 2) {
+              // Second call: upsert fails (name constraint violation)
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            // Third call: fallback lookup by unprefixed category_id succeeds
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: { id: 'existing-uuid', category_id: 'comparison-decision' }, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], categoryId: 'baseurl-comparison-decision' }],
+        postgrestClient: client,
+      });
+      // Should succeed — fallback resolved via unprefixed slug "comparison-decision"
+      expect(result.created).to.equal(1);
+    });
+
+    it('falls back to unprefixed slug lookup when topic upsert fails', async () => {
+      let topicCallCount = 0;
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            topicCallCount += 1;
+            if (topicCallCount === 1) {
+              return makeChain({ data: [], error: null });
+            }
+            if (topicCallCount === 2) {
+              return {
+                upsert: () => ({
+                  select: () => ({
+                    then: (resolve) => resolve({ data: null, error: { code: '23505', message: 'unique_violation' } }),
+                    catch: () => {},
+                  }),
+                }),
+              };
+            }
+            // Fallback lookup by unprefixed topic_id
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => thenable({ data: { id: 'existing-uuid', topic_id: 'some-topic' }, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], topicId: 'gsc-some-topic' }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+    });
+
+    it('warns when category upsert fails', async () => {
+      const warnStub = sandbox.stub(console, 'warn');
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'categories') {
+            return {
+              select: () => makeChain({ data: [], error: null }),
+              upsert: () => ({
+                select: () => ({
+                  then: (resolve) => resolve({ data: null, error: { code: '42501', message: 'permission denied' } }),
+                  catch: () => {},
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], category: 'Unknown Cat' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.calledOnce).to.be.true;
+      expect(warnStub.firstCall.args[0]).to.include('Failed to auto-create categories');
+    });
+
+    it('warns when topic upsert fails', async () => {
+      const warnStub = sandbox.stub(console, 'warn');
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'p-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          if (table === 'topics') {
+            return {
+              select: () => makeChain({ data: [], error: null }),
+              upsert: () => ({
+                select: () => ({
+                  then: (resolve) => resolve({ data: null, error: { code: '42501', message: 'permission denied' } }),
+                  catch: () => {},
+                }),
+              }),
+            };
+          }
+          return makeChain({ data: [], error: null });
+        },
+      };
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], topic: 'Unknown Topic' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.calledOnce).to.be.true;
+      expect(warnStub.firstCall.args[0]).to.include('Failed to auto-create topics');
+    });
+
+    it('warns (does not throw) when category upsert fails with any error', async () => {
+      const warnStub = sandbox.stub(console, 'warn');
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -881,22 +1152,31 @@ describe('prompts-storage', () => {
             };
           }
           if (table === 'categories') {
-            return makeChain({ data: null, error: { message: 'constraint violation' } });
+            return {
+              select: () => makeChain({ data: [], error: null }),
+              upsert: () => ({
+                select: () => ({
+                  then: (resolve) => resolve({ data: null, error: { code: '42501', message: 'permission denied' } }),
+                  catch: () => {},
+                }),
+              }),
+            };
           }
           return makeChain({ data: [], error: null });
         },
       };
-      await expect(
-        upsertPrompts({
-          organizationId: ORG_ID,
-          brandUuid: BRAND_UUID,
-          prompts: [{ prompt: 'X', regions: [], categoryId: 'bad-cat' }],
-          postgrestClient: client,
-        }),
-      ).to.be.rejectedWith('Failed to auto-create categories');
+      // Should not throw — new behavior warns instead of throwing
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], category: 'bad-cat' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.called).to.be.true;
     });
 
-    it('throws when auto-creating topics fails', async () => {
+    it('warns (does not throw) when topic upsert fails with any error', async () => {
+      const warnStub = sandbox.stub(console, 'warn');
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -907,19 +1187,27 @@ describe('prompts-storage', () => {
             };
           }
           if (table === 'topics') {
-            return makeChain({ data: null, error: { message: 'constraint violation' } });
+            return {
+              select: () => makeChain({ data: [], error: null }),
+              upsert: () => ({
+                select: () => ({
+                  then: (resolve) => resolve({ data: null, error: { code: '42501', message: 'permission denied' } }),
+                  catch: () => {},
+                }),
+              }),
+            };
           }
           return makeChain({ data: [], error: null });
         },
       };
-      await expect(
-        upsertPrompts({
-          organizationId: ORG_ID,
-          brandUuid: BRAND_UUID,
-          prompts: [{ prompt: 'X', regions: [], topicId: 'bad-topic' }],
-          postgrestClient: client,
-        }),
-      ).to.be.rejectedWith('Failed to auto-create topics');
+      // Should not throw — new behavior warns instead of throwing
+      await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'X', regions: [], topic: 'bad-topic' }],
+        postgrestClient: client,
+      });
+      expect(warnStub.called).to.be.true;
     });
 
     it('handles existing prompts with null regions', async () => {
@@ -987,7 +1275,8 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(1);
     });
 
-    it('falls back to null when categoryId/topicId not found in maps', async () => {
+    it('falls back gracefully when upsert returns null data (no error)', async () => {
+      const warnStub = sandbox.stub(console, 'warn');
       const client = {
         from: (table) => {
           if (table === 'prompts') {
@@ -1004,7 +1293,18 @@ describe('prompts-storage', () => {
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
           }
-          // Return empty lookup maps so categoryMap/topicMap won't find the IDs
+          if (table === 'categories' || table === 'topics') {
+            return {
+              select: () => makeChain({ data: [], error: null }),
+              // Upsert returns null data (no error) — exercises the `data || []` fallback branch
+              upsert: () => ({
+                select: () => ({
+                  then: (resolve) => resolve({ data: null, error: null }),
+                  catch: () => {},
+                }),
+              }),
+            };
+          }
           return makeChain({ data: [], error: null });
         },
       };
@@ -1012,13 +1312,13 @@ describe('prompts-storage', () => {
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
         prompts: [{
-          prompt: 'Test', regions: ['us'], categoryId: 'nonexistent-cat', topicId: 'nonexistent-topic',
+          prompt: 'Test', regions: ['us'], category: 'Nonexistent Cat', topic: 'Nonexistent Topic',
         }],
         postgrestClient: client,
       });
+      // Prompt is still created even though category/topic UUIDs couldn't be resolved
       expect(result.created).to.equal(1);
-      expect(result.prompts[0].categoryId).to.equal('nonexistent-cat');
-      expect(result.prompts[0].topicId).to.equal('nonexistent-topic');
+      expect(warnStub.called).to.be.false;
     });
 
     it('handles prompts without regions, categoryId, topicId, name, or text', async () => {
@@ -1127,8 +1427,12 @@ describe('prompts-storage', () => {
       };
       const client = {
         from: (table) => {
-          if (table === 'categories') return makeChain({ data: { id: 'cat-uuid' }, error: null });
-          if (table === 'topics') return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          if (table === 'categories') {
+            return makeChain({ data: { id: 'cat-uuid' }, error: null });
+          }
+          if (table === 'topics') {
+            return makeChain({ data: { id: 'topic-uuid' }, error: null });
+          }
           return makeChain({ data: row, error: null });
         },
       };
@@ -1268,7 +1572,9 @@ describe('prompts-storage', () => {
     it('passes search param through to query', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1285,7 +1591,9 @@ describe('prompts-storage', () => {
     it('applies origin filter', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1301,7 +1609,9 @@ describe('prompts-storage', () => {
     it('applies region filter', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1317,7 +1627,9 @@ describe('prompts-storage', () => {
     it('applies sort and order params', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1334,7 +1646,9 @@ describe('prompts-storage', () => {
     it('uses default sort when invalid sort column', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1350,7 +1664,9 @@ describe('prompts-storage', () => {
     it('sorts by foreign table column (topic)', async () => {
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [sampleRow], error: null, count: 1 });
         },
       };
@@ -1368,7 +1684,9 @@ describe('prompts-storage', () => {
       const rowWithSource = { ...sampleRow, source: 'sheet' };
       const client = {
         from: (table) => {
-          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
           return makeChain({ data: [rowWithSource], error: null, count: 1 });
         },
       };
@@ -1507,7 +1825,9 @@ describe('prompts-storage', () => {
       const client = {
         from: () => {
           callCount += 1;
-          if (callCount === 1) return makeChain({ data: { id: 'row-id' }, error: null });
+          if (callCount === 1) {
+            return makeChain({ data: { id: 'row-id' }, error: null });
+          }
           return makeChain({ data: null, error: null });
         },
       };

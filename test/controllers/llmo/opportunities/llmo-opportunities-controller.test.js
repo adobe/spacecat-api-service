@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -38,6 +37,7 @@ function createMockOpportunity({
     getCreatedAt: () => '2026-01-01',
     getUpdatedAt: () => '2026-01-02',
     getUpdatedBy: () => 'system',
+    getLastAuditedAt: () => null,
   };
 }
 
