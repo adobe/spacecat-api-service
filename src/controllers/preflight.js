@@ -283,7 +283,7 @@ function PreflightController(ctx, log, env) {
         mode: step,
         scan_id: scanId,
         persist: true,
-        ...(isNonEmptyArray(audits) && { audits }),
+        ...(audits !== undefined && { audits }),
       }),
     });
 
@@ -399,14 +399,16 @@ function PreflightController(ctx, log, env) {
       let preflightAudits;
       try {
         const configuration = await dataAccess.Configuration.findLatest();
-        if (configuration) {
-          const enabledAudits = configuration.getEnabledAuditsForSite(site);
-          preflightAudits = enabledAudits
-            .filter((type) => type.endsWith('-preflight'))
-            .map((type) => type.replace(/-preflight$/, ''));
+        if (!configuration) {
+          return internalServerError('Configuration not available');
         }
+        const enabledAudits = configuration.getEnabledAuditsForSite(site);
+        preflightAudits = enabledAudits
+          .filter((type) => type.endsWith('-preflight'))
+          .map((type) => type.replace(/-preflight$/, ''));
       } catch (e) {
-        log.warn(`Failed to load Configuration for preflight audits, running all: ${e.message}`);
+        log.error(`Failed to load Configuration for preflight audits: ${e.message}`);
+        return internalServerError('Failed to load audit configuration');
       }
 
       const job = await dataAccess.AsyncJob.create({

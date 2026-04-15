@@ -1445,7 +1445,7 @@ describe('Preflight Controller', () => {
       expect(body.audits).to.deep.equal(['alt-text', 'headings', 'links']);
     });
 
-    it('omits audits field when no preflight handlers are enabled', async () => {
+    it('sends empty audits list when no preflight handlers are enabled', async () => {
       mockConfiguration.getEnabledAuditsForSite.returns([
         'lhs-mobile', 'cwv',
       ]);
@@ -1457,10 +1457,10 @@ describe('Preflight Controller', () => {
 
       const [, calledOptions] = fetchStub.secondCall.args;
       const body = JSON.parse(calledOptions.body);
-      expect(body.audits).to.be.undefined;
+      expect(body.audits).to.deep.equal([]);
     });
 
-    it('runs all audits when Configuration.findLatest fails', async () => {
+    it('returns 500 when Configuration.findLatest fails', async () => {
       mockDataAccess.Configuration.findLatest = sandbox.stub().rejects(new Error('DB error'));
 
       preflightController = PreflightController(
@@ -1476,14 +1476,12 @@ describe('Preflight Controller', () => {
       const response = await preflightController.createBetaPreflightJob({
         data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
       });
-      expect(response.status).to.equal(202);
-
-      const [, calledOptions] = fetchStub.secondCall.args;
-      const body = JSON.parse(calledOptions.body);
-      expect(body.audits).to.be.undefined;
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.message).to.equal('Failed to load audit configuration');
     });
 
-    it('runs all audits when Configuration.findLatest returns null', async () => {
+    it('returns 500 when Configuration.findLatest returns null', async () => {
       mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(null);
 
       preflightController = PreflightController(
@@ -1499,11 +1497,9 @@ describe('Preflight Controller', () => {
       const response = await preflightController.createBetaPreflightJob({
         data: { url: 'https://main--example-site.aem.page/test.html', step: 'identify' },
       });
-      expect(response.status).to.equal(202);
-
-      const [, calledOptions] = fetchStub.secondCall.args;
-      const body = JSON.parse(calledOptions.body);
-      expect(body.audits).to.be.undefined;
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.message).to.equal('Configuration not available');
     });
   });
 
