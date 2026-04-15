@@ -33,6 +33,15 @@ const ERR_NOT_FOUND = 'not found';
 
 const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
+// Allowlists mirror the CASE whitelists in the DB RPCs — unknown values are already
+// rejected server-side, but we validate here too for defence-in-depth.
+const VALID_SORT_COLUMNS_BY_URL = new Set([
+  'host', 'url_path', 'total_hits', 'unique_agents',
+  'success_rate', 'avg_ttfb_ms', 'category_name',
+]);
+const VALID_SORT_COLUMNS_BY_USER_AGENT = new Set([
+  'page_type', 'agent_type', 'unique_agents', 'total_hits',
+]);
 const DEFAULT_BY_URL_LIMIT = 50;
 const MAX_BY_URL_LIMIT = 500;
 
@@ -347,12 +356,13 @@ export function createAgenticTrafficByUserAgentHandler(getSiteAndValidateAccess)
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
         const rawSortBy = ctx.data?.sortBy || ctx.data?.sort_by || 'total_hits';
+        const sortBy = VALID_SORT_COLUMNS_BY_USER_AGENT.has(rawSortBy) ? rawSortBy : 'total_hits';
         const rawSortOrder = (ctx.data?.sortOrder || ctx.data?.sort_order || 'desc').toLowerCase();
         const sortOrder = VALID_SORT_ORDERS.has(rawSortOrder) ? rawSortOrder : 'desc';
 
         const rpcParams = {
           ...buildRpcParams(siteId, parsed),
-          p_sort_by: rawSortBy,
+          p_sort_by: sortBy,
           p_sort_order: sortOrder,
         };
         // by_user_agent does not accept p_user_agent — remove it
@@ -389,9 +399,11 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
         const rawSortBy = ctx.data?.sortBy || ctx.data?.sort_by || 'total_hits';
+        const sortBy = VALID_SORT_COLUMNS_BY_URL.has(rawSortBy) ? rawSortBy : 'total_hits';
         const rawSortOrder = (ctx.data?.sortOrder || ctx.data?.sort_order || 'desc').toLowerCase();
         const sortOrder = VALID_SORT_ORDERS.has(rawSortOrder) ? rawSortOrder : 'desc';
-        const rawLimit = ctx.data?.limit;
+        // Accept both "pageSize" (documented name) and legacy "limit" alias
+        const rawLimit = ctx.data?.pageSize || ctx.data?.page_size || ctx.data?.limit;
         const rawPageOffset = ctx.data?.pageOffset || ctx.data?.page_offset;
         const urlPathSearch = ctx.data?.urlPathSearch || ctx.data?.url_path_search || null;
         const parsedLimit = Number.parseInt(String(rawLimit), 10) || DEFAULT_BY_URL_LIMIT;
@@ -407,7 +419,7 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
           p_page_limit: limit,
           p_page_offset: pageOffset,
           p_url_path_search: urlPathSearch,
-          p_sort_by: rawSortBy,
+          p_sort_by: sortBy,
           p_sort_order: sortOrder,
         };
 

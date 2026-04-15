@@ -609,6 +609,16 @@ describe('llmo-agentic-traffic', () => {
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
     });
 
+    it('falls back to total_hits for an invalid sortBy value', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_by_user_agent: { data: [], error: null },
+      });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', sortBy: 'DROP TABLE' } });
+      const handler = createAgenticTrafficByUserAgentHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_sort_by).to.equal('total_hits');
+    });
+
     it('returns 500 when RPC returns an error', async () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: { data: null, error: { message: 'db error' } },
@@ -657,13 +667,21 @@ describe('llmo-agentic-traffic', () => {
       expect(body.rows[0].deployedAtEdge).to.equal(true);
     });
 
-    it('caps limit at 500', async () => {
+    it('caps limit at 500 via legacy "limit" param', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       const rpcCallArgs = client.rpc.firstCall.args[1];
       expect(rpcCallArgs.p_page_limit).to.equal(500);
+    });
+
+    it('accepts "pageSize" as the documented parameter name', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', pageSize: 25 } });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_page_limit).to.equal(25);
     });
 
     it('uses default limit of 50 when not specified', async () => {
@@ -680,6 +698,14 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
+    });
+
+    it('falls back to total_hits for an invalid sortBy value', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', sortBy: 'DROP TABLE' } });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_sort_by).to.equal('total_hits');
     });
 
     it('forwards pagination and path search params to the new RPC signature', async () => {
