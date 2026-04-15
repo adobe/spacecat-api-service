@@ -37,9 +37,13 @@ import {
  * @returns {{ model: string|null, error?: string }}
  */
 function resolveUrlInspectorPlatform(params) {
-  if (!shouldApplyFilter(params.model)) return { model: null };
+  if (!shouldApplyFilter(params.model)) {
+    return { model: null };
+  }
   const result = validateModel(params.model);
-  if (!result.valid) return { model: null, error: result.error };
+  if (!result.valid) {
+    return { model: null, error: result.error };
+  }
   return { model: result.model };
 }
 
@@ -73,7 +77,9 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
       }
 
       const { model, error: modelError } = resolveUrlInspectorPlatform(params);
-      if (modelError) return badRequest(modelError);
+      if (modelError) {
+        return badRequest(modelError);
+      }
 
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
@@ -146,7 +152,9 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       }
 
       const { model, error: modelError } = resolveUrlInspectorPlatform(params);
-      if (modelError) return badRequest(modelError);
+      if (modelError) {
+        return badRequest(modelError);
+      }
 
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const offset = pagination.page * pagination.pageSize;
@@ -218,7 +226,9 @@ export function createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess) {
       }
 
       const { model, error: modelError } = resolveUrlInspectorPlatform(params);
-      if (modelError) return badRequest(modelError);
+      if (modelError) {
+        return badRequest(modelError);
+      }
 
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const channel = q.channel || q.selectedChannel;
@@ -309,7 +319,9 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
       }
 
       const { model, error: modelError } = resolveUrlInspectorPlatform(params);
-      if (modelError) return badRequest(modelError);
+      if (modelError) {
+        return badRequest(modelError);
+      }
 
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const channel = q.channel || q.selectedChannel;
@@ -389,7 +401,9 @@ export function createUrlInspectorDomainUrlsHandler(
       }
 
       const { model, error: modelError } = resolveUrlInspectorPlatform(params);
-      if (modelError) return badRequest(modelError);
+      if (modelError) {
+        return badRequest(modelError);
+      }
 
       const channel = q.channel || q.selectedChannel;
       const offset = pagination.page * pagination.pageSize;
@@ -462,7 +476,9 @@ export function createUrlInspectorUrlPromptsHandler(
       }
 
       const { model, error: modelError } = resolveUrlInspectorPlatform(params);
-      if (modelError) return badRequest(modelError);
+      if (modelError) {
+        return badRequest(modelError);
+      }
 
       const { data, error } = await client.rpc('rpc_url_inspector_url_prompts', {
         p_site_id: params.siteId,

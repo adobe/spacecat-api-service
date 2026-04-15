@@ -29,7 +29,9 @@ const ORG_ID = '11111111-1111-1111-1111-111111111111';
 
 /** Parse response body whether it's a JSON string or already an object. */
 function parseBody(response) {
-  if (typeof response.body === 'string') return JSON.parse(response.body);
+  if (typeof response.body === 'string') {
+    return JSON.parse(response.body);
+  }
   return response.body;
 }
 const SITE_ID = '22222222-2222-2222-2222-222222222222';
