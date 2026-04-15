@@ -152,16 +152,17 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
               updatedBy: 'llmo-onboarding-mode-resolution',
               postgrestClient,
             });
+            log.warn(
+              `LLMO mode resolution: organization ${organizationId} has brandalf=true but also has `
+              + 'pre-cutoff sites while kill switch is active. Reverted brandalf flag to false. '
+              + 'This org has sites that require migration before it can use v2.',
+            );
           } catch (revertError) {
             log.error(
-              `Failed to revert brandalf flag for org ${organizationId}: ${revertError.message}`,
+              `Failed to revert brandalf flag for org ${organizationId}: ${revertError.message}. `
+              + 'Flag may still be true — manual intervention required.',
             );
           }
-          log.warn(
-            `LLMO mode resolution: organization ${organizationId} has brandalf=true but also has `
-            + 'pre-cutoff sites while kill switch is active. Reverted brandalf flag to false. '
-            + 'This org has sites that require migration before it can use v2.',
-          );
           return LLMO_ONBOARDING_MODE_V1;
         }
       } catch (error) {

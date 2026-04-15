@@ -321,7 +321,7 @@ describe('llmo-onboarding-mode', () => {
         });
         const mode = await resolveLlmoOnboardingMode('org-1', ctx);
         expect(mode).to.equal('v1');
-        expect(ctx.log.error).to.have.been.calledWithMatch(/Failed to revert brandalf flag/);
+        expect(ctx.log.error).to.have.been.calledWithMatch(/Failed to revert brandalf flag.*Flag may still be true/);
       });
 
       it('row 3: kill switch + no pre-cutoff + brandalf=true → v2', async () => {
