@@ -16,6 +16,7 @@ const AEM_CS_FASTLY_CNAME_PATTERNS = [
   'cdn.adobeaemcloud.com',
   'adobe-aem.map.fastly.net',
 ];
+// Same Fastly A records as edge-routing-utils (keep lists in sync).
 const AEM_CS_FASTLY_IPS = new Set([
   '151.101.195.10',
   '151.101.67.10',
@@ -26,16 +27,6 @@ const AEM_CS_FASTLY_IPS = new Set([
 // ENODATA = record type doesn't exist; ENOTFOUND = domain doesn't exist (NXDOMAIN).
 // Both are authoritative answers — safe to treat as "no records" and continue.
 const DNS_NO_RECORD_CODES = new Set(['ENODATA', 'ENOTFOUND']);
-
-/**
- * Checks whether a CNAME matches a known pattern using suffix matching.
- * Handles the trailing dot that DNS resolvers sometimes return.
- * e.g. "foo.cdn.adobeaemcloud.com." matches pattern "cdn.adobeaemcloud.com"
- */
-function cnameMatchesPattern(cname, pattern) {
-  const normalized = cname.endsWith('.') ? cname.slice(0, -1) : cname;
-  return normalized === pattern || normalized.endsWith(`.${pattern}`);
-}
 
 function catchDnsLookup(err) {
   if (DNS_NO_RECORD_CODES.has(err.code)) {
@@ -62,8 +53,8 @@ async function checkHost(host, log) {
     log?.info(`[cdn-detection] DNS lookup failed for ${host} (CNAME)`);
     return null;
   }
-  log?.info(`[cdn-detection] CNAMEs for ${host}: ${cnames.length ? cnames.join(', ') : '(none)'}`);
-  if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((p) => cnameMatchesPattern(c, p)))) {
+  log?.info(`[cdn-detection] Detected CNAMES for domain ${host}: ${cnames}`);
+  if (cnames.some((c) => AEM_CS_FASTLY_CNAME_PATTERNS.some((pattern) => c.includes(pattern)))) {
     return 'aem-cs-fastly';
   }
 
@@ -72,7 +63,7 @@ async function checkHost(host, log) {
     log?.info(`[cdn-detection] DNS lookup failed for ${host} (A record)`);
     return null;
   }
-  log?.info(`[cdn-detection] IPs for ${host}: ${ips.length ? ips.join(', ') : '(none)'}`);
+  log?.info(`[cdn-detection] Detected IPs for domain ${host}: ${ips}`);
   if (ips.some((ip) => AEM_CS_FASTLY_IPS.has(ip))) {
     return 'aem-cs-fastly';
   }

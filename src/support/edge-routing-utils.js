@@ -186,11 +186,9 @@ const AEM_CS_FASTLY_CNAME_PATTERNS = [
   'adobe-aem.map.fastly.net',
 ];
 const AEM_CS_FASTLY_IPS = new Set([
-  '146.75.123.10',
   '151.101.195.10',
   '151.101.67.10',
   '151.101.3.10',
-  '151.101.107.10',
   '151.101.131.10',
 ]);
 

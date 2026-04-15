@@ -11,9 +11,12 @@
  */
 
 /* eslint-env mocha */
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+
+use(sinonChai);
 
 function dnsError(code) {
   const err = new Error(code);
@@ -78,7 +81,12 @@ describe('cdn-detection', () => {
   });
 
   it('returns aem-cs-fastly for each of the known Fastly IPs', async () => {
-    const fastlyIPs = ['151.101.195.10', '151.101.67.10', '151.101.3.10', '151.101.131.10'];
+    const fastlyIPs = [
+      '151.101.195.10',
+      '151.101.67.10',
+      '151.101.3.10',
+      '151.101.131.10',
+    ];
 
     for (const ip of fastlyIPs) {
       dnsStubs.resolveCname.reset();
@@ -100,12 +108,12 @@ describe('cdn-detection', () => {
     expect(result).to.equal('aem-cs-fastly');
   });
 
-  it('rejects CNAME that contains pattern as substring but not as suffix', async () => {
+  it('matches CNAME with includes (same as edge-routing-utils)', async () => {
     dnsStubs.resolveCname.resolves(['evil.cdn.adobeaemcloud.com.attacker.com']);
     dnsStubs.resolve4.resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.equal('other');
+    expect(result).to.equal('aem-cs-fastly');
   });
 
   it('returns other when domain does not match Fastly CNAME or IPs', async () => {
@@ -229,8 +237,8 @@ describe('cdn-detection', () => {
       const result = await detectCdnForDomain('example.com', log);
       expect(result).to.equal('other');
       expect(log.info).to.have.been.calledWith('[cdn-detection] Detecting CDN for domain example.com');
-      expect(log.info).to.have.been.calledWith(sinon.match('CNAMEs for www.example.com'));
-      expect(log.info).to.have.been.calledWith(sinon.match('IPs for www.example.com'));
+      expect(log.info).to.have.been.calledWith(sinon.match('Detected CNAMES for domain www.example.com'));
+      expect(log.info).to.have.been.calledWith(sinon.match('Detected IPs for domain www.example.com'));
     });
 
     it('logs CNAME match when detection returns aem-cs-fastly', async () => {
@@ -238,7 +246,7 @@ describe('cdn-detection', () => {
 
       const result = await detectCdnForDomain('example.com', log);
       expect(result).to.equal('aem-cs-fastly');
-      expect(log.info).to.have.been.calledWith(sinon.match('CNAMEs for www.example.com'));
+      expect(log.info).to.have.been.calledWith(sinon.match('Detected CNAMES for domain www.example.com'));
     });
 
     it('logs DNS failure for CNAME and A record', async () => {
@@ -256,18 +264,18 @@ describe('cdn-detection', () => {
 
       const result = await detectCdnForDomain('example.com', log);
       expect(result).to.be.null;
-      expect(log.info).to.have.been.calledWith(sinon.match('CNAMEs for www.example.com'));
+      expect(log.info).to.have.been.calledWith(sinon.match('Detected CNAMES for domain www.example.com'));
       expect(log.info).to.have.been.calledWith(sinon.match('DNS lookup failed for www.example.com (A record)'));
     });
 
-    it('logs (none) when CNAMEs and IPs resolve to empty arrays', async () => {
+    it('logs empty CNAME and IP arrays like edge-routing-utils (template interpolation)', async () => {
       dnsStubs.resolveCname.resolves([]);
       dnsStubs.resolve4.resolves([]);
 
       const result = await detectCdnForDomain('example.com', log);
       expect(result).to.equal('other');
-      expect(log.info).to.have.been.calledWith('[cdn-detection] CNAMEs for www.example.com: (none)');
-      expect(log.info).to.have.been.calledWith('[cdn-detection] IPs for www.example.com: (none)');
+      expect(log.info).to.have.been.calledWith('[cdn-detection] Detected CNAMES for domain www.example.com: ');
+      expect(log.info).to.have.been.calledWith('[cdn-detection] Detected IPs for domain www.example.com: ');
     });
   });
 });
