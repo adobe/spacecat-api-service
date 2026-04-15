@@ -629,6 +629,7 @@ describe('llmo-agentic-traffic', () => {
           data: [{
             host: 'example.com',
             url_path: '/page',
+            total_count: 1,
             total_hits: 150,
             unique_agents: 3,
             top_agent: 'ChatGPT-User',
@@ -647,12 +648,13 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].host).to.equal('example.com');
-      expect(body[0].urlPath).to.equal('/page');
-      expect(body[0].topAgent).to.equal('ChatGPT-User');
-      expect(body[0].topAgentType).to.equal('Chatbots');
-      expect(body[0].responseCodes).to.deep.equal([200, 301]);
-      expect(body[0].deployedAtEdge).to.equal(true);
+      expect(body.totalCount).to.equal(1);
+      expect(body.rows[0].host).to.equal('example.com');
+      expect(body.rows[0].urlPath).to.equal('/page');
+      expect(body.rows[0].topAgent).to.equal('ChatGPT-User');
+      expect(body.rows[0].topAgentType).to.equal('Chatbots');
+      expect(body.rows[0].responseCodes).to.deep.equal([200, 301]);
+      expect(body.rows[0].deployedAtEdge).to.equal(true);
     });
 
     it('caps limit at 500', async () => {
@@ -742,13 +744,13 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].host).to.equal('');
-      expect(body[0].urlPath).to.equal('');
-      expect(body[0].topAgent).to.equal('');
-      expect(body[0].responseCodes).to.deep.equal([]);
-      expect(body[0].successRate).to.be.null;
-      expect(body[0].avgTtfbMs).to.be.null;
-      expect(body[0].avgCitabilityScore).to.be.null;
+      expect(body.rows[0].host).to.equal('');
+      expect(body.rows[0].urlPath).to.equal('');
+      expect(body.rows[0].topAgent).to.equal('');
+      expect(body.rows[0].responseCodes).to.deep.equal([]);
+      expect(body.rows[0].successRate).to.be.null;
+      expect(body.rows[0].avgTtfbMs).to.be.null;
+      expect(body.rows[0].avgCitabilityScore).to.be.null;
     });
 
     it('returns null for fields that are undefined in the response', async () => {
@@ -774,10 +776,10 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].successRate).to.be.null;
-      expect(body[0].avgTtfbMs).to.be.null;
-      expect(body[0].avgCitabilityScore).to.be.null;
-      expect(body[0].deployedAtEdge).to.equal(false);
+      expect(body.rows[0].successRate).to.be.null;
+      expect(body.rows[0].avgTtfbMs).to.be.null;
+      expect(body.rows[0].avgCitabilityScore).to.be.null;
+      expect(body.rows[0].deployedAtEdge).to.equal(false);
     });
 
     it('returns 500 when RPC returns an error', async () => {

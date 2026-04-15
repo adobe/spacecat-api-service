@@ -416,24 +416,31 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic by-url PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by URL');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
-          host: row.host || '',
-          urlPath: row.url_path || '',
-          totalHits: Number(row.total_hits ?? 0),
-          uniqueAgents: Number(row.unique_agents ?? 0),
-          topAgent: row.top_agent || '',
-          topAgentType: row.top_agent_type || '',
-          responseCodes: Array.isArray(row.response_codes) ? row.response_codes.map(Number) : [],
-          successRate: row.success_rate !== null && row.success_rate !== undefined
-            ? Number(row.success_rate) : null,
-          avgTtfbMs: row.avg_ttfb_ms !== null && row.avg_ttfb_ms !== undefined
-            ? Number(row.avg_ttfb_ms) : null,
-          categoryName: row.category_name || '',
-          avgCitabilityScore: row.avg_citability_score !== null
-            && row.avg_citability_score !== undefined
-            ? Number(row.avg_citability_score) : null,
-          deployedAtEdge: row.deployed_at_edge ?? false,
-        })));
+        const rows = data ?? [];
+        // total_count is returned in every row by the RPC; pick it from the first one
+        /* c8 ignore next */
+        const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
+        /* c8 ignore next */ return ok({
+          totalCount,
+          rows: rows.map((row) => ({
+            host: row.host || '',
+            urlPath: row.url_path || '',
+            totalHits: Number(row.total_hits ?? 0),
+            uniqueAgents: Number(row.unique_agents ?? 0),
+            topAgent: row.top_agent || '',
+            topAgentType: row.top_agent_type || '',
+            responseCodes: Array.isArray(row.response_codes) ? row.response_codes.map(Number) : [],
+            successRate: row.success_rate !== null && row.success_rate !== undefined
+              ? Number(row.success_rate) : null,
+            avgTtfbMs: row.avg_ttfb_ms !== null && row.avg_ttfb_ms !== undefined
+              ? Number(row.avg_ttfb_ms) : null,
+            categoryName: row.category_name || '',
+            avgCitabilityScore: row.avg_citability_score !== null
+              && row.avg_citability_score !== undefined
+              ? Number(row.avg_citability_score) : null,
+            deployedAtEdge: row.deployed_at_edge ?? false,
+          })),
+        });
       },
     );
   };
