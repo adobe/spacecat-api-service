@@ -55,15 +55,18 @@ export default function DrsBpPgAuditController() {
       return internalServerError('PostgREST client not available');
     }
 
-    const url = new URL(reqContext.url);
-    const siteId = url.searchParams.get('siteId');
-    const dateStart = url.searchParams.get('dateStart');
-    const dateEnd = url.searchParams.get('dateEnd');
-    const handlerName = url.searchParams.get('handlerName') || DEFAULT_HANDLER_NAME;
-    const limitParam = parseInt(url.searchParams.get('limit') || String(MAX_LIMIT), 10);
+    const { params = {} } = reqContext;
+    const {
+      siteId,
+      dateStart,
+      dateEnd,
+      handlerName: handlerNameParam,
+    } = params;
+    const handlerName = handlerNameParam || DEFAULT_HANDLER_NAME;
+    const limitParam = parseInt(params.limit || String(MAX_LIMIT), 10);
     const clampedLimit = Math.min(Number.isNaN(limitParam) ? MAX_LIMIT : limitParam, MAX_LIMIT);
     const limit = Math.max(1, clampedLimit);
-    const offsetParam = parseInt(url.searchParams.get('offset') || '0', 10);
+    const offsetParam = parseInt(params.offset || '0', 10);
     const offset = Number.isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
 
     if (!siteId) {
