@@ -1,3 +1,24 @@
+# [1.442.0](https://github.com/adobe/spacecat-api-service/compare/v1.441.0...v1.442.0) (2026-04-15)
+
+
+### Features
+
+* introduce prompt execution sources api ([#2217](https://github.com/adobe/spacecat-api-service/issues/2217)) ([acb5962](https://github.com/adobe/spacecat-api-service/commit/acb59624978a95d7a535b87ac79d28d7d8b6cb6d))
+
+# [1.441.0](https://github.com/adobe/spacecat-api-service/compare/v1.440.2...v1.441.0) (2026-04-15)
+
+
+### Features
+
+* **LLMO-4176:** add brandalf flag override and decision matrix to onboarding mode resolution ([#2171](https://github.com/adobe/spacecat-api-service/issues/2171)) ([977e4e9](https://github.com/adobe/spacecat-api-service/commit/977e4e976ce2abd0a247af60969eca0e22624d5c))
+
+## [1.440.2](https://github.com/adobe/spacecat-api-service/compare/v1.440.1...v1.440.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.13.4 ([#2218](https://github.com/adobe/spacecat-api-service/issues/2218)) ([6866a3e](https://github.com/adobe/spacecat-api-service/commit/6866a3e006f03e6e48fe300b4ae111ec29bd75e9))
+
 ## [1.440.1](https://github.com/adobe/spacecat-api-service/compare/v1.440.0...v1.440.1) (2026-04-15)
 
 

@@ -221,7 +221,7 @@ describe('Customer Config Mapper', () => {
 
       const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
       expect(result.customer.brands[0].urls).to.have.lengthOf(2);
-      expect(result.customer.brands[0].urls[0]).to.deep.equal({ value: 'https://example.com', type: 'url' });
+      expect(result.customer.brands[0].urls[0]).to.deep.equal({ value: 'https://example.com', type: 'base' });
     });
 
     it('handles category URLs without value', () => {
