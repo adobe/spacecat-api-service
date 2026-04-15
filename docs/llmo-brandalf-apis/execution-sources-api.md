@@ -6,6 +6,8 @@ Returns all `brand_presence_sources` rows for a single **brand presence executio
 
 ## API Paths
 
+OpenAPI: [`api.yaml`](../openapi/api.yaml) → `/org/{spaceCatId}/brands/all/.../sources` and `/org/{spaceCatId}/brands/{brandId}/.../sources` (see [`org-brand-presence-api.yaml`](../openapi/org-brand-presence-api.yaml)).
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources` | Sources for an execution (any brand in the org) |
@@ -84,7 +86,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/executio
 | 400 | PostgREST not configured (`DATA_SERVICE_PROVIDER` ≠ postgres) |
 | 400 | Invalid `executionId` (not a UUID) |
 | 400 | Missing required query parameter: `startDate`, `endDate`, or `platform` |
-| 400 | Organization not found / PostgREST error on execution or sources query |
+| 400 | Organization not found |
+| 500 | PostgREST error while loading execution or sources (details are logged server-side only) |
 | 403 | User does not belong to the organization |
 | 403 | `siteId` does not belong to the organization |
 | 404 | No execution matches `executionId` and filters (including brand scope) |

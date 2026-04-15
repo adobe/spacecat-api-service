@@ -1,0 +1,178 @@
+# Org-scoped brand presence (PostgREST / mysticat-data-service) — fragments for api.yaml path $refs
+
+org-brand-presence-execution-sources-all:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat organization ID (organization_id in mysticat)
+      schema:
+        type: string
+        format: uuid
+    - name: executionId
+      in: path
+      required: true
+      description: brand_presence_executions.id (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: startDate
+      in: query
+      required: true
+      description: Start of execution lookup window (YYYY-MM-DD). Alias start_date.
+      schema:
+        type: string
+        format: date
+    - name: endDate
+      in: query
+      required: true
+      description: End of execution lookup window (YYYY-MM-DD). Alias end_date.
+      schema:
+        type: string
+        format: date
+    - name: platform
+      in: query
+      required: true
+      description: |
+        LLM model key for the execution lookup. Alias model (same semantics).
+        Must match BrandPresenceLlmModel after server-side normalization.
+      schema:
+        $ref: './schemas.yaml#/BrandPresenceLlmModel'
+    - name: siteId
+      in: query
+      required: false
+      description: Optional site filter; must belong to the organization. Alias site_id.
+      schema:
+        type: string
+        format: uuid
+    - name: regionCode
+      in: query
+      required: false
+      description: Optional region filter. Aliases region, region_code.
+      schema:
+        type: string
+    - name: origin
+      in: query
+      required: false
+      description: Optional origin filter (case-insensitive partial match).
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+      - customer-config
+    summary: List sources for a brand presence execution (all brands)
+    description: |
+      Returns brand_presence_sources rows for one execution with resolved url and hostname
+      from source_urls. Requires explicit startDate, endDate, and platform so the
+      execution can be resolved within the partitioned table window.
+    operationId: getOrgBrandPresenceExecutionSourcesAll
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Execution and source rows
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandPresenceExecutionSourcesResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to the organization or site
+      '404':
+        description: Execution not found for the given filters
+      '500':
+        $ref: './responses.yaml#/500'
+
+org-brand-presence-execution-sources-by-brand:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat organization ID (organization_id in mysticat)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand UUID; execution must belong to this brand
+      schema:
+        type: string
+        format: uuid
+    - name: executionId
+      in: path
+      required: true
+      description: brand_presence_executions.id (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: startDate
+      in: query
+      required: true
+      description: Start of execution lookup window (YYYY-MM-DD). Alias start_date.
+      schema:
+        type: string
+        format: date
+    - name: endDate
+      in: query
+      required: true
+      description: End of execution lookup window (YYYY-MM-DD). Alias end_date.
+      schema:
+        type: string
+        format: date
+    - name: platform
+      in: query
+      required: true
+      description: |
+        LLM model key for the execution lookup. Alias model (same semantics).
+        Must match BrandPresenceLlmModel after server-side normalization.
+      schema:
+        $ref: './schemas.yaml#/BrandPresenceLlmModel'
+    - name: siteId
+      in: query
+      required: false
+      description: Optional site filter; must belong to the organization. Alias site_id.
+      schema:
+        type: string
+        format: uuid
+    - name: regionCode
+      in: query
+      required: false
+      description: Optional region filter. Aliases region, region_code.
+      schema:
+        type: string
+    - name: origin
+      in: query
+      required: false
+      description: Optional origin filter (case-insensitive partial match).
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+      - customer-config
+    summary: List sources for a brand presence execution (scoped brand)
+    description: |
+      Same as the all-brands variant, but the execution must match the path brandId.
+    operationId: getOrgBrandPresenceExecutionSourcesByBrand
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Execution and source rows
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandPresenceExecutionSourcesResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to the organization or site
+      '404':
+        description: Execution not found for the given filters
+      '500':
+        $ref: './responses.yaml#/500'

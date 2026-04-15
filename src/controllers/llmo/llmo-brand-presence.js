@@ -14,6 +14,7 @@ import {
   ok,
   badRequest,
   forbidden,
+  internalServerError,
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
@@ -2590,7 +2591,7 @@ export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
 
       if (execError) {
         ctx.log.error(`Brand presence execution-sources PostgREST error: ${execError.message}`);
-        return badRequest(execError.message);
+        return internalServerError('Internal server error');
       }
 
       const execRow = (execRows || [])[0];
@@ -2613,7 +2614,7 @@ export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
 
       if (sourceError) {
         ctx.log.error(`Brand presence execution-sources PostgREST error: ${sourceError.message}`);
-        return badRequest(sourceError.message);
+        return internalServerError('Internal server error');
       }
 
       const sources = (sourceRows || []).map(mapExecutionSourceRowToResponse);

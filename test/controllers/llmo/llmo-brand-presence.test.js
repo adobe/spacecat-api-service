@@ -7443,7 +7443,7 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(404);
     });
 
-    it('returns badRequest when execution query returns PostgREST error', async () => {
+    it('returns internalServerError when execution query returns PostgREST error', async () => {
       const client = createTableAwareMock({
         brand_presence_executions: { data: null, error: { message: 'exec failed' } },
         brand_presence_sources: { data: [], error: null },
@@ -7453,13 +7453,13 @@ describe('llmo-brand-presence', () => {
       const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       expect(mockContext.log.error).to.have.been.calledWith(
         'Brand presence execution-sources PostgREST error: exec failed',
       );
     });
 
-    it('returns badRequest when sources query returns PostgREST error', async () => {
+    it('returns internalServerError when sources query returns PostgREST error', async () => {
       const client = createTableAwareMock({
         brand_presence_executions: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: null, error: { message: 'sources failed' } },
@@ -7469,7 +7469,7 @@ describe('llmo-brand-presence', () => {
       const handler = createExecutionSourcesHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(500);
       expect(mockContext.log.error).to.have.been.calledWith(
         'Brand presence execution-sources PostgREST error: sources failed',
       );
