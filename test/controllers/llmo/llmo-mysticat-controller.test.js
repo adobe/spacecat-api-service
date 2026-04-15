@@ -99,6 +99,7 @@ describe('LlmoMysticatController', () => {
     const controller = LlmoMysticatController(mockContext);
 
     expect(controller.getFilterDimensions).to.be.a('function');
+    expect(controller.getExecutionSources).to.be.a('function');
     expect(controller.getAgenticTrafficGlobal).to.be.a('function');
     expect(controller.postAgenticTrafficGlobal).to.be.a('function');
   });

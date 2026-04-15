@@ -10,7 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok, badRequest, forbidden } from '@adobe/spacecat-shared-http-utils';
+import {
+  ok,
+  badRequest,
+  forbidden,
+  notFound,
+} from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -1899,6 +1904,14 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // eslint-disable-next-line max-len
 const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
+/** Detail columns plus org/site/model for execution-sources lookup */
+// eslint-disable-next-line max-len
+const EXECUTION_SOURCES_EXEC_SELECT = `${DETAIL_SELECT}, brand_id, site_id, model`;
+
+/** brand_presence_sources columns plus embedded URL for execution-sources API */
+// eslint-disable-next-line max-len
+const EXECUTION_SOURCES_SOURCE_SELECT = 'url_id, content_type, is_owned, source_urls(url, hostname)';
+
 /**
  * Derives the ISO week string from an execution_date using the shared toISOWeek helper.
  */
@@ -2096,6 +2109,90 @@ function buildDetailExecQuery(client, organizationId, params, defaults, filterBy
   }
 
   return q;
+}
+
+/**
+ * Builds a single-execution query for brand presence sources (same filters as topic/prompt detail).
+ * @param {Object} client - PostgREST client
+ * @param {string} organizationId - Organization UUID
+ * @param {string} executionId - Execution row id
+ * @param {Object} params - Parsed filter params
+ * @param {Object} defaults - Default date range
+ * @param {string|null} filterByBrandId - Brand UUID or null when brand is "all"
+ * @returns {Object} Chainable query ending in .limit(1)
+ */
+function buildSingleExecutionSourcesExecQuery(
+  client,
+  organizationId,
+  executionId,
+  params,
+  defaults,
+  filterByBrandId,
+) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = resolveModelFromRequest(params.model);
+
+  let q = client
+    .from('brand_presence_executions')
+    .select(EXECUTION_SOURCES_EXEC_SELECT)
+    .eq('organization_id', organizationId)
+    .eq('id', executionId)
+    .gte('execution_date', startDate)
+    .lte('execution_date', endDate)
+    .eq('model', model);
+
+  if (shouldApplyFilter(params.siteId)) {
+    q = q.eq('site_id', params.siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(params.regionCode)) {
+    q = q.eq('region_code', params.regionCode);
+  }
+  if (shouldApplyFilter(params.origin)) {
+    q = q.ilike('origin', params.origin);
+  }
+
+  return q;
+}
+
+/**
+ * Maps a brand_presence_sources row (with embedded source_urls) to the slim
+ * execution-sources API shape (url resolution only).
+ * @param {Object} row - PostgREST row
+ * @returns {{
+ *   urlId: string,
+ *   contentType: string,
+ *   isOwned: boolean,
+ *   url: string,
+ *   hostname: string,
+ * }}
+ */
+function mapExecutionSourceRowToResponse(row) {
+  const su = row.source_urls || {};
+  return {
+    urlId: row.url_id != null ? String(row.url_id) : '',
+    contentType: row.content_type ?? '',
+    isOwned: row.is_owned === true || row.is_owned === 'true',
+    url: su.url ?? '',
+    hostname: su.hostname ?? '',
+  };
+}
+
+/**
+ * Minimal execution summary for execution-sources responses.
+ * @param {Object} execRow - brand_presence_executions row
+ * @returns {Object}
+ */
+function mapExecutionSummaryForSources(execRow) {
+  return {
+    executionId: execRow.id != null ? String(execRow.id) : '',
+    brandId: execRow.brand_id != null ? String(execRow.brand_id) : '',
+    siteId: execRow.site_id != null ? String(execRow.site_id) : '',
+    model: execRow.model ?? '',
+  };
 }
 
 /**
@@ -2419,6 +2516,90 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
         },
         weeklyStats,
         executions,
+        sources,
+      });
+    },
+  );
+}
+
+/**
+ * Creates the getExecutionSources handler.
+ * Returns one source entry per `brand_presence_sources` row with
+ * `{ urlId, contentType, isOwned, url, hostname }` (`url` / `hostname` from `source_urls`).
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'execution-sources',
+    async (ctx, client) => {
+      const { spaceCatId, brandId, executionId } = ctx.params;
+      if (!hasText(executionId) || !isValidUUID(executionId)) {
+        return badRequest('Invalid execution id');
+      }
+
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const execQ = buildSingleExecutionSourcesExecQuery(
+        client,
+        organizationId,
+        executionId,
+        params,
+        defaults,
+        filterByBrandId,
+      );
+      const { data: execRows, error: execError } = await execQ.limit(1);
+
+      if (execError) {
+        ctx.log.error(`Brand presence execution-sources PostgREST error: ${execError.message}`);
+        return badRequest(execError.message);
+      }
+
+      const execRow = (execRows || [])[0];
+      if (!execRow) {
+        return notFound('Execution not found');
+      }
+
+      const execDate = execRow.execution_date;
+      if (!hasText(execDate)) {
+        return notFound('Execution not found');
+      }
+
+      const { data: sourceRows, error: sourceError } = await client
+        .from('brand_presence_sources')
+        .select(EXECUTION_SOURCES_SOURCE_SELECT)
+        .eq('organization_id', organizationId)
+        .eq('execution_id', executionId)
+        .eq('execution_date', execDate)
+        .limit(WEEKS_QUERY_LIMIT);
+
+      if (sourceError) {
+        ctx.log.error(`Brand presence execution-sources PostgREST error: ${sourceError.message}`);
+        return badRequest(sourceError.message);
+      }
+
+      const sources = (sourceRows || []).map(mapExecutionSourceRowToResponse);
+
+      return ok({
+        execution: {
+          ...mapExecutionSummaryForSources(execRow),
+          executionDate: execDate,
+        },
         sources,
       });
     },

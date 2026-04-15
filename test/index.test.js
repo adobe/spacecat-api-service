@@ -307,6 +307,20 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Brand Id is invalid. Please provide a valid UUID or "all".');
   });
 
+  it('handles executionId not correctly formatted for execution-sources', async () => {
+    context.pathInfo.suffix = '/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/all/brand-presence/executions/not-a-uuid/sources';
+
+    request = new Request(`${baseUrl}/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/all/brand-presence/executions/not-a-uuid/sources`, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
+  });
+
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
 
