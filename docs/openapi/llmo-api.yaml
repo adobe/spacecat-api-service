@@ -912,6 +912,12 @@ llmo-onboard:
                   format: uuid
                   description: The created or existing site ID
                   example: "987fcdeb-51a2-43d1-9f12-345678901234"
+                detectedCdn:
+                  type:
+                    - string
+                    - 'null'
+                  description: CDN provider detected via DNS during onboarding
+                  example: "aem-cs-fastly"
                 status:
                   type: string
                   enum: ["initiated", "in_progress", "completed", "failed"]
