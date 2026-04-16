@@ -1292,6 +1292,7 @@ function LlmoController(ctx) {
       }
 
       let cdnTypeNormalized = null;
+      const cdnRoutingStart = Date.now();
       if (hasText(cdnType)) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
           + ` cdnType: ${cdnType}, enabled: ${enabled}`);
@@ -1435,7 +1436,8 @@ function LlmoController(ctx) {
           await saveSiteConfig(site, currentConfig, log, 'marking edge optimize disabled');
           log.info(`[edge-optimize-routing] Marked edge optimize as disabled for site ${siteId}`);
         }
-        log.info(`[edge-optimize-routing] ${baseURL} CDN routing ${routingEnabled ? 'enabled' : 'disabled'} successfully`);
+        log.info(`[edge-optimize-routing] ${baseURL} CDN routing ${routingEnabled ? 'enabled' : 'disabled'} successfully`
+          + ` in ${Date.now() - cdnRoutingStart}ms`);
       }
 
       return ok({
