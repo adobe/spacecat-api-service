@@ -548,7 +548,7 @@ async function performAsoPlgOnboarding({
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
   if (alreadyOnboarded) {
     // If the existing onboarded site has no active PLG work (no open suggestions, and no
-    // completed audit with resolved suggestions), displace it: waitlist the old domain,
+    // completed audit with resolved suggestions), displace it: mark the old domain inactive,
     // revoke its ASO enrollment, and continue onboarding the new domain.
     // NOTE: this check-then-act is not atomic. Two concurrent requests for the same IMS org
     // could both pass this check and both proceed to onboard, temporarily violating the
@@ -562,7 +562,7 @@ async function performAsoPlgOnboarding({
 
     if (canDisplace) {
       log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
-      alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
+      alreadyOnboarded.setStatus(STATUSES.INACTIVE);
       alreadyOnboarded.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`);
       await alreadyOnboarded.save();
       await postPlgOnboardingNotification(alreadyOnboarded, context);

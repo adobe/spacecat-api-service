@@ -2078,8 +2078,8 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
 
-      // Old domain is waitlisted with displacement reason
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      // Old domain is inactive with displacement reason
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(onboardedRecord.setWaitlistReason)
         .to.have.been.calledWithMatch(/was replaced by.*no active suggestions.*new domain.*current org/);
       expect(onboardedRecord.save).to.have.been.called;
@@ -2259,7 +2259,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -2287,7 +2287,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -2344,7 +2344,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -2392,8 +2392,8 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
 
-      // Old domain is waitlisted
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      // Old domain is inactive
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(onboardedRecord.save).to.have.been.called;
 
       // No enrollment revocation attempted (no org ID)
@@ -2429,7 +2429,7 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
 
       // Displacement proceeds; enrollment for the non-ASO entitlement was never queried
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
         .not.to.have.been.calledWith(NON_ASO_ENT_ID);
 
@@ -2468,8 +2468,8 @@ describe('PlgOnboardingController', () => {
       // Displacement still completes — revocation failure is non-fatal
       expect(res.status).to.equal(200);
 
-      // Old domain is waitlisted
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+      // Old domain is inactive
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(onboardedRecord.save).to.have.been.called;
 
       // Revocation failure was logged as error
