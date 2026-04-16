@@ -394,7 +394,7 @@ const routeRequiredCapabilities = {
   // Note: DRS workers call this via admin x-api-key (not S2S JWT) — they run in a separate
   // AWS account and do not hold an S2S consumer registration. The capability here gates
   // future S2S JWT callers only; admin key access bypasses capability checks entirely.
-  'GET /monitoring/drs-bp-pg-audit': 'drsBpPgAudit:read',
+  'GET /monitoring/drs-bp-pg-audit': 'audit:read',
 
   // API Keys
   'POST /tools/api-keys': 'apiKey:write',
