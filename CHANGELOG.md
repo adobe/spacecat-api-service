@@ -1,3 +1,10 @@
+# [1.445.0](https://github.com/adobe/spacecat-api-service/compare/v1.444.0...v1.445.0) (2026-04-16)
+
+
+### Features
+
+* **monitoring:** add GET /monitoring/drs-bp-pg-audit proxy endpoint for brand presence monitoring ([#2216](https://github.com/adobe/spacecat-api-service/issues/2216)) ([603b591](https://github.com/adobe/spacecat-api-service/commit/603b591ea9b2acc061bf921ff6bae0b84e6ce559))
+
 # [1.444.0](https://github.com/adobe/spacecat-api-service/compare/v1.443.0...v1.444.0) (2026-04-16)
 
 
