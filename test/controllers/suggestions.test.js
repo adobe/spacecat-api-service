@@ -3833,6 +3833,30 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.include('not granted');
       expect(body.message).to.include(SUGGESTION_IDS[2]);
       expect(body.message).to.not.include(SUGGESTION_IDS[0]);
+      expect(body.message).to.not.include('trial simulation');
+    });
+
+    it('includes trial simulation hint in 403 message when x-view-as-trial header is present', async () => {
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0]],
+        notGrantedIds: [SUGGESTION_IDS[2]],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`],
+      });
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.include('not granted');
+      expect(body.message).to.include('trial simulation');
+      expect(body.message).to.include('View as Trial');
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
