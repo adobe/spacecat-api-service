@@ -40,7 +40,7 @@ const toListJSON = (config) => {
   if (isNonEmptyObject(json.llmo)) {
     result.llmo = {};
     const {
-      dataFolder, brand, tags, customerIntent,
+      dataFolder, brand, tags, customerIntent, detectedCdn,
     } = json.llmo;
     if (dataFolder) {
       result.llmo.dataFolder = dataFolder;
@@ -53,6 +53,9 @@ const toListJSON = (config) => {
     }
     if (customerIntent) {
       result.llmo.customerIntent = customerIntent;
+    }
+    if (detectedCdn) {
+      result.llmo.detectedCdn = detectedCdn;
     }
   }
   if (isNonEmptyObject(json.edgeOptimizeConfig)) {

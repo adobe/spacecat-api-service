@@ -939,6 +939,7 @@ function BrandsController(ctx, log, env) {
         topic: topicData,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       return createResponse(created, 201);

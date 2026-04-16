@@ -108,6 +108,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 
 ```json
 {
+  "topic": "PDF Editing",
+  "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "items": [
     {
       "topic": "PDF Editing",
@@ -131,6 +133,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
   "totalCount": 47
 }
 ```
+
+Root **`topic`** and **`topicId`** mirror the [Topic Detail API](topic-detail-api.md) conventions: same resolution from execution rows and the `:topicId` path (UUID path filters by `topic_id` but still returns a display label and stable id when the query returns rows). `topicId` is `null` when the path is a topic name and rows have no `topic_id`.
 
 ### Prompt Object Fields
 

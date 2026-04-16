@@ -9,7 +9,7 @@ Single entry point for all org-scoped Brand Presence HTTP APIs backed by mystica
 
 Parameters are typically supplied as **query string** fields (merged into request `data` by the API gateway). Aliases such as `start_date` / `startDate` are noted per endpoint.
 
-Deep-dive docs: [filter-dimensions](filter-dimensions-api.md), [weeks](brand-presence-weeks-api.md), [sentiment-overview](sentiment-overview-api.md), [market-tracking-trends](market-tracking-trends-api.md), [topics & prompts](topics-api.md), [search](search-api.md), [topic detail](topic-detail-api.md), [prompt detail](prompt-detail-api.md), [sentiment-movers](sentiment-movers-api.md), [share-of-voice](share-of-voice-api.md), [stats](brand-presence-stats-api.md).
+Deep-dive docs: [filter-dimensions](filter-dimensions-api.md), [weeks](brand-presence-weeks-api.md), [sentiment-overview](sentiment-overview-api.md), [market-tracking-trends](market-tracking-trends-api.md), [topics & prompts](topics-api.md), [search](search-api.md), [topic detail](topic-detail-api.md), [prompt detail](prompt-detail-api.md), [sentiment-movers](sentiment-movers-api.md), [share-of-voice](share-of-voice-api.md), [stats](brand-presence-stats-api.md), [execution sources](execution-sources-api.md).
 
 ---
 
@@ -31,6 +31,7 @@ Each **Query parameters** cell lists one parameter per line as `name : sample (o
 | 10 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/sentiment-movers` | Top/bottom prompts by sentiment change (RPC `rpc_sentiment_movers`). | <ul><li><code>type</code> : <code>top</code> or <code>bottom</code> (optional)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>google-ai-mode</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : category UUID (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>human</code> (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li></ul> | [§10](#10-sentiment-movers) | [sentiment-movers-api.md](sentiment-movers-api.md) |
 | 11 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/share-of-voice` | Per-topic share of voice, competitors, rankings (`rpc_share_of_voice`). | <ul><li><code>startDate</code> : <code>2025-09-27</code> (optional)</li><li><code>endDate</code> : <code>2025-09-30</code> (optional)</li><li><code>model</code> : <code>gemini</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : <code>0178a3f0-1234-7000-8000-000000000099</code> (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li><li><code>maxCompetitors</code> / <code>max_competitors</code> : <code>5</code> (optional)</li></ul> | [§11](#11-share-of-voice) | [share-of-voice-api.md](share-of-voice-api.md) |
 | 12 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/stats` | Org/brand execution totals and averages via `rpc_brand_presence_stats`; optional weekly slices. | <ul><li><code>startDate</code> : <code>2025-01-01</code> (optional)</li><li><code>endDate</code> : <code>2025-01-31</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>gemini</code> (optional)</li><li><code>showTrends</code> / <code>show_trends</code> : <code>true</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : category UUID (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li></ul> | [§12](#12-stats) | [brand-presence-stats-api.md](brand-presence-stats-api.md) |
+| 13 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/executions/:executionId/sources` | Source rows for one execution (<code>:executionId</code> = execution UUID), with resolved URLs from <code>source_urls</code>. | <ul><li><code>startDate</code> / <code>start_date</code> (required)</li><li><code>endDate</code> / <code>end_date</code> (required)</li><li><code>platform</code> / <code>model</code> (required)</li><li><code>siteId</code> / <code>site_id</code> (optional)</li><li><code>regionCode</code> / <code>region</code> / <code>region_code</code> (optional)</li><li><code>origin</code> (optional)</li></ul> | [§13](#13-execution-sources) | [execution-sources-api.md](execution-sources-api.md) |
 
 ---
 
@@ -361,6 +362,31 @@ Illustrative JSON; real data varies by org and filters.
   ]
 }
 ```
+
+### 13. Execution sources
+
+```json
+{
+  "execution": {
+    "executionId": "001b5813-283f-4563-9b94-3f32727f6051",
+    "executionDate": "2026-03-02",
+    "brandId": "019cb903-1184-7f92-8325-f9d1176af316",
+    "siteId": "c2473d89-e997-458d-a86d-b4096649c12b",
+    "model": "chatgpt-free"
+  },
+  "sources": [
+    {
+      "urlId": "019cba12-b404-7077-9aa1-2992346a1767",
+      "contentType": "earned",
+      "isOwned": false,
+      "url": "https://www.example.com/article",
+      "hostname": "www.example.com"
+    }
+  ]
+}
+```
+
+See [execution-sources-api.md](execution-sources-api.md) for errors and filters.
 
 ---
 
