@@ -178,12 +178,12 @@ function LlmoController(ctx) {
         sheetURL = `${llmoConfig.dataFolder}/${dataSource}.json`;
       }
 
+      const DEFAULT_LIMIT = 5000;
+
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
       const { limit, offset, sheet } = context.data;
-      if (limit) {
-        url.searchParams.set('limit', limit);
-      }
+      url.searchParams.set('limit', limit || DEFAULT_LIMIT);
       if (offset) {
         url.searchParams.set('offset', offset);
       }
@@ -231,7 +231,7 @@ function LlmoController(ctx) {
     // Start timing for the entire method
     const methodStartTime = Date.now();
 
-    const FIXED_LLMO_LIMIT = 1000000;
+    const DEFAULT_LIMIT = 5000;
 
     // Extract and validate request body structure
     const {
@@ -240,8 +240,8 @@ function LlmoController(ctx) {
       include = [],
       exclude = [],
       groupBy = [],
-      limit = FIXED_LLMO_LIMIT, // Default to 1M records to return all records
-      offset = 0, // Default to 0 to return the first 1M records
+      limit = DEFAULT_LIMIT,
+      offset = 0,
     } = context.data || {};
 
     // Validate request body structure
@@ -406,12 +406,12 @@ function LlmoController(ctx) {
       // Use 'llmo-global' folder
       const sheetURL = `llmo-global/${configName}.json`;
 
+      const GLOBAL_DEFAULT_LIMIT = 5000;
+
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
       const { limit, offset, sheet } = context.data;
-      if (limit) {
-        url.searchParams.set('limit', limit);
-      }
+      url.searchParams.set('limit', limit || GLOBAL_DEFAULT_LIMIT);
       if (offset) {
         url.searchParams.set('offset', offset);
       }
