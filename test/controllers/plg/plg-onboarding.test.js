@@ -3995,6 +3995,7 @@ describe('PlgOnboardingController', () => {
           data: { decision: 'BYPASSED', justification: 'Recorded for audit' },
           attributes: adminAuthAttributes,
           log: mockLog,
+          env: {},
         });
 
         expect(res.status).to.equal(200);
@@ -4033,6 +4034,7 @@ describe('PlgOnboardingController', () => {
           data: { decision: 'BYPASSED', justification: 'Offboarding' },
           attributes: adminAuthAttributes,
           log: mockLog,
+          env: {},
         });
 
         expect(res.status).to.equal(200);
@@ -4068,6 +4070,7 @@ describe('PlgOnboardingController', () => {
           data: { decision: 'BYPASSED', justification: 'Offboarding' },
           attributes: adminAuthAttributes,
           log: mockLog,
+          env: {},
         });
 
         expect(res.status).to.equal(200);
@@ -4089,6 +4092,7 @@ describe('PlgOnboardingController', () => {
           data: { decision: 'UPHELD', justification: 'Offboarding without site' },
           attributes: adminAuthAttributes,
           log: mockLog,
+          env: {},
         });
 
         expect(res.status).to.equal(200);
@@ -5675,6 +5679,7 @@ describe('PlgOnboardingController', () => {
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
             attributes: {},
+            env: {},
           });
           expect(res.status).to.equal(200);
           expect(mockOnboarding.setStatus).to.have.been.calledWith('INACTIVE');
@@ -5690,6 +5695,7 @@ describe('PlgOnboardingController', () => {
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
             attributes: {},
+            env: {},
           });
 
           expect(res.status).to.equal(200);

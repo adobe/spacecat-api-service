@@ -265,6 +265,7 @@ async function inactivateWaitlistedOnboardings(existingRecords, onboarding, cont
       justification: 'System action to start onboarding for new domain in the same IMS org.',
     }]);
     await record.save();
+    await postPlgOnboardingNotification(record, context);
   }));
 
   context.log.info(
@@ -1403,6 +1404,7 @@ function PlgOnboardingController(ctx) {
         await revokeAsoSiteEnrollments(onboarding, context);
         onboarding.setStatus(STATUSES.INACTIVE);
         await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log.error(
@@ -1659,6 +1661,9 @@ function PlgOnboardingController(ctx) {
 
     onboarding.setStatus(status);
     await onboarding.save();
+    if (status === STATUSES.INACTIVE) {
+      await postPlgOnboardingNotification(onboarding, context);
+    }
     return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
