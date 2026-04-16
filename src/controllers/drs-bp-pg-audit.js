@@ -12,10 +12,26 @@
 
 import { badRequest, internalServerError, ok } from '@adobe/spacecat-shared-http-utils';
 
+import { isValidDateInterval } from '../utils/date-utils.js';
+
 const MAX_LIMIT = 500;
+const MAX_DATE_RANGE_DAYS = 90;
 const DEFAULT_HANDLER_NAME = 'wrpc_import_brand_presence';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const HANDLER_RE = /^[a-z][a-z0-9_]{0,99}$/;
+
+/**
+ * Maps a projection_audit row from PostgREST to the API response shape.
+ * Decouples the API contract from the database schema.
+ */
+function toAuditDto(row) {
+  return {
+    correlationId: row.correlation_id,
+    siteId: row.scope_prefix,
+    outputCount: row.output_count,
+    projectedAt: row.projected_at,
+  };
+}
 
 /**
  * DRS Brand Presence PostgREST Audit Controller.
@@ -29,12 +45,19 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * admin key callers bypass capability checks via LegacyApiKeyHandler. This is intentional —
  * DRS runs in a separate AWS account and does not hold an S2S consumer registration.
  *
+ * TODO: When S2S JWT callers are onboarded, the `drsBpPgAudit:read` capability grants access
+ * to query any siteId (cross-tenant). Implement site-scoped authorization before the S2S
+ * transition so JWT callers can only access their own sites.
+ *
  * DB note: the PostgREST query filters on (scope_prefix, handler_name, projected_at, skipped).
  * A composite index on these columns is required for acceptable query performance on large tables.
  *
+ * @param {object} context - Application context with dataAccess, log, etc.
  * @returns {{ getProjectionAudit: Function }}
  */
-export default function DrsBpPgAuditController() {
+export default function DrsBpPgAuditController(context) {
+  const postgrestClient = context?.dataAccess?.services?.postgrestClient;
+
   /**
    * GET /monitoring/drs-bp-pg-audit
    *
@@ -46,11 +69,10 @@ export default function DrsBpPgAuditController() {
    *   limit       {number}  optional  - Page size (default + max: 500)
    *   offset      {number}  optional  - Row offset for pagination (default: 0)
    *
-   * @param {object} reqContext - Request context with params, url, dataAccess.
+   * @param {object} reqContext - Request context with params, url, log.
    * @returns {Response} JSON array of projection_audit rows.
    */
   const getProjectionAudit = async (reqContext) => {
-    const postgrestClient = reqContext.dataAccess?.services?.postgrestClient;
     if (!postgrestClient?.from) {
       return internalServerError('PostgREST client not available');
     }
@@ -75,40 +97,49 @@ export default function DrsBpPgAuditController() {
     if (!UUID_RE.test(siteId)) {
       return badRequest('siteId must be a valid UUID');
     }
-    if (!dateStart) {
-      return badRequest('dateStart is required');
+    if (!dateStart || !dateEnd) {
+      return badRequest('dateStart and dateEnd are required');
     }
-    if (!DATE_RE.test(dateStart)) {
-      return badRequest('dateStart must be a valid date in YYYY-MM-DD format');
+    if (!isValidDateInterval(dateStart, dateEnd)) {
+      return badRequest('Invalid date interval: dates must be valid YYYY-MM-DD, dateEnd must be after dateStart');
     }
-    if (!dateEnd) {
-      return badRequest('dateEnd is required');
+
+    const daysDiff = (new Date(dateEnd) - new Date(dateStart)) / (1000 * 60 * 60 * 24);
+    if (daysDiff > MAX_DATE_RANGE_DAYS) {
+      return badRequest(`Date range must not exceed ${MAX_DATE_RANGE_DAYS} days`);
     }
-    if (!DATE_RE.test(dateEnd)) {
-      return badRequest('dateEnd must be a valid date in YYYY-MM-DD format');
+
+    if (handlerNameParam && !HANDLER_RE.test(handlerNameParam)) {
+      return badRequest('Invalid handlerName');
     }
-    if (dateEnd <= dateStart) {
-      return badRequest('dateEnd must be after dateStart');
-    }
+
+    // Fetch limit + 1 to detect whether more rows exist without false positives
+    // on exact page boundaries.
+    const fetchCount = limit + 1;
 
     const { data, error } = await postgrestClient
       .from('projection_audit')
-      .select('correlation_id,scope_prefix,output_count,metadata,projected_at')
+      // metadata excluded: contains internal S3 paths (resultLocation) — safe for admin-key
+      // callers but should be reviewed before exposing to S2S JWT consumers.
+      .select('correlation_id,scope_prefix,output_count,projected_at')
       .eq('scope_prefix', siteId)
       .eq('handler_name', handlerName)
       .gte('projected_at', `${dateStart}T00:00:00Z`)
       .lt('projected_at', `${dateEnd}T00:00:00Z`)
       .eq('skipped', false)
       .order('projected_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .range(offset, offset + fetchCount - 1);
 
     if (error) {
       reqContext.log?.error('projection_audit query failed', { errorMessage: error.message });
       return internalServerError('projection_audit query failed');
     }
 
-    const rows = data ?? [];
-    return ok({ rows, hasMore: rows.length >= limit });
+    const fetched = data ?? [];
+    const hasMore = fetched.length > limit;
+    const rows = hasMore ? fetched.slice(0, limit) : fetched;
+
+    return ok({ rows: rows.map(toAuditDto), hasMore });
   };
 
   return { getProjectionAudit };

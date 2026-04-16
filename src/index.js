@@ -249,7 +249,7 @@ async function run(request, context) {
     const featureFlagsController = FeatureFlagsController(context);
     const autofixChecksController = AutofixChecksController(context);
     const pageRelationshipsController = PageRelationshipsController(context);
-    const drsBpPgAuditController = DrsBpPgAuditController();
+    const drsBpPgAuditController = DrsBpPgAuditController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,

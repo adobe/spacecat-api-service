@@ -84,5 +84,23 @@ export default function drsBpPgAuditTests(getHttpClient) {
       const res = await http.admin.get(`/monitoring/drs-bp-pg-audit?siteId=${VALID_SITE_ID}&dateStart=2026-04-14&dateEnd=2026-04-14`);
       expect(res.status).to.equal(400);
     });
+
+    it('admin: returns 400 for semantically impossible date', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.get(`/monitoring/drs-bp-pg-audit?siteId=${VALID_SITE_ID}&dateStart=2026-13-45&dateEnd=2026-04-15`);
+      expect(res.status).to.equal(400);
+    });
+
+    it('admin: returns 400 when date range exceeds 90 days', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.get(`/monitoring/drs-bp-pg-audit?siteId=${VALID_SITE_ID}&dateStart=2026-01-01&dateEnd=2026-06-01`);
+      expect(res.status).to.equal(400);
+    });
+
+    it('admin: returns 400 when handlerName has invalid characters', async () => {
+      const http = getHttpClient();
+      const res = await http.admin.get(`/monitoring/drs-bp-pg-audit?siteId=${VALID_SITE_ID}&dateStart=2026-04-14&dateEnd=2026-04-15&handlerName=DROP%20TABLE`);
+      expect(res.status).to.equal(400);
+    });
   });
 }

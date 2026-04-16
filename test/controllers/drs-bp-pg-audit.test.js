@@ -44,15 +44,28 @@ describe('DrsBpPgAuditController tests', () => {
       correlation_id: 'corr-1',
       scope_prefix: VALID_SITE_ID,
       output_count: 42,
-      metadata: {},
       projected_at: '2025-04-14T10:00:00Z',
     },
     {
       correlation_id: 'corr-2',
       scope_prefix: VALID_SITE_ID,
       output_count: 38,
-      metadata: {},
       projected_at: '2025-04-14T09:00:00Z',
+    },
+  ];
+
+  const expectedDtoRows = [
+    {
+      correlationId: 'corr-1',
+      siteId: VALID_SITE_ID,
+      outputCount: 42,
+      projectedAt: '2025-04-14T10:00:00Z',
+    },
+    {
+      correlationId: 'corr-2',
+      siteId: VALID_SITE_ID,
+      outputCount: 38,
+      projectedAt: '2025-04-14T09:00:00Z',
     },
   ];
 
@@ -79,23 +92,22 @@ describe('DrsBpPgAuditController tests', () => {
       },
     };
 
-    controller = DrsBpPgAuditController();
+    controller = DrsBpPgAuditController(context);
   });
 
   afterEach(() => sinon.restore());
 
   function makeCtx(params, overrides = {}) {
-    return { params, dataAccess: context.dataAccess, ...overrides };
+    return { params, ...overrides };
   }
 
   describe('getProjectionAudit', () => {
     // ── Validation: auth / client availability ──
 
     it('returns 500 when postgrestClient is not available', async () => {
-      const ctrl = DrsBpPgAuditController();
+      const ctrl = DrsBpPgAuditController({ dataAccess: { services: {} } });
       const resp = await ctrl.getProjectionAudit({
         params: VALID_PARAMS,
-        dataAccess: { services: {} },
       });
       expect(resp.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });
@@ -117,13 +129,13 @@ describe('DrsBpPgAuditController tests', () => {
       expect(resp.status).to.equal(STATUS_BAD_REQUEST);
     });
 
-    it('returns 400 when dateStart has invalid format', async () => {
-      const resp = await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, dateStart: '14-04-2025' }));
+    it('returns 400 when dateEnd is missing', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx({ siteId: VALID_SITE_ID, dateStart: '2025-04-14' }));
       expect(resp.status).to.equal(STATUS_BAD_REQUEST);
     });
 
-    it('returns 400 when dateEnd is missing', async () => {
-      const resp = await controller.getProjectionAudit(makeCtx({ siteId: VALID_SITE_ID, dateStart: '2025-04-14' }));
+    it('returns 400 when dateStart has invalid format', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, dateStart: '14-04-2025' }));
       expect(resp.status).to.equal(STATUS_BAD_REQUEST);
     });
 
@@ -142,24 +154,85 @@ describe('DrsBpPgAuditController tests', () => {
       expect(resp.status).to.equal(STATUS_BAD_REQUEST);
     });
 
+    it('returns 400 for semantically impossible dates like 2025-13-45', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, dateStart: '2025-13-45' }));
+      expect(resp.status).to.equal(STATUS_BAD_REQUEST);
+    });
+
+    it('returns 400 when date range exceeds 90 days', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx({
+        siteId: VALID_SITE_ID,
+        dateStart: '2025-01-01',
+        dateEnd: '2025-06-01',
+      }));
+      expect(resp.status).to.equal(STATUS_BAD_REQUEST);
+      const body = await resp.json();
+      expect(body.message).to.include('90 days');
+    });
+
+    it('returns 400 when handlerName has invalid characters', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx({
+        ...VALID_PARAMS,
+        handlerName: 'DROP TABLE;--',
+      }));
+      expect(resp.status).to.equal(STATUS_BAD_REQUEST);
+    });
+
+    it('returns 400 when handlerName starts with a digit', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx({
+        ...VALID_PARAMS,
+        handlerName: '1bad_handler',
+      }));
+      expect(resp.status).to.equal(STATUS_BAD_REQUEST);
+    });
+
+    it('returns 400 when handlerName contains uppercase letters', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx({
+        ...VALID_PARAMS,
+        handlerName: 'Bad_Handler',
+      }));
+      expect(resp.status).to.equal(STATUS_BAD_REQUEST);
+    });
+
     // ── Success: response shape ──
 
-    it('returns 200 with rows and hasMore=false on success', async () => {
+    it('returns 200 with DTO-mapped rows and hasMore=false on success', async () => {
       const resp = await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
       expect(resp.status).to.equal(STATUS_OK);
       const body = await resp.json();
-      expect(body.rows).to.deep.equal(sampleRows);
+      expect(body.rows).to.deep.equal(expectedDtoRows);
       expect(body.hasMore).to.equal(false);
     });
 
-    it('returns hasMore=true when a full page of rows is returned', async () => {
-      const fullPage = Array.from({ length: 500 }, (_, i) => ({ correlation_id: `c-${i}` }));
+    it('returns hasMore=true only when more rows exist beyond limit', async () => {
+      // Fetch limit+1 = 501 rows returned means more data exists
+      const fullPage = Array.from({ length: 501 }, (_, i) => ({
+        correlation_id: `c-${i}`,
+        scope_prefix: VALID_SITE_ID,
+        output_count: i,
+        projected_at: '2025-04-14T10:00:00Z',
+      }));
       queryChain.range.resolves({ data: fullPage, error: null });
       const resp = await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
       expect(resp.status).to.equal(STATUS_OK);
       const body = await resp.json();
       expect(body.rows).to.have.lengthOf(500);
       expect(body.hasMore).to.equal(true);
+    });
+
+    it('returns hasMore=false when exactly limit rows are returned', async () => {
+      const exactPage = Array.from({ length: 500 }, (_, i) => ({
+        correlation_id: `c-${i}`,
+        scope_prefix: VALID_SITE_ID,
+        output_count: i,
+        projected_at: '2025-04-14T10:00:00Z',
+      }));
+      queryChain.range.resolves({ data: exactPage, error: null });
+      const resp = await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
+      expect(resp.status).to.equal(STATUS_OK);
+      const body = await resp.json();
+      expect(body.rows).to.have.lengthOf(500);
+      expect(body.hasMore).to.equal(false);
     });
 
     it('returns empty rows array and hasMore=false when data is null', async () => {
@@ -169,6 +242,22 @@ describe('DrsBpPgAuditController tests', () => {
       const body = await resp.json();
       expect(body.rows).to.deep.equal([]);
       expect(body.hasMore).to.equal(false);
+    });
+
+    // ── DTO transformation ──
+
+    it('maps snake_case DB columns to camelCase in response', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
+      const body = await resp.json();
+      const row = body.rows[0];
+      expect(row).to.have.all.keys('correlationId', 'siteId', 'outputCount', 'projectedAt');
+      expect(row).to.not.have.any.keys('correlation_id', 'scope_prefix', 'output_count', 'projected_at');
+    });
+
+    it('does not include metadata column in response', async () => {
+      const resp = await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
+      const body = await resp.json();
+      expect(body.rows[0]).to.not.have.key('metadata');
     });
 
     // ── Query construction ──
@@ -190,36 +279,65 @@ describe('DrsBpPgAuditController tests', () => {
       expect(queryChain.lt).to.have.been.calledWith('projected_at', '2025-04-15T00:00:00Z');
     });
 
+    it('selects only the expected columns without metadata', async () => {
+      await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
+      expect(queryChain.select).to.have.been.calledWith('correlation_id,scope_prefix,output_count,projected_at');
+    });
+
+    it('filters on skipped=false', async () => {
+      await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
+      expect(queryChain.eq).to.have.been.calledWith('skipped', false);
+    });
+
+    it('orders by projected_at descending', async () => {
+      await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
+      expect(queryChain.order).to.have.been.calledWith('projected_at', { ascending: false });
+    });
+
     // ── Limit / offset ──
 
     it('clamps limit to 500 even if larger value is requested', async () => {
       await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, limit: '9999' }));
-      expect(queryChain.range).to.have.been.calledWith(0, 499);
+      // fetchCount = limit + 1 = 501, so range(0, 500)
+      expect(queryChain.range).to.have.been.calledWith(0, 500);
     });
 
     it('defaults limit to 500 when non-numeric limit is provided', async () => {
       await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, limit: 'notanumber' }));
-      expect(queryChain.range).to.have.been.calledWith(0, 499);
+      expect(queryChain.range).to.have.been.calledWith(0, 500);
     });
 
     it('floors limit to 1 when limit=0 is provided', async () => {
       await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, limit: '0' }));
-      expect(queryChain.range).to.have.been.calledWith(0, 0);
+      // fetchCount = 1 + 1 = 2, so range(0, 1)
+      expect(queryChain.range).to.have.been.calledWith(0, 1);
+    });
+
+    it('floors limit to 1 when negative limit is provided', async () => {
+      await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, limit: '-5' }));
+      // fetchCount = 1 + 1 = 2, so range(0, 1)
+      expect(queryChain.range).to.have.been.calledWith(0, 1);
     });
 
     it('passes offset to range', async () => {
       await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, offset: '500' }));
-      expect(queryChain.range).to.have.been.calledWith(500, 999);
+      // fetchCount = 500 + 1 = 501, so range(500, 1000)
+      expect(queryChain.range).to.have.been.calledWith(500, 1000);
     });
 
     it('defaults offset to 0 when not provided', async () => {
       await controller.getProjectionAudit(makeCtx(VALID_PARAMS));
-      expect(queryChain.range).to.have.been.calledWith(0, 499);
+      expect(queryChain.range).to.have.been.calledWith(0, 500);
     });
 
     it('defaults offset to 0 when non-numeric offset is provided', async () => {
       await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, offset: 'notanumber' }));
-      expect(queryChain.range).to.have.been.calledWith(0, 499);
+      expect(queryChain.range).to.have.been.calledWith(0, 500);
+    });
+
+    it('defaults offset to 0 when negative offset is provided', async () => {
+      await controller.getProjectionAudit(makeCtx({ ...VALID_PARAMS, offset: '-10' }));
+      expect(queryChain.range).to.have.been.calledWith(0, 500);
     });
 
     // ── Error handling ──

@@ -24,6 +24,11 @@ drs-bp-pg-audit:
       Results are paginated. Inspect `hasMore` in the response to determine whether additional
       pages exist. Increment `offset` by `limit` (default 500) and repeat while `hasMore` is
       `true`.
+
+      Validation constraints:
+      - Dates must be semantically valid (not just format-valid) — e.g. `2025-02-30` is rejected
+      - Date range must not exceed 90 days
+      - `handlerName` must match `^[a-z][a-z0-9_]{0,99}$`
     operationId: getDrsBpPgAudit
     security:
       - admin_key: [ ]
@@ -43,7 +48,7 @@ drs-bp-pg-audit:
           type: string
           format: date
         description: |
-          Start date (inclusive) in YYYY-MM-DD format.
+          Start date (inclusive) in YYYY-MM-DD format. Must be a valid calendar date.
           Rows with `projected_at >= dateStartT00:00:00Z` are returned.
         example: '2026-04-14'
       - in: query
@@ -54,6 +59,7 @@ drs-bp-pg-audit:
           format: date
         description: |
           End date (exclusive) in YYYY-MM-DD format. Must be after `dateStart`.
+          Date range (dateEnd − dateStart) must not exceed 90 days.
           Rows with `projected_at < dateEndT00:00:00Z` are returned.
         example: '2026-04-15'
       - in: query
@@ -61,8 +67,9 @@ drs-bp-pg-audit:
         required: false
         schema:
           type: string
+          pattern: '^[a-z][a-z0-9_]{0,99}$'
           default: wrpc_import_brand_presence
-        description: Filter by handler name.
+        description: Filter by handler name. Must be lowercase alphanumeric with underscores.
         example: wrpc_import_brand_presence
       - in: query
         name: limit
@@ -100,24 +107,21 @@ drs-bp-pg-audit:
                   items:
                     type: object
                     properties:
-                      correlation_id:
+                      correlationId:
                         type: string
-                      scope_prefix:
+                      siteId:
                         type: string
                         format: uuid
-                      output_count:
+                      outputCount:
                         type: integer
-                      metadata:
-                        type: object
-                        additionalProperties: true
-                      projected_at:
+                      projectedAt:
                         type: string
                         format: date-time
                 hasMore:
                   type: boolean
                   description: |
-                    `true` when the number of rows returned equals `limit`, indicating that
-                    a subsequent page may exist. `false` when the final page has been reached.
+                    `true` when more rows exist beyond the current page. `false` when the
+                    final page has been reached.
       '400':
         $ref: './responses.yaml#/400'
       '401':
