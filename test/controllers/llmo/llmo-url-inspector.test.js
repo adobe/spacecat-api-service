@@ -571,6 +571,42 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
+    it('handles rows with null fields but valid url', async () => {
+      const rpcData = [
+        {
+          total_non_owned_urls: null,
+          url: 'https://nullfields.com',
+          content_type: null,
+          prompt: null,
+          category: null,
+          region: null,
+          topics: null,
+          citation_count: null,
+          execution_count: null,
+        },
+      ];
+
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_trending_urls: { data: rpcData, error: null } },
+      });
+
+      const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.totalNonOwnedUrls).to.equal(0);
+      expect(body.urls).to.have.length(1);
+      expect(body.urls[0].contentType).to.equal('');
+      expect(body.urls[0].prompts[0].prompt).to.equal('');
+      expect(body.urls[0].prompts[0].category).to.equal('');
+      expect(body.urls[0].prompts[0].region).to.equal('');
+      expect(body.urls[0].prompts[0].topics).to.equal('');
+      expect(body.urls[0].prompts[0].citationCount).to.equal(0);
+      expect(body.urls[0].prompts[0].executionCount).to.equal(0);
+      expect(body.urls[0].totalCitations).to.equal(0);
+    });
+
     it('passes brandId, selectedChannel and filters out null URL rows', async () => {
       const rpcData = [
         {
