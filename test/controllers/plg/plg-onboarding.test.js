@@ -2262,95 +2262,6 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('inactivates waitlisted and IP allowlisting records for the same IMS org before onboarding a new domain', async () => {
-      const waitlistedRecord = createMockOnboarding({
-        id: 'waitlisted-onboarding-id',
-        domain: 'waitlisted-domain.com',
-        status: 'WAITLISTED',
-        reviews: [{
-          reason: 'Existing waitlist reason',
-          decision: 'UPHELD',
-          reviewedBy: 'reviewer@example.com',
-          reviewedAt: '2026-03-09T12:00:00.000Z',
-          justification: 'Existing review',
-        }],
-      });
-      const ipAllowlistingRecord = createMockOnboarding({
-        id: 'ip-allowlisting-onboarding-id',
-        domain: 'allowlisted-domain.com',
-        status: 'WAITING_FOR_IP_ALLOWLISTING',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, ipAllowlistingRecord]);
-
-      const context = buildContext(
-        { domain: TEST_DOMAIN },
-        {
-          authInfo: {
-            getProfile: sandbox.stub().returns({
-              tenants: [{ id: 'ABC123' }],
-              trial_email: 'trial-user@example.com',
-            }),
-          },
-        },
-      );
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-
-      expect(waitlistedRecord.setStatus).to.have.been.calledWith('INACTIVE');
-      expect(waitlistedRecord.save).to.have.been.calledOnce;
-      expect(waitlistedRecord.setReviews).to.have.been.calledOnce;
-      const waitlistedReviews = waitlistedRecord.setReviews.firstCall.args[0];
-      expect(waitlistedReviews).to.have.length(2);
-      expect(waitlistedReviews[1]).to.include({
-        reason: `Inactivated this domain to start onboarding ${TEST_DOMAIN} for the same IMS org.`,
-        decision: 'BYPASSED',
-        reviewedBy: 'system:auto-inactivate',
-        justification: 'System action to start onboarding for new domain in the same IMS org.',
-      });
-      expect(waitlistedReviews[1].reviewedAt).to.be.a('string');
-
-      expect(ipAllowlistingRecord.setStatus).to.have.been.calledWith('INACTIVE');
-      expect(ipAllowlistingRecord.save).to.have.been.calledOnce;
-      expect(ipAllowlistingRecord.setReviews).to.have.been.calledOnce;
-      expect(ipAllowlistingRecord.setReviews.firstCall.args[0][0]).to.include({
-        reason: `Inactivated this domain to start onboarding ${TEST_DOMAIN} for the same IMS org.`,
-        decision: 'BYPASSED',
-        reviewedBy: 'system:auto-inactivate',
-        justification: 'System action to start onboarding for new domain in the same IMS org.',
-      });
-
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('attributes automated waitlist inactivation to system:auto-inactivate (not profile email)', async () => {
-      const waitlistedRecord = createMockOnboarding({
-        id: 'waitlisted-onboarding-id',
-        imsOrgId: '',
-        domain: 'waitlisted-domain.com',
-        status: 'WAITLISTED',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord]);
-
-      const context = buildContext(
-        { domain: TEST_DOMAIN },
-        {
-          authInfo: {
-            getProfile: sandbox.stub().returns({
-              tenants: [{ id: 'ABC123' }],
-              email: 'preferred-user@example.com',
-            }),
-          },
-        },
-      );
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(waitlistedRecord.setReviews.firstCall.args[0][0]).to.include({
-        reviewedBy: 'system:auto-inactivate',
-      });
-    });
-
     it('displaces already-onboarded domain when it has no open PLG suggestions', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
@@ -2384,8 +2295,8 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
 
-      // Old domain is inactive with displacement reason
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      // Old domain is waitlisted with displacement reason
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(onboardedRecord.setWaitlistReason)
         .to.have.been.calledWithMatch(/was replaced by.*no active suggestions.*new domain.*current org/);
       expect(onboardedRecord.save).to.have.been.called;
@@ -2436,7 +2347,7 @@ describe('PlgOnboardingController', () => {
       expect(mockLog.warn).to.have.been.calledWithMatch(
         /Failed to disable summit-plg for displaced site old-site-uuid: lookup failed/,
       );
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -2605,7 +2516,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -2633,7 +2544,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -2690,7 +2601,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -2738,8 +2649,8 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
 
-      // Old domain is inactive
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      // Old domain is waitlisted
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(onboardedRecord.save).to.have.been.called;
 
       // No enrollment revocation attempted (no org ID)
@@ -2775,7 +2686,7 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
 
       // Displacement proceeds; enrollment for the non-ASO entitlement was never queried
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
         .not.to.have.been.calledWith(NON_ASO_ENT_ID);
 
@@ -2814,8 +2725,8 @@ describe('PlgOnboardingController', () => {
       // Displacement still completes — revocation failure is non-fatal
       expect(res.status).to.equal(200);
 
-      // Old domain is inactive
-      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      // Old domain is waitlisted
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(onboardedRecord.save).to.have.been.called;
 
       // Revocation failure was logged as error
