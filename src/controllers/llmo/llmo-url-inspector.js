@@ -433,6 +433,9 @@ export function createUrlInspectorDomainUrlsHandler(
         url: r.url || '',
         contentType: r.content_type || '',
         citations: Number(r.citations ?? 0),
+        promptsCited: Number(r.prompts_cited ?? 0),
+        categories: r.categories || '',
+        regions: r.regions || '',
       }));
 
       return ok({ urls, totalCount });
