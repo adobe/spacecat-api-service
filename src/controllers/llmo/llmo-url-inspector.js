@@ -61,7 +61,7 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
     getOrgAndValidateAccess,
     'url-inspector-stats',
     async (ctx, client) => {
-      const { spaceCatId, brandId } = ctx.params;
+      const { spaceCatId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
       const defaults = defaultDateRange();
 
@@ -83,8 +83,6 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
         return badRequest(modelError);
       }
 
-      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-
       const { data, error } = await client.rpc('rpc_url_inspector_stats', {
         p_site_id: params.siteId,
         p_start_date: params.startDate || defaults.startDate,
@@ -92,7 +90,6 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
         p_category: shouldApplyFilter(params.categoryId) ? params.categoryId : null,
         p_region: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
         p_platform: model,
-        p_brand_id: filterByBrandId,
       });
 
       if (error) {
@@ -299,7 +296,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
     getOrgAndValidateAccess,
     'url-inspector-cited-domains',
     async (ctx, client) => {
-      const { spaceCatId, brandId } = ctx.params;
+      const { spaceCatId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
       const pagination = parsePaginationParams(ctx, { defaultPageSize: 50 });
       const defaults = defaultDateRange();
@@ -323,7 +320,6 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         return badRequest(modelError);
       }
 
-      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const channel = q.channel || q.selectedChannel;
       const offset = pagination.page * pagination.pageSize;
 
@@ -335,7 +331,6 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         p_region: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
         p_channel: shouldApplyFilter(channel) ? channel : null,
         p_platform: model,
-        p_brand_id: filterByBrandId,
         p_limit: pagination.pageSize,
         p_offset: offset,
       });

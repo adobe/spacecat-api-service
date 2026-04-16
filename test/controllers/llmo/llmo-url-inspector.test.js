@@ -171,7 +171,7 @@ describe('URL Inspector Handlers', () => {
       expect(body.weeklyTrends).to.have.length(0);
     });
 
-    it('passes brandId filter when brandId is not "all"', async () => {
+    it('does not pass brandId to summary-table RPC', async () => {
       const { context, rpcStub } = createContext(
         { brandId: BRAND_ID },
         {},
@@ -182,7 +182,7 @@ describe('URL Inspector Handlers', () => {
       await handler(context);
 
       const rpcCall = rpcStub.firstCall;
-      expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
+      expect(rpcCall.args[1]).to.not.have.property('p_brand_id');
     });
 
     it('passes null for platform when not provided', async () => {
@@ -751,7 +751,7 @@ describe('URL Inspector Handlers', () => {
       expect(body.totalCount).to.equal(0);
 
       const rpcCall = rpcStub.firstCall;
-      expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
+      expect(rpcCall.args[1]).to.not.have.property('p_brand_id');
       expect(rpcCall.args[1].p_channel).to.equal('earned');
     });
   });
