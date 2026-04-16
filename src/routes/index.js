@@ -88,13 +88,13 @@ function isStaticRoute(routePattern) {
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} tokensController - The tokens controller.
+ * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
- * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -141,13 +141,13 @@ export default function getRouteHandlers(
   sentimentController,
   consumersController,
   tokensController,
+  plgOnboardingController,
   imsOrgAccessController,
   contactSalesLeadsController,
   featureFlagsController,
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
-  plgOnboardingController,
   drsBpPgAuditController,
 ) {
   const staticRoutes = {};
@@ -214,15 +214,6 @@ export default function getRouteHandlers(
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
     'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
-
-    // PLG (ASO) onboarding
-    'POST /plg/onboard': plgOnboardingController.onboard,
-    'GET /plg/sites': plgOnboardingController.getAllOnboardings,
-    'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
-    'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
-    'POST /plg/records': plgOnboardingController.createOnboarding,
-    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
-    'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
@@ -490,6 +481,15 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
     'GET /org/:spaceCatId/brands/all/opportunities': llmoOpportunitiesController.getBrandOpportunities,
     'GET /org/:spaceCatId/brands/:brandId/opportunities': llmoOpportunitiesController.getBrandOpportunities,
+
+    // PLG Routes
+    'POST /plg/onboard': plgOnboardingController.onboard,
+    'GET /plg/sites': plgOnboardingController.getAllOnboardings,
+    'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
+    'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
+    'POST /plg/records': plgOnboardingController.createOnboarding,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
