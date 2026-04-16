@@ -144,7 +144,6 @@ async function postPlgOnboardingNotification(onboarding, context) {
   }
 
   let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
-    + `• *ID:* \`${onboarding.getId()}\`\n`
     + `• *Domain:* \`${domain}\`\n`
     + `• *IMS Org:* \`${imsOrgId}\``;
 
@@ -629,6 +628,9 @@ async function performAsoPlgOnboarding({
       const existingOrgName = existingOrgForOnboarded?.getName?.()
         || alreadyOnboarded.getOrganizationId();
       log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+      if (alreadyOnboarded.getOrganizationId()) {
+        onboarding.setOrganizationId(alreadyOnboarded.getOrganizationId());
+      }
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
       await onboarding.save();
