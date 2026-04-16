@@ -308,6 +308,54 @@ describe('onboardSingleSite — paid profile guard', () => {
     });
   });
 
+  describe('restricted tier guard', () => {
+    const assertBlockedTier = async (tier) => {
+      const result = await onboardSingleSite(
+        SITE_URL,
+        IMS_ORG_ID,
+        {},
+        demoProfile,
+        300,
+        slackContext(),
+        makeContext(null),
+        { tier },
+        { profileName: 'demo' },
+      );
+      expect(result.status).to.equal('Failed');
+      expect(result.errors).to.match(/reserved and cannot be assigned/);
+      expect(sayStub).to.have.been.calledWith(sinon.match(/reserved and cannot be used here/));
+    };
+
+    it("blocks onboarding when tier is 'PLG'", async () => assertBlockedTier('PLG'));
+    it("blocks onboarding when tier is 'PRE_ONBOARD'", async () => assertBlockedTier('PRE_ONBOARD'));
+
+    it('allows onboarding when tier is FREE_TRIAL (not restricted)', async () => {
+      let result;
+      try {
+        result = await onboardSingleSite(
+          SITE_URL,
+          IMS_ORG_ID,
+          {},
+          demoProfile,
+          300,
+          slackContext(),
+          makeContext(null),
+          { tier: 'FREE_TRIAL' },
+          { profileName: 'demo' },
+        );
+      } catch {
+        // Downstream deps not fully mocked — expected. Tier guard is what we care about.
+      }
+      const blockedBySayRestricted = sayStub.getCalls().some(
+        (call) => /reserved and cannot be used here/.test(call.args[0]),
+      );
+      expect(blockedBySayRestricted).to.be.false;
+      if (result) {
+        expect(result.errors).to.not.match(/reserved/);
+      }
+    });
+  });
+
   describe('allowed scenarios', () => {
     // For tests where the guard should NOT block, the function proceeds into
     // createSiteAndOrganization which is not fully mocked — it may throw.
