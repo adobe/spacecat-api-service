@@ -77,13 +77,13 @@ export default function compressionTests(getHttpClient, getBaseUrl, getTokens) {
       expect(res.encoding).to.be.null;
     });
 
-    it('does not compress when no Accept-Encoding header', async () => {
-      const http = getHttpClient();
-      const result = await http.admin.get('/sites');
-      expect(result.status).to.equal(200);
-      expect(result.headers.get('content-encoding')).to.be.null;
-      expect(result.body).to.be.an('array');
-    });
+    // Note: the previous "does not compress when no Accept-Encoding header"
+    // test was removed. With Node 24's global fetch (undici) auto-adding
+    // Accept-Encoding, and /sites now exceeding the compression wrapper's
+    // 1024-byte minSize threshold (LLMO-4176 added two seed sites), the
+    // wrapper legitimately compresses the response. The "Accept-Encoding:
+    // identity" case above already exercises the same wrapper short-circuit
+    // (negotiateEncoding('identity') → identity → no compression).
 
     it('health check returns 200 with Accept-Encoding without errors', async () => {
       const res = await fetch(`${baseUrl}/_status_check/healthcheck.json`, {

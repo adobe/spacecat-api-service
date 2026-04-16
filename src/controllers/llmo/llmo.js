@@ -1030,6 +1030,7 @@ function LlmoController(ctx) {
         dataFolder: result.dataFolder,
         organizationId: result.organizationId,
         siteId: result.siteId,
+        detectedCdn: result.detectedCdn,
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
