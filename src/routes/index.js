@@ -94,6 +94,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -145,6 +146,7 @@ export default function getRouteHandlers(
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  plgOnboardingController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -544,6 +546,11 @@ export default function getRouteHandlers(
 
     // Autofix checks (permission/capability validation before autofix deploy)
     'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
+
+    // PLG onboarding admin records management
+    'POST /plg/records': plgOnboardingController.createOnboarding,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
   };
 
   // Initialization of static and dynamic routes

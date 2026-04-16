@@ -1635,6 +1635,32 @@ describe('PlgOnboardingController', () => {
         sinon.match(/Failed to look up org name for onboarding notification/),
       );
     });
+
+    it('posts notification without org name when org has no name', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ONBOARDED',
+        organizationId: TEST_ORG_ID,
+        siteId: TEST_SITE_ID,
+      });
+
+      const ctx = buildSlackContext(onboarding);
+      ctx.dataAccess = {
+        ...ctx.dataAccess,
+        Organization: {
+          ...ctx.dataAccess.Organization,
+          findById: sandbox.stub().resolves({ getName: () => null }),
+        },
+      };
+
+      await SlackController({ log: mockLog }).onboard(ctx);
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Onboarded');
+      expect(message).to.not.include('Org Name');
+      expect(message).to.include(TEST_ORG_ID);
+      expect(message).to.include(TEST_SITE_ID);
+    });
   });
 
   // --- RUM check (informational, non-blocking) ---

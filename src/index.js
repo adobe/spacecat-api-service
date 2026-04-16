@@ -96,6 +96,7 @@ import AutofixChecksController from './controllers/autofix-checks.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
+import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -231,6 +232,7 @@ async function run(request, context) {
     const featureFlagsController = FeatureFlagsController(context);
     const autofixChecksController = AutofixChecksController(context);
     const pageRelationshipsController = PageRelationshipsController(context);
+    const plgOnboardingController = PlgOnboardingController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -281,6 +283,7 @@ async function run(request, context) {
       pageRelationshipsController,
       ephemeralRunController,
       autofixChecksController,
+      plgOnboardingController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -300,6 +303,9 @@ async function run(request, context) {
       }
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
+      }
+      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;
