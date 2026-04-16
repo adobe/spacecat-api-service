@@ -22,9 +22,6 @@ const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
 const MINIO_PORT = process.env.IT_MINIO_PORT || '9100';
 const MINIO_HEALTH_URL = `http://localhost:${MINIO_PORT}/minio/health/live`;
-// Set IT_SKIP_DOCKER=true to skip docker-compose lifecycle (e.g. when using
-// the local mysticat-data-service docker stack).
-const SKIP_DOCKER = process.env.IT_SKIP_DOCKER === 'true';
 
 /**
  * Polls the PostgREST admin endpoint until it responds.
@@ -95,22 +92,18 @@ async function ensureMinIoBucket() {
  * @returns {Promise<string>} The PostgREST base URL
  */
 export async function startPostgres() {
-  if (!SKIP_DOCKER) {
-    execSync(
-      `docker compose -f "${COMPOSE_FILE}" up -d`,
-      { stdio: 'inherit', timeout: 120_000 },
-    );
-  }
+  execSync(
+    `docker compose -f "${COMPOSE_FILE}" up -d`,
+    { stdio: 'inherit', timeout: 120_000 },
+  );
 
   // Wait for PostgREST and MinIO to become ready in parallel
   await Promise.all([
     waitForPostgREST(),
-    ...(SKIP_DOCKER ? [] : [waitForMinio()]),
+    waitForMinio(),
   ]);
 
-  if (!SKIP_DOCKER) {
-    await ensureMinIoBucket();
-  }
+  await ensureMinIoBucket();
 
   return POSTGREST_URL;
 }
@@ -119,7 +112,6 @@ export async function startPostgres() {
  * Tears down docker compose services and removes volumes.
  */
 export async function stopPostgres() {
-  if (SKIP_DOCKER) { return; }
   try {
     execSync(
       `docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans`,

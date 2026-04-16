@@ -38,8 +38,8 @@ import { projectionAudits } from './seed-data/projection-audits.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
-const POSTGRES_CONTAINER = process.env.IT_POSTGRES_CONTAINER || 'spacecat-it-db';
-const POSTGRES_DB = process.env.IT_POSTGRES_DB || 'mysticat';
+const POSTGRES_CONTAINER = 'spacecat-it-db';
+const POSTGRES_DB = 'mysticat';
 
 /**
  * Inserts rows into a PostgREST table one at a time.
