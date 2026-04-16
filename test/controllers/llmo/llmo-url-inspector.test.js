@@ -26,14 +26,6 @@ import {
 use(sinonChai);
 
 const ORG_ID = '11111111-1111-1111-1111-111111111111';
-
-/** Parse response body whether it's a JSON string or already an object. */
-function parseBody(response) {
-  if (typeof response.body === 'string') {
-    return JSON.parse(response.body);
-  }
-  return response.body;
-}
 const SITE_ID = '22222222-2222-2222-2222-222222222222';
 const BRAND_ID = '33333333-3333-3333-3333-333333333333';
 
@@ -119,7 +111,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.stats.totalPromptsCited).to.equal(10);
@@ -170,7 +162,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.stats.totalPromptsCited).to.equal(0);
@@ -203,6 +195,66 @@ describe('URL Inspector Handlers', () => {
 
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_platform).to.equal(null);
+    });
+
+    it('passes valid model to RPC when platform is provided', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { platform: 'perplexity' },
+        { rpcResults: { rpc_url_inspector_stats: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_platform).to.equal('perplexity');
+    });
+
+    it('passes category and region filters to RPC', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        {
+          categoryId: 'cat-1', regionCode: 'US', startDate: '2026-01-01', endDate: '2026-02-01',
+        },
+        { rpcResults: { rpc_url_inspector_stats: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_category).to.equal('cat-1');
+      expect(rpcCall.args[1].p_region).to.equal('US');
+      expect(rpcCall.args[1].p_start_date).to.equal('2026-01-01');
+      expect(rpcCall.args[1].p_end_date).to.equal('2026-02-01');
+    });
+
+    it('handles weekly rows with null fields', async () => {
+      const rpcData = [
+        {
+          week: '2026-W10',
+          total_prompts_cited: null,
+          total_prompts: null,
+          unique_urls: null,
+          total_citations: null,
+        },
+      ];
+
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_stats: { data: rpcData, error: null } },
+      });
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(body.stats.totalPromptsCited).to.equal(0);
+      expect(body.weeklyTrends).to.have.length(1);
+      expect(body.weeklyTrends[0].totalPromptsCited).to.equal(0);
+      expect(body.weeklyTrends[0].totalPrompts).to.equal(0);
+      expect(body.weeklyTrends[0].uniqueUrls).to.equal(0);
+      expect(body.weeklyTrends[0].totalCitations).to.equal(0);
     });
   });
 
@@ -237,7 +289,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.urls).to.have.length(2);
@@ -254,7 +306,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.urls).to.have.length(0);
@@ -274,6 +326,84 @@ describe('URL Inspector Handlers', () => {
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_limit).to.equal(25);
       expect(rpcCall.args[1].p_offset).to.equal(50); // page 2 * pageSize 25
+    });
+
+    it('returns badRequest when siteId is missing', async () => {
+      const { context } = createContext({}, { siteId: undefined });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns forbidden when site does not belong to org', async () => {
+      const { context, limitStub } = createContext();
+      limitStub.resolves({ data: [], error: null });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns badRequest for invalid model', async () => {
+      const { context } = createContext({}, { platform: 'bad-model' });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest on RPC error', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: {
+          rpc_url_inspector_owned_urls: { data: null, error: { message: 'RPC failed' } },
+        },
+      });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('passes filters and handles null row fields', async () => {
+      const rpcData = [{
+        url: 'https://example.com/page1',
+        citations: null,
+        prompts_cited: null,
+        products: null,
+        regions: null,
+        weekly_citations: null,
+        weekly_prompts_cited: null,
+        total_count: null,
+      }];
+
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_ID },
+        { categoryId: 'cat-1', regionCode: 'US' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: rpcData, error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(0);
+      expect(body.urls[0].promptsCited).to.equal(0);
+      expect(body.urls[0].products).to.deep.equal([]);
+      expect(body.urls[0].regions).to.deep.equal([]);
+      expect(body.urls[0].weeklyCitations).to.deep.equal([]);
+      expect(body.urls[0].weeklyPromptsCited).to.deep.equal([]);
+      expect(body.totalCount).to.equal(0);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
+      expect(rpcCall.args[1].p_category).to.equal('cat-1');
+      expect(rpcCall.args[1].p_region).to.equal('US');
     });
   });
 
@@ -321,7 +451,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.totalNonOwnedUrls).to.equal(500);
@@ -363,7 +493,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(body.urls).to.have.length(1);
       expect(body.urls[0].prompts).to.have.length(1);
@@ -377,7 +507,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.urls).to.have.length(0);
@@ -396,6 +526,82 @@ describe('URL Inspector Handlers', () => {
 
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_channel).to.equal('earned');
+    });
+
+    it('returns badRequest when siteId is missing', async () => {
+      const { context } = createContext({}, { siteId: undefined });
+
+      const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns forbidden when site does not belong to org', async () => {
+      const { context, limitStub } = createContext();
+      limitStub.resolves({ data: [], error: null });
+
+      const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns badRequest for invalid model', async () => {
+      const { context } = createContext({}, { platform: 'bad-model' });
+
+      const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest on RPC error', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: {
+          rpc_url_inspector_trending_urls: { data: null, error: { message: 'RPC failed' } },
+        },
+      });
+
+      const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('passes brandId, selectedChannel and handles null row fields', async () => {
+      const rpcData = [{
+        total_non_owned_urls: null,
+        url: null,
+        content_type: null,
+        prompt: null,
+        category: null,
+        region: null,
+        topics: null,
+        citation_count: null,
+        execution_count: null,
+      }];
+
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_ID },
+        { selectedChannel: 'social', categoryId: 'cat-1', regionCode: 'DE' },
+        { rpcResults: { rpc_url_inspector_trending_urls: { data: rpcData, error: null } } },
+      );
+
+      const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.totalNonOwnedUrls).to.equal(0);
+      expect(body.urls[0].prompts[0].prompt).to.equal('');
+      expect(body.urls[0].prompts[0].citationCount).to.equal(0);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
+      expect(rpcCall.args[1].p_channel).to.equal('social');
+      expect(rpcCall.args[1].p_category).to.equal('cat-1');
+      expect(rpcCall.args[1].p_region).to.equal('DE');
     });
   });
 
@@ -428,7 +634,7 @@ describe('URL Inspector Handlers', () => {
 
       const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.domains).to.have.length(2);
@@ -463,6 +669,72 @@ describe('URL Inspector Handlers', () => {
 
       const response = await handler(context);
       expect(response.status).to.equal(400);
+    });
+
+    it('returns forbidden when site does not belong to org', async () => {
+      const { context, limitStub } = createContext();
+      limitStub.resolves({ data: [], error: null });
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns badRequest for invalid model', async () => {
+      const { context } = createContext({}, { platform: 'bad-model' });
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest on RPC error', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: {
+          rpc_url_inspector_cited_domains: { data: null, error: { message: 'RPC failed' } },
+        },
+      });
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('passes brandId, channel filters and handles null row fields', async () => {
+      const rpcData = [{
+        domain: null,
+        total_citations: null,
+        total_urls: null,
+        prompts_cited: null,
+        content_type: null,
+        categories: null,
+        regions: null,
+        total_count: null,
+      }];
+
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_ID },
+        { channel: 'earned', categoryId: 'cat-1', regionCode: 'US' },
+        { rpcResults: { rpc_url_inspector_cited_domains: { data: rpcData, error: null } } },
+      );
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.domains[0].domain).to.equal('');
+      expect(body.domains[0].totalCitations).to.equal(0);
+      expect(body.domains[0].totalUrls).to.equal(0);
+      expect(body.domains[0].contentType).to.equal('');
+      expect(body.totalCount).to.equal(0);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
+      expect(rpcCall.args[1].p_channel).to.equal('earned');
     });
   });
 
@@ -500,7 +772,7 @@ describe('URL Inspector Handlers', () => {
         getOrgAndValidateAccess(),
       );
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.urls).to.have.length(2);
@@ -570,6 +842,57 @@ describe('URL Inspector Handlers', () => {
 
       expect(response.status).to.equal(400);
     });
+
+    it('returns badRequest for invalid model', async () => {
+      const { context } = createContext(
+        {},
+        { hostname: 'example.com', platform: 'bad-model' },
+      );
+
+      const handler = createUrlInspectorDomainUrlsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('uses domain alias and selectedChannel, handles null row fields', async () => {
+      const rpcData = [{
+        url_id: null,
+        url: null,
+        content_type: null,
+        citations: null,
+        total_count: null,
+      }];
+
+      const { context, rpcStub } = createContext(
+        {},
+        { domain: 'example.com', selectedChannel: 'social' },
+        {
+          rpcResults: {
+            rpc_url_inspector_domain_urls: { data: rpcData, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorDomainUrlsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].urlId).to.equal('');
+      expect(body.urls[0].url).to.equal('');
+      expect(body.urls[0].contentType).to.equal('');
+      expect(body.urls[0].citations).to.equal(0);
+      expect(body.totalCount).to.equal(0);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_hostname).to.equal('example.com');
+      expect(rpcCall.args[1].p_channel).to.equal('social');
+    });
   });
 
   describe('createUrlInspectorUrlPromptsHandler', () => {
@@ -609,7 +932,7 @@ describe('URL Inspector Handlers', () => {
         getOrgAndValidateAccess(),
       );
       const response = await handler(context);
-      const body = parseBody(response);
+      const body = await response.json();
 
       expect(response.status).to.equal(200);
       expect(body.prompts).to.have.length(2);
@@ -639,6 +962,188 @@ describe('URL Inspector Handlers', () => {
       const response = await handler(context);
 
       expect(response.status).to.equal(403);
+    });
+
+    it('returns badRequest when siteId is missing', async () => {
+      const urlId = '44444444-4444-4444-4444-444444444444';
+      const { context } = createContext({}, { siteId: undefined, urlId });
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest for invalid model', async () => {
+      const urlId = '44444444-4444-4444-4444-444444444444';
+      const { context } = createContext({}, { urlId, platform: 'bad-model' });
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest on RPC error', async () => {
+      const urlId = '44444444-4444-4444-4444-444444444444';
+      const { context } = createContext(
+        {},
+        { urlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: null,
+              error: { message: 'RPC failed' },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('uses url_id alias and handles null row fields', async () => {
+      const urlId = '44444444-4444-4444-4444-444444444444';
+      const rpcData = [{
+        prompt: null,
+        category: null,
+        region: null,
+        topics: null,
+        citations: null,
+      }];
+
+      const { context, rpcStub } = createContext(
+        {},
+        { url_id: urlId, startDate: '2026-01-01', endDate: '2026-02-01' },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: { data: rpcData, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts[0].prompt).to.equal('');
+      expect(body.prompts[0].category).to.equal('');
+      expect(body.prompts[0].region).to.equal('');
+      expect(body.prompts[0].topics).to.equal('');
+      expect(body.prompts[0].citations).to.equal(0);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_url_id).to.equal(urlId);
+      expect(rpcCall.args[1].p_start_date).to.equal('2026-01-01');
+    });
+  });
+
+  describe('null data from RPC', () => {
+    it('stats handles null data from RPC gracefully', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_stats: { data: null, error: null } },
+      });
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.stats.totalPromptsCited).to.equal(0);
+    });
+
+    it('owned-urls handles null data from RPC gracefully', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_owned_urls: { data: null, error: null } },
+      });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls).to.have.length(0);
+      expect(body.totalCount).to.equal(0);
+    });
+
+    it('trending-urls handles null data from RPC gracefully', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_trending_urls: { data: null, error: null } },
+      });
+
+      const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls).to.have.length(0);
+      expect(body.totalNonOwnedUrls).to.equal(0);
+    });
+
+    it('cited-domains handles null data from RPC gracefully', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_cited_domains: { data: null, error: null } },
+      });
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.domains).to.have.length(0);
+      expect(body.totalCount).to.equal(0);
+    });
+
+    it('domain-urls handles null data from RPC gracefully', async () => {
+      const { context } = createContext(
+        {},
+        { hostname: 'example.com' },
+        {
+          rpcResults: {
+            rpc_url_inspector_domain_urls: { data: null, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorDomainUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls).to.have.length(0);
+      expect(body.totalCount).to.equal(0);
+    });
+
+    it('url-prompts handles null data from RPC gracefully', async () => {
+      const urlId = '44444444-4444-4444-4444-444444444444';
+      const { context } = createContext(
+        {},
+        { urlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: { data: null, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts).to.have.length(0);
     });
   });
 

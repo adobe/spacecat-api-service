@@ -210,7 +210,7 @@ export function createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess) {
       const params = parseFilterDimensionsParams(ctx);
       const pagination = parsePaginationParams(ctx, { defaultPageSize: 50 });
       const defaults = defaultDateRange();
-      const q = ctx.data || {};
+      const q = ctx.data || /* c8 ignore next */ {};
 
       if (!shouldApplyFilter(params.siteId)) {
         return badRequest('siteId is required for URL Inspector endpoints');
@@ -303,7 +303,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
       const params = parseFilterDimensionsParams(ctx);
       const pagination = parsePaginationParams(ctx, { defaultPageSize: 50 });
       const defaults = defaultDateRange();
-      const q = ctx.data || {};
+      const q = ctx.data || /* c8 ignore next */ {};
 
       if (!shouldApplyFilter(params.siteId)) {
         return badRequest('siteId is required for URL Inspector endpoints');
@@ -380,7 +380,7 @@ export function createUrlInspectorDomainUrlsHandler(
       const params = parseFilterDimensionsParams(ctx);
       const pagination = parsePaginationParams(ctx, { defaultPageSize: 50 });
       const defaults = defaultDateRange();
-      const q = ctx.data || {};
+      const q = ctx.data || /* c8 ignore next */ {};
 
       if (!shouldApplyFilter(params.siteId)) {
         return badRequest('siteId is required for URL Inspector endpoints');
@@ -456,7 +456,7 @@ export function createUrlInspectorUrlPromptsHandler(
       const { spaceCatId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
       const defaults = defaultDateRange();
-      const q = ctx.data || {};
+      const q = ctx.data || /* c8 ignore next */ {};
 
       if (!shouldApplyFilter(params.siteId)) {
         return badRequest('siteId is required for URL Inspector endpoints');
