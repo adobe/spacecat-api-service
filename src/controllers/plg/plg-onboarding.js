@@ -69,6 +69,10 @@ const REVIEW_REASONS = {
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 /**
+ * Reviewer id for system inactivation of waitlisted rows during PLG onboarding (not the end user).
+ */
+const SYSTEM_AUTO_INACTIVATE_REVIEWER = 'system:auto-inactivate';
+/**
  * Derives the review check key from the onboarding record's current state.
  * @param {object} onboarding - The PlgOnboarding record.
  * @returns {string|null} The check key enum value, or null if unknown.
@@ -156,7 +160,6 @@ async function postPlgOnboardingNotification(onboarding, context) {
   }
 
   let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
-    + `• *ID:* \`${onboarding.getId()}\`\n`
     + `• *Domain:* \`${domain}\`\n`
     + `• *IMS Org:* \`${imsOrgId}\``;
 
@@ -250,7 +253,7 @@ async function inactivateWaitlistedOnboardings(existingRecords, onboarding, cont
   }
 
   const reviewedAt = new Date().toISOString();
-  const reviewedBy = getReviewerIdentity(context);
+  const reviewedBy = SYSTEM_AUTO_INACTIVATE_REVIEWER;
   await Promise.all(waitlistedRecords.map(async (record) => {
     const reviews = record.getReviews() || [];
     record.setStatus(STATUSES.INACTIVE);
@@ -306,6 +309,24 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
 }
 
 /**
+ * Disables the summit-plg config handler for a given site. Non-fatal.
+ * @param {object} site - The site to disable the handler for.
+ * @param {object} context - Request context.
+ */
+async function disableSummitPlgHandler(site, context) {
+  const { dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  try {
+    const configuration = await Configuration.findLatest();
+    configuration.disableHandlerForSite('summit-plg', site);
+    await configuration.save();
+    log.info(`Disabled summit-plg handler for site ${site.getId()}`);
+  } catch (error) {
+    log.warn(`Failed to disable summit-plg handler for site ${site.getId()}: ${error.message}`);
+  }
+}
+
+/**
  * Revokes all ASO site enrollments for the site linked to a given onboarding record.
  * Called when transitioning an ONBOARDED domain to INACTIVE.
  * @param {object} onboarding - The PlgOnboarding record being offboarded.
@@ -330,23 +351,23 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
   const enrollments = await site.getSiteEnrollments();
   if (!enrollments || enrollments.length === 0) {
     log.info(`No enrollments to revoke for site ${siteId}`);
-    return;
+  } else {
+    const entitlements = await Promise.all(enrollments.map((e) => e.getEntitlement()));
+    const asoEnrollments = enrollments.filter(
+      (_, i) => entitlements[i]?.getProductCode() === ASO_PRODUCT_CODE,
+    );
+
+    if (asoEnrollments.length === 0) {
+      log.info(`No ASO enrollments to revoke for site ${siteId}`);
+    } else {
+      await Promise.all(asoEnrollments.map((enrollment) => {
+        log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId}`);
+        return enrollment.remove();
+      }));
+    }
   }
 
-  const entitlements = await Promise.all(enrollments.map((e) => e.getEntitlement()));
-  const asoEnrollments = enrollments.filter(
-    (_, i) => entitlements[i]?.getProductCode() === ASO_PRODUCT_CODE,
-  );
-
-  if (asoEnrollments.length === 0) {
-    log.info(`No ASO enrollments to revoke for site ${siteId}`);
-    return;
-  }
-
-  await Promise.all(asoEnrollments.map((enrollment) => {
-    log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId}`);
-    return enrollment.remove();
-  }));
+  await disableSummitPlgHandler(site, context);
 }
 
 /**
@@ -631,6 +652,14 @@ async function performAsoPlgOnboarding({
       } else {
         log.warn(`Cannot revoke ASO enrollment for displaced site ${alreadyOnboardedSiteId}: no org ID on onboarding record`);
       }
+      try {
+        const displacedSite = await Site.findById(alreadyOnboardedSiteId);
+        if (displacedSite) {
+          await disableSummitPlgHandler(displacedSite, context);
+        }
+      } catch (disableError) {
+        log.warn(`Failed to disable summit-plg for displaced site ${alreadyOnboardedSiteId}: ${disableError.message}`);
+      }
       // Fall through to continue onboarding the new domain
     } else {
       const existingOrgForOnboarded = alreadyOnboarded.getOrganizationId()
@@ -641,6 +670,9 @@ async function performAsoPlgOnboarding({
       const existingOrgName = existingOrgForOnboarded?.getName?.()
         || alreadyOnboarded.getOrganizationId();
       log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
+      if (alreadyOnboarded.getOrganizationId()) {
+        onboarding.setOrganizationId(alreadyOnboarded.getOrganizationId());
+      }
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
       await onboarding.save();
@@ -1379,7 +1411,7 @@ function PlgOnboardingController(ctx) {
         );
         return internalServerError('Failed to inactivate onboarding. Please try again later.');
       }
-      return ok(PlgOnboardingDto.toJSON(onboarding));
+      return ok(PlgOnboardingDto.toAdminJSON(onboarding));
     }
 
     const checkKey = deriveCheckKey(onboarding);

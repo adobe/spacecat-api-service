@@ -261,6 +261,7 @@ describe('PlgOnboardingController', () => {
       Configuration: {
         findLatest: sandbox.stub().resolves({
           enableHandlerForSite: sandbox.stub(),
+          disableHandlerForSite: sandbox.stub(),
           save: sandbox.stub().resolves(),
           getQueues: sandbox.stub().returns({ audits: 'audit-queue-url' }),
         }),
@@ -1548,7 +1549,6 @@ describe('PlgOnboardingController', () => {
       expect(message).to.include('Waiting for IP Allowlisting');
       expect(message).to.include('cloudflare');
       expect(message).to.include('1.2.3.4, 5.6.7.8');
-      expect(message).to.include(TEST_ONBOARDING_ID);
       expect(message).to.include('Test Org');
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
@@ -2098,7 +2098,7 @@ describe('PlgOnboardingController', () => {
       expect(waitlistedReviews[1]).to.include({
         reason: `Inactivated this domain to start onboarding ${TEST_DOMAIN} for the same IMS org.`,
         decision: 'BYPASSED',
-        reviewedBy: 'admin',
+        reviewedBy: 'system:auto-inactivate',
         justification: 'System action to start onboarding for new domain in the same IMS org.',
       });
       expect(waitlistedReviews[1].reviewedAt).to.be.a('string');
@@ -2109,14 +2109,14 @@ describe('PlgOnboardingController', () => {
       expect(ipAllowlistingRecord.setReviews.firstCall.args[0][0]).to.include({
         reason: `Inactivated this domain to start onboarding ${TEST_DOMAIN} for the same IMS org.`,
         decision: 'BYPASSED',
-        reviewedBy: 'admin',
+        reviewedBy: 'system:auto-inactivate',
         justification: 'System action to start onboarding for new domain in the same IMS org.',
       });
 
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('uses profile.email for review entries when a waitlisted record has no imsOrgId', async () => {
+    it('attributes automated waitlist inactivation to system:auto-inactivate (not profile email)', async () => {
       const waitlistedRecord = createMockOnboarding({
         id: 'waitlisted-onboarding-id',
         imsOrgId: '',
@@ -2140,7 +2140,7 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(waitlistedRecord.setReviews.firstCall.args[0][0]).to.include({
-        reviewedBy: 'preferred-user@example.com',
+        reviewedBy: 'system:auto-inactivate',
       });
     });
 
@@ -2190,6 +2190,46 @@ describe('PlgOnboardingController', () => {
       expect(mockEnrollmentToRevoke.remove).to.have.been.called;
 
       // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('logs when Site.findById fails while disabling summit-plg after displacement', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]);
+
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
+
+      mockDataAccess.Site.findById.callsFake((siteId) => {
+        if (siteId === OLD_SITE_ID) {
+          return Promise.reject(new Error('lookup failed'));
+        }
+        return Promise.resolve(null);
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWithMatch(
+        /Failed to disable summit-plg for displaced site old-site-uuid: lookup failed/,
+      );
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -3968,6 +4008,70 @@ describe('PlgOnboardingController', () => {
         expect(record.setStatus).to.have.been.calledWith('INACTIVE');
         expect(record.save).to.have.been.calledOnce;
         expect(mockDataAccess.PlgOnboarding.allByImsOrgId).to.not.have.been.called;
+        expect(res.value).to.have.property('updatedBy');
+      });
+
+      it('ONBOARDED: disables summit-plg handler when revoking enrollment', async () => {
+        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const mockEnrollment = {
+          getId: () => 'enroll-onboarded',
+          remove: sandbox.stub().resolves(),
+          getEntitlement: sandbox.stub().resolves(asoEntitlement),
+        };
+        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
+        const record = createMockOnboarding({
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+          waitlistReason: '',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findById.resolves(linkedSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Offboarding' },
+          attributes: adminAuthAttributes,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        const config = await mockDataAccess.Configuration.findLatest();
+        expect(config.disableHandlerForSite).to.have.been.calledWith('summit-plg', linkedSite);
+      });
+
+      it('ONBOARDED: logs warning when disabling summit-plg handler fails', async () => {
+        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const mockEnrollment = {
+          getId: () => 'enroll-onboarded',
+          remove: sandbox.stub().resolves(),
+          getEntitlement: sandbox.stub().resolves(asoEntitlement),
+        };
+        const linkedSite = createMockSite({ siteEnrollments: [mockEnrollment] });
+        const record = createMockOnboarding({
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+          waitlistReason: '',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findById.resolves(linkedSite);
+        mockDataAccess.Configuration.findLatest.resolves({
+          enableHandlerForSite: sandbox.stub(),
+          disableHandlerForSite: sandbox.stub().throws(new Error('Config write failed')),
+          save: sandbox.stub().resolves(),
+          getQueues: sandbox.stub().returns({ audits: 'audit-queue-url' }),
+        });
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Offboarding' },
+          attributes: adminAuthAttributes,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to disable summit-plg handler/);
       });
 
       it('ONBOARDED: sets INACTIVE without Site lookup when no site is linked', async () => {

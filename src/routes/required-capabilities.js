@@ -64,6 +64,20 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/opportunities',
   'GET /org/:spaceCatId/brands/:brandId/opportunities',
 
+  // Agentic traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/agentic-traffic/url-brand-presence',
+  'GET /sites/:siteId/agentic-traffic/kpis',
+  'GET /sites/:siteId/agentic-traffic/kpis-trend',
+  'GET /sites/:siteId/agentic-traffic/by-region',
+  'GET /sites/:siteId/agentic-traffic/by-category',
+  'GET /sites/:siteId/agentic-traffic/by-page-type',
+  'GET /sites/:siteId/agentic-traffic/by-status',
+  'GET /sites/:siteId/agentic-traffic/by-user-agent',
+  'GET /sites/:siteId/agentic-traffic/by-url',
+  'GET /sites/:siteId/agentic-traffic/filter-dimensions',
+  'GET /sites/:siteId/agentic-traffic/weeks',
+  'GET /sites/:siteId/agentic-traffic/movers',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
@@ -127,6 +141,9 @@ export const INTERNAL_ROUTES = [
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
+
+  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
+  'GET /v2/regions',
 ];
 
 /**
@@ -208,6 +225,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
@@ -370,6 +389,12 @@ const routeRequiredCapabilities = {
 
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
+
+  // Monitoring
+  // Note: DRS workers call this via admin x-api-key (not S2S JWT) — they run in a separate
+  // AWS account and do not hold an S2S consumer registration. The capability here gates
+  // future S2S JWT callers only; admin key access bypasses capability checks entirely.
+  'GET /monitoring/drs-bp-pg-audit': 'drsBpPgAudit:read',
 
   // API Keys
   'POST /tools/api-keys': 'apiKey:write',
