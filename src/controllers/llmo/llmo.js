@@ -1297,7 +1297,7 @@ function LlmoController(ctx) {
         cdnTypeNormalized = SUPPORTED_EDGE_ROUTING_CDN_TYPES.includes(cdnTypeTrimmed)
           ? cdnTypeTrimmed : null;
         if (!cdnTypeNormalized) {
-          log.info(`[edge-optimize-routing-failed] ${baseURL} cdnType: ${cdnType} not eligible for automated routing`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} cdnType: ${cdnType} not eligible for automated routing`);
         } else {
           // Verify the requested CDN type matches the domain's actual CDN via DNS
           try {
@@ -1311,7 +1311,7 @@ function LlmoController(ctx) {
               return badRequest(`Requested CDN type '${cdnTypeNormalized}' does not match the detected CDN for this domain`);
             }
           } catch (detectError) {
-            log.info(`[edge-optimize-routing-failed] ${baseURL} CDN auto-detection failed: ${detectError.message}`);
+            log.error(`[edge-optimize-routing-failed] ${baseURL} CDN auto-detection failed: ${detectError.message}`);
           }
         }
       }
