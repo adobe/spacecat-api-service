@@ -142,17 +142,19 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(403);
     });
 
-    it('returns badRequest on RPC error', async () => {
+    it('returns internalServerError on RPC error without leaking details', async () => {
       const { context } = createContext({}, {}, {
         rpcResults: {
-          rpc_url_inspector_stats: { data: null, error: { message: 'RPC failed' } },
+          rpc_url_inspector_stats: { data: null, error: { message: 'pq: column "x" does not exist' } },
         },
       });
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.not.include('pq:');
     });
 
     it('returns empty stats when RPC returns empty data', async () => {
@@ -356,7 +358,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns badRequest on RPC error', async () => {
+    it('returns internalServerError on RPC error', async () => {
       const { context } = createContext({}, {}, {
         rpcResults: {
           rpc_url_inspector_owned_urls: { data: null, error: { message: 'RPC failed' } },
@@ -366,7 +368,7 @@ describe('URL Inspector Handlers', () => {
       const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(500);
     });
 
     it('passes filters and handles null row fields', async () => {
@@ -556,7 +558,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns badRequest on RPC error', async () => {
+    it('returns internalServerError on RPC error', async () => {
       const { context } = createContext({}, {}, {
         rpcResults: {
           rpc_url_inspector_trending_urls: { data: null, error: { message: 'RPC failed' } },
@@ -566,21 +568,34 @@ describe('URL Inspector Handlers', () => {
       const handler = createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(500);
     });
 
-    it('passes brandId, selectedChannel and handles null row fields', async () => {
-      const rpcData = [{
-        total_non_owned_urls: null,
-        url: null,
-        content_type: null,
-        prompt: null,
-        category: null,
-        region: null,
-        topics: null,
-        citation_count: null,
-        execution_count: null,
-      }];
+    it('passes brandId, selectedChannel and filters out null URL rows', async () => {
+      const rpcData = [
+        {
+          total_non_owned_urls: 1,
+          url: null,
+          content_type: null,
+          prompt: null,
+          category: null,
+          region: null,
+          topics: null,
+          citation_count: null,
+          execution_count: null,
+        },
+        {
+          total_non_owned_urls: 1,
+          url: 'https://valid.com',
+          content_type: 'earned',
+          prompt: 'test',
+          category: 'Cat',
+          region: 'DE',
+          topics: 'Topic',
+          citation_count: 5,
+          execution_count: 1,
+        },
+      ];
 
       const { context, rpcStub } = createContext(
         { brandId: BRAND_ID },
@@ -593,9 +608,9 @@ describe('URL Inspector Handlers', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(body.totalNonOwnedUrls).to.equal(0);
-      expect(body.urls[0].prompts[0].prompt).to.equal('');
-      expect(body.urls[0].prompts[0].citationCount).to.equal(0);
+      expect(body.urls).to.have.length(1);
+      expect(body.urls[0].url).to.equal('https://valid.com');
+      expect(body.urls[0].totalCitations).to.equal(5);
 
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
@@ -616,6 +631,7 @@ describe('URL Inspector Handlers', () => {
           content_type: 'earned',
           categories: 'Cat A,Cat B',
           regions: 'US,DE',
+          total_count: 2,
         },
         {
           domain: 'other.com',
@@ -625,6 +641,7 @@ describe('URL Inspector Handlers', () => {
           content_type: 'social',
           categories: 'Cat A',
           regions: 'US',
+          total_count: 2,
         },
       ];
 
@@ -638,6 +655,7 @@ describe('URL Inspector Handlers', () => {
 
       expect(response.status).to.equal(200);
       expect(body.domains).to.have.length(2);
+      expect(body.totalCount).to.equal(2);
       expect(body.domains[0].domain).to.equal('example.com');
       expect(body.domains[0].totalCitations).to.equal(100);
       expect(body.domains[0].contentType).to.equal('earned');
@@ -690,7 +708,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns badRequest on RPC error', async () => {
+    it('returns internalServerError on RPC error', async () => {
       const { context } = createContext({}, {}, {
         rpcResults: {
           rpc_url_inspector_cited_domains: { data: null, error: { message: 'RPC failed' } },
@@ -700,7 +718,7 @@ describe('URL Inspector Handlers', () => {
       const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(500);
     });
 
     it('passes brandId, channel filters and handles null row fields', async () => {
@@ -821,7 +839,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(403);
     });
 
-    it('returns badRequest on RPC error', async () => {
+    it('returns internalServerError on RPC error', async () => {
       const { context } = createContext(
         {},
         { hostname: 'example.com' },
@@ -840,7 +858,7 @@ describe('URL Inspector Handlers', () => {
       );
       const response = await handler(context);
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(500);
     });
 
     it('returns badRequest for invalid model', async () => {
@@ -988,7 +1006,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns badRequest on RPC error', async () => {
+    it('returns internalServerError on RPC error', async () => {
       const urlId = '44444444-4444-4444-4444-444444444444';
       const { context } = createContext(
         {},
@@ -1008,7 +1026,7 @@ describe('URL Inspector Handlers', () => {
       );
       const response = await handler(context);
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(500);
     });
 
     it('uses url_id alias and handles null row fields', async () => {

@@ -10,7 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok, badRequest, forbidden } from '@adobe/spacecat-shared-http-utils';
+import {
+  ok, badRequest, forbidden, internalServerError,
+} from '@adobe/spacecat-shared-http-utils';
 
 import {
   withBrandPresenceAuth,
@@ -95,7 +97,7 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
 
       if (error) {
         ctx.log.error(`URL Inspector stats RPC error: ${error.message}`);
-        return badRequest(error.message);
+        return internalServerError('Internal error processing URL Inspector stats');
       }
 
       const rows = data || [];
@@ -173,7 +175,7 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
 
       if (error) {
         ctx.log.error(`URL Inspector owned URLs RPC error: ${error.message}`);
-        return badRequest(error.message);
+        return internalServerError('Internal error processing URL Inspector owned URLs');
       }
 
       const rows = data || [];
@@ -249,14 +251,13 @@ export function createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess) {
 
       if (error) {
         ctx.log.error(`URL Inspector trending URLs RPC error: ${error.message}`);
-        return badRequest(error.message);
+        return internalServerError('Internal error processing URL Inspector trending URLs');
       }
 
-      const rows = data || [];
+      const rows = (data || []).filter((row) => row.url != null);
       const totalNonOwnedUrls = rows.length > 0
         ? Number(rows[0].total_non_owned_urls ?? 0) : 0;
 
-      // Group flat rows by URL, nesting prompts under each URL
       const urlMap = new Map();
       for (const row of rows) {
         if (!urlMap.has(row.url)) {
@@ -289,8 +290,7 @@ export function createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess) {
 
 /**
  * Creates the getUrlInspectorCitedDomains handler.
- * Domain-level citation aggregations with dominant content type.
- * No pagination — domain count per site is bounded (hundreds to low thousands).
+ * Paginated domain-level citation aggregations with dominant content type.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
@@ -342,7 +342,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
 
       if (error) {
         ctx.log.error(`URL Inspector cited domains RPC error: ${error.message}`);
-        return badRequest(error.message);
+        return internalServerError('Internal error processing URL Inspector cited domains');
       }
 
       const rows = data || [];
@@ -366,6 +366,10 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
 /**
  * Creates the getUrlInspectorDomainUrls handler.
  * Phase 2 drilldown: paginated URLs within a specific domain.
+ *
+ * Note: the underlying RPC does not accept p_brand_id, p_category, or p_region.
+ * Domain-level drilldown is already scoped by hostname; brand/category/region
+ * filtering is applied at the parent level (cited-domains, stats).
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createUrlInspectorDomainUrlsHandler(
@@ -421,7 +425,7 @@ export function createUrlInspectorDomainUrlsHandler(
 
       if (error) {
         ctx.log.error(`URL Inspector domain URLs RPC error: ${error.message}`);
-        return badRequest(error.message);
+        return internalServerError('Internal error processing URL Inspector domain URLs');
       }
 
       const rows = data || [];
@@ -446,6 +450,10 @@ export function createUrlInspectorDomainUrlsHandler(
 /**
  * Creates the getUrlInspectorUrlPrompts handler.
  * Phase 3 drilldown: prompts that cited a specific URL.
+ *
+ * Note: the underlying RPC does not accept p_brand_id, p_category, or p_region.
+ * URL-level drilldown is scoped by url_id; broader filters are applied at
+ * the parent level (cited-domains, stats).
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createUrlInspectorUrlPromptsHandler(
@@ -494,7 +502,7 @@ export function createUrlInspectorUrlPromptsHandler(
 
       if (error) {
         ctx.log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
-        return badRequest(error.message);
+        return internalServerError('Internal error processing URL Inspector URL prompts');
       }
 
       const rows = data || [];
