@@ -1498,7 +1498,7 @@ function PlgOnboardingController(ctx) {
           // Re-run PLG flow for the current domain
           await onboarding.save();
           const result = await performAsoPlgOnboarding(
-            { domain: onboarding.getDomain(), imsOrgId, updatedBy: reviewedBy },
+            { domain: onboarding.getDomain(), imsOrgId },
             context,
           );
           return ok(PlgOnboardingDto.toAdminJSON(result));
@@ -1549,7 +1549,6 @@ function PlgOnboardingController(ctx) {
               /* c8 ignore next */
               presetAuthorUrl: siteConfig.authorUrl || null,
               presetProgramId: siteConfig.programId ?? null,
-              updatedBy: reviewedBy,
             },
             context,
           );
@@ -1581,7 +1580,6 @@ function PlgOnboardingController(ctx) {
               {
                 domain: siteConfig.alternateDomain,
                 imsOrgId: onboarding.getImsOrgId(),
-                updatedBy: reviewedBy,
               },
               context,
             );
@@ -1610,7 +1608,7 @@ function PlgOnboardingController(ctx) {
             await site.save();
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             const result = await performAsoPlgOnboarding(
-              { domain, imsOrgId: onboarding.getImsOrgId(), updatedBy: reviewedBy },
+              { domain, imsOrgId: onboarding.getImsOrgId() },
               context,
             );
             return ok(PlgOnboardingDto.toAdminJSON(result));
@@ -1703,9 +1701,6 @@ function PlgOnboardingController(ctx) {
 
     onboarding.setStatus(status);
     await onboarding.save();
-    if (status === STATUSES.INACTIVE) {
-      await postPlgOnboardingNotification(onboarding, context);
-    }
     return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
