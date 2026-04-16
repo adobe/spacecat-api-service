@@ -1,3 +1,10 @@
+# [1.444.0](https://github.com/adobe/spacecat-api-service/compare/v1.443.0...v1.444.0) (2026-04-16)
+
+
+### Features
+
+* auto-detect AEM CS Fastly CDN during LLMO onboarding | LLMO-3959 ([#2204](https://github.com/adobe/spacecat-api-service/issues/2204)) ([e6767f9](https://github.com/adobe/spacecat-api-service/commit/e6767f9953009bd8fb387623428ff5722feed164))
+
 # [1.443.0](https://github.com/adobe/spacecat-api-service/compare/v1.442.1...v1.443.0) (2026-04-15)
 
 
