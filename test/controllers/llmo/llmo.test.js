@@ -5392,7 +5392,7 @@ describe('LlmoController', () => {
       });
       expect(result.status).to.equal(200);
       expect(callCdnRoutingApiStub).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWith(
+      expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/not eligible for automated routing/),
       );
     });
@@ -5484,7 +5484,7 @@ describe('LlmoController', () => {
         mockSite.getBaseURL = sinon.stub().returns('https://[');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
-        expect(mockLog.info).to.have.been.calledWith(
+        expect(mockLog.error).to.have.been.calledWith(
           sinon.match(/CDN auto-detection failed/),
         );
       });
