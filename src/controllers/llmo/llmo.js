@@ -231,7 +231,7 @@ function LlmoController(ctx) {
     // Start timing for the entire method
     const methodStartTime = Date.now();
 
-    const DEFAULT_LIMIT = 5000;
+    const POST_DEFAULT_LIMIT = 1000000;
 
     // Extract and validate request body structure
     const {
@@ -240,7 +240,7 @@ function LlmoController(ctx) {
       include = [],
       exclude = [],
       groupBy = [],
-      limit = DEFAULT_LIMIT,
+      limit = POST_DEFAULT_LIMIT,
       offset = 0,
     } = context.data || {};
 

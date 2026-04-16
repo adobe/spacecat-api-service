@@ -80,6 +80,7 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
 
   const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${filePath}`);
 
+  // Apply pagination parameters when calling the source URL
   const DEFAULT_LIMIT = 5000;
   const limit = queryParams.limit ? parseInt(queryParams.limit, 10) : DEFAULT_LIMIT;
   const offset = queryParams.offset ? parseInt(queryParams.offset, 10) : 0;
