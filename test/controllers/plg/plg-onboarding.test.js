@@ -4725,6 +4725,39 @@ describe('PlgOnboardingController', () => {
         expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke one or more ASO enrollments/);
       });
 
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: continues and logs warn when revokeAsoSiteEnrollments throws', async () => {
+        const throwingSite = createMockSite({ siteId: TEST_SITE_ID });
+        throwingSite.getSiteEnrollments.rejects(new Error('DB connection lost'));
+        const waitlistedRecord = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        const oldOnboardedRecord = createMockOnboarding({
+          id: 'old-onboarding-id',
+          domain: 'site-a.com',
+          status: 'ONBOARDED',
+          siteId: TEST_SITE_ID,
+        });
+
+        mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+        mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord, oldOnboardedRecord]);
+        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(waitlistedRecord);
+        mockDataAccess.Site.findById.resolves(throwingSite);
+        mockDataAccess.Site.create.resolves(mockSite);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Customer wants new domain' },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke enrollments for offboarded domain/);
+      });
+
       it('BYPASS AEM_SITE_CHECK: returns 400 when siteConfig is missing', async () => {
         const record = createMockOnboarding({
           status: 'WAITLISTED',
