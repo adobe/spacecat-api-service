@@ -77,7 +77,13 @@ export default function DrsBpPgAuditController(context) {
       return internalServerError('PostgREST client not available');
     }
 
-    const { params = {} } = reqContext;
+    // Merge path params with URL query string params (query string takes precedence).
+    // Framework only puts path params in reqContext.params; query string comes from request.url.
+    const queryParams = reqContext.request?.url
+      ? Object.fromEntries(new URL(reqContext.request.url).searchParams)
+      : {};
+    const params = { ...(reqContext.params ?? {}), ...queryParams };
+
     const {
       siteId,
       dateStart,

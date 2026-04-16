@@ -11,6 +11,7 @@
  */
 
 import { ctx } from './harness.js';
+import { resetPostgres } from './seed.js';
 import drsBpPgAuditTests from '../shared/tests/drs-bp-pg-audit.js';
 
-drsBpPgAuditTests(() => ctx.httpClient);
+drsBpPgAuditTests(() => ctx.httpClient, resetPostgres);
