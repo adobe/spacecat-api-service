@@ -4101,7 +4101,7 @@ describe('PlgOnboardingController', () => {
         expect(record.save).to.have.been.calledOnce;
       });
 
-      it('ONBOARDED: returns 500 when ASO enrollment revocation fails', async () => {
+      it('ONBOARDED: logs warn and continues to INACTIVE when ASO enrollment revocation fails', async () => {
         const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
         const mockEnrollment = {
           getId: () => 'enroll-onboarded',
@@ -4123,15 +4123,12 @@ describe('PlgOnboardingController', () => {
           data: { decision: 'BYPASSED', justification: 'test' },
           attributes: adminAuthAttributes,
           log: mockLog,
+          env: {},
         });
 
-        expect(res.status).to.equal(500);
-        expect(res.value).to.equal('Failed to inactivate onboarding. Please try again later.');
-        expect(mockLog.error).to.have.been.calledWithMatch(
-          sinon.match(/^Failed to inactivate onboarded PLG domain example.com: remove failed/),
-          sinon.match.instanceOf(Error),
-        );
-        expect(record.setStatus).to.not.have.been.called;
+        expect(res.status).to.equal(200);
+        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke one or more ASO enrollments/);
+        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
       });
 
       it('ONBOARDED: returns 500 when save fails', async () => {
@@ -4725,7 +4722,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke enrollments/);
+        expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke one or more ASO enrollments/);
       });
 
       it('BYPASS AEM_SITE_CHECK: returns 400 when siteConfig is missing', async () => {

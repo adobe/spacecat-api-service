@@ -361,10 +361,14 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
     if (asoEnrollments.length === 0) {
       log.info(`No ASO enrollments to revoke for site ${siteId}`);
     } else {
-      await Promise.all(asoEnrollments.map((enrollment) => {
-        log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId}`);
-        return enrollment.remove();
-      }));
+      try {
+        await Promise.all(asoEnrollments.map((enrollment) => {
+          log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId}`);
+          return enrollment.remove();
+        }));
+      } catch (revokeError) {
+        log.warn(`Failed to revoke one or more ASO enrollments for site ${siteId}: ${revokeError.message}`);
+      }
     }
   }
 
