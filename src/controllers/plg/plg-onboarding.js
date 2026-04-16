@@ -1297,15 +1297,21 @@ function PlgOnboardingController(ctx) {
         }
       }
       const emailMap = {};
-      await Promise.all([...imsIds].map(async (imsId) => {
-        try {
-          const imsProfile = await imsClient.getImsAdminProfile(imsId);
-          emailMap[imsId] = imsProfile.email || null;
-        } catch (e) {
-          log.warn(`Failed to resolve email for IMS ID ${imsId}: ${e.message}`);
-          emailMap[imsId] = null;
-        }
-      }));
+      const IMS_CONCURRENCY = 10;
+      const imsIdList = [...imsIds];
+      for (let i = 0; i < imsIdList.length; i += IMS_CONCURRENCY) {
+        const batch = imsIdList.slice(i, i + IMS_CONCURRENCY);
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.all(batch.map(async (imsId) => {
+          try {
+            const imsProfile = await imsClient.getImsAdminProfile(imsId);
+            emailMap[imsId] = imsProfile.email || null;
+          } catch (e) {
+            log.warn(`Failed to resolve email for IMS ID ${imsId}: ${e.message}`);
+            emailMap[imsId] = null;
+          }
+        }));
+      }
 
       let payload;
       try {
