@@ -1400,14 +1400,15 @@ function LlmoController(ctx) {
         }
 
         // Call CDN API with the SP token
+        const cdnApiStart = Date.now();
         try {
           await callCdnRoutingApi(strategy, cdnConfig, domain, spToken, routingEnabled, log);
         } catch (cdnError) {
-          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN API call failed: ${cdnError.message}`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN API call failed in ${Date.now() - cdnApiStart}ms: ${cdnError.message}`);
           return internalServerError('Failed to update CDN routing');
         }
 
-        log.info(`[edge-optimize-routing] CDN routing updated for site ${siteId}, domain ${domain}`);
+        log.info(`[edge-optimize-routing] CDN routing updated for site ${siteId}, domain ${domain} in ${Date.now() - cdnApiStart}ms`);
 
         if (routingEnabled) {
           // Trigger the import worker job to detect when edge-optimize goes live and stamp
@@ -1434,7 +1435,7 @@ function LlmoController(ctx) {
           await saveSiteConfig(site, currentConfig, log, 'marking edge optimize disabled');
           log.info(`[edge-optimize-routing] Marked edge optimize as disabled for site ${siteId}`);
         }
-        log.info(`[edge-optimize-routing] ${baseURL} CDN routing updated successfully`);
+        log.info(`[edge-optimize-routing] ${baseURL} CDN routing ${routingEnabled ? 'enabled' : 'disabled'} successfully`);
       }
 
       return ok({

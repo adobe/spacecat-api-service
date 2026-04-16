@@ -5591,6 +5591,9 @@ describe('LlmoController', () => {
           undefined,
           { delaySeconds: 300 },
         );
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/CDN routing enabled successfully/),
+        );
       });
 
       it('returns 200 and logs when SQS enqueue for enabled marking fails', async () => {
@@ -5617,6 +5620,9 @@ describe('LlmoController', () => {
           enabled: false,
         });
         expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/CDN routing disabled successfully/),
+        );
       });
 
       it('uses valid overrideBaseURL from fetch config for CDN probe URL', async () => {
