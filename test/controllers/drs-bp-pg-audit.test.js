@@ -356,5 +356,19 @@ describe('DrsBpPgAuditController tests', () => {
       const body = await resp.json();
       expect(JSON.stringify(body)).to.not.include('internal schema details');
     });
+
+    // ── Param sourcing ──
+
+    it('reads params from request.url query string when present', async () => {
+      const url = `http://localhost/monitoring/drs-bp-pg-audit?siteId=${VALID_SITE_ID}&dateStart=2025-04-14&dateEnd=2025-04-15`;
+      const resp = await controller.getProjectionAudit({ request: { url }, params: {} });
+      expect(resp.status).to.equal(STATUS_OK);
+    });
+
+    it('falls back to empty params when reqContext.params is undefined', async () => {
+      const url = `http://localhost/monitoring/drs-bp-pg-audit?siteId=${VALID_SITE_ID}&dateStart=2025-04-14&dateEnd=2025-04-15`;
+      const resp = await controller.getProjectionAudit({ request: { url } });
+      expect(resp.status).to.equal(STATUS_OK);
+    });
   });
 });
