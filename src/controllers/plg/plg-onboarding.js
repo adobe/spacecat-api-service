@@ -43,7 +43,7 @@ import {
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
-import { loadProfileConfig } from '../../utils/slack/base.js';
+import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -96,6 +96,69 @@ function isInternalOrg(orgId, env) {
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
+
+const PLG_STATUS_NOTIFICATION_CONFIG = {
+  [STATUSES.ONBOARDED]: { emoji: ':white_check_mark:', label: 'Onboarded' },
+  [STATUSES.WAITLISTED]: { emoji: ':warning:', label: 'Waitlisted' },
+  [STATUSES.WAITING_FOR_IP_ALLOWLISTING]: { emoji: ':warning:', label: 'Waiting for IP Allowlisting' },
+  [STATUSES.ERROR]: { emoji: ':red_circle:', label: 'Error' },
+  [STATUSES.INACTIVE]: { emoji: ':zzz:', label: 'Inactive' },
+};
+
+/**
+ * Posts a PLG onboarding status notification to the configured ESE Slack channel.
+ * Fires on terminal/actionable status transitions. Fails gracefully.
+ * @param {object} onboarding - The PlgOnboarding record after save.
+ * @param {object} context - The request context containing env and log.
+ * @returns {Promise<void>}
+ */
+async function postPlgOnboardingNotification(onboarding, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+
+  if (!channelId || !token) {
+    return;
+  }
+
+  const status = onboarding.getStatus();
+  const config = PLG_STATUS_NOTIFICATION_CONFIG[status];
+  /* c8 ignore next 3 */
+  if (!config) {
+    return;
+  }
+
+  const domain = onboarding.getDomain();
+  const imsOrgId = onboarding.getImsOrgId();
+
+  let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *IMS Org:* \`${imsOrgId}\``;
+
+  const waitlistReason = onboarding.getWaitlistReason();
+  if (waitlistReason) {
+    message += `\n• *Reason:* ${waitlistReason}`;
+  }
+
+  const botBlocker = onboarding.getBotBlocker();
+  if (botBlocker?.type) {
+    message += `\n• *Bot Blocker:* ${botBlocker.type}`;
+    if (botBlocker.ipsToAllowlist?.length) {
+      message += ` (IPs to allowlist: ${botBlocker.ipsToAllowlist.join(', ')})`;
+    }
+  }
+
+  const error = onboarding.getError();
+  if (error?.message) {
+    message += `\n• *Error:* ${error.message}`;
+  }
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (slackError) {
+    log.error(`Failed to post PLG onboarding notification to Slack: ${slackError.message}`);
+  }
+}
 
 // AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
 const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
@@ -501,8 +564,8 @@ async function performAsoPlgOnboarding({
       log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
       alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
       alreadyOnboarded.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`);
-      alreadyOnboarded.setUpdatedBy(alreadyOnboarded.getImsOrgId() || 'system');
       await alreadyOnboarded.save();
+      await postPlgOnboardingNotification(alreadyOnboarded, context);
       // NOTE: the underlying Site record is intentionally left unchanged. The Site model does
       // not carry PLG lifecycle state — PlgOnboarding is the sole source of truth for whether
       // a domain is actively enrolled in PLG. Audit scheduling and other downstream systems
@@ -545,8 +608,8 @@ async function performAsoPlgOnboarding({
       log.info(`IMS org ${imsOrgId} already has onboarded domain ${alreadyOnboarded.getDomain()}, waitlisting ${domain}`);
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
-      onboarding.setUpdatedBy(imsOrgId || 'system');
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
       return onboarding;
     }
   }
@@ -563,8 +626,8 @@ async function performAsoPlgOnboarding({
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setSteps(steps);
       onboarding.setCompletedAt(new Date().toISOString());
-      onboarding.setUpdatedBy(imsOrgId || 'system');
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
       return onboarding;
     }
     log.warn(`Preonboarded site ${onboarding.getSiteId()} not found, falling through to full onboarding`);
@@ -608,8 +671,8 @@ async function performAsoPlgOnboarding({
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
         onboarding.setSteps(steps);
-        onboarding.setUpdatedBy(imsOrgId || 'system');
         await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
         return onboarding;
       }
     }
@@ -640,8 +703,8 @@ async function performAsoPlgOnboarding({
         onboarding.setWaitlistReason(waitlistReason);
         onboarding.setSiteId(site.getId());
         onboarding.setSteps(steps);
-        onboarding.setUpdatedBy(imsOrgId || 'system');
         await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
         return onboarding;
       }
     }
@@ -665,8 +728,8 @@ async function performAsoPlgOnboarding({
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
-      onboarding.setUpdatedBy(imsOrgId || 'system');
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
 
       return onboarding;
     }
@@ -942,8 +1005,8 @@ async function performAsoPlgOnboarding({
     onboarding.setStatus(STATUSES.ONBOARDED);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
-    onboarding.setUpdatedBy(imsOrgId || 'system');
     await onboarding.save();
+    await postPlgOnboardingNotification(onboarding, context);
 
     return onboarding;
   } catch (error) {
@@ -954,15 +1017,22 @@ async function performAsoPlgOnboarding({
       message: (error.clientError || error.conflict)
         ? error.message : 'An internal error occurred',
     });
-    onboarding.setUpdatedBy(imsOrgId || 'system');
     try {
       await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
     } catch (saveError) {
       log.error(`Failed to persist error state for onboarding ${onboarding.getId()}: ${saveError.message}`);
     }
     throw error;
   }
 }
+
+/**
+ * Resolves requestor emails from IMS user IDs stored in updated_by.
+ * @param {Array} records - PlgOnboarding records.
+ * @param {object} imsClient - IMS client instance.
+ * @returns {Promise<object>} Map of userId -> email.
+ */
 
 /**
  * PLG Onboarding controller.
@@ -1024,6 +1094,8 @@ function PlgOnboardingController(ctx) {
 
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
+      onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
+      await onboarding.save();
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
       log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);
@@ -1133,9 +1205,45 @@ function PlgOnboardingController(ctx) {
         return internalServerError('Failed to list PLG onboarding records');
       }
 
+      // Resolve updatedBy IMS IDs to emails for the response
+      const { imsClient } = context;
+      // Collect all unique IMS IDs from updatedBy and reviewedBy fields
+      const imsIds = new Set();
+      for (const r of records) {
+        const updatedBy = r.getUpdatedBy();
+        if (hasText(updatedBy) && updatedBy !== 'system') {
+          imsIds.add(updatedBy);
+        }
+        for (const review of (r.getReviews() || [])) {
+          if (hasText(review.reviewedBy) && review.reviewedBy !== 'admin') {
+            imsIds.add(review.reviewedBy);
+          }
+        }
+      }
+      const emailMap = {};
+      await Promise.all([...imsIds].map(async (imsId) => {
+        try {
+          const imsProfile = await imsClient.getImsAdminProfile(imsId);
+          emailMap[imsId] = imsProfile.email || null;
+        } catch (e) {
+          log.warn(`Failed to resolve email for IMS ID ${imsId}: ${e.message}`);
+          emailMap[imsId] = null;
+        }
+      }));
+
       let payload;
       try {
-        payload = records.map(PlgOnboardingDto.toJSON);
+        payload = records.map((record) => {
+          const json = PlgOnboardingDto.toAdminJSON(record);
+          return {
+            ...json,
+            trialEmail: emailMap[record.getUpdatedBy()] ?? null,
+            reviews: json.reviews.map((review) => ({
+              ...review,
+              reviewedBy: emailMap[review.reviewedBy] ?? review.reviewedBy,
+            })),
+          };
+        });
       } catch (serializationError) {
         const serMsg = serializationError instanceof Error
           ? serializationError.message
@@ -1242,9 +1350,8 @@ function PlgOnboardingController(ctx) {
 
     // UPHOLD: just store the review and return
     if (decision === REVIEW_DECISIONS.UPHELD) {
-      onboarding.setUpdatedBy(onboarding.getImsOrgId() || 'system');
       await onboarding.save();
-      return ok(PlgOnboardingDto.toJSON(onboarding));
+      return ok(PlgOnboardingDto.toAdminJSON(onboarding));
     }
 
     // BYPASS: scenario-specific prep, then re-run the flow
@@ -1270,6 +1377,7 @@ function PlgOnboardingController(ctx) {
               justification: 'System action to start onboarding for new domain in the same IMS org.',
             }]);
             await oldOnboarded.save();
+            await postPlgOnboardingNotification(oldOnboarded, context);
             try {
               await revokeAsoSiteEnrollments(oldOnboarded, context);
             } catch (revokeErr) {
@@ -1278,13 +1386,12 @@ function PlgOnboardingController(ctx) {
             log.info(`Offboarded old domain ${oldOnboarded.getDomain()} for IMS org ${imsOrgId}`);
           }
           // Re-run PLG flow for the current domain
-          onboarding.setUpdatedBy(onboarding.getImsOrgId() || 'system');
           await onboarding.save();
           const result = await performAsoPlgOnboarding(
             { domain: onboarding.getDomain(), imsOrgId },
             context,
           );
-          return ok(PlgOnboardingDto.toJSON(result));
+          return ok(PlgOnboardingDto.toAdminJSON(result));
         }
 
         case REVIEW_REASONS.AEM_SITE_CHECK: {
@@ -1323,7 +1430,6 @@ function PlgOnboardingController(ctx) {
           }
 
           // Re-run PLG flow with pre-set delivery type and optional author URL
-          onboarding.setUpdatedBy(onboarding.getImsOrgId() || 'system');
           await onboarding.save();
           const result = await performAsoPlgOnboarding(
             {
@@ -1336,7 +1442,7 @@ function PlgOnboardingController(ctx) {
             },
             context,
           );
-          return ok(PlgOnboardingDto.toJSON(result));
+          return ok(PlgOnboardingDto.toAdminJSON(result));
         }
 
         case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED: {
@@ -1357,14 +1463,14 @@ function PlgOnboardingController(ctx) {
               return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
             }
             onboarding.setStatus(STATUSES.INACTIVE);
-            onboarding.setUpdatedBy(onboarding.getImsOrgId() || 'system');
             await onboarding.save();
+            await postPlgOnboardingNotification(onboarding, context);
             log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
             const result = await performAsoPlgOnboarding(
               { domain: siteConfig.alternateDomain, imsOrgId: onboarding.getImsOrgId() },
               context,
             );
-            return ok(PlgOnboardingDto.toJSON(result));
+            return ok(PlgOnboardingDto.toAdminJSON(result));
           }
 
           // Handle moveSite: transfer site from existing org to current org
@@ -1397,7 +1503,7 @@ function PlgOnboardingController(ctx) {
               { domain, imsOrgId: onboarding.getImsOrgId() },
               context,
             );
-            return ok(PlgOnboardingDto.toJSON(result));
+            return ok(PlgOnboardingDto.toAdminJSON(result));
           }
 
           return badRequest(
@@ -1457,7 +1563,7 @@ function PlgOnboardingController(ctx) {
     const onboarding = await PlgOnboarding.create({
       imsOrgId, domain, baseURL, status,
     });
-    return created(PlgOnboardingDto.toJSON(onboarding));
+    return created(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
   /**
@@ -1486,9 +1592,8 @@ function PlgOnboardingController(ctx) {
     }
 
     onboarding.setStatus(status);
-    onboarding.setUpdatedBy(onboarding.getImsOrgId() || 'system');
     await onboarding.save();
-    return ok(PlgOnboardingDto.toJSON(onboarding));
+    return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
   /**

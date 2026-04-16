@@ -142,17 +142,17 @@ describe('PlgOnboardingController', () => {
       getBotBlocker: sandbox.stub().returns(record.botBlocker),
       getWaitlistReason: sandbox.stub().returns(record.waitlistReason),
       getReviews: sandbox.stub().returns(record.reviews),
-      getUpdatedBy: sandbox.stub().returns(record.updatedBy),
+      getUpdatedBy: sandbox.stub().returns(overrides.updatedBy || null),
       getCompletedAt: sandbox.stub().returns(record.completedAt),
       getCreatedAt: sandbox.stub().returns(record.createdAt),
       getUpdatedAt: sandbox.stub().returns(record.updatedAt),
       setStatus: sandbox.stub(),
+      setUpdatedBy: sandbox.stub(),
       setSiteId: sandbox.stub(),
       setOrganizationId: sandbox.stub(),
       setSteps: sandbox.stub(),
       setError: sandbox.stub(),
       setBotBlocker: sandbox.stub(),
-      setUpdatedBy: sandbox.stub(),
       setWaitlistReason: sandbox.stub(),
       setReviews: sandbox.stub(),
       setCompletedAt: sandbox.stub(),
@@ -1391,6 +1391,214 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Slack notifications ---
+
+  describe('onboard - Slack notifications', () => {
+    let postSlackMessageStub;
+    let SlackController;
+
+    beforeEach(async () => {
+      postSlackMessageStub = sandbox.stub().resolves();
+
+      SlackController = (await esmock(
+        '../../../src/controllers/plg/plg-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: composeBaseURLStub,
+            detectBotBlocker: detectBotBlockerStub,
+            detectLocale: detectLocaleStub,
+            hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+            isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+            resolveCanonicalUrl: resolveCanonicalUrlStub,
+          },
+          '@adobe/spacecat-shared-http-utils': {
+            badRequest: (msg) => ({ status: 400, value: msg }),
+            createResponse: (body, status) => ({ status, value: body }),
+            created: (data) => ({ status: 201, value: data }),
+            forbidden: (msg) => ({ status: 403, value: msg }),
+            internalServerError: (msg) => ({ status: 500, value: msg }),
+            notFound: (msg) => ({ status: 404, value: msg }),
+            noContent: () => ({ status: 204 }),
+            ok: (data) => ({ status: 200, value: data }),
+          },
+          '@adobe/spacecat-shared-launchdarkly-client': {
+            default: ldCreateFromStub,
+          },
+          '@adobe/spacecat-shared-rum-api-client': {
+            default: {
+              createFrom: sandbox.stub().returns({
+                retrieveDomainkey: rumRetrieveDomainkeyStub,
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: { createForSite: tierClientCreateForSiteStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: { toDynamoItem: configToDynamoItemStub },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+            Entitlement: {
+              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+            default: {
+              STATUSES: {
+                IN_PROGRESS: 'IN_PROGRESS',
+                ONBOARDED: 'ONBOARDED',
+                PRE_ONBOARDING: 'PRE_ONBOARDING',
+                ERROR: 'ERROR',
+                WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                WAITLISTED: 'WAITLISTED',
+                INACTIVE: 'INACTIVE',
+              },
+              REVIEW_DECISIONS: { BYPASSED: 'BYPASSED', UPHELD: 'UPHELD' },
+            },
+          },
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
+            createOrFindOrganization: createOrFindOrganizationStub,
+            enableAudits: enableAuditsStub,
+            enableImports: enableImportsStub,
+            triggerAudits: triggerAuditsStub,
+          },
+          '../../../src/support/utils.js': {
+            autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            updateCodeConfig: updateCodeConfigStub,
+            findDeliveryType: findDeliveryTypeStub,
+            deriveProjectName: deriveProjectNameStub,
+            queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+          },
+          '../../../src/utils/slack/base.js': {
+            loadProfileConfig: loadProfileConfigStub,
+            postSlackMessage: postSlackMessageStub,
+          },
+          '../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+          },
+          '../../../src/support/access-control-util.js': {
+            default: {
+              fromContext: () => ({ hasAdminAccess: () => false }),
+            },
+          },
+        },
+      )).default;
+    });
+
+    function buildSlackContext(onboarding) {
+      return {
+        data: { domain: TEST_DOMAIN },
+        dataAccess: {
+          ...mockDataAccess,
+          PlgOnboarding: {
+            ...mockDataAccess.PlgOnboarding,
+            findByImsOrgIdAndDomain: sandbox.stub().resolves(null),
+            create: sandbox.stub().resolves(onboarding),
+          },
+        },
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123TEST',
+          SLACK_BOT_TOKEN: 'xoxb-test-token',
+        },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+    }
+
+    it('posts notification with botBlocker type and ipsToAllowlist', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4', '5.6.7.8'] },
+      });
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4', '5.6.7.8'],
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [channelId, message] = postSlackMessageStub.firstCall.args;
+      expect(channelId).to.equal('C123TEST');
+      expect(message).to.include('Waiting for IP Allowlisting');
+      expect(message).to.include('cloudflare');
+      expect(message).to.include('1.2.3.4, 5.6.7.8');
+    });
+
+    it('posts notification with botBlocker type but no ipsToAllowlist', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        botBlocker: { type: 'akamai' },
+      });
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'akamai',
+      });
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('akamai');
+      expect(message).to.not.include('IPs to allowlist');
+    });
+
+    it('posts error notification including error message', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ERROR',
+        error: { message: 'An internal error occurred' },
+      });
+      createOrFindOrganizationStub.rejects(new Error('DB failure'));
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Error');
+      expect(message).to.include('An internal error occurred');
+    });
+
+    it('posts notification with waitlist reason for non-AEM site', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'WAITLISTED',
+        waitlistReason: `Domain ${TEST_DOMAIN} is not an AEM site`,
+      });
+      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
+      findDeliveryTypeStub.resolves('other');
+
+      await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Waitlisted');
+      expect(message).to.include('is not an AEM site');
+    });
+
+    it('logs error when postSlackMessage fails but does not propagate', async () => {
+      postSlackMessageStub.rejects(new Error('Slack API unavailable'));
+      const onboarding = createMockOnboarding({
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'] },
+      });
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4'],
+      });
+
+      const res = await SlackController({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Failed to post PLG onboarding notification to Slack/),
+      );
+    });
+  });
+
   // --- RUM check (informational, non-blocking) ---
 
   describe('onboard - RUM check', () => {
@@ -1886,7 +2094,7 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('falls back to system updatedBy when displacing an onboarded record without imsOrgId', async () => {
+    it('does not set updatedBy on displaced onboarded record when imsOrgId is missing', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
       const ASO_ENTITLEMENT_ID = 'aso-entitlement-uuid';
@@ -1912,7 +2120,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
 
       expect(res.status).to.equal(200);
-      expect(onboardedRecord.setUpdatedBy).to.have.been.calledWith('system');
+      expect(onboardedRecord.setUpdatedBy).to.not.have.been.called;
     });
 
     it('waitlists new domain when already-onboarded site has NEW PLG suggestions', async () => {
@@ -3265,6 +3473,103 @@ describe('PlgOnboardingController', () => {
           sinon.match(/^Failed to list PLG onboardings: connection reset/),
         );
       });
+
+      it('resolves trialEmail via getImsAdminProfile when updatedBy is set', async () => {
+        const record = createMockOnboarding({ updatedBy: 'user-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'user@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].trialEmail).to.equal('user@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('user-ims-id@AdobeID');
+      });
+
+      it('sets trialEmail to null when getImsAdminProfile returns no email', async () => {
+        const record = createMockOnboarding({ updatedBy: 'user-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({}),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].trialEmail).to.be.null;
+      });
+
+      it('sets trialEmail to null when getImsAdminProfile fails', async () => {
+        const record = createMockOnboarding({ updatedBy: 'bad-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().rejects(new Error('IMS unavailable')),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].trialEmail).to.be.null;
+        expect(mockLog.warn).to.have.been.calledWithMatch(
+          sinon.match(/Failed to resolve email for IMS ID bad-ims-id@AdobeID/),
+        );
+      });
+
+      it('resolves reviewedBy IMS IDs to emails in reviews array', async () => {
+        const record = createMockOnboarding({
+          reviews: [
+            { reviewedBy: 'reviewer-ims-id@AdobeID', decision: 'BYPASSED', reason: 'test' },
+          ],
+        });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'reviewer@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].reviews[0].reviewedBy).to.equal('reviewer@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('reviewer-ims-id@AdobeID');
+      });
+
+      it('keeps reviewedBy as-is when not resolvable (e.g. "admin")', async () => {
+        const record = createMockOnboarding({
+          reviews: [
+            { reviewedBy: 'admin', decision: 'UPHELD', reason: 'test' },
+          ],
+        });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = { getImsAdminProfile: sandbox.stub() };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].reviews[0].reviewedBy).to.equal('admin');
+        expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
     });
   });
 
@@ -3722,7 +4027,7 @@ describe('PlgOnboardingController', () => {
         expect(reviews[0].reviewedBy).to.equal('profile-fallback@example.com');
       });
 
-      it('falls back to admin reviewer and system updatedBy when auth profile email and imsOrgId are missing', async () => {
+      it('falls back to admin reviewer when auth profile email and imsOrgId are missing', async () => {
         const record = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -3738,7 +4043,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setUpdatedBy).to.have.been.calledWith('system');
+        expect(record.setUpdatedBy).to.not.have.been.called;
         const reviews = record.setReviews.firstCall.args[0];
         expect(reviews[0].reviewedBy).to.equal('admin');
       });
@@ -3781,7 +4086,7 @@ describe('PlgOnboardingController', () => {
         expect(oldOnboardedRecord.save).to.have.been.called;
       });
 
-      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: falls back to system updatedBy when imsOrgId is missing and rerun errors', async () => {
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: returns 500 when imsOrgId is missing and rerun errors', async () => {
         const waitlistedRecord = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -3818,11 +4123,11 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(500);
-        expect(waitlistedRecord.setUpdatedBy).to.have.been.calledWith('system');
-        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('system');
+        expect(waitlistedRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
       });
 
-      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: falls back to system when rerun waitlists a non-AEM domain', async () => {
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun waitlists a non-AEM domain when imsOrgId is missing', async () => {
         const waitlistedRecord = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -3854,11 +4159,11 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('system');
+        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
-      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: falls back to system when rerun is waitlisted due to an existing onboarded domain', async () => {
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun is waitlisted due to an existing onboarded domain', async () => {
         const waitlistedRecord = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -3910,13 +4215,13 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('system');
+        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
         expect(rerunRecord.setWaitlistReason)
           .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
       });
 
-      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: falls back to system when rerun stops at bot blocker', async () => {
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun stops at bot blocker when imsOrgId is missing', async () => {
         const waitlistedRecord = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -3952,11 +4257,11 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('system');
+        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
       });
 
-      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: falls back to system when rerun completes successfully', async () => {
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun completes successfully when imsOrgId is missing', async () => {
         const waitlistedRecord = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -3992,11 +4297,11 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('system');
+        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
         expect(rerunRecord.setStatus).to.have.been.calledWith('ONBOARDED');
       });
 
-      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: falls back to system on pre-onboarding fast path', async () => {
+      it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: pre-onboarding fast path when imsOrgId is missing', async () => {
         const waitlistedRecord = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -4035,7 +4340,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('system');
+        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
         expect(rerunRecord.setStatus).to.have.been.calledWith('ONBOARDED');
       });
 
@@ -4290,7 +4595,7 @@ describe('PlgOnboardingController', () => {
         });
       });
 
-      it('BYPASS AEM_SITE_CHECK: falls back to system updatedBy and rerun waitlists when site belongs to another org', async () => {
+      it('BYPASS AEM_SITE_CHECK: rerun waitlists when site belongs to another org and imsOrgId is missing', async () => {
         const record = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -4327,8 +4632,8 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setUpdatedBy).to.have.been.calledWith('system');
-        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('system');
+        expect(record.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
@@ -4731,7 +5036,7 @@ describe('PlgOnboardingController', () => {
         expect(record.save).to.have.been.called;
       });
 
-      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: falls back to system updatedBy', async () => {
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED alternateDomain: retires current record when imsOrgId is missing', async () => {
         const record = createMockOnboarding({
           imsOrgId: '',
           status: 'WAITLISTED',
@@ -4760,7 +5065,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setUpdatedBy).to.have.been.calledWith('system');
+        expect(record.setUpdatedBy).to.not.have.been.called;
       });
 
       it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: removes all enrollments when existing org is internal/demo', async () => {
@@ -5170,7 +5475,7 @@ describe('PlgOnboardingController', () => {
           expect(mockOnboarding.save).to.have.been.called;
         });
 
-        it('falls back to system updatedBy when record imsOrgId is missing', async () => {
+        it('updates status when record imsOrgId is missing', async () => {
           const record = createMockOnboarding({ imsOrgId: '' });
           mockDataAccess.PlgOnboarding.findById.resolves(record);
 
@@ -5182,7 +5487,9 @@ describe('PlgOnboardingController', () => {
           });
 
           expect(res.status).to.equal(200);
-          expect(record.setUpdatedBy).to.have.been.calledWith('system');
+          expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+          expect(record.setUpdatedBy).to.not.have.been.called;
+          expect(record.save).to.have.been.called;
         });
       });
 
