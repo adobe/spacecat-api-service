@@ -69,10 +69,6 @@ const REVIEW_REASONS = {
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 /**
- * Reviewer id for system inactivation of waitlisted rows during PLG onboarding (not the end user).
- */
-const SYSTEM_AUTO_INACTIVATE_REVIEWER = 'system:auto-inactivate';
-/**
  * Derives the review check key from the onboarding record's current state.
  * @param {object} onboarding - The PlgOnboarding record.
  * @returns {string|null} The check key enum value, or null if unknown.
@@ -173,9 +169,19 @@ async function postPlgOnboardingNotification(onboarding, context) {
     message += `\n• *Site ID:* \`${siteId}\``;
   }
 
-  const waitlistReason = onboarding.getWaitlistReason();
-  if (waitlistReason) {
-    message += `\n• *Reason:* ${waitlistReason}`;
+  if ([STATUSES.WAITLISTED, STATUSES.WAITING_FOR_IP_ALLOWLISTING].includes(status)) {
+    const waitlistReason = onboarding.getWaitlistReason();
+    if (waitlistReason) {
+      message += `\n• *Reason:* ${waitlistReason}`;
+    }
+
+    const botBlocker = onboarding.getBotBlocker();
+    if (botBlocker?.type) {
+      message += `\n• *Bot Blocker:* ${botBlocker.type}`;
+      if (botBlocker.ipsToAllowlist?.length) {
+        message += ` (IPs to allowlist: ${botBlocker.ipsToAllowlist.join(', ')})`;
+      }
+    }
   }
 
   if (status === STATUSES.INACTIVE) {
@@ -183,14 +189,6 @@ async function postPlgOnboardingNotification(onboarding, context) {
     const lastReview = reviews?.length ? reviews[reviews.length - 1] : null;
     if (lastReview?.reason) {
       message += `\n• *Inactivation Reason:* ${lastReview.reason}`;
-    }
-  }
-
-  const botBlocker = onboarding.getBotBlocker();
-  if (botBlocker?.type) {
-    message += `\n• *Bot Blocker:* ${botBlocker.type}`;
-    if (botBlocker.ipsToAllowlist?.length) {
-      message += ` (IPs to allowlist: ${botBlocker.ipsToAllowlist.join(', ')})`;
     }
   }
 
@@ -247,38 +245,6 @@ function getReviewerIdentity(context) {
   const authInfo = context.attributes?.authInfo;
   const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
   return hasText(profile?.email) ? profile.email : 'admin';
-}
-
-async function inactivateWaitlistedOnboardings(existingRecords, onboarding, context) {
-  const waitlistedRecords = existingRecords.filter(
-    (record) => record.getId() !== onboarding.getId()
-      && record.getDomain() !== onboarding.getDomain()
-      && [STATUSES.WAITLISTED, STATUSES.WAITING_FOR_IP_ALLOWLISTING].includes(record.getStatus()),
-  );
-
-  if (waitlistedRecords.length === 0) {
-    return;
-  }
-
-  const reviewedAt = new Date().toISOString();
-  const reviewedBy = SYSTEM_AUTO_INACTIVATE_REVIEWER;
-  await Promise.all(waitlistedRecords.map(async (record) => {
-    const reviews = record.getReviews() || [];
-    record.setStatus(STATUSES.INACTIVE);
-    record.setReviews([...reviews, {
-      reason: `Inactivated this domain to start onboarding ${onboarding.getDomain()} for the same IMS org.`,
-      decision: REVIEW_DECISIONS.BYPASSED,
-      reviewedBy,
-      reviewedAt,
-      justification: 'System action to start onboarding for new domain in the same IMS org.',
-    }]);
-    await record.save();
-    await postPlgOnboardingNotification(record, context);
-  }));
-
-  context.log.info(
-    `IMS org ${onboarding.getImsOrgId()}: inactivated ${waitlistedRecords.length} waitlisted onboarding record(s) for new domain ${onboarding.getDomain()}`,
-  );
 }
 
 async function ensureAsoEntitlement(site, context) {
@@ -612,12 +578,11 @@ async function performAsoPlgOnboarding({
   }
   // Guard: only one domain per IMS org can be onboarded
   const existingRecords = await PlgOnboarding.allByImsOrgId(imsOrgId);
-  await inactivateWaitlistedOnboardings(existingRecords, onboarding, context);
   const alreadyOnboarded = existingRecords
     .find((r) => r.getDomain() !== domain && r.getStatus() === STATUSES.ONBOARDED);
   if (alreadyOnboarded) {
     // If the existing onboarded site has no active PLG work (no open suggestions, and no
-    // completed audit with resolved suggestions), displace it: mark the old domain inactive,
+    // completed audit with resolved suggestions), displace it: waitlist the old domain,
     // revoke its ASO enrollment, and continue onboarding the new domain.
     // NOTE: this check-then-act is not atomic. Two concurrent requests for the same IMS org
     // could both pass this check and both proceed to onboard, temporarily violating the
@@ -631,7 +596,7 @@ async function performAsoPlgOnboarding({
 
     if (canDisplace) {
       log.info(`IMS org ${imsOrgId}: displacing domain ${alreadyOnboarded.getDomain()} (site ${alreadyOnboardedSiteId}) for new domain ${domain}`);
-      alreadyOnboarded.setStatus(STATUSES.INACTIVE);
+      alreadyOnboarded.setStatus(STATUSES.WAITLISTED);
       alreadyOnboarded.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} was replaced by ${domain} — it had no active suggestions and a new domain '${domain}' started onboarding for current org.`);
       await alreadyOnboarded.save();
       await postPlgOnboardingNotification(alreadyOnboarded, context);
@@ -707,6 +672,8 @@ async function performAsoPlgOnboarding({
       await updateLaunchDarklyFlags(site, context);
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
+      onboarding.setWaitlistReason(null);
+      onboarding.setBotBlocker(null);
       onboarding.setSteps(steps);
       onboarding.setCompletedAt(new Date().toISOString());
       if (updatedBy) {
@@ -1099,6 +1066,8 @@ async function performAsoPlgOnboarding({
 
     // Mark as completed
     onboarding.setStatus(STATUSES.ONBOARDED);
+    onboarding.setWaitlistReason(null);
+    onboarding.setBotBlocker(null);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
     if (updatedBy) {
