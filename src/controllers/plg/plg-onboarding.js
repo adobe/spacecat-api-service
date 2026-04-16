@@ -705,30 +705,31 @@ async function performAsoPlgOnboarding({
       const existingOrgId = site.getOrganizationId();
 
       if (existingOrgId !== organizationId) {
-        const existingOrg = await Organization.findById(existingOrgId);
-        /* c8 ignore next */
-        const existingImsOrgId = existingOrg?.getImsOrgId?.() || existingOrgId;
-        /* c8 ignore next */
-        const existingOrgName = existingOrg?.getName?.() || existingOrgId;
-        let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
-        const siteEnrollments = await site.getSiteEnrollments();
-        if (!siteEnrollments || siteEnrollments.length === 0) {
-          const currentOrgName = organization.getName();
-          waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${currentOrgName}'.`;
-        } else if (isInternalOrg(existingOrgId, env)) {
-          const currentOrgName = organization.getName();
-          waitlistReason += ` This domain is currently in a demo org '${existingOrgName}'. It can be moved to '${currentOrgName}'.`;
+        if (isInternalOrg(existingOrgId, env)) {
+          log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — continuing PLG onboarding without waitlist`);
         } else {
-          const currentOrgName = organization.getName();
-          waitlistReason += ` This domain cannot be moved to '${currentOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+          const existingOrg = await Organization.findById(existingOrgId);
+          /* c8 ignore next */
+          const existingImsOrgId = existingOrg?.getImsOrgId?.() || existingOrgId;
+          /* c8 ignore next */
+          const existingOrgName = existingOrg?.getName?.() || existingOrgId;
+          let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
+          const siteEnrollments = await site.getSiteEnrollments();
+          if (!siteEnrollments || siteEnrollments.length === 0) {
+            const currentOrgName = organization.getName();
+            waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${currentOrgName}'.`;
+          } else {
+            const currentOrgName = organization.getName();
+            waitlistReason += ` This domain cannot be moved to '${currentOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+          }
+          onboarding.setStatus(STATUSES.WAITLISTED);
+          onboarding.setWaitlistReason(waitlistReason);
+          onboarding.setSiteId(site.getId());
+          onboarding.setSteps(steps);
+          await onboarding.save();
+          await postPlgOnboardingNotification(onboarding, context);
+          return onboarding;
         }
-        onboarding.setStatus(STATUSES.WAITLISTED);
-        onboarding.setWaitlistReason(waitlistReason);
-        onboarding.setSiteId(site.getId());
-        onboarding.setSteps(steps);
-        await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, context);
-        return onboarding;
       }
     }
 
@@ -1074,6 +1075,7 @@ function PlgOnboardingController(ctx) {
     }
 
     const { domain, imsOrgId: requestedImsOrgId } = data;
+    const isFromBackoffice = data.fromBackoffice === true;
 
     if (!hasText(domain)) {
       return badRequest('domain is required');
@@ -1117,7 +1119,9 @@ function PlgOnboardingController(ctx) {
 
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
-      onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
+      if (!isFromBackoffice) {
+        onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
+      }
       await onboarding.save();
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
@@ -1290,7 +1294,7 @@ function PlgOnboardingController(ctx) {
    */
   const update = async (context) => {
     const {
-      dataAccess: da, params, data, env,
+      dataAccess: da, params, data,
     } = context;
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
@@ -1500,14 +1504,9 @@ function PlgOnboardingController(ctx) {
           if (siteConfig?.moveSite) {
             const siteEnrollments = await site.getSiteEnrollments();
             if (siteEnrollments && siteEnrollments.length > 0) {
-              if (isInternalOrg(existingOrgId, env)) {
-                log.info(`Site ${site.getId()} is in internal/demo org — revoking all enrollments before move`);
-                await Promise.all(siteEnrollments.map((e) => e.remove()));
-              } else {
-                const existingOrg = await Organization.findById(existingOrgId);
-                /* c8 ignore next */
-                return badRequest(`Cannot move domain ${domain} — it is already set up with active products in org '${existingOrg?.getName?.() || existingOrgId}'.`);
-              }
+              const existingOrg = await Organization.findById(existingOrgId);
+              /* c8 ignore next */
+              return badRequest(`Cannot move domain ${domain} — it is already set up with active products in org '${existingOrg?.getName?.() || existingOrgId}'.`);
             }
             const currentOrgId = onboarding.getOrganizationId();
             if (!currentOrgId) {

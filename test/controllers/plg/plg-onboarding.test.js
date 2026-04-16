@@ -861,7 +861,26 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
       expect(mockOnboarding.setCompletedAt).to.have.been.called;
       expect(mockOnboarding.setSteps).to.have.been.called;
+      expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('system');
       expect(mockOnboarding.save).to.have.been.called;
+    });
+
+    it('does not set updatedBy when fromBackoffice is true', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN, fromBackoffice: true });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setUpdatedBy).to.not.have.been.called;
+    });
+
+    it('still sets updatedBy when fromBackoffice is not a boolean true', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN, fromBackoffice: 'true' });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('system');
     });
 
     it('resumes existing onboarding record for same imsOrgId+domain', async () => {
@@ -1742,7 +1761,7 @@ describe('PlgOnboardingController', () => {
         .to.have.been.calledWithMatch(/already assigned to another organization/);
     });
 
-    it('waitlists when site belongs to ASO_DEMO_ORG with no enrollments', async () => {
+    it('continues onboarding when site belongs to ASO_DEMO_ORG with no enrollments', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -1751,13 +1770,11 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(existingSite.setOrganizationId).to.not.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/already assigned to another organization/);
+      expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('includes demo org message in waitlist reason when site in demo org has enrollments', async () => {
+    it('continues onboarding when site in demo org has enrollments (internal org bypass)', async () => {
       const existingSite = createMockSite({
         orgId: DEMO_ORG_ID,
         siteEnrollments: [{ getId: () => 'enroll-1' }],
@@ -1768,9 +1785,8 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWithMatch(/demo org.*can be moved to/);
+      expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
     it('treats org as non-internal when ASO_PLG_EXCLUDED_ORGS is not set', async () => {
@@ -5133,7 +5149,7 @@ describe('PlgOnboardingController', () => {
         expect(record.setUpdatedBy).to.not.have.been.called;
       });
 
-      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: removes all enrollments when existing org is internal/demo', async () => {
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: returns 400 when existing org is internal/demo and site has enrollments', async () => {
         const enrollment1 = { getId: () => 'enroll-1', remove: sandbox.stub().resolves() };
         const enrollment2 = { getId: () => 'enroll-2', remove: sandbox.stub().resolves() };
         const existingSite = createMockSite({
@@ -5146,12 +5162,14 @@ describe('PlgOnboardingController', () => {
           siteId: TEST_SITE_ID,
           organizationId: TEST_ORG_ID,
         });
-        const newSite = createMockSite({ orgId: TEST_ORG_ID });
+        const demoOrg = {
+          getId: sandbox.stub().returns(DEMO_ORG_ID),
+          getName: sandbox.stub().returns('Demo Org'),
+        };
 
         mockDataAccess.PlgOnboarding.findById.resolves(record);
         mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-        mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
-        mockDataAccess.Site.create.resolves(newSite);
+        mockDataAccess.Organization.findById.resolves(demoOrg);
 
         const res = await AdminAccessPlgController({ log: mockLog }).update({
           dataAccess: mockDataAccess,
@@ -5162,9 +5180,10 @@ describe('PlgOnboardingController', () => {
           log: mockLog,
         });
 
-        expect(res.status).to.equal(200);
-        expect(enrollment1.remove).to.have.been.called;
-        expect(enrollment2.remove).to.have.been.called;
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('active products');
+        expect(enrollment1.remove).to.not.have.been.called;
+        expect(enrollment2.remove).to.not.have.been.called;
       });
 
       it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: returns 400 when onboarding has no organizationId', async () => {
