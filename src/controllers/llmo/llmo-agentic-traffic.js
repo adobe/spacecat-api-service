@@ -93,6 +93,7 @@ function parseAgenticTrafficParams(context) {
     agentType: q.agentType || q.agent_type || null,
     userAgent: q.userAgent || q.user_agent || null,
     contentType: q.contentType || q.content_type || null,
+    successRate: q.successRate || q.success_rate || null,
   };
 }
 
@@ -109,6 +110,7 @@ function buildRpcParams(siteId, parsed) {
     p_agent_type: parsed.agentType,
     p_user_agent: parsed.userAgent,
     p_content_type: parsed.contentType,
+    p_success_rate: parsed.successRate,
   };
 }
 

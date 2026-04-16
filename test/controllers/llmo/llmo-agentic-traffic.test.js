@@ -251,6 +251,7 @@ describe('llmo-agentic-traffic', () => {
             agent_type: 'Chatbots',
             user_agent: 'GPTBot',
             content_type: 'html',
+            success_rate: 'high',
           },
         },
       });
@@ -263,6 +264,7 @@ describe('llmo-agentic-traffic', () => {
         p_agent_type: 'Chatbots',
         p_user_agent: 'GPTBot',
         p_content_type: 'html',
+        p_success_rate: 'high',
       });
     });
 
@@ -726,6 +728,19 @@ describe('llmo-agentic-traffic', () => {
         p_page_limit: 75,
         p_page_offset: 10,
         p_url_path_search: 'pricing',
+      });
+    });
+
+    it('forwards successRate filter as p_success_rate to the RPC', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', successRate: 'low' },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_success_rate: 'low',
       });
     });
 
