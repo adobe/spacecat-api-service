@@ -744,6 +744,32 @@ describe('llmo-agentic-traffic', () => {
       });
     });
 
+    it('accepts snake_case success_rate alias', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', success_rate: 'medium' },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_success_rate: 'medium',
+      });
+    });
+
+    it('normalizes unknown successRate values to null instead of forwarding to the RPC', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', successRate: 'invalid-bucket' },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_success_rate: null,
+      });
+    });
+
     it('normalizes invalid page offsets to 0', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({
