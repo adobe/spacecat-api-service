@@ -1778,7 +1778,8 @@ function SuggestionsController(ctx, sqs, env) {
           siteId,
           opportunityId,
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          name: context.data?.name || opportunity.getType(),
+          name: context.data?.name
+            || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
           promptsCount: prompts.length,
           promptsLocation: promptsS3Key,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,

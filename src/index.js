@@ -29,6 +29,7 @@ import {
   s2sAuthWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
   elevatedSlackClientWrapper,
@@ -94,6 +95,7 @@ import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
+import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
@@ -136,6 +138,41 @@ function localCORSWrapper(fn) {
 }
 /* c8 ignore stop */
 
+/* c8 ignore start */
+/**
+ * Auth handler that bypasses authentication when SKIP_AUTH=true.
+ * For local development only — injects a mock admin identity.
+ */
+class SkipAuthHandler extends AbstractHandler {
+  constructor(log) {
+    super('skipAuth', log);
+  }
+
+  // eslint-disable-next-line no-unused-vars,class-methods-use-this
+  async checkAuth(request, context) {
+    if (context.env?.SKIP_AUTH !== 'true') {
+      return null;
+    }
+    // Defense-in-depth: refuse to skip auth in a deployed Lambda environment
+    if (context.func?.name || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      this.log('SKIP_AUTH is true but running in Lambda - ignoring', 'warn');
+      return null;
+    }
+    this.log('SKIP_AUTH is true - injecting mock admin identity', 'info');
+    return new AuthInfo()
+      .withAuthenticated(true)
+      .withProfile({
+        user_id: 'local-dev-admin',
+        email: 'admin@localhost',
+        is_admin: true,
+        tenants: [],
+      })
+      .withType('api_key')
+      .withScopes([{ name: 'admin' }]);
+  }
+}
+/* c8 ignore stop */
+
 /**
  * This is the main function
  * @param {Request} request the request object (see fetch api)
@@ -143,29 +180,8 @@ function localCORSWrapper(fn) {
  * @returns {Response} a response
  */
 async function run(request, context) {
-  const { log, pathInfo, env } = context;
+  const { log, pathInfo } = context;
   const { route, suffix, method } = pathInfo;
-
-  // Add mock authInfo when authentication is skipped
-  /* c8 ignore start */
-  if (env.SKIP_AUTH === 'true' && !context.attributes?.authInfo) {
-    if (!context.attributes) {
-      context.attributes = {};
-    }
-    // Create a mock admin authInfo
-    context.attributes.authInfo = new AuthInfo()
-      .withAuthenticated(true)
-      .withProfile({
-        user_id: 'local-dev-admin',
-        email: 'admin@localhost',
-        is_admin: true,
-        // Empty tenants means hasOrganization will return false, but is_admin bypasses that
-        tenants: [],
-      })
-      .withType('api_key')
-      .withScopes([{ name: 'admin' }]);
-  }
-  /* c8 ignore stop */
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
@@ -233,6 +249,7 @@ async function run(request, context) {
     const featureFlagsController = FeatureFlagsController(context);
     const autofixChecksController = AutofixChecksController(context);
     const pageRelationshipsController = PageRelationshipsController(context);
+    const drsBpPgAuditController = DrsBpPgAuditController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -284,6 +301,7 @@ async function run(request, context) {
       pageRelationshipsController,
       ephemeralRunController,
       autofixChecksController,
+      drsBpPgAuditController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -307,6 +325,9 @@ async function run(request, context) {
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
       }
+      if (params.executionId && !isValidUUID(params.executionId)) {
+        return badRequest('Execution Id is invalid. Please provide a valid UUID.');
+      }
       context.params = params;
       context.request = request;
 
@@ -329,7 +350,9 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
 const wrappedMain = wrap(run)
   .with(authWrapper, {
-    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+    authHandlers: [
+      SkipAuthHandler, JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler,
+    ],
   })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 

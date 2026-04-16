@@ -106,15 +106,21 @@ describe('edge-routing-auth', () => {
   });
 
   describe('hasPaidLlmoProductContext', () => {
-    it('returns false when productContexts missing or empty', () => {
+    it('returns false when projectedProductContext missing or empty', () => {
       expect(hasPaidLlmoProductContext({})).to.equal(false);
-      expect(hasPaidLlmoProductContext({ productContexts: [] })).to.equal(false);
+      expect(hasPaidLlmoProductContext({ projectedProductContext: [] })).to.equal(false);
     });
 
     it('returns true when dx_llmo service code is present', () => {
       expect(hasPaidLlmoProductContext({
-        productContexts: [{ serviceCode: 'dx_llmo' }],
+        projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }],
       })).to.equal(true);
+    });
+
+    it('returns false when service code does not match', () => {
+      expect(hasPaidLlmoProductContext({
+        projectedProductContext: [{ prodCtx: { serviceCode: 'other' } }],
+      })).to.equal(false);
     });
   });
 
@@ -129,7 +135,9 @@ describe('edge-routing-auth', () => {
         },
       },
       imsClient: {
-        getImsUserProfile: sandbox.stub().resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] }),
+        getImsUserProfile: sandbox.stub().resolves({
+          projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }],
+        }),
         getImsUserOrganizations: sandbox.stub().resolves([]),
       },
     });
@@ -164,12 +172,14 @@ describe('edge-routing-auth', () => {
 
     it('rejects paid users without LLMO product context', async () => {
       const ctx = baseCtx();
-      ctx.imsClient.getImsUserProfile.resolves({ productContexts: [{ serviceCode: 'other' }] });
+      ctx.imsClient.getImsUserProfile.resolves({
+        projectedProductContext: [{ prodCtx: { serviceCode: 'other' } }],
+      });
       await expect(
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('User does not have LLMO product access');
+      ).to.be.rejectedWith('Adobe LLM Optimizer Users\' IMS Product Profile access');
     });
 
     it('rejects trial when ims org id is missing', async () => {
@@ -197,7 +207,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('rejects trial when matching org has no groups array', async () => {
@@ -212,7 +222,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('allows trial users in LLMO Admin group for matching org', async () => {
@@ -241,7 +251,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('rejects unknown entitlement tier', async () => {

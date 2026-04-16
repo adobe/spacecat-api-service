@@ -55,12 +55,12 @@ export async function getImsTokenFromCookie(context) {
  * @returns {boolean}
  */
 export function hasPaidLlmoProductContext(imsUserProfile) {
-  const productContexts = imsUserProfile?.productContexts;
+  const productContexts = imsUserProfile?.projectedProductContext;
   if (!Array.isArray(productContexts) || productContexts.length === 0) {
     return false;
   }
   return productContexts.some(
-    (ctx) => LLMO_IMS_SERVICE_CODES.includes(ctx?.serviceCode),
+    (ctx) => LLMO_IMS_SERVICE_CODES.includes(ctx?.prodCtx?.serviceCode),
   );
 }
 
@@ -117,7 +117,7 @@ export async function authorizeEdgeCdnRouting(context, {
 
     if (!hasPaidLlmoProductContext(imsUserProfile)) {
       log.warn(`[edge-routing-auth] Paid user lacks LLMO product context for site ${siteId}`);
-      const err = new Error('User does not have LLMO product access');
+      const err = new Error('User does not have \'Adobe LLM Optimizer Users\' IMS Product Profile access');
       err.status = 403;
       throw err;
     }
@@ -147,7 +147,7 @@ export async function authorizeEdgeCdnRouting(context, {
     }
 
     if (!isGroupMember) {
-      const err = new Error(`Only ${LLMO_ADMIN_GROUP_NAME} group members can configure CDN routing`);
+      const err = new Error(`Only '${LLMO_ADMIN_GROUP_NAME}' IMS Group members can configure CDN routing`);
       err.status = 403;
       throw err;
     }
