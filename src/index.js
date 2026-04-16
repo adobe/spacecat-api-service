@@ -325,6 +325,9 @@ async function run(request, context) {
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
       }
+      if (params.executionId && !isValidUUID(params.executionId)) {
+        return badRequest('Execution Id is invalid. Please provide a valid UUID.');
+      }
       context.params = params;
       context.request = request;
 

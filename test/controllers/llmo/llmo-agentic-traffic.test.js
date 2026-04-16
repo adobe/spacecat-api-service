@@ -609,6 +609,16 @@ describe('llmo-agentic-traffic', () => {
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
     });
 
+    it('falls back to total_hits for an invalid sortBy value', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_by_user_agent: { data: [], error: null },
+      });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', sortBy: 'DROP TABLE' } });
+      const handler = createAgenticTrafficByUserAgentHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_sort_by).to.equal('total_hits');
+    });
+
     it('returns 500 when RPC returns an error', async () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: { data: null, error: { message: 'db error' } },
@@ -629,6 +639,7 @@ describe('llmo-agentic-traffic', () => {
           data: [{
             host: 'example.com',
             url_path: '/page',
+            total_count: 1,
             total_hits: 150,
             unique_agents: 3,
             top_agent: 'ChatGPT-User',
@@ -647,21 +658,30 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].host).to.equal('example.com');
-      expect(body[0].urlPath).to.equal('/page');
-      expect(body[0].topAgent).to.equal('ChatGPT-User');
-      expect(body[0].topAgentType).to.equal('Chatbots');
-      expect(body[0].responseCodes).to.deep.equal([200, 301]);
-      expect(body[0].deployedAtEdge).to.equal(true);
+      expect(body.totalCount).to.equal(1);
+      expect(body.rows[0].host).to.equal('example.com');
+      expect(body.rows[0].urlPath).to.equal('/page');
+      expect(body.rows[0].topAgent).to.equal('ChatGPT-User');
+      expect(body.rows[0].topAgentType).to.equal('Chatbots');
+      expect(body.rows[0].responseCodes).to.deep.equal([200, 301]);
+      expect(body.rows[0].deployedAtEdge).to.equal(true);
     });
 
-    it('caps limit at 500', async () => {
+    it('caps limit at 500 via legacy "limit" param', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       const rpcCallArgs = client.rpc.firstCall.args[1];
       expect(rpcCallArgs.p_page_limit).to.equal(500);
+    });
+
+    it('accepts "pageSize" as the documented parameter name', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', pageSize: 25 } });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_page_limit).to.equal(25);
     });
 
     it('uses default limit of 50 when not specified', async () => {
@@ -678,6 +698,14 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
+    });
+
+    it('falls back to total_hits for an invalid sortBy value', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', sortBy: 'DROP TABLE' } });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_sort_by).to.equal('total_hits');
     });
 
     it('forwards pagination and path search params to the new RPC signature', async () => {
@@ -742,13 +770,13 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].host).to.equal('');
-      expect(body[0].urlPath).to.equal('');
-      expect(body[0].topAgent).to.equal('');
-      expect(body[0].responseCodes).to.deep.equal([]);
-      expect(body[0].successRate).to.be.null;
-      expect(body[0].avgTtfbMs).to.be.null;
-      expect(body[0].avgCitabilityScore).to.be.null;
+      expect(body.rows[0].host).to.equal('');
+      expect(body.rows[0].urlPath).to.equal('');
+      expect(body.rows[0].topAgent).to.equal('');
+      expect(body.rows[0].responseCodes).to.deep.equal([]);
+      expect(body.rows[0].successRate).to.be.null;
+      expect(body.rows[0].avgTtfbMs).to.be.null;
+      expect(body.rows[0].avgCitabilityScore).to.be.null;
     });
 
     it('returns null for fields that are undefined in the response', async () => {
@@ -774,10 +802,10 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].successRate).to.be.null;
-      expect(body[0].avgTtfbMs).to.be.null;
-      expect(body[0].avgCitabilityScore).to.be.null;
-      expect(body[0].deployedAtEdge).to.equal(false);
+      expect(body.rows[0].successRate).to.be.null;
+      expect(body.rows[0].avgTtfbMs).to.be.null;
+      expect(body.rows[0].avgCitabilityScore).to.be.null;
+      expect(body.rows[0].deployedAtEdge).to.equal(false);
     });
 
     it('returns 500 when RPC returns an error', async () => {

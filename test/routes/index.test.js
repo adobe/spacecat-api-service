@@ -619,6 +619,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail',
       'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail',
+      'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources',
       'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers',
       'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice',

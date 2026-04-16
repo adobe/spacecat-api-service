@@ -134,7 +134,7 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
   });
 
   const brandRegions = allRegions.size > 0 ? Array.from(allRegions) : ['gl'];
-  const brandUrls = Array.from(allUrls).map((url) => ({ value: url, type: 'url' }));
+  const brandUrls = Array.from(allUrls).map((url) => ({ value: url, type: 'base' }));
 
   // Only create a brand if we have brand aliases
   if (brandAliases.length === 0) {
