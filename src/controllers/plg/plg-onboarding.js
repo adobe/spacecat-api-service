@@ -178,6 +178,14 @@ async function postPlgOnboardingNotification(onboarding, context) {
     message += `\n• *Reason:* ${waitlistReason}`;
   }
 
+  if (status === STATUSES.INACTIVE) {
+    const reviews = onboarding.getReviews();
+    const lastReview = reviews?.length ? reviews[reviews.length - 1] : null;
+    if (lastReview?.reason) {
+      message += `\n• *Inactivation Reason:* ${lastReview.reason}`;
+    }
+  }
+
   const botBlocker = onboarding.getBotBlocker();
   if (botBlocker?.type) {
     message += `\n• *Bot Blocker:* ${botBlocker.type}`;
@@ -1170,8 +1178,8 @@ function PlgOnboardingController(ctx) {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
       if (!isFromBackoffice) {
         onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
+        await onboarding.save();
       }
-      await onboarding.save();
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
       log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);
