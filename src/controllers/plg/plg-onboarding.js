@@ -556,7 +556,7 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @returns {Promise<object>} PlgOnboarding record
  */
 async function performAsoPlgOnboarding({
-  domain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
+  domain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId, updatedBy,
 }, context) {
   const { dataAccess, env, log } = context;
   const {
@@ -688,6 +688,9 @@ async function performAsoPlgOnboarding({
       }
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
+      if (updatedBy) {
+        onboarding.setUpdatedBy(updatedBy);
+      }
       await onboarding.save();
       await postPlgOnboardingNotification(onboarding, context);
       return onboarding;
@@ -706,6 +709,9 @@ async function performAsoPlgOnboarding({
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setSteps(steps);
       onboarding.setCompletedAt(new Date().toISOString());
+      if (updatedBy) {
+        onboarding.setUpdatedBy(updatedBy);
+      }
       await onboarding.save();
       await postPlgOnboardingNotification(onboarding, context);
       return onboarding;
@@ -751,6 +757,9 @@ async function performAsoPlgOnboarding({
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
         onboarding.setSteps(steps);
+        if (updatedBy) {
+          onboarding.setUpdatedBy(updatedBy);
+        }
         await onboarding.save();
         await postPlgOnboardingNotification(onboarding, context);
         return onboarding;
@@ -783,6 +792,9 @@ async function performAsoPlgOnboarding({
           onboarding.setWaitlistReason(waitlistReason);
           onboarding.setSiteId(site.getId());
           onboarding.setSteps(steps);
+          if (updatedBy) {
+            onboarding.setUpdatedBy(updatedBy);
+          }
           await onboarding.save();
           await postPlgOnboardingNotification(onboarding, context);
           return onboarding;
@@ -809,6 +821,9 @@ async function performAsoPlgOnboarding({
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
+      if (updatedBy) {
+        onboarding.setUpdatedBy(updatedBy);
+      }
       await onboarding.save();
       await postPlgOnboardingNotification(onboarding, context);
 
@@ -1086,6 +1101,9 @@ async function performAsoPlgOnboarding({
     onboarding.setStatus(STATUSES.ONBOARDED);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
+    if (updatedBy) {
+      onboarding.setUpdatedBy(updatedBy);
+    }
     await onboarding.save();
     await postPlgOnboardingNotification(onboarding, context);
 
@@ -1098,6 +1116,9 @@ async function performAsoPlgOnboarding({
       message: (error.clientError || error.conflict)
         ? error.message : 'An internal error occurred',
     });
+    if (updatedBy) {
+      onboarding.setUpdatedBy(updatedBy);
+    }
     try {
       await onboarding.save();
       await postPlgOnboardingNotification(onboarding, context);
@@ -1174,12 +1195,10 @@ function PlgOnboardingController(ctx) {
       }
     }
 
+    const updatedBy = isFromBackoffice ? null : (authInfo?.getProfile()?.email || 'system');
+
     try {
-      const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
-      if (!isFromBackoffice) {
-        onboarding.setUpdatedBy(authInfo?.getProfile()?.email || 'system');
-        await onboarding.save();
-      }
+      const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId, updatedBy }, context);
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
       log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);
@@ -1479,7 +1498,7 @@ function PlgOnboardingController(ctx) {
           // Re-run PLG flow for the current domain
           await onboarding.save();
           const result = await performAsoPlgOnboarding(
-            { domain: onboarding.getDomain(), imsOrgId },
+            { domain: onboarding.getDomain(), imsOrgId, updatedBy: reviewedBy },
             context,
           );
           return ok(PlgOnboardingDto.toAdminJSON(result));
@@ -1530,6 +1549,7 @@ function PlgOnboardingController(ctx) {
               /* c8 ignore next */
               presetAuthorUrl: siteConfig.authorUrl || null,
               presetProgramId: siteConfig.programId ?? null,
+              updatedBy: reviewedBy,
             },
             context,
           );
@@ -1558,7 +1578,11 @@ function PlgOnboardingController(ctx) {
             await postPlgOnboardingNotification(onboarding, context);
             log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
             const result = await performAsoPlgOnboarding(
-              { domain: siteConfig.alternateDomain, imsOrgId: onboarding.getImsOrgId() },
+              {
+                domain: siteConfig.alternateDomain,
+                imsOrgId: onboarding.getImsOrgId(),
+                updatedBy: reviewedBy,
+              },
               context,
             );
             return ok(PlgOnboardingDto.toAdminJSON(result));
@@ -1586,7 +1610,7 @@ function PlgOnboardingController(ctx) {
             await site.save();
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             const result = await performAsoPlgOnboarding(
-              { domain, imsOrgId: onboarding.getImsOrgId() },
+              { domain, imsOrgId: onboarding.getImsOrgId(), updatedBy: reviewedBy },
               context,
             );
             return ok(PlgOnboardingDto.toAdminJSON(result));

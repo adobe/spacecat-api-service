@@ -4433,7 +4433,7 @@ describe('PlgOnboardingController', () => {
 
         expect(res.status).to.equal(500);
         expect(waitlistedRecord.setUpdatedBy).to.not.have.been.called;
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: rerun waitlists a non-AEM domain when imsOrgId is missing', async () => {
@@ -4468,7 +4468,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
@@ -4524,7 +4524,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
         expect(rerunRecord.setWaitlistReason)
           .to.have.been.calledWithMatch(/another domain is already onboarded for this IMS org/);
@@ -4566,7 +4566,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
       });
 
@@ -4606,7 +4606,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('ONBOARDED');
       });
 
@@ -4649,7 +4649,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('ONBOARDED');
       });
 
@@ -4975,7 +4975,7 @@ describe('PlgOnboardingController', () => {
 
         expect(res.status).to.equal(200);
         expect(record.setUpdatedBy).to.not.have.been.called;
-        expect(rerunRecord.setUpdatedBy).to.not.have.been.called;
+        expect(rerunRecord.setUpdatedBy).to.have.been.calledWith('ese@adobe.com');
         expect(rerunRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
