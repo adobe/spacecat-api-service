@@ -390,6 +390,12 @@ const routeRequiredCapabilities = {
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
 
+  // Monitoring
+  // Note: DRS workers call this via admin x-api-key (not S2S JWT) — they run in a separate
+  // AWS account and do not hold an S2S consumer registration. The capability here gates
+  // future S2S JWT callers only; admin key access bypasses capability checks entirely.
+  'GET /monitoring/drs-bp-pg-audit': 'drsBpPgAudit:read',
+
   // API Keys
   'POST /tools/api-keys': 'apiKey:write',
   'DELETE /tools/api-keys/:id': 'apiKey:write',
