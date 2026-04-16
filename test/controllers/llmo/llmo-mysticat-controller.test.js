@@ -99,6 +99,7 @@ describe('LlmoMysticatController', () => {
     const controller = LlmoMysticatController(mockContext);
 
     expect(controller.getFilterDimensions).to.be.a('function');
+    expect(controller.getExecutionSources).to.be.a('function');
     expect(controller.getAgenticTrafficGlobal).to.be.a('function');
     expect(controller.postAgenticTrafficGlobal).to.be.a('function');
   });
@@ -187,5 +188,56 @@ describe('LlmoMysticatController', () => {
     const result = await controller.getFilterDimensions(mockContext);
 
     expect(result.status).to.equal(400);
+  });
+
+  // ── getSiteAndValidateAccess (used by agentic traffic site-scoped handlers) ──
+
+  it('getAgenticTrafficKpis validates site and returns data', async () => {
+    const mockSite = {
+      getOrganizationId: () => 'org-123',
+    };
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(mockSite);
+    mockContext.params = { ...mockContext.params, siteId: 'site-123' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(mockContext.dataAccess.Site.findById).to.have.been.calledWith('site-123');
+    expect(mockContext.dataAccess.Organization.findById).to.have.been.calledWith('org-123');
+    expect(result.status).to.equal(200);
+  });
+
+  it('getAgenticTrafficKpis returns 400 when site not found', async () => {
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(null);
+    mockContext.params = { ...mockContext.params, siteId: 'missing-site' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(result.status).to.equal(400);
+  });
+
+  it('getAgenticTrafficKpis returns 400 when organization not found for site', async () => {
+    const mockSite = { getOrganizationId: () => 'org-unknown' };
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(mockSite);
+    mockContext.dataAccess.Organization.findById.resolves(null);
+    mockContext.params = { ...mockContext.params, siteId: 'site-123' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(result.status).to.equal(400);
+  });
+
+  it('getAgenticTrafficKpis returns 403 when user has no LLMO org access', async () => {
+    const mockSite = { getOrganizationId: () => 'org-123' };
+    mockContext.dataAccess.Site.findById = sinon.stub().resolves(mockSite);
+    mockAccessControlUtil.hasAccess.resolves(false);
+    mockContext.params = { ...mockContext.params, siteId: 'site-123' };
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getAgenticTrafficKpis(mockContext);
+
+    expect(result.status).to.equal(403);
   });
 });

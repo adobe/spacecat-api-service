@@ -270,6 +270,19 @@ describe('getRouteHandlers', () => {
     getFilterDimensions: () => null,
     getAgenticTrafficGlobal: () => null,
     postAgenticTrafficGlobal: () => null,
+    getRegions: () => null,
+    getAgenticTrafficKpis: () => null,
+    getAgenticTrafficKpisTrend: () => null,
+    getAgenticTrafficByRegion: () => null,
+    getAgenticTrafficByCategory: () => null,
+    getAgenticTrafficByPageType: () => null,
+    getAgenticTrafficByStatus: () => null,
+    getAgenticTrafficByUserAgent: () => null,
+    getAgenticTrafficByUrl: () => null,
+    getAgenticTrafficFilterDimensions: () => null,
+    getAgenticTrafficWeeks: () => null,
+    getAgenticTrafficMovers: () => null,
+    getAgenticTrafficUrlBrandPresence: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -512,6 +525,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers',
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
+      'GET /v2/regions',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -534,6 +548,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /llmo/onboard/update-query-index']).to.equal(mockLlmoController.updateQueryIndex);
     expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
     expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
+    expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
     expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
@@ -597,6 +612,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail',
       'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail',
+      'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources',
       'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers',
       'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice',
@@ -859,6 +876,18 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
       'POST /sites/:siteId/autofix-checks',
+      'GET /sites/:siteId/agentic-traffic/kpis',
+      'GET /sites/:siteId/agentic-traffic/kpis-trend',
+      'GET /sites/:siteId/agentic-traffic/by-region',
+      'GET /sites/:siteId/agentic-traffic/by-category',
+      'GET /sites/:siteId/agentic-traffic/by-page-type',
+      'GET /sites/:siteId/agentic-traffic/by-status',
+      'GET /sites/:siteId/agentic-traffic/by-user-agent',
+      'GET /sites/:siteId/agentic-traffic/by-url',
+      'GET /sites/:siteId/agentic-traffic/filter-dimensions',
+      'GET /sites/:siteId/agentic-traffic/weeks',
+      'GET /sites/:siteId/agentic-traffic/movers',
+      'GET /sites/:siteId/agentic-traffic/url-brand-presence',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
