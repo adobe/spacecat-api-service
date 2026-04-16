@@ -89,9 +89,21 @@ function deriveCheckKey(onboarding) {
   return null;
 }
 
+function parseCommaSeparatedEnvList(value) {
+  return (value || '').split(',').map((id) => id.trim()).filter(Boolean);
+}
+
 function isInternalOrg(orgId, env) {
-  const excludedOrgs = (env.ASO_PLG_EXCLUDED_ORGS || '').split(',').map((id) => id.trim()).filter(Boolean);
-  return excludedOrgs.includes(orgId);
+  return parseCommaSeparatedEnvList(env.ASO_PLG_EXCLUDED_ORGS).includes(orgId);
+}
+
+/**
+ * Site IDs that must not use the internal-org waitlist bypass, even when the site lives in an
+ * org listed in ASO_PLG_EXCLUDED_ORGS (e.g. customer demo sites in a shared internal org).
+ * Comma-separated UUIDs in env ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS.
+ */
+function isInternalOrgDemoSite(siteId, env) {
+  return parseCommaSeparatedEnvList(env.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS).includes(siteId);
 }
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
@@ -705,7 +717,7 @@ async function performAsoPlgOnboarding({
       const existingOrgId = site.getOrganizationId();
 
       if (existingOrgId !== organizationId) {
-        if (isInternalOrg(existingOrgId, env)) {
+        if (isInternalOrg(existingOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
           log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — continuing PLG onboarding without waitlist`);
         } else {
           const existingOrg = await Organization.findById(existingOrgId);

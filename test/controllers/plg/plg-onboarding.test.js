@@ -1789,6 +1789,24 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
+    it('waitlists when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {
+      const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const context = {
+        ...buildContext({ domain: TEST_DOMAIN }),
+        env: {
+          ...mockEnv,
+          ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS: `${TEST_SITE_ID}, other-site-uuid`,
+        },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+    });
+
     it('treats org as non-internal when ASO_PLG_EXCLUDED_ORGS is not set', async () => {
       const existingSite = createMockSite({
         orgId: DEMO_ORG_ID,
