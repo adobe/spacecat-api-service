@@ -182,7 +182,7 @@ function LlmoController(ctx) {
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
       const { limit, offset, sheet } = context.data;
-      url.searchParams.set('limit', limit ?? DEFAULT_LLMO_GET_LIMIT);
+      url.searchParams.set('limit', limit || DEFAULT_LLMO_GET_LIMIT);
       if (offset) {
         url.searchParams.set('offset', offset);
       }
@@ -408,7 +408,7 @@ function LlmoController(ctx) {
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
       const { limit, offset, sheet } = context.data;
-      url.searchParams.set('limit', limit ?? DEFAULT_LLMO_GET_LIMIT);
+      url.searchParams.set('limit', limit || DEFAULT_LLMO_GET_LIMIT);
       if (offset) {
         url.searchParams.set('offset', offset);
       }
