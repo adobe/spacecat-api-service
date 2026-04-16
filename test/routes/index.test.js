@@ -415,8 +415,8 @@ describe('getRouteHandlers', () => {
 
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
-    getStatus: sinon.stub(),
     getAllOnboardings: sinon.stub(),
+    getStatus: sinon.stub(),
     update: sinon.stub(),
     createOnboarding: sinon.stub(),
     updateOnboardingStatus: sinon.stub(),
@@ -859,10 +859,10 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
       'POST /sites/:siteId/autofix-checks',
-      'DELETE /plg/records/:plgOnboardingId',
       'GET /plg/onboard/status/:imsOrgId',
       'PATCH /plg/onboard/:onboardingId',
       'PATCH /plg/records/:plgOnboardingId',
+      'DELETE /plg/records/:plgOnboardingId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
