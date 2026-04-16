@@ -34,9 +34,12 @@ import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
 import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
 import { brands } from './seed-data/brands.js';
+import { projectionAudits } from './seed-data/projection-audits.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
+const POSTGRES_CONTAINER = 'spacecat-it-db';
+const POSTGRES_DB = 'mysticat';
 
 /**
  * Inserts rows into a PostgREST table one at a time.
@@ -77,12 +80,13 @@ async function insertRows(table, rows) {
  */
 function clearData() {
   execSync(
-    'docker exec spacecat-it-db psql -U postgres -d mysticat -c "'
+    `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -c "`
     + 'DELETE FROM access_grant_logs;'
     + 'DELETE FROM site_ims_org_accesses;'
     + 'DELETE FROM plg_onboardings;'
     + 'DELETE FROM consumers;'
     + 'DELETE FROM async_jobs;'
+    + 'DELETE FROM projection_audit;'
     + 'DELETE FROM organizations;'
     + '"',
     { stdio: 'pipe', timeout: 10_000 },
@@ -104,6 +108,7 @@ async function seed() {
     insertRows('organizations', organizations),
     insertRows('async_jobs', asyncJobs),
     insertRows('consumers', consumers),
+    insertRows('projection_audit', projectionAudits),
   ]);
 
   // Level 1a: depend on organizations

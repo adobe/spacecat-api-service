@@ -179,7 +179,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('User does not have LLMO product access');
+      ).to.be.rejectedWith('Adobe LLM Optimizer Users\' IMS Product Profile access');
     });
 
     it('rejects trial when ims org id is missing', async () => {
@@ -207,7 +207,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('rejects trial when matching org has no groups array', async () => {
@@ -222,7 +222,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('allows trial users in LLMO Admin group for matching org', async () => {
@@ -251,7 +251,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('rejects unknown entitlement tier', async () => {
