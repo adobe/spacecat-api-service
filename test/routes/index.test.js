@@ -414,6 +414,10 @@ describe('getRouteHandlers', () => {
   };
 
   const mockPlgOnboardingController = {
+    onboard: sinon.stub(),
+    getAllOnboardings: sinon.stub(),
+    getStatus: sinon.stub(),
+    update: sinon.stub(),
     createOnboarding: sinon.stub(),
     updateOnboardingStatus: sinon.stub(),
     deleteOnboarding: sinon.stub(),
@@ -508,6 +512,8 @@ describe('getRouteHandlers', () => {
       'GET /consumers',
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
+      'POST /plg/onboard',
+      'GET /plg/sites',
       'POST /plg/records',
     );
 
@@ -534,6 +540,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
+    expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
+    expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
 
     const expectedDynamicRouteKeys = [
       'GET /audits/latest/:auditType',
@@ -850,6 +858,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
       'POST /sites/:siteId/autofix-checks',
+      'GET /plg/onboard/status/:imsOrgId',
+      'PATCH /plg/onboard/:onboardingId',
       'PATCH /plg/records/:plgOnboardingId',
       'DELETE /plg/records/:plgOnboardingId',
     ];

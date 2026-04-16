@@ -547,7 +547,11 @@ export default function getRouteHandlers(
     // Autofix checks (permission/capability validation before autofix deploy)
     'POST /sites/:siteId/autofix-checks': autofixChecksController.runChecks,
 
-    // PLG onboarding admin records management
+    // PLG Routes
+    'POST /plg/onboard': plgOnboardingController.onboard,
+    'GET /plg/sites': plgOnboardingController.getAllOnboardings,
+    'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
+    'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
     'POST /plg/records': plgOnboardingController.createOnboarding,
     'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
     'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
