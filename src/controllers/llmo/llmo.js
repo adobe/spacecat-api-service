@@ -54,6 +54,7 @@ import {
   applyExclusions,
   applyGroups,
   applyMappings,
+  DEFAULT_LLMO_GET_LIMIT,
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
@@ -178,12 +179,10 @@ function LlmoController(ctx) {
         sheetURL = `${llmoConfig.dataFolder}/${dataSource}.json`;
       }
 
-      const DEFAULT_LIMIT = 5000;
-
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
       const { limit, offset, sheet } = context.data;
-      url.searchParams.set('limit', limit || DEFAULT_LIMIT);
+      url.searchParams.set('limit', limit ?? DEFAULT_LLMO_GET_LIMIT);
       if (offset) {
         url.searchParams.set('offset', offset);
       }
@@ -406,12 +405,10 @@ function LlmoController(ctx) {
       // Use 'llmo-global' folder
       const sheetURL = `llmo-global/${configName}.json`;
 
-      const GLOBAL_DEFAULT_LIMIT = 5000;
-
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
       const { limit, offset, sheet } = context.data;
-      url.searchParams.set('limit', limit || GLOBAL_DEFAULT_LIMIT);
+      url.searchParams.set('limit', limit ?? DEFAULT_LLMO_GET_LIMIT);
       if (offset) {
         url.searchParams.set('offset', offset);
       }
