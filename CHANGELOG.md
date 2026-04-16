@@ -1,3 +1,10 @@
+## [1.445.1](https://github.com/adobe/spacecat-api-service/compare/v1.445.0...v1.445.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* enhance edge-routing logs for customers and alerting ([#2225](https://github.com/adobe/spacecat-api-service/issues/2225)) ([870417e](https://github.com/adobe/spacecat-api-service/commit/870417e2e6a5d79563799943535a5edebe9ba7f6))
+
 # [1.445.0](https://github.com/adobe/spacecat-api-service/compare/v1.444.0...v1.445.0) (2026-04-16)
 
 

@@ -4898,7 +4898,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLMO product access');
+      expect(responseBody.message).to.include('Adobe LLM Optimizer Users\' IMS Product Profile access');
     });
 
     // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
@@ -5265,7 +5265,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include('LLMO Admin group members');
+      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
     });
 
     it('returns 403 when trial user has no matching IMS org in organization list', async () => {
@@ -5335,7 +5335,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include('LLMO Admin group members');
+      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
     });
 
     it('returns 403 when getImsUserOrganizations throws (trial admin path)', async () => {
@@ -5413,7 +5413,7 @@ describe('LlmoController', () => {
       });
       expect(result.status).to.equal(200);
       expect(callCdnRoutingApiStub).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWith(
+      expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/not eligible for automated routing/),
       );
     });
@@ -5505,7 +5505,7 @@ describe('LlmoController', () => {
         mockSite.getBaseURL = sinon.stub().returns('https://[');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
-        expect(mockLog.info).to.have.been.calledWith(
+        expect(mockLog.error).to.have.been.calledWith(
           sinon.match(/CDN auto-detection failed/),
         );
       });
@@ -5612,6 +5612,9 @@ describe('LlmoController', () => {
           undefined,
           { delaySeconds: 300 },
         );
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/CDN routing enabled successfully/),
+        );
       });
 
       it('returns 200 and logs when SQS enqueue for enabled marking fails', async () => {
@@ -5638,6 +5641,9 @@ describe('LlmoController', () => {
           enabled: false,
         });
         expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/CDN routing disabled successfully/),
+        );
       });
 
       it('uses valid overrideBaseURL from fetch config for CDN probe URL', async () => {
