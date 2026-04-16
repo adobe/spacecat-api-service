@@ -1511,6 +1511,8 @@ describe('PlgOnboardingController', () => {
       const onboarding = createMockOnboarding({
         status: 'WAITING_FOR_IP_ALLOWLISTING',
         botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4', '5.6.7.8'] },
+        organizationId: TEST_ORG_ID,
+        siteId: TEST_SITE_ID,
       });
       detectBotBlockerStub.resolves({
         crawlable: false,
@@ -1526,6 +1528,10 @@ describe('PlgOnboardingController', () => {
       expect(message).to.include('Waiting for IP Allowlisting');
       expect(message).to.include('cloudflare');
       expect(message).to.include('1.2.3.4, 5.6.7.8');
+      expect(message).to.include(TEST_ONBOARDING_ID);
+      expect(message).to.include('Test Org');
+      expect(message).to.include(TEST_ORG_ID);
+      expect(message).to.include(TEST_SITE_ID);
     });
 
     it('posts notification with botBlocker type but no ipsToAllowlist', async () => {
@@ -1544,6 +1550,10 @@ describe('PlgOnboardingController', () => {
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('akamai');
       expect(message).to.not.include('IPs to allowlist');
+      // organizationId is null on this onboarding, so org name/ID should not appear
+      expect(message).to.not.include('Org Name');
+      expect(message).to.not.include('Org ID');
+      expect(message).to.not.include('Site ID');
     });
 
     it('posts error notification including error message', async () => {
@@ -1594,6 +1604,35 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/Failed to post PLG onboarding notification to Slack/),
+      );
+    });
+
+    it('posts notification without org name when org lookup fails', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'WAITLISTED',
+        waitlistReason: `Domain ${TEST_DOMAIN} is not an AEM site`,
+        organizationId: TEST_ORG_ID,
+      });
+      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
+      findDeliveryTypeStub.resolves('other');
+
+      const ctx = buildSlackContext(onboarding);
+      ctx.dataAccess = {
+        ...ctx.dataAccess,
+        Organization: {
+          ...ctx.dataAccess.Organization,
+          findById: sandbox.stub().rejects(new Error('DB error')),
+        },
+      };
+
+      await SlackController({ log: mockLog }).onboard(ctx);
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Waitlisted');
+      expect(message).to.not.include('Org Name');
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/Failed to look up org name for onboarding notification/),
       );
     });
   });

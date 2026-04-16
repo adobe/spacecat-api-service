@@ -131,10 +131,33 @@ async function postPlgOnboardingNotification(onboarding, context) {
 
   const domain = onboarding.getDomain();
   const imsOrgId = onboarding.getImsOrgId();
+  const siteId = onboarding.getSiteId();
+  const organizationId = onboarding.getOrganizationId();
+
+  let orgName = null;
+  if (organizationId) {
+    try {
+      const org = await context.dataAccess.Organization.findById(organizationId);
+      orgName = org?.getName?.() || null;
+    } catch (orgLookupError) {
+      log.warn(`Failed to look up org name for onboarding notification: ${orgLookupError.message}`);
+    }
+  }
 
   let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *ID:* \`${onboarding.getId()}\`\n`
     + `• *Domain:* \`${domain}\`\n`
     + `• *IMS Org:* \`${imsOrgId}\``;
+
+  if (orgName) {
+    message += `\n• *Org Name:* ${orgName}`;
+  }
+  if (organizationId) {
+    message += `\n• *Org ID:* \`${organizationId}\``;
+  }
+  if (siteId) {
+    message += `\n• *Site ID:* \`${siteId}\``;
+  }
 
   const waitlistReason = onboarding.getWaitlistReason();
   if (waitlistReason) {
