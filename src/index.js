@@ -95,6 +95,7 @@ import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
+import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
@@ -248,6 +249,7 @@ async function run(request, context) {
     const featureFlagsController = FeatureFlagsController(context);
     const autofixChecksController = AutofixChecksController(context);
     const pageRelationshipsController = PageRelationshipsController(context);
+    const drsBpPgAuditController = DrsBpPgAuditController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -299,6 +301,7 @@ async function run(request, context) {
       pageRelationshipsController,
       ephemeralRunController,
       autofixChecksController,
+      drsBpPgAuditController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -321,6 +324,9 @@ async function run(request, context) {
       }
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
+      }
+      if (params.executionId && !isValidUUID(params.executionId)) {
+        return badRequest('Execution Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;

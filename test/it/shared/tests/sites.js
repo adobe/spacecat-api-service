@@ -21,9 +21,17 @@ import {
   SITE_3_BASE_URL,
   SITE_4_ID,
   SITE_4_BASE_URL,
+  SITE_LEGACY_LLMO_ID,
+  SITE_NEW_LLMO_ID,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
 } from '../seed-ids.js';
+
+// LLMO-4176 mode-resolution test sites are seeded with intentionally
+// historical / future created_at values to straddle the Brandalf GA cutoff
+// (2026-04-01). They MUST be excluded from expectSiteListDto, which asserts
+// createdAt is within the last hour.
+const LLMO_FIXTURE_SITE_IDS = new Set([SITE_LEGACY_LLMO_ID, SITE_NEW_LLMO_ID]);
 
 /**
  * Base64-encode a URL for the /sites/by-base-url/:baseURL path parameter.
@@ -83,9 +91,14 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
         // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
-        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3)
-        expect(res.body).to.be.an('array').with.lengthOf(2);
-        res.body.forEach((s) => expectSiteListDto(s));
+        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
+        // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
+        expect(res.body).to.be.an('array').with.lengthOf(4);
+        // Skip the LLMO fixtures in the DTO check — they have intentional
+        // historical/future createdAt values that fail the "recent" assertion.
+        res.body
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
         const ids = res.body.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
         expect(ids).to.include(SITE_4_ID);
@@ -212,8 +225,9 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/aem_edge');
         expect(res.status).to.equal(200);
-        // SITE_1, SITE_3, and SITE_4 are aem_edge; SITE_2 is aem_cs
-        expect(res.body).to.be.an('array').with.lengthOf(3);
+        // SITE_1, SITE_3, SITE_4, SITE_LEGACY_LLMO, SITE_NEW_LLMO are aem_edge;
+        // SITE_2 is aem_cs.
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -236,7 +250,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/AEM_EDGE');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
@@ -246,7 +260,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/Aem_Edge');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(3);
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });

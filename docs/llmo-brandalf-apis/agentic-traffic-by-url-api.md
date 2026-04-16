@@ -39,53 +39,62 @@ All three endpoints share the standard agentic traffic filters. See [Agentic Tra
 
 ### GET `/sites/:siteId/agentic-traffic/by-url`
 
-Returns a per-URL breakdown with traffic volume, performance, and citability metrics. The default result set is the top 2000 URLs by total hits.
+Returns a **paginated** per-URL breakdown with traffic volume, performance, and citability metrics. Supports server-side substring search via `urlPathSearch`.
 
 **Additional parameters:**
 
 | Parameter | Aliases | Type | Default | Max | Description |
 |-----------|---------|------|---------|-----|-------------|
+| `pageSize` | — | integer | 50 | 500 | Rows per page |
+| `pageOffset` | `page_offset` | integer | 0 | — | Zero-based row offset |
+| `urlPathSearch` | `url_path_search` | string | — | — | Substring filter on `url_path` (server-side) |
 | `sortBy` | `sort_by` | string | `total_hits` | — | Column to sort by |
 | `sortOrder` | `sort_order` | string | `desc` | — | `asc` or `desc` |
-| `limit` | — | integer | 2000 | 2000 | Maximum number of rows to return |
 
 **RPC:** `rpc_agentic_traffic_by_url`
 
 **Response:**
 
 ```json
-[
-  {
-    "host": "www.example.com",
-    "urlPath": "/blog/ai-tools",
-    "totalHits": 4200,
-    "uniqueAgents": 8,
-    "topAgent": "GPTBot",
-    "topAgentType": "crawler",
-    "responseCodes": [200, 301],
-    "successRate": 0.97,
-    "avgTtfbMs": 280.5,
-    "categoryName": "Blog",
-    "avgCitabilityScore": 0.82,
-    "deployedAtEdge": true
-  }
-]
+{
+  "totalCount": 1240,
+  "rows": [
+    {
+      "host": "www.example.com",
+      "urlPath": "/blog/ai-tools",
+      "totalHits": 4200,
+      "uniqueAgents": 8,
+      "topAgent": "GPTBot",
+      "topAgentType": "crawler",
+      "responseCodes": [200, 301],
+      "successRate": 0.97,
+      "avgTtfbMs": 280.5,
+      "categoryName": "Blog",
+      "avgCitabilityScore": 0.82,
+      "deployedAtEdge": true
+    }
+  ]
+}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `host` | string | Hostname (e.g. `www.example.com`) |
-| `urlPath` | string | URL path (e.g. `/blog/ai-tools`) |
-| `totalHits` | number | Total AI-crawler requests to this URL |
-| `uniqueAgents` | number | Number of distinct user-agent strings |
-| `topAgent` | string | Most frequent user-agent string |
-| `topAgentType` | string | Agent type of `topAgent` |
-| `responseCodes` | number[] | Distinct HTTP status codes seen for this URL |
-| `successRate` | number \| null | Fraction of 2xx responses (0–1) |
-| `avgTtfbMs` | number \| null | Average time-to-first-byte in milliseconds |
-| `categoryName` | string | Content category |
-| `avgCitabilityScore` | number \| null | Average citability score (0–1) |
-| `deployedAtEdge` | boolean | Whether the URL is deployed at the edge |
+| `totalCount` | number | Total URLs matching the filters (across all pages) |
+| `rows` | array | URLs for the requested page |
+| `rows[].host` | string | Hostname (e.g. `www.example.com`) |
+| `rows[].urlPath` | string | URL path (e.g. `/blog/ai-tools`) |
+| `rows[].totalHits` | number | Total AI-crawler requests to this URL |
+| `rows[].uniqueAgents` | number | Number of distinct user-agent strings |
+| `rows[].topAgent` | string | Most frequent user-agent string |
+| `rows[].topAgentType` | string | Agent type of `topAgent` |
+| `rows[].responseCodes` | number[] | Distinct HTTP status codes seen for this URL |
+| `rows[].successRate` | number \| null | Fraction of 2xx responses (0–1) |
+| `rows[].avgTtfbMs` | number \| null | Average time-to-first-byte in milliseconds |
+| `rows[].categoryName` | string | Content category |
+| `rows[].avgCitabilityScore` | number \| null | Average citability score (0–1) |
+| `rows[].deployedAtEdge` | boolean | Whether the URL is deployed at the edge |
+
+**Pagination pattern:** use `pageOffset = page × pageSize` for cursor-free offset pagination. Use `totalCount` to determine whether more pages exist (`loadedCount < totalCount`).
 
 ---
 
