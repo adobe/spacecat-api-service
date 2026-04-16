@@ -751,9 +751,17 @@ describe('Suggestions Controller', () => {
       notGrantedIds: [],
       grantIds: [`grant-${grantedId}`],
     });
-    // Uses the real controller — getIsSummitPlgEnabled short-circuits to true via trial header
-    // without needing Configuration/Entitlement checks
-    const response = await suggestionsController.getAllForOpportunity({
+    const ControllerWithTrial = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithTrial = ControllerWithTrial({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithTrial.getAllForOpportunity({
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
       ...context,

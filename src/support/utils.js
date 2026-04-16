@@ -614,8 +614,7 @@ export function isViewAsTrialRequest(requestContext) {
  * @param {Object} site - Site entity
  * @param {Object} context - Request context with dataAccess, log
  * @param {Object} [requestContext] - Optional per-request context; when provided, the check
- *   is gated on the x-client-type header being 'sites-optimizer-ui'. Requests carrying the
- *   x-view-as-trial header are treated as PLG for read-only paths.
+ *   is gated on the x-client-type header being 'sites-optimizer-ui'.
  * @returns {Promise<boolean>}
  */
 export async function getIsSummitPlgEnabled(site, context, requestContext) {
