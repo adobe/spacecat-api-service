@@ -4877,7 +4877,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLMO product access');
+      expect(responseBody.message).to.include('Adobe LLM Optimizer Users\' IMS Product Profile access');
     });
 
     // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
@@ -5244,7 +5244,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include('LLMO Admin group members');
+      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
     });
 
     it('returns 403 when trial user has no matching IMS org in organization list', async () => {
@@ -5314,7 +5314,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include('LLMO Admin group members');
+      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
     });
 
     it('returns 403 when getImsUserOrganizations throws (trial admin path)', async () => {
