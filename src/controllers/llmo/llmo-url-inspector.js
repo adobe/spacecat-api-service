@@ -429,6 +429,7 @@ export function createUrlInspectorDomainUrlsHandler(
         ? Number(rows[0].total_count ?? 0) : 0;
 
       const urls = rows.map((r) => ({
+        urlId: r.url_id || '',
         url: r.url || '',
         contentType: r.content_type || '',
         citations: Number(r.citations ?? 0),
