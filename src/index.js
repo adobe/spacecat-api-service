@@ -307,6 +307,9 @@ async function run(request, context) {
       if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
         return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
+      if (params.onboardingId && !isValidUUIDV4(params.onboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+      }
       context.params = params;
       context.request = request;
 

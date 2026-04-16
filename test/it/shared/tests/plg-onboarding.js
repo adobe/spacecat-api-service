@@ -18,6 +18,7 @@ import {
   PLG_ONBOARDING_1_ID,
   PLG_ONBOARDING_1_DOMAIN,
   PLG_ONBOARDING_2_ID,
+  PLG_ONBOARDING_3_ID,
   NON_EXISTENT_IMS_ORG_ID,
 } from '../seed-ids.js';
 
@@ -184,7 +185,7 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           const res = await http.admin.get(`/plg/onboard/status/${ORG_1_IMS_ORG_ID}`);
           expect(res.status).to.equal(200);
 
-          expect(res.body).to.be.an('array').with.length.of.at.least(2);
+          expect(res.body).to.be.an('array').with.length.of.at.least(3);
           const record = res.body.find((r) => r.id === PLG_ONBOARDING_1_ID);
           expectPlgOnboardingDto(record);
           expect(record.imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
@@ -198,7 +199,7 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           const http = getHttpClient();
           const res = await http.user.get(`/plg/onboard/status/${ORG_1_IMS_ORG_ID}`);
           expect(res.status).to.equal(200);
-          expect(res.body).to.be.an('array').with.length.of.at.least(2);
+          expect(res.body).to.be.an('array').with.length.of.at.least(3);
         });
       }
     });
@@ -249,14 +250,18 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         expect(res.status).to.equal(404);
       });
 
-      it('returns 400 when onboarding is not waitlisted', async () => {
+      it('returns 400 when onboarding is not WAITLISTED or ONBOARDED', async () => {
         const http = getHttpClient();
-        // PLG_ONBOARDING_1 is ONBOARDED, not WAITLISTED
-        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_1_ID}`, {
+        // PLG_ONBOARDING_3 is IN_PROGRESS — admin PATCH is only allowed for WAITLISTED or ONBOARDED
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_3_ID}`, {
           decision: 'BYPASSED',
           justification: 'test',
         });
         expect(res.status).to.equal(400);
+        expect(res.body).to.be.an('object');
+        expect(res.body.message).to.equal(
+          'Onboarding record must be in WAITLISTED or ONBOARDED state',
+        );
       });
 
       if (!skipPlgOnboardingTests) {

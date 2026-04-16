@@ -137,6 +137,9 @@ export const PLG_ONBOARDING_1_ID = 'd1111111-1111-4111-b111-111111111111';
 export const PLG_ONBOARDING_1_DOMAIN = 'site1.example.com';
 export const PLG_ONBOARDING_2_ID = 'd2222222-2222-4222-b222-222222222222';
 export const PLG_ONBOARDING_2_DOMAIN = 'waitlisted-site.example.com';
+/** IN_PROGRESS — used to assert PATCH rejects non–WAITLISTED/ONBOARDED records */
+export const PLG_ONBOARDING_3_ID = 'd3333333-3333-4333-b333-333333333333';
+export const PLG_ONBOARDING_3_DOMAIN = 'in-progress-plg-it.example.com';
 
 // ── ORG_3: Delegate Agency Org ──
 
