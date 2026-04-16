@@ -413,6 +413,12 @@ describe('getRouteHandlers', () => {
     runChecks: sinon.stub(),
   };
 
+  const mockPlgOnboardingController = {
+    createOnboarding: sinon.stub(),
+    updateOnboardingStatus: sinon.stub(),
+    deleteOnboarding: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -463,6 +469,7 @@ describe('getRouteHandlers', () => {
       mockPageRelationshipsController,
       mockEphemeralRunController,
       mockAutofixChecksController,
+      mockPlgOnboardingController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -501,6 +508,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers',
       'POST /consumers/register',
       'POST /ephemeral-run/batch',
+      'POST /plg/records',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -842,6 +850,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
       'POST /sites/:siteId/autofix-checks',
+      'PATCH /plg/records/:plgOnboardingId',
+      'DELETE /plg/records/:plgOnboardingId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
