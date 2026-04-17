@@ -1999,6 +1999,9 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // Verify site org is reassigned to the new customer org
+      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(existingSite.save).to.have.been.called;
     });
 
     it('waitlists when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {

@@ -726,12 +726,15 @@ async function performAsoPlgOnboarding({
     }
 
     // Step 3: Check site ownership
+    let needsOrgReassignment = false;
     if (site) {
       const existingOrgId = site.getOrganizationId();
 
       if (existingOrgId !== organizationId) {
         if (isInternalOrg(existingOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
-          log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — continuing PLG onboarding without waitlist`);
+          log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — will reassign to new org ${organizationId} after successful onboarding`);
+          // Don't save yet - we'll reassign the org just before marking ONBOARDED
+          needsOrgReassignment = true;
         } else {
           const existingOrg = await Organization.findById(existingOrgId);
           /* c8 ignore next */
@@ -1054,6 +1057,14 @@ async function performAsoPlgOnboarding({
       });
     } catch (error) {
       log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
+    }
+
+    // Reassign site org if it was previously in an internal/demo org
+    if (needsOrgReassignment) {
+      log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
+      site.setOrganizationId(organizationId);
+      await site.save();
+      steps.siteOrgReassigned = true;
     }
 
     // Mark as completed
