@@ -1299,9 +1299,10 @@ function PlgOnboardingController(ctx) {
       try {
         payload = records.map((record) => {
           const json = PlgOnboardingDto.toAdminJSON(record);
+          const updatedBy = record.getUpdatedBy();
           return {
             ...json,
-            trialEmail: emailMap[record.getUpdatedBy()] ?? null,
+            updatedBy: updatedBy ? (emailMap[updatedBy] ?? updatedBy) : null,
             reviews: json.reviews.map((review) => ({
               ...review,
               reviewedBy: emailMap[review.reviewedBy] ?? review.reviewedBy,

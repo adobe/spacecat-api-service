@@ -3736,7 +3736,7 @@ describe('PlgOnboardingController', () => {
         );
       });
 
-      it('resolves trialEmail via getImsAdminProfile when updatedBy is set', async () => {
+      it('resolves updatedBy to email via getImsAdminProfile when updatedBy is set', async () => {
         const record = createMockOnboarding({ updatedBy: 'user-ims-id@AdobeID' });
         mockDataAccess.PlgOnboarding.all.resolves([record]);
         const mockImsClient = {
@@ -3750,11 +3750,11 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(res.value[0].trialEmail).to.equal('user@example.com');
+        expect(res.value[0].updatedBy).to.equal('user@example.com');
         expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('user-ims-id@AdobeID');
       });
 
-      it('sets trialEmail to null when getImsAdminProfile returns no email', async () => {
+      it('falls back to IMS ID when getImsAdminProfile returns no email', async () => {
         const record = createMockOnboarding({ updatedBy: 'user-ims-id@AdobeID' });
         mockDataAccess.PlgOnboarding.all.resolves([record]);
         const mockImsClient = {
@@ -3768,10 +3768,10 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(res.value[0].trialEmail).to.be.null;
+        expect(res.value[0].updatedBy).to.equal('user-ims-id@AdobeID');
       });
 
-      it('sets trialEmail to null when getImsAdminProfile fails', async () => {
+      it('falls back to IMS ID when getImsAdminProfile fails', async () => {
         const record = createMockOnboarding({ updatedBy: 'bad-ims-id@AdobeID' });
         mockDataAccess.PlgOnboarding.all.resolves([record]);
         const mockImsClient = {
@@ -3785,7 +3785,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(res.value[0].trialEmail).to.be.null;
+        expect(res.value[0].updatedBy).to.equal('bad-ims-id@AdobeID');
         expect(mockLog.warn).to.have.been.calledWithMatch(
           sinon.match(/Failed to resolve email for IMS ID bad-ims-id@AdobeID/),
         );
@@ -3830,6 +3830,22 @@ describe('PlgOnboardingController', () => {
 
         expect(res.status).to.equal(200);
         expect(res.value[0].reviews[0].reviewedBy).to.equal('admin');
+        expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
+
+      it('sets updatedBy to null when updatedBy is null (system-triggered onboarding)', async () => {
+        const record = createMockOnboarding({ updatedBy: null });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = { getImsAdminProfile: sandbox.stub() };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].updatedBy).to.be.null;
         expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
       });
     });
