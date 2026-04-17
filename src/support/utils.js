@@ -596,6 +596,19 @@ export async function resolveWwwUrl(site, context) {
 }
 
 /**
+ * Returns true when the request originates from the sites-optimizer-ui client
+ * and carries the x-view-as-trial header, indicating the user has enabled
+ * trial-mode simulation. Used to apply PLG-style suggestion filtering
+ * @param {Object} requestContext - Per-request context with pathInfo.headers
+ * @returns {boolean}
+ */
+export function isViewAsTrialRequest(requestContext) {
+  const headers = requestContext?.pathInfo?.headers;
+  return headers?.['x-client-type'] === 'sites-optimizer-ui'
+    && headers?.['x-view-as-trial'] === 'true';
+}
+
+/**
  * Returns whether the summit-plg audit handler is enabled for the site in configuration.
  * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
  * @param {Object} site - Site entity
@@ -610,6 +623,9 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
       const clientType = requestContext.pathInfo?.headers?.['x-client-type'];
       if (clientType !== 'sites-optimizer-ui') {
         return false;
+      }
+      if (isViewAsTrialRequest(requestContext)) {
+        return true;
       }
     }
     const { Configuration, Entitlement } = context.dataAccess || {};
