@@ -470,6 +470,20 @@ describe('edge-routing-utils', () => {
       expect(result.statusCode).to.equal(404);
     });
 
+    it('returns reachable:true on 200 with no content-type header', async () => {
+      fetchStub.resolves({
+        status: 200,
+        headers: new Headers(),
+        text: async () => 'some content',
+      });
+
+      const result = await edgeUtils.probeWafConnectivity('https://www.noct.com', log, proxyBaseUrl);
+
+      expect(result.reachable).to.be.true;
+      expect(result.blocked).to.be.false;
+      expect(result.statusCode).to.equal(200);
+    });
+
     it('returns blocked:false for server error status (502)', async () => {
       fetchStub.resolves({
         status: 502,
