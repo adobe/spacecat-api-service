@@ -45,6 +45,7 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectCdnForDomain,
+  probeWafConnectivity,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromCookie, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1858,6 +1859,47 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * GET /sites/{siteId}/llmo/probes/edge-optimize
+   *
+   * Edge Optimize connectivity probe — detects whether a WAF or Bot Manager is
+   * blocking the AdobeEdgeOptimize/1.0 user-agent at the customer's origin.
+   *
+   * @param {object} context - Request context.
+   * @returns {Promise<Response>} 200 with probe result, or 4xx/5xx on error.
+   */
+  const checkWafConnectivity = async (context) => {
+    const { log, dataAccess } = context;
+    const { Site } = dataAccess;
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid siteId');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound(`Site with ID ${siteId} not found`);
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can check this site');
+    }
+
+    const baseURL = site.getBaseURL();
+    if (!baseURL) {
+      return internalServerError('Site has no baseURL configured');
+    }
+
+    log.info(`[waf-probe] Starting WAF connectivity probe for site ${siteId} (${baseURL})`);
+
+    const result = await probeWafConnectivity(baseURL, log, context.env?.TOKOWAKA_PROXY_BASE_URL);
+
+    log.info(`[waf-probe] Result for site ${siteId}: reachable=${result.reachable}, blocked=${result.blocked}`);
+
+    return ok(result);
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1887,6 +1929,7 @@ function LlmoController(ctx) {
     getStrategy,
     saveStrategy,
     checkEdgeOptimizeStatus,
+    checkWafConnectivity,
     markOpportunitiesReviewed,
     updateQueryIndex,
   };

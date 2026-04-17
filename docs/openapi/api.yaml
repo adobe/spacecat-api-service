@@ -57,6 +57,11 @@ tags:
     description: APIs for taking and retrieving webpage screenshots, specifically for consent banner analysis
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: llmo-probes
+    description: >
+      Diagnostic probes for LLMO features. Each probe validates that a specific
+      LLMO capability (edge-optimize, prerender, etc.) can reach the customer's
+      origin without being blocked by WAFs, bot managers, or network issues.
   - name: entitlements
     description: Entitlement management operations
   - name: site-enrollments
@@ -522,6 +527,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
+  /sites/{siteId}/llmo/probes/edge-optimize:
+    $ref: './llmo-api.yaml#/llmo-probe-edge-optimize'
   /sites/{siteId}/llmo/edge-optimize-routing:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
   /sites/{siteId}/llmo/strategy:

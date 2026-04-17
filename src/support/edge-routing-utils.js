@@ -181,6 +181,131 @@ export async function callCdnRoutingApi(
   }
 }
 
+// Default Tokowaka worker base URL for WAF connectivity probes.
+// The probe sends a normal proxy request through Tokowaka (with x-forwarded-host)
+// so the origin fetch happens from Fastly edge IPs with the AdobeEdgeOptimize UA.
+const TOKOWAKA_PROXY_BASE_URL_DEFAULT = 'https://live.edgeoptimize.net';
+
+const WAF_PROBE_TIMEOUT_MS = 15000;
+
+// Soft-block detection: bot-challenge pages are typically tiny HTML with these keywords.
+const BOT_CHALLENGE_BODY_MAX_BYTES = 2048;
+const BOT_CHALLENGE_KEYWORDS = [
+  'challenge', 'captcha', 'bot manager', 'access denied', 'blocked', 'cloudflare',
+];
+
+// HTTP status codes that indicate a hard WAF/bot-manager block.
+const HARD_BLOCK_STATUS_CODES = new Set([403, 406, 429]);
+
+/**
+ * Classifies the Tokowaka proxy response to determine WAF/bot-manager blocking.
+ *
+ * @param {object} response - The fetch Response from Tokowaka.
+ * @param {string} targetHost - The probed hostname (for logging).
+ * @param {object} log - Logger.
+ * @returns {Promise<object>} Classification result with { reachable, blocked, statusCode }.
+ */
+async function classifyProbeResponse(response, targetHost, log) {
+  const { status } = response;
+
+  // Hard block: WAF explicitly rejects the request.
+  if (HARD_BLOCK_STATUS_CODES.has(status)) {
+    log.info(`[waf-probe] Hard block for ${targetHost}: HTTP ${status}`);
+    return { reachable: false, blocked: true, statusCode: status };
+  }
+
+  // 2xx — check for soft blocks (bot-challenge pages disguised as 200 OK).
+  if (status >= 200 && status < 300) {
+    const contentType = response.headers.get('content-type') || '';
+
+    if (contentType.includes('text/html')) {
+      const contentLengthHeader = response.headers.get('content-length');
+      const contentLengthNum = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
+
+      // Large HTML response — real content, not a challenge page.
+      if (contentLengthNum !== null && contentLengthNum > BOT_CHALLENGE_BODY_MAX_BYTES) {
+        log.info(`[waf-probe] Clean pass for ${targetHost}: HTTP ${status} (large content-length)`);
+        return { reachable: true, blocked: false, statusCode: status };
+      }
+
+      // Read body snippet for keyword matching.
+      const text = await response.text();
+      if (text.length <= BOT_CHALLENGE_BODY_MAX_BYTES) {
+        const lower = text.toLowerCase();
+        const isSoftBlock = BOT_CHALLENGE_KEYWORDS.some((kw) => lower.includes(kw));
+        if (isSoftBlock) {
+          log.info(`[waf-probe] Soft block (challenge page) for ${targetHost}: HTTP ${status}`);
+          return { reachable: false, blocked: true, statusCode: status };
+        }
+      }
+    }
+
+    log.info(`[waf-probe] Clean pass for ${targetHost}: HTTP ${status}`);
+    return { reachable: true, blocked: false, statusCode: status };
+  }
+
+  // Other non-2xx (404, 500, 502, etc.) — not a WAF block, but not reachable either.
+  log.info(`[waf-probe] Unexpected status for ${targetHost}: HTTP ${status}`);
+  return { reachable: false, blocked: false, statusCode: status };
+}
+
+/**
+ * Detects whether a WAF or Bot Manager is blocking AdobeEdgeOptimize/1.0 traffic
+ * for the given site by sending a normal proxy request through the Tokowaka edge worker.
+ *
+ * The probe calls live.edgeoptimize.net with x-forwarded-host set to the customer
+ * domain. Tokowaka proxies to the customer origin from Fastly edge IPs using its
+ * standard AdobeEdgeOptimize/1.0 user-agent. The response is then classified here.
+ *
+ * Four outcomes:
+ * - **Hard block**: HTTP 403, 406, or 429 → `{ reachable: false, blocked: true }`
+ * - **Soft block**: 2xx with tiny bot-challenge HTML body → `{ reachable: false, blocked: true }`
+ * - **Pass**: 2xx with real content → `{ reachable: true, blocked: false }`
+ * - **Network/timeout error**: `{ reachable: false, blocked: null, reason: 'timeout'|'error' }`
+ *
+ * This function never throws — all errors are captured into the return value.
+ *
+ * @param {string} siteBaseUrl - The site's base URL (with or without scheme).
+ * @param {object} log - Logger.
+ * @param {string} [tokowakaProxyBaseUrl] - Override for the Tokowaka worker base URL.
+ *   Defaults to the production URL. Populated from TOKOWAKA_PROXY_BASE_URL env var.
+ * @returns {Promise<object>} WAF probe result.
+ */
+export async function probeWafConnectivity(
+  siteBaseUrl,
+  log,
+  tokowakaProxyBaseUrl = TOKOWAKA_PROXY_BASE_URL_DEFAULT,
+) {
+  const normalizedUrl = siteBaseUrl.startsWith('http') ? siteBaseUrl : `https://${siteBaseUrl}`;
+  const { host: targetHost, href: probedUrl } = new URL(normalizedUrl);
+
+  const probeResult = {
+    probedUrl,
+  };
+
+  log.info(`[waf-probe] Probing ${targetHost} via Tokowaka proxy at ${tokowakaProxyBaseUrl}`);
+
+  try {
+    const response = await fetch(tokowakaProxyBaseUrl, {
+      method: 'GET',
+      headers: {
+        'x-forwarded-host': targetHost,
+      },
+      signal: AbortSignal.timeout(WAF_PROBE_TIMEOUT_MS),
+    });
+
+    const classification = await classifyProbeResponse(response, targetHost, log);
+    return { ...probeResult, ...classification };
+  } catch (error) {
+    const isTimeout = error.name === 'TimeoutError' || error.name === 'AbortError';
+    const reason = isTimeout ? 'timeout' : 'error';
+    log.warn(`[waf-probe] ${reason} probing ${targetHost} via Tokowaka: ${error.message}`);
+    return {
+      ...probeResult, reachable: false, blocked: null, reason,
+    };
+  }
+}
+
 const AEM_CS_FASTLY_CNAME_PATTERNS = [
   'cdn.adobeaemcloud.com',
   'adobe-aem.map.fastly.net',
