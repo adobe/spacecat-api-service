@@ -1,3 +1,10 @@
+# [1.446.0](https://github.com/adobe/spacecat-api-service/compare/v1.445.3...v1.446.0) (2026-04-17)
+
+
+### Features
+
+* view trial toggle ([#2197](https://github.com/adobe/spacecat-api-service/issues/2197)) ([c99aea7](https://github.com/adobe/spacecat-api-service/commit/c99aea7735b4d7aa1682a730d9228b8852f85547))
+
 ## [1.445.3](https://github.com/adobe/spacecat-api-service/compare/v1.445.2...v1.445.3) (2026-04-17)
 
 
