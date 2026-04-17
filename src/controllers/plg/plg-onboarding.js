@@ -1091,13 +1091,6 @@ async function performAsoPlgOnboarding({
 }
 
 /**
- * Resolves requestor emails from IMS user IDs stored in updated_by.
- * @param {Array} records - PlgOnboarding records.
- * @param {object} imsClient - IMS client instance.
- * @returns {Promise<object>} Map of userId -> email.
- */
-
-/**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
   * @returns {object} Controller with onboard, getStatus, and getAllOnboardings methods.
