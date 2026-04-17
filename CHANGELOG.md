@@ -1,3 +1,10 @@
+## [1.446.3](https://github.com/adobe/spacecat-api-service/compare/v1.446.2...v1.446.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* **categories:** return 409 on duplicate name instead of 500 ([#2233](https://github.com/adobe/spacecat-api-service/issues/2233)) ([eeeddc0](https://github.com/adobe/spacecat-api-service/commit/eeeddc0594837e22deb9e93d7d96880dc661ddf2))
+
 ## [1.446.2](https://github.com/adobe/spacecat-api-service/compare/v1.446.1...v1.446.2) (2026-04-17)
 
 
