@@ -267,9 +267,9 @@ describe('Modal Utils', () => {
   });
 
   describe('createEntitlementsForProducts', () => {
-    it('creates entitlements for multiple products in parallel', async () => {
+    it('creates new entitlements when none exist', async () => {
       const mockSite = { getId: () => 'site123' };
-      const mockLambdaContext = { env: {}, log: {} };
+      const mockLambdaContext = { env: {}, log: {}, dataAccess: {} };
       const selectedProducts = ['ASO', 'LLMO'];
 
       const mockEntitlement1 = { getId: () => 'entitlement-aso' };
@@ -279,12 +279,14 @@ describe('Modal Utils', () => {
 
       mockTierClient.createForSite
         .onFirstCall().returns({
+          checkValidEntitlement: sinon.stub().resolves({}),
           createEntitlement: sinon.stub().resolves({
             entitlement: mockEntitlement1,
             siteEnrollment: mockEnrollment1,
           }),
         })
         .onSecondCall().returns({
+          checkValidEntitlement: sinon.stub().resolves({}),
           createEntitlement: sinon.stub().resolves({
             entitlement: mockEntitlement2,
             siteEnrollment: mockEnrollment2,
@@ -311,16 +313,16 @@ describe('Modal Utils', () => {
       });
     });
 
-    it('creates entitlement for single product', async () => {
+    it('preserves existing entitlement and returns existing enrollment', async () => {
       const mockSite = { getId: () => 'site456' };
-      const mockLambdaContext = { env: {}, log: {} };
+      const mockLambdaContext = { env: {}, log: {}, dataAccess: {} };
       const selectedProducts = ['ASO'];
 
-      const mockEntitlement = { getId: () => 'entitlement-123' };
-      const mockEnrollment = { getId: () => 'enrollment-123' };
+      const mockEntitlement = { getId: () => 'entitlement-existing', getTier: () => 'PAID' };
+      const mockEnrollment = { getId: () => 'enrollment-existing' };
 
       mockTierClient.createForSite.returns({
-        createEntitlement: sinon.stub().resolves({
+        checkValidEntitlement: sinon.stub().resolves({
           entitlement: mockEntitlement,
           siteEnrollment: mockEnrollment,
         }),
@@ -335,17 +337,60 @@ describe('Modal Utils', () => {
       expect(results).to.have.lengthOf(1);
       expect(results[0]).to.deep.equal({
         product: 'ASO',
-        entitlementId: 'entitlement-123',
-        enrollmentId: 'enrollment-123',
+        entitlementId: 'entitlement-existing',
+        enrollmentId: 'enrollment-existing',
+        existingTier: 'PAID',
+        alreadyExisted: true,
+      });
+    });
+
+    it('creates enrollment when entitlement exists but enrollment does not', async () => {
+      const mockSite = { getId: () => 'site789' };
+      const mockEnrollment = { getId: () => 'enrollment-new' };
+      const mockLambdaContext = {
+        env: {},
+        log: {},
+        dataAccess: {
+          SiteEnrollment: {
+            create: sinon.stub().resolves(mockEnrollment),
+          },
+        },
+      };
+      const selectedProducts = ['ASO'];
+
+      const mockEntitlement = { getId: () => 'entitlement-existing', getTier: () => 'PLG' };
+
+      mockTierClient.createForSite.returns({
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: mockEntitlement,
+        }),
+      });
+
+      const results = await modalUtils.createEntitlementsForProducts(
+        mockLambdaContext,
+        mockSite,
+        selectedProducts,
+      );
+
+      expect(results).to.have.lengthOf(1);
+      expect(results[0]).to.deep.equal({
+        product: 'ASO',
+        entitlementId: 'entitlement-existing',
+        enrollmentId: 'enrollment-new',
+        existingTier: 'PLG',
+        enrollmentCreated: true,
+      });
+      expect(mockLambdaContext.dataAccess.SiteEnrollment.create).to.have.been.calledWith({
+        siteId: 'site789',
+        entitlementId: 'entitlement-existing',
       });
     });
 
     it('returns empty array for empty product list', async () => {
-      const mockSite = { getId: () => 'site789' };
-      const mockLambdaContext = { env: {}, log: {} };
+      const mockSite = { getId: () => 'site999' };
+      const mockLambdaContext = { env: {}, log: {}, dataAccess: {} };
       const selectedProducts = [];
 
-      // Reset the stub before this test
       mockTierClient.createForSite.resetHistory();
 
       const results = await modalUtils.createEntitlementsForProducts(
@@ -360,7 +405,7 @@ describe('Modal Utils', () => {
   });
 
   describe('postEntitlementMessages', () => {
-    it('posts messages for multiple entitlement results', async () => {
+    it('posts created message for newly created entitlements', async () => {
       const say = sinon.stub().resolves();
       const entitlementResults = [
         { product: 'ASO', entitlementId: 'ent-1', enrollmentId: 'enr-1' },
@@ -371,32 +416,51 @@ describe('Modal Utils', () => {
       await modalUtils.postEntitlementMessages(say, entitlementResults, siteId);
 
       expect(say.calledTwice).to.be.true;
+      expect(say.getCall(0).args[0]).to.include('Created');
       expect(say.getCall(0).args[0]).to.include('ASO');
       expect(say.getCall(0).args[0]).to.include('ent-1');
       expect(say.getCall(0).args[0]).to.include('enr-1');
-      expect(say.getCall(0).args[0]).to.include('site123');
       expect(say.getCall(0).args[0]).to.include(EntitlementModel.TIERS.FREE_TRIAL);
 
+      expect(say.getCall(1).args[0]).to.include('Created');
       expect(say.getCall(1).args[0]).to.include('LLMO');
       expect(say.getCall(1).args[0]).to.include('ent-2');
       expect(say.getCall(1).args[0]).to.include('enr-2');
-      expect(say.getCall(1).args[0]).to.include('site123');
     });
 
-    it('posts message for single entitlement result', async () => {
+    it('posts already-existed message when entitlement and enrollment existed', async () => {
       const say = sinon.stub().resolves();
       const entitlementResults = [
-        { product: 'ASO', entitlementId: 'ent-123', enrollmentId: 'enr-456' },
+        {
+          product: 'ASO', entitlementId: 'ent-123', enrollmentId: 'enr-456', existingTier: 'PAID', alreadyExisted: true,
+        },
       ];
       const siteId = 'site789';
 
       await modalUtils.postEntitlementMessages(say, entitlementResults, siteId);
 
       expect(say.calledOnce).to.be.true;
-      expect(say.getCall(0).args[0]).to.include('ASO');
+      expect(say.getCall(0).args[0]).to.include('already exist');
+      expect(say.getCall(0).args[0]).to.include('PAID');
       expect(say.getCall(0).args[0]).to.include('ent-123');
-      expect(say.getCall(0).args[0]).to.include('enr-456');
-      expect(say.getCall(0).args[0]).to.include('site789');
+    });
+
+    it('posts enrollment-created message when entitlement existed but enrollment was new', async () => {
+      const say = sinon.stub().resolves();
+      const entitlementResults = [
+        {
+          product: 'ASO', entitlementId: 'ent-123', enrollmentId: 'enr-new', existingTier: 'PLG', enrollmentCreated: true,
+        },
+      ];
+      const siteId = 'site789';
+
+      await modalUtils.postEntitlementMessages(say, entitlementResults, siteId);
+
+      expect(say.calledOnce).to.be.true;
+      expect(say.getCall(0).args[0]).to.include('already existed');
+      expect(say.getCall(0).args[0]).to.include('created enrollment');
+      expect(say.getCall(0).args[0]).to.include('PLG');
+      expect(say.getCall(0).args[0]).to.include('enr-new');
     });
 
     it('does not post messages for empty results', async () => {

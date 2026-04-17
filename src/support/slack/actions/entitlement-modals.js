@@ -294,18 +294,31 @@ export function ensureEntitlementImsOrgModal(lambdaContext) {
       for (const product of selectedProducts) {
         try {
           const tierClient = TierClient.createForOrg(lambdaContext, organization, product);
-          const { entitlement } = await tierClient.createEntitlement(
-            EntitlementModel.TIERS.FREE_TRIAL,
-          );
-          entitlementResults.push({
-            product,
-            entitlementId: entitlement.getId(),
-          });
+          const existing = await tierClient.checkValidEntitlement();
 
-          await say(
-            `:white_check_mark: Ensured ${product} entitlement ${entitlement.getId()} `
-            + `(${EntitlementModel.TIERS.FREE_TRIAL}) for organization ${organizationId}`,
-          );
+          if (existing.entitlement) {
+            const currentTier = existing.entitlement.getTier();
+            entitlementResults.push({
+              product,
+              entitlementId: existing.entitlement.getId(),
+            });
+            await say(
+              `:information_source: ${product} entitlement ${existing.entitlement.getId()} `
+              + `(${currentTier}) already exists for organization ${organizationId}`,
+            );
+          } else {
+            const { entitlement } = await tierClient.createEntitlement(
+              EntitlementModel.TIERS.FREE_TRIAL,
+            );
+            entitlementResults.push({
+              product,
+              entitlementId: entitlement.getId(),
+            });
+            await say(
+              `:white_check_mark: Created ${product} entitlement ${entitlement.getId()} `
+              + `(${EntitlementModel.TIERS.FREE_TRIAL}) for organization ${organizationId}`,
+            );
+          }
         } catch (error) {
           log.error(`Error creating ${product} entitlement for org ${organizationId}:`, error);
           await say(`:x: Failed to ensure ${product} entitlement: ${error.message}`);

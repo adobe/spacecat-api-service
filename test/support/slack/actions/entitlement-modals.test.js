@@ -155,6 +155,7 @@ describe('EntitlementModals', () => {
             revokeSiteEnrollment: sinon.stub().resolves(),
           }),
           createForOrg: sinon.stub().returns({
+            checkValidEntitlement: sinon.stub().resolves({}),
             createEntitlement: sinon.stub().resolves({
               entitlement: { getId: () => TEST_IDS.ent },
             }),
@@ -397,15 +398,55 @@ describe('EntitlementModals', () => {
       );
     });
 
-    it('handles errors during individual product entitlement', async () => {
-      const mockTierClient = {
-        createEntitlement: sinon.stub().rejects(new Error('Tier error')),
+    it('preserves existing entitlement and skips creation', async () => {
+      const existingEntitlement = {
+        getId: () => 'ent-existing',
+        getTier: () => 'PLG',
+      };
+      const mockTierClientInstance = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: existingEntitlement }),
       };
 
       const module = await esmock('../../../../src/support/slack/actions/entitlement-modals.js', {
         '@adobe/spacecat-shared-tier-client': {
           default: {
-            createForOrg: sinon.stub().returns(mockTierClient),
+            createForOrg: sinon.stub().returns(mockTierClientInstance),
+          },
+        },
+        '../../../../src/support/slack/actions/entitlement-modal-utils.js': {
+          extractSelectedProducts: await import('../../../../src/support/slack/actions/entitlement-modal-utils.js')
+            .then((m) => m.extractSelectedProducts),
+          createSayFunction: await import('../../../../src/support/slack/actions/entitlement-modal-utils.js')
+            .then((m) => m.createSayFunction),
+          updateMessageToProcessing: mockUpdateMessageToProcessing,
+        },
+      });
+
+      await testModalSubmission(
+        module.ensureEntitlementImsOrgModal,
+        createOrgMetadata(),
+        createProductState(),
+        (ack, client) => {
+          expect(ack).to.have.been.calledOnce;
+          expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+            text: sinon.match('already exists'),
+          }));
+          expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+            text: sinon.match('PLG'),
+          }));
+        },
+      );
+    });
+
+    it('handles errors during individual product entitlement', async () => {
+      const mockTierClientInstance = {
+        checkValidEntitlement: sinon.stub().rejects(new Error('Tier error')),
+      };
+
+      const module = await esmock('../../../../src/support/slack/actions/entitlement-modals.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForOrg: sinon.stub().returns(mockTierClientInstance),
           },
         },
         '../../../../src/support/slack/actions/entitlement-modal-utils.js': {

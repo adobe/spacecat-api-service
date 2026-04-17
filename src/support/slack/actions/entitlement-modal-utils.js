@@ -168,7 +168,9 @@ export async function updateMessageToProcessing(client, channelId, messageTs, ba
 }
 
 /**
- * Creates entitlements for selected products in parallel
+ * Creates entitlements for selected products in parallel.
+ * If the org already has an entitlement for a product, preserves the existing tier
+ * and only creates the site enrollment if missing.
  * @param {object} lambdaContext - Lambda context
  * @param {object} site - Site object
  * @param {string[]} selectedProducts - Array of product codes
@@ -177,6 +179,36 @@ export async function updateMessageToProcessing(client, channelId, messageTs, ba
 export async function createEntitlementsForProducts(lambdaContext, site, selectedProducts) {
   const entitlementPromises = selectedProducts.map(async (product) => {
     const tierClient = await TierClient.createForSite(lambdaContext, site, product);
+    const existing = await tierClient.checkValidEntitlement();
+
+    if (existing.entitlement) {
+      const currentTier = existing.entitlement.getTier();
+
+      if (existing.siteEnrollment) {
+        return {
+          product,
+          entitlementId: existing.entitlement.getId(),
+          enrollmentId: existing.siteEnrollment.getId(),
+          existingTier: currentTier,
+          alreadyExisted: true,
+        };
+      }
+
+      const { SiteEnrollment } = lambdaContext.dataAccess;
+      const siteEnrollment = await SiteEnrollment.create({
+        siteId: site.getId(),
+        entitlementId: existing.entitlement.getId(),
+      });
+
+      return {
+        product,
+        entitlementId: existing.entitlement.getId(),
+        enrollmentId: siteEnrollment.getId(),
+        existingTier: currentTier,
+        enrollmentCreated: true,
+      };
+    }
+
     const { entitlement, siteEnrollment } = await tierClient.createEntitlement(
       EntitlementModel.TIERS.FREE_TRIAL,
     );
@@ -200,8 +232,17 @@ export async function createEntitlementsForProducts(lambdaContext, site, selecte
 export async function postEntitlementMessages(say, entitlementResults, siteId) {
   /* eslint-disable no-await-in-loop */
   for (const result of entitlementResults) {
-    const message = `:white_check_mark: Ensured ${result.product} entitlement ${result.entitlementId} `
-      + `(${EntitlementModel.TIERS.FREE_TRIAL}) and enrollment ${result.enrollmentId} for site ${siteId}`;
+    let message;
+    if (result.alreadyExisted) {
+      message = `:information_source: ${result.product} entitlement ${result.entitlementId} `
+        + `(${result.existingTier}) and enrollment ${result.enrollmentId} already exist for site ${siteId}`;
+    } else if (result.enrollmentCreated) {
+      message = `:white_check_mark: ${result.product} entitlement ${result.entitlementId} `
+        + `(${result.existingTier}) already existed — created enrollment ${result.enrollmentId} for site ${siteId}`;
+    } else {
+      message = `:white_check_mark: Created ${result.product} entitlement ${result.entitlementId} `
+        + `(${EntitlementModel.TIERS.FREE_TRIAL}) and enrollment ${result.enrollmentId} for site ${siteId}`;
+    }
     await say(message);
   }
   /* eslint-enable no-await-in-loop */
