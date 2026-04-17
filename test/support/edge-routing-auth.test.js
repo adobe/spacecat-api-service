@@ -100,8 +100,13 @@ describe('edge-routing-auth', () => {
     it('returns access token when cookie is present', async () => {
       getCookieValueStub.returns('ptok');
       exchangePromiseTokenStub.resolves('user-token');
-      const token = await getImsTokenFromPromiseToken({});
+      const ctxLog = { info: sandbox.stub(), error: sandbox.stub() };
+      const token = await getImsTokenFromPromiseToken({
+        pathInfo: { headers: {} },
+        log: ctxLog,
+      });
       expect(token).to.equal('user-token');
+      expect(ctxLog.info).to.have.been.calledWith(sinon.match(/cookie/));
     });
 
     it('returns access token from x-promise-token header when cookie is absent', async () => {
