@@ -1114,7 +1114,6 @@ function PlgOnboardingController(ctx) {
     }
 
     const { domain, imsOrgId: requestedImsOrgId } = data;
-    const isFromBackoffice = data.fromBackoffice === true;
 
     if (!hasText(domain)) {
       return badRequest('domain is required');
@@ -1128,6 +1127,8 @@ function PlgOnboardingController(ctx) {
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
     const isAdmin = accessControlUtil.hasAdminAccess();
+
+    const isInternalCall = data.fromBackoffice === true || isAdmin;
 
     // Admins can onboard on behalf of any IMS org — imsOrgId must be explicitly provided
     let imsOrgId;
@@ -1156,7 +1157,7 @@ function PlgOnboardingController(ctx) {
       }
     }
 
-    const updatedBy = isFromBackoffice ? null : (authInfo?.getProfile()?.email || 'system');
+    const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId, updatedBy }, context);
