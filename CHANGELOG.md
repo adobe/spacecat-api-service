@@ -1,3 +1,10 @@
+## [1.445.3](https://github.com/adobe/spacecat-api-service/compare/v1.445.2...v1.445.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* lower default limit for aem.live proxy requests from 10M to 5000 ([#2229](https://github.com/adobe/spacecat-api-service/issues/2229)) ([a5ee1b0](https://github.com/adobe/spacecat-api-service/commit/a5ee1b0dfa1c972c6ae810f5355cac39bc96b3b4))
+
 ## [1.445.2](https://github.com/adobe/spacecat-api-service/compare/v1.445.1...v1.445.2) (2026-04-16)
 
 
