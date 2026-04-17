@@ -1,3 +1,10 @@
+## [1.446.1](https://github.com/adobe/spacecat-api-service/compare/v1.446.0...v1.446.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* edge-routing - consume promise token from header ([#2231](https://github.com/adobe/spacecat-api-service/issues/2231)) ([a62e57a](https://github.com/adobe/spacecat-api-service/commit/a62e57aa977cec5c19d40bc366d1a8e28ffbff77))
+
 # [1.446.0](https://github.com/adobe/spacecat-api-service/compare/v1.445.3...v1.446.0) (2026-04-17)
 
 
