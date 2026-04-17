@@ -181,6 +181,59 @@ describe('categories-storage', () => {
         postgrestClient,
       })).to.be.rejectedWith('Failed to create category: unique violation');
     });
+
+    it('throws a 409-typed error when the DB returns uq_category_name_per_org violation', async () => {
+      const postgrestClient = {
+        from: sinon.stub().returns(createChainableQuery({
+          data: null,
+          error: {
+            code: '23505',
+            message: 'duplicate key value violates unique constraint "uq_category_name_per_org"',
+            details: 'Key (organization_id, name)=(00000000-..., DupTest) already exists.',
+            hint: '',
+          },
+        })),
+      };
+
+      const err = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'DupTest' },
+        postgrestClient,
+        updatedBy: 'test',
+      }).catch((e) => e);
+
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(409);
+      expect(err.message).to.match(/already exists/i);
+      expect(err.message).to.include('DupTest');
+    });
+
+    it('throws a generic error when 23505 is raised without a matching constraint message', async () => {
+      const postgrestClient = {
+        from: sinon.stub().returns(createChainableQuery({
+          data: null,
+          error: {
+            code: '23505',
+            // message intentionally omitted to cover the `error.message || ''` fallback
+            // while keeping the regex match path false
+            details: '',
+            hint: '',
+          },
+        })),
+      };
+
+      const err = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'OtherDup' },
+        postgrestClient,
+        updatedBy: 'test',
+      }).catch((e) => e);
+
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.be.undefined;
+      expect(err.message).to.match(/^Failed to create category:/);
+      expect(err.message).to.not.match(/already exists/i);
+    });
   });
 
   describe('updateCategory', () => {

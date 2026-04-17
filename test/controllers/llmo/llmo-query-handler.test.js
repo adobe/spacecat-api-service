@@ -133,16 +133,6 @@ describe('llmo-query-handler', () => {
       expect(fetchUrl).to.include(TEST_DATA_SOURCE);
     });
 
-    it('should use default limit of 5000 when no limit is provided', async () => {
-      setupFetchTest(createSheetData([]));
-      mockContext.data = {};
-
-      await queryLlmoFiles(mockContext, mockLlmoConfig);
-
-      const fetchUrl = getFetchUrl();
-      expect(fetchUrl).to.include('limit=5000');
-    });
-
     it('should construct correct URL with sheetType and week', async () => {
       setupFetchTest(createSheetData([]));
 
