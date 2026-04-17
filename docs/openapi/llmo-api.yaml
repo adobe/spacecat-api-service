@@ -2104,8 +2104,9 @@ llmo-probe-edge-optimize:
                   type: boolean
                   description: Whether the origin returned real content (not a WAF block).
                 blocked:
-                  type: boolean
-                  nullable: true
+                  type:
+                    - boolean
+                    - 'null'
                   description: >
                     `true` — WAF/Bot Manager is blocking the UA.
                     `false` — not blocked.
