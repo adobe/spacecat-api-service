@@ -34,6 +34,7 @@ const TEST_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123456789012/audit-j
 const CATEGORY_ID = '123e4567-e89b-12d3-a456-426614174000';
 const TOPIC_ID = '456e7890-e89b-12d3-a456-426614174001';
 const EXTERNAL_API_BASE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
+const DEFAULT_LIMIT = 5000;
 
 const createMockResponse = (data, ok = true, status = 200) => ({
   ok,
@@ -91,7 +92,7 @@ describe('LlmoController', () => {
   let probeSiteAndResolveDomainStub;
   let callCdnRoutingApiStub;
   let probeWafConnectivityStub;
-  let getImsTokenFromCookieStub;
+  let getImsTokenFromPromiseTokenStub;
   let edgeRoutingAuthReal;
   let detectCdnForDomainStub;
   let authorizeEdgeCdnRoutingStub;
@@ -191,7 +192,7 @@ describe('LlmoController', () => {
     });
 
     edgeRoutingAuthReal = await import('../../../src/support/edge-routing-auth.js');
-    getImsTokenFromCookieStub = sinon.stub().resolves('test-ims-user-token');
+    getImsTokenFromPromiseTokenStub = sinon.stub().resolves('test-ims-user-token');
     detectCdnForDomainStub = sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY);
     authorizeEdgeCdnRoutingStub = sinon.stub().callsFake((ctx, params, log) => (
       edgeRoutingAuthReal.authorizeEdgeCdnRouting(ctx, params, log)
@@ -232,7 +233,7 @@ describe('LlmoController', () => {
         fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
       },
       '../../../src/support/edge-routing-auth.js': {
-        getImsTokenFromCookie: (...args) => getImsTokenFromCookieStub(...args),
+        getImsTokenFromPromiseToken: (...args) => getImsTokenFromPromiseTokenStub(...args),
         authorizeEdgeCdnRouting: (...args) => authorizeEdgeCdnRoutingStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
@@ -649,8 +650,8 @@ describe('LlmoController', () => {
     getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
     getImsUserProfileStub = sinon.stub().resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
     getImsUserOrganizationsStub = sinon.stub().resolves([]);
-    getImsTokenFromCookieStub.reset();
-    getImsTokenFromCookieStub.resolves('test-ims-user-token');
+    getImsTokenFromPromiseTokenStub.reset();
+    getImsTokenFromPromiseTokenStub.resolves('test-ims-user-token');
     probeSiteAndResolveDomainStub = sinon.stub().resolves('www.example.com');
     probeWafConnectivityStub = sinon.stub().resolves({
       reachable: true, blocked: false, statusCode: 200, probedUrl: 'https://www.example.com/',
@@ -695,7 +696,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
-      expect(tracingFetchStub).to.have.been.calledWith(testUrl, {
+      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, {
         headers: {
           Authorization: `token ${TEST_API_KEY}`,
           'User-Agent': TEST_USER_AGENT,
@@ -704,7 +705,17 @@ describe('LlmoController', () => {
       });
     });
 
-    ['limit', 'offset', 'sheet'].forEach((param) => {
+    it('should add limit query parameter to URL when provided', async () => {
+      const mockResponse = createMockResponse({ data: 'test-data' });
+      tracingFetchStub.resolves(mockResponse);
+      mockContext.data.limit = '10';
+
+      await controller.getLlmoSheetData(mockContext);
+
+      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=10`, sinon.match.object);
+    });
+
+    ['offset', 'sheet'].forEach((param) => {
       it(`should add ${param} query parameter to URL when provided`, async () => {
         const mockResponse = createMockResponse({ data: 'test-data' });
         tracingFetchStub.resolves(mockResponse);
@@ -712,7 +723,7 @@ describe('LlmoController', () => {
 
         await controller.getLlmoSheetData(mockContext);
 
-        const expectedUrl = `${testUrl}?${param}=${mockContext.data[param]}`;
+        const expectedUrl = `${testUrl}?limit=${DEFAULT_LIMIT}&${param}=${mockContext.data[param]}`;
         expect(tracingFetchStub).to.have.been.calledWith(expectedUrl, sinon.match.object);
       });
     });
@@ -738,7 +749,7 @@ describe('LlmoController', () => {
       await controller.getLlmoSheetData(mockContext);
 
       expect(tracingFetchStub).to.have.been.calledWith(
-        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/test-data.json`,
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/test-data.json?limit=${DEFAULT_LIMIT}`,
         sinon.match.object,
       );
     });
@@ -751,7 +762,7 @@ describe('LlmoController', () => {
 
         await controller.getLlmoSheetData(mockContext);
 
-        expect(tracingFetchStub).to.have.been.calledWith(testUrl, sinon.match.object);
+        expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, sinon.match.object);
       });
     });
 
@@ -762,7 +773,7 @@ describe('LlmoController', () => {
 
       await controller.getLlmoSheetData(mockContext);
 
-      expect(tracingFetchStub).to.have.been.calledWith(testUrl, {
+      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, {
         headers: {
           Authorization: 'token hlx_api_key_missing',
           'User-Agent': TEST_USER_AGENT,
@@ -858,7 +869,7 @@ describe('LlmoController', () => {
       await controller.getLlmoSheetData(mockContext);
 
       expect(tracingFetchStub).to.have.been.calledWith(
-        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w01/test-data.json`,
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w01/test-data.json?limit=${DEFAULT_LIMIT}`,
         sinon.match.object,
       );
     });
@@ -887,7 +898,7 @@ describe('LlmoController', () => {
       await controller.getLlmoSheetData(mockContext);
 
       expect(tracingFetchStub).to.have.been.calledWith(
-        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json`,
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json?limit=${DEFAULT_LIMIT}`,
         sinon.match.object,
       );
     });
@@ -911,10 +922,20 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
-      expect(tracingFetchStub).to.have.been.calledWith(testUrl, sinon.match.object);
+      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, sinon.match.object);
     });
 
-    ['limit', 'offset', 'sheet'].forEach((param) => {
+    it('should add limit query parameter to URL when provided', async () => {
+      const mockResponse = createMockResponse({ data: 'test-data' });
+      tracingFetchStub.resolves(mockResponse);
+      mockContext.data.limit = '10';
+
+      await controller.getLlmoGlobalSheetData(mockContext);
+
+      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=10`, sinon.match.object);
+    });
+
+    ['offset', 'sheet'].forEach((param) => {
       it(`should add ${param} query parameter to URL when provided`, async () => {
         const mockResponse = createMockResponse({ data: 'test-data' });
         tracingFetchStub.resolves(mockResponse);
@@ -922,7 +943,7 @@ describe('LlmoController', () => {
 
         await controller.getLlmoGlobalSheetData(mockContext);
 
-        const expectedUrl = `${testUrl}?${param}=${mockContext.data[param]}`;
+        const expectedUrl = `${testUrl}?limit=${DEFAULT_LIMIT}&${param}=${mockContext.data[param]}`;
         expect(tracingFetchStub).to.have.been.calledWith(expectedUrl, sinon.match.object);
       });
     });
@@ -5234,7 +5255,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5304,7 +5325,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5371,7 +5392,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5569,14 +5590,14 @@ describe('LlmoController', () => {
       });
 
       it('returns 400 when promiseToken cookie is missing for CDN routing', async () => {
-        getImsTokenFromCookieStub.callsFake((ctx) => (
-          edgeRoutingAuthReal.getImsTokenFromCookie(ctx)
+        getImsTokenFromPromiseTokenStub.callsFake((ctx) => (
+          edgeRoutingAuthReal.getImsTokenFromPromiseToken(ctx)
         ));
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ pathInfo: { headers: { cookie: '' } } }),
         );
         expect(result.status).to.equal(400);
-        expect((await result.json()).message).to.include('promiseToken cookie is required');
+        expect((await result.json()).message).to.include('Authentication failed: mandatory token missing');
       });
 
       it('returns 200 with routing data when CDN routing succeeds', async () => {
@@ -5651,10 +5672,10 @@ describe('LlmoController', () => {
         );
       });
 
-      it('uses tokenError.status when getImsTokenFromCookie fails with a status', async () => {
+      it('uses tokenError.status when getImsTokenFromPromiseToken fails with a status', async () => {
         const tokenErr = new Error('IMS cookie exchange failed');
         tokenErr.status = 503;
-        getImsTokenFromCookieStub.rejects(tokenErr);
+        getImsTokenFromPromiseTokenStub.rejects(tokenErr);
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(503);
         expect((await result.json()).message).to.equal('IMS cookie exchange failed');
@@ -5669,8 +5690,8 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.equal('Custom auth failure');
       });
 
-      it('returns 401 when getImsTokenFromCookie fails without a status', async () => {
-        getImsTokenFromCookieStub.rejects(new Error('token failure'));
+      it('returns 401 when getImsTokenFromPromiseToken fails without a status', async () => {
+        getImsTokenFromPromiseTokenStub.rejects(new Error('token failure'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(401);
       });

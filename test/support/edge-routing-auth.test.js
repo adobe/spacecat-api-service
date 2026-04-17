@@ -35,7 +35,7 @@ describe('edge-routing-auth', () => {
   let log;
   let getCookieValueStub;
   let exchangePromiseTokenStub;
-  let getImsTokenFromCookie;
+  let getImsTokenFromPromiseToken;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -58,22 +58,22 @@ describe('edge-routing-auth', () => {
         },
       },
     });
-    getImsTokenFromCookie = authMocked.getImsTokenFromCookie;
+    getImsTokenFromPromiseToken = authMocked.getImsTokenFromPromiseToken;
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
-  describe('getImsTokenFromCookie', () => {
-    it('throws 400 when promiseToken cookie is missing', async () => {
+  describe('getImsTokenFromPromiseToken', () => {
+    it('throws 400 when neither cookie nor x-promise-token header is present', async () => {
       getCookieValueStub.returns(null);
       try {
-        await getImsTokenFromCookie({ pathInfo: { headers: {} } });
+        await getImsTokenFromPromiseToken({ pathInfo: { headers: {} } });
         expect.fail('expected throw');
       } catch (e) {
         expect(e.status).to.equal(400);
-        expect(e.message).to.include('promiseToken cookie is required');
+        expect(e.message).to.include('Authentication failed: mandatory token missing');
       }
     });
 
@@ -82,7 +82,7 @@ describe('edge-routing-auth', () => {
       exchangePromiseTokenStub.rejects(new Error('ims down'));
       const ctxLog = { error: sandbox.stub() };
       try {
-        await getImsTokenFromCookie({
+        await getImsTokenFromPromiseToken({
           pathInfo: { headers: { cookie: 'promiseToken=ptok' } },
           log: ctxLog,
         });
@@ -97,11 +97,39 @@ describe('edge-routing-auth', () => {
       }
     });
 
-    it('returns access token when exchange succeeds', async () => {
+    it('returns access token when cookie is present', async () => {
       getCookieValueStub.returns('ptok');
       exchangePromiseTokenStub.resolves('user-token');
-      const token = await getImsTokenFromCookie({});
+      const ctxLog = { info: sandbox.stub(), error: sandbox.stub() };
+      const token = await getImsTokenFromPromiseToken({
+        pathInfo: { headers: {} },
+        log: ctxLog,
+      });
       expect(token).to.equal('user-token');
+      expect(ctxLog.info).to.have.been.calledWith(sinon.match(/cookie/));
+    });
+
+    it('returns access token from x-promise-token header when cookie is absent', async () => {
+      getCookieValueStub.returns(null);
+      exchangePromiseTokenStub.resolves('user-token-from-header');
+      const ctxLog = { info: sandbox.stub(), error: sandbox.stub() };
+      const token = await getImsTokenFromPromiseToken({
+        pathInfo: { headers: { 'x-promise-token': 'header-ptok' } },
+        log: ctxLog,
+      });
+      expect(token).to.equal('user-token-from-header');
+      expect(exchangePromiseTokenStub).to.have.been.calledWith(sinon.match.any, 'header-ptok');
+      expect(ctxLog.info).to.have.been.calledWith(sinon.match(/header/));
+    });
+
+    it('prefers cookie over x-promise-token header when both are present', async () => {
+      getCookieValueStub.returns('cookie-ptok');
+      exchangePromiseTokenStub.resolves('user-token-from-cookie');
+      const token = await getImsTokenFromPromiseToken({
+        pathInfo: { headers: { 'x-promise-token': 'header-ptok' } },
+      });
+      expect(token).to.equal('user-token-from-cookie');
+      expect(exchangePromiseTokenStub).to.have.been.calledWith(sinon.match.any, 'cookie-ptok');
     });
   });
 
