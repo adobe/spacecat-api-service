@@ -295,7 +295,7 @@ async function disableSummitPlgHandler(site, context) {
 
 /**
  * Revokes all ASO site enrollments for the site linked to a given onboarding record.
- * Called when transitioning an ONBOARDED domain to INACTIVE.
+ * Called when transitioning an ONBOARDED domain to WAITLISTED.
  * @param {object} onboarding - The PlgOnboarding record being offboarded.
  * @param {object} context - Request context.
  */
@@ -1327,7 +1327,7 @@ function PlgOnboardingController(ctx) {
   /**
    * PATCH /plg/onboard/:onboardingId
    * Admin-only: review a waitlisted onboarding (BYPASS or UPHOLD), or record a review on an
-   * ONBOARDED record and transition it to INACTIVE (revokes ASO site enrollments when linked).
+   * ONBOARDED record and transition it to WAITLISTED (revokes ASO site enrollments when linked).
    * On BYPASS for WAITLISTED, performs scenario-specific prep and re-runs the PLG flow.
    */
   const update = async (context) => {
