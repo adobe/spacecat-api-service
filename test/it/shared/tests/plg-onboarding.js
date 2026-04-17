@@ -265,6 +265,23 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
       });
 
       if (!skipPlgOnboardingTests) {
+        it('ONBOARDED: transitions to WAITLISTED with justification as waitlist reason', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_1_ID}`, {
+            decision: 'UPHELD',
+            justification: 'Rejecting onboarded domain per request',
+          });
+          expect(res.status).to.equal(200);
+          expectPlgOnboardingDto(res.body);
+          expect(res.body.status).to.equal('WAITLISTED');
+          expect(res.body.waitlistReason).to.equal('Rejecting onboarded domain per request');
+          expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
+          expect(res.body.reviews[0].decision).to.equal('UPHELD');
+          expect(res.body.reviews[0].justification).to.equal('Rejecting onboarded domain per request');
+          expect(res.body.reviews[0].reviewedBy).to.be.a('string');
+          expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
+        });
+
         it('UPHELD: stores review and keeps WAITLISTED status', async () => {
           const http = getHttpClient();
           const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}`, {
