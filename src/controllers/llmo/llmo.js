@@ -1865,7 +1865,6 @@ function LlmoController(ctx) {
    * @param {object} context - Request context.
    * @returns {Promise<Response>} 200 with probe result, or 4xx/5xx on error.
    */
-  /* istanbul ignore next */
   const checkWafConnectivity = async (context) => {
     const { log, dataAccess } = context;
     const { Site } = dataAccess;
@@ -1885,6 +1884,7 @@ function LlmoController(ctx) {
     }
 
     const baseURL = site.getBaseURL();
+    /* c8 ignore next 3 */
     if (!baseURL) {
       return internalServerError('Site has no baseURL configured');
     }
