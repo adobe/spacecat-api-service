@@ -1,3 +1,10 @@
+## [1.445.2](https://github.com/adobe/spacecat-api-service/compare/v1.445.1...v1.445.2) (2026-04-16)
+
+
+### Bug Fixes
+
+* **llmo:** defer prompt gen to post-Brandalf + fix type:url constraint (LLMO-4258, LLMO-4294) ([ed5363d](https://github.com/adobe/spacecat-api-service/commit/ed5363d1db0e645de34d38013d6362a023ab0192))
+
 ## [1.445.1](https://github.com/adobe/spacecat-api-service/compare/v1.445.0...v1.445.1) (2026-04-16)
 
 
