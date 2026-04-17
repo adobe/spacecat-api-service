@@ -39,6 +39,7 @@ export async function getImsTokenFromPromiseToken(context) {
     err.status = 400;
     throw err;
   }
+  context.log?.info?.(`Promise token found in ${rawHeaderToken ? 'header' : 'cookie'}`);
 
   const promiseToken = decodeURIComponent(rawPromiseToken);
 
