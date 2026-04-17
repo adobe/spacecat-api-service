@@ -134,58 +134,8 @@ export async function triggerBrandalfOnboardingJob({
   return drsJob;
 }
 
-function buildPromptGenerationMetadata({
-  siteId,
-  imsOrgId,
-  baseUrl,
-  brandName,
-  region,
-  onboardingMode,
-}) {
-  return buildOnboardingMetadata({
-    siteId,
-    imsOrgId,
-    brandName,
-    onboardingMode,
-    extra: {
-      base_url: baseUrl,
-      region,
-    },
-  });
-}
-
-export async function submitOnboardingPromptGenerationJob({
-  drsClient,
-  baseUrl,
-  brandName,
-  audience,
-  region = 'US',
-  numPrompts = 50,
-  siteId,
-  imsOrgId,
-  onboardingMode,
-}) {
-  return drsClient.submitJob({
-    provider_id: 'prompt_generation_base_url',
-    source: 'onboarding',
-    parameters: {
-      base_url: baseUrl,
-      brand: brandName,
-      audience,
-      region,
-      num_prompts: numPrompts,
-      model: 'gpt-5-nano',
-      metadata: buildPromptGenerationMetadata({
-        siteId,
-        imsOrgId,
-        baseUrl,
-        brandName,
-        region,
-        onboardingMode,
-      }),
-    },
-  });
-}
+// submitOnboardingPromptGenerationJob removed — prompt generation is now
+// triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
 export function buildInitialCustomerConfigV2({
   brandName,
@@ -1433,35 +1383,10 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
     await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
 
-    // Submit DRS prompt generation job (non-blocking)
-    try {
-      const drsClient = DrsClient.createFrom(context);
-      if (drsClient.isConfigured()) {
-        // Try to get audience from brand profile, fall back to default
-        const brandProfile = siteConfig.getBrandProfile?.();
-        const audience = brandProfile?.main_profile?.target_audience
-          || `General consumers interested in ${brandName} products and services`;
-
-        const drsJob = await submitOnboardingPromptGenerationJob({
-          drsClient,
-          baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
-          brandName: brandName.trim(),
-          audience,
-          region: 'US',
-          numPrompts: 50,
-          siteId: site.getId(),
-          imsOrgId,
-          onboardingMode,
-        });
-        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
-        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
-      } else {
-        log.debug('DRS client not configured, skipping prompt generation');
-      }
-    } catch (drsError) {
-      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
-    }
+    // Prompt generation is deferred to DRS: when the Brandalf job completes
+    // and syncs brands (with correct regions) to SpaceCat, DRS automatically
+    // submits a prompt_generation_base_url job with the brand's region.
+    // This ensures prompts are generated in the correct language (LLMO-4258).
 
     return {
       site,

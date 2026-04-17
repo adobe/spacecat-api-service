@@ -1,3 +1,31 @@
+## [1.446.1](https://github.com/adobe/spacecat-api-service/compare/v1.446.0...v1.446.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* edge-routing - consume promise token from header ([#2231](https://github.com/adobe/spacecat-api-service/issues/2231)) ([a62e57a](https://github.com/adobe/spacecat-api-service/commit/a62e57aa977cec5c19d40bc366d1a8e28ffbff77))
+
+# [1.446.0](https://github.com/adobe/spacecat-api-service/compare/v1.445.3...v1.446.0) (2026-04-17)
+
+
+### Features
+
+* view trial toggle ([#2197](https://github.com/adobe/spacecat-api-service/issues/2197)) ([c99aea7](https://github.com/adobe/spacecat-api-service/commit/c99aea7735b4d7aa1682a730d9228b8852f85547))
+
+## [1.445.3](https://github.com/adobe/spacecat-api-service/compare/v1.445.2...v1.445.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* lower default limit for aem.live proxy requests from 10M to 5000 ([#2229](https://github.com/adobe/spacecat-api-service/issues/2229)) ([a5ee1b0](https://github.com/adobe/spacecat-api-service/commit/a5ee1b0dfa1c972c6ae810f5355cac39bc96b3b4))
+
+## [1.445.2](https://github.com/adobe/spacecat-api-service/compare/v1.445.1...v1.445.2) (2026-04-16)
+
+
+### Bug Fixes
+
+* **llmo:** defer prompt gen to post-Brandalf + fix type:url constraint (LLMO-4258, LLMO-4294) ([ed5363d](https://github.com/adobe/spacecat-api-service/commit/ed5363d1db0e645de34d38013d6362a023ab0192))
+
 ## [1.445.1](https://github.com/adobe/spacecat-api-service/compare/v1.445.0...v1.445.1) (2026-04-16)
 
 

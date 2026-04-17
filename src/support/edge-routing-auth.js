@@ -22,19 +22,24 @@ export const LLMO_IMS_SERVICE_CODES = ['dx_llmo'];
 export const LLMO_ADMIN_GROUP_NAME = 'LLMO Admin';
 
 /**
- * Reads the promiseToken cookie from the request and exchanges it for an IMS user access token.
+ * Reads the promise token from the request (cookie first, then x-promise-token header)
+ * and exchanges it for an IMS user access token.
  *
  * @param {object} context - The request context.
  * @returns {Promise<string>} The IMS user access token.
  * @throws {Error} With a `status` property (400 or 401) on failure.
  */
-export async function getImsTokenFromCookie(context) {
-  const rawPromiseToken = getCookieValue(context, 'promiseToken');
+export async function getImsTokenFromPromiseToken(context) {
+  const rawCookieToken = getCookieValue(context, 'promiseToken');
+  const rawHeaderToken = context.pathInfo?.headers?.['x-promise-token'];
+  const rawPromiseToken = rawCookieToken || rawHeaderToken;
+
   if (!hasText(rawPromiseToken)) {
-    const err = new Error('promiseToken cookie is required for CDN routing');
+    const err = new Error('Authentication failed: mandatory token missing');
     err.status = 400;
     throw err;
   }
+  context.log?.info?.(`Promise token found in ${rawHeaderToken ? 'header' : 'cookie'}`);
 
   const promiseToken = decodeURIComponent(rawPromiseToken);
 
