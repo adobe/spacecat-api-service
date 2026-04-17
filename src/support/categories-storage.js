@@ -100,6 +100,11 @@ export async function createCategory({
     .single();
 
   if (error) {
+    if (error.code === '23505' && /uq_category_name_per_org/.test(error.message || '')) {
+      const conflict = new Error(`Category with name '${category.name}' already exists for this organization`);
+      conflict.status = 409;
+      throw conflict;
+    }
     throw new Error(`Failed to create category: ${error.message}`);
   }
   return mapDbCategoryToV2(data);
