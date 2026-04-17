@@ -5584,6 +5584,7 @@ describe('PlgOnboardingController', () => {
         // Site should be reassigned to the current org
         expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
         expect(existingSite.save).to.have.been.called;
+        expect(record.save).to.have.been.called;
         // Original record should NOT be offboarded (different from default flow)
         expect(record.setStatus).to.not.have.been.calledWith('INACTIVE');
       });
@@ -5625,6 +5626,7 @@ describe('PlgOnboardingController', () => {
           imsOrgId: TEST_IMS_ORG_ID,
           authorURL: 'https://author.example.com',
         });
+        expect(record.save).to.have.been.called;
       });
 
       it('returns 400 for unknown waitlist reason', async () => {

@@ -1577,6 +1577,8 @@ function PlgOnboardingController(ctx) {
             }
             await site.save();
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
+            // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
+            await onboarding.save();
             const result = await performAsoPlgOnboarding(
               { domain, imsOrgId: onboarding.getImsOrgId() },
               context,
