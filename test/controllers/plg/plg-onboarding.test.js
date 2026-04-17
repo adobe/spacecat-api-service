@@ -1765,9 +1765,14 @@ describe('PlgOnboardingController', () => {
         }],
       });
       let currentStatus = 'ONBOARDED';
+      let currentWaitlistReason = null;
       record.getStatus.callsFake(() => currentStatus);
       record.setStatus.callsFake((s) => {
         currentStatus = s;
+      });
+      record.getWaitlistReason.callsFake(() => currentWaitlistReason);
+      record.setWaitlistReason.callsFake((r) => {
+        currentWaitlistReason = r;
       });
       mockDataAccess.PlgOnboarding.findById.resolves(record);
 
@@ -1782,9 +1787,9 @@ describe('PlgOnboardingController', () => {
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
-      expect(message).to.include('Inactive');
-      expect(message).to.include('Inactivation Reason');
-      expect(message).to.include('Domain is not an AEM site');
+      expect(message).to.include('Waitlisted');
+      expect(message).to.include('Reason:');
+      expect(message).to.include('Inactivating per request');
     });
 
     it('INACTIVE notification omits inactivation reason when there are no reviews', async () => {
@@ -1885,7 +1890,7 @@ describe('PlgOnboardingController', () => {
 
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
-      expect(message).to.include('Inactive');
+      expect(message).to.include('Waitlisted');
       expect(message).to.not.include('Inactivation Reason');
     });
   });
@@ -4091,7 +4096,7 @@ describe('PlgOnboardingController', () => {
         expect(res.value).to.equal('Onboarding record must be in WAITLISTED or ONBOARDED state');
       });
 
-      it('ONBOARDED: revokes ASO enrollments, sets INACTIVE, appends review', async () => {
+      it('ONBOARDED: revokes ASO enrollments, sets WAITLISTED, appends review', async () => {
         const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
         const mockEnrollment = {
           getId: () => 'enroll-onboarded',
@@ -4124,7 +4129,8 @@ describe('PlgOnboardingController', () => {
         expect(reviews).to.have.length(1);
         expect(reviews[0].decision).to.equal('BYPASSED');
         expect(reviews[0].justification).to.equal('Recorded for audit');
-        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(record.setWaitlistReason).to.have.been.calledWith('Recorded for audit');
         expect(record.save).to.have.been.calledOnce;
         expect(mockDataAccess.PlgOnboarding.allByImsOrgId).to.not.have.been.called;
         expect(res.value).to.have.property('updatedBy');
@@ -4195,7 +4201,7 @@ describe('PlgOnboardingController', () => {
         expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to disable summit-plg handler/);
       });
 
-      it('ONBOARDED: sets INACTIVE without Site lookup when no site is linked', async () => {
+      it('ONBOARDED: sets WAITLISTED without Site lookup when no site is linked', async () => {
         const record = createMockOnboarding({
           status: 'ONBOARDED',
           siteId: null,
@@ -4215,11 +4221,12 @@ describe('PlgOnboardingController', () => {
 
         expect(res.status).to.equal(200);
         expect(mockDataAccess.Site.findById).to.not.have.been.called;
-        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(record.setWaitlistReason).to.have.been.calledWith('Offboarding without site');
         expect(record.save).to.have.been.calledOnce;
       });
 
-      it('ONBOARDED: logs warn and continues to INACTIVE when ASO enrollment revocation fails', async () => {
+      it('ONBOARDED: logs warn and continues to WAITLISTED when ASO enrollment revocation fails', async () => {
         const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
         const mockEnrollment = {
           getId: () => 'enroll-onboarded',
@@ -4246,7 +4253,7 @@ describe('PlgOnboardingController', () => {
 
         expect(res.status).to.equal(200);
         expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke one or more ASO enrollments/);
-        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
       it('ONBOARDED: returns 500 when save fails', async () => {
@@ -4267,9 +4274,9 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(500);
-        expect(res.value).to.equal('Failed to inactivate onboarding. Please try again later.');
+        expect(res.value).to.equal('Failed to waitlist onboarding. Please try again later.');
         expect(mockLog.error).to.have.been.calledWithMatch(
-          sinon.match(/^Failed to inactivate onboarded PLG domain example.com: persist failed/),
+          sinon.match(/^Failed to waitlist onboarded PLG domain example.com: persist failed/),
           sinon.match.instanceOf(Error),
         );
       });
@@ -4293,10 +4300,10 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(500);
-        expect(res.value).to.equal('Failed to inactivate onboarding. Please try again later.');
+        expect(res.value).to.equal('Failed to waitlist onboarding. Please try again later.');
         expect(mockLog.error).to.have.been.calledOnce;
         expect(mockLog.error.firstCall.args[0]).to.match(
-          /^Failed to inactivate onboarded PLG domain example.com: 503$/,
+          /^Failed to waitlist onboarded PLG domain example.com: 503$/,
         );
         expect(mockLog.error.firstCall.args[1]).to.equal(503);
       });
@@ -4397,7 +4404,10 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(oldOnboardedRecord.setWaitlistReason).to.have.been.calledWith(
+          sinon.match(/was displaced by.*for IMS org/),
+        );
         expect(oldOnboardedRecord.setReviews).to.have.been.calledOnce;
         const oldReviews = oldOnboardedRecord.setReviews.firstCall.args[0];
         expect(oldReviews).to.have.length(1);
@@ -4701,7 +4711,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
         expect(mockEnrollment.remove).to.have.been.called;
       });
 
@@ -4733,7 +4743,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: skips enrollment revocation when no enrollments', async () => {
@@ -4765,7 +4775,7 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(oldOnboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: skips revocation when no ASO enrollments found', async () => {
@@ -5387,7 +5397,10 @@ describe('PlgOnboardingController', () => {
         });
 
         expect(res.status).to.equal(200);
-        expect(record.setStatus).to.have.been.calledWith('INACTIVE');
+        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(record.setWaitlistReason).to.have.been.calledWith(
+          sinon.match(/was replaced by alternate domain/),
+        );
         expect(record.save).to.have.been.called;
       });
 

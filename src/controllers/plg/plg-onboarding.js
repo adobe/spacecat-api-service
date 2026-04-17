@@ -184,14 +184,6 @@ async function postPlgOnboardingNotification(onboarding, context) {
     }
   }
 
-  if (status === STATUSES.INACTIVE) {
-    const reviews = onboarding.getReviews();
-    const lastReview = reviews?.length ? reviews[reviews.length - 1] : null;
-    if (lastReview?.reason) {
-      message += `\n• *Inactivation Reason:* ${lastReview.reason}`;
-    }
-  }
-
   const error = onboarding.getError();
   if (error?.message) {
     message += `\n• *Error:* ${error.message}`;
@@ -1404,20 +1396,21 @@ function PlgOnboardingController(ctx) {
     const updatedReviews = [...existingReviews, reviewEntry];
     onboarding.setReviews(updatedReviews);
 
-    // ONBOARDED: revoke ASO enrollments, mark INACTIVE, persist review (no bypass / re-run)
+    // ONBOARDED: revoke ASO enrollments, mark WAITLISTED, persist review (no bypass / re-run)
     if (status === STATUSES.ONBOARDED) {
       try {
         await revokeAsoSiteEnrollments(onboarding, context);
-        onboarding.setStatus(STATUSES.INACTIVE);
+        onboarding.setStatus(STATUSES.WAITLISTED);
+        onboarding.setWaitlistReason(justification);
         await onboarding.save();
         await postPlgOnboardingNotification(onboarding, context);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log.error(
-          `Failed to inactivate onboarded PLG domain ${onboarding.getDomain()}: ${msg}`,
+          `Failed to waitlist onboarded PLG domain ${onboarding.getDomain()}: ${msg}`,
           err,
         );
-        return internalServerError('Failed to inactivate onboarding. Please try again later.');
+        return internalServerError('Failed to waitlist onboarding. Please try again later.');
       }
       return ok(PlgOnboardingDto.toAdminJSON(onboarding));
     }
@@ -1445,7 +1438,8 @@ function PlgOnboardingController(ctx) {
               && r.getStatus() === STATUSES.ONBOARDED,
           );
           if (oldOnboarded) {
-            oldOnboarded.setStatus(STATUSES.INACTIVE);
+            oldOnboarded.setStatus(STATUSES.WAITLISTED);
+            oldOnboarded.setWaitlistReason(`Domain ${oldOnboarded.getDomain()} was displaced by ${onboarding.getDomain()} for IMS org ${imsOrgId}.`);
             // Add offboard review to old record
             const oldReviews = oldOnboarded.getReviews() || [];
             oldOnboarded.setReviews([...oldReviews, {
@@ -1541,7 +1535,8 @@ function PlgOnboardingController(ctx) {
             if (!isSafeDomain(siteConfig.alternateDomain)) {
               return badRequest(`Invalid alternate domain: ${siteConfig.alternateDomain}`);
             }
-            onboarding.setStatus(STATUSES.INACTIVE);
+            onboarding.setStatus(STATUSES.WAITLISTED);
+            onboarding.setWaitlistReason(`Domain ${domain} was replaced by alternate domain ${siteConfig.alternateDomain}.`);
             await onboarding.save();
             await postPlgOnboardingNotification(onboarding, context);
             log.info(`Retiring domain ${domain}, starting onboarding for alternate domain ${siteConfig.alternateDomain}`);
