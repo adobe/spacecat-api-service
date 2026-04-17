@@ -1275,6 +1275,13 @@ function PlgOnboardingController(ctx) {
       }
 
       // Resolve updatedBy IMS IDs to emails for the response
+      // eslint-disable-next-line no-warning-comments
+      // TODO: Create a GET /plg/onboard/:onboardingId endpoint for individual record details.
+      // This would allow the backoffice UI to:
+      // 1. GET /plg/sites - return basic info without IMS resolution (fast list view)
+      // 2. GET /plg/onboard/:onboardingId - return full details without resolved emails
+      // This would eliminate the N * IMS_CONCURRENCY API calls on every list load and
+      // significantly improve performance as the PLG onboarding table grows.
       const { imsClient } = context;
       // Collect all unique IMS IDs from updatedBy and reviewedBy fields
       const imsIds = new Set();
