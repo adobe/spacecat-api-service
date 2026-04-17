@@ -34,7 +34,6 @@ const TEST_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123456789012/audit-j
 const CATEGORY_ID = '123e4567-e89b-12d3-a456-426614174000';
 const TOPIC_ID = '456e7890-e89b-12d3-a456-426614174001';
 const EXTERNAL_API_BASE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
-const DEFAULT_LIMIT = 5000;
 
 const createMockResponse = (data, ok = true, status = 200) => ({
   ok,
@@ -691,7 +690,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
-      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, {
+      expect(tracingFetchStub).to.have.been.calledWith(testUrl, {
         headers: {
           Authorization: `token ${TEST_API_KEY}`,
           'User-Agent': TEST_USER_AGENT,
@@ -700,17 +699,7 @@ describe('LlmoController', () => {
       });
     });
 
-    it('should add limit query parameter to URL when provided', async () => {
-      const mockResponse = createMockResponse({ data: 'test-data' });
-      tracingFetchStub.resolves(mockResponse);
-      mockContext.data.limit = '10';
-
-      await controller.getLlmoSheetData(mockContext);
-
-      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=10`, sinon.match.object);
-    });
-
-    ['offset', 'sheet'].forEach((param) => {
+    ['limit', 'offset', 'sheet'].forEach((param) => {
       it(`should add ${param} query parameter to URL when provided`, async () => {
         const mockResponse = createMockResponse({ data: 'test-data' });
         tracingFetchStub.resolves(mockResponse);
@@ -718,7 +707,7 @@ describe('LlmoController', () => {
 
         await controller.getLlmoSheetData(mockContext);
 
-        const expectedUrl = `${testUrl}?limit=${DEFAULT_LIMIT}&${param}=${mockContext.data[param]}`;
+        const expectedUrl = `${testUrl}?${param}=${mockContext.data[param]}`;
         expect(tracingFetchStub).to.have.been.calledWith(expectedUrl, sinon.match.object);
       });
     });
@@ -744,7 +733,7 @@ describe('LlmoController', () => {
       await controller.getLlmoSheetData(mockContext);
 
       expect(tracingFetchStub).to.have.been.calledWith(
-        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/test-data.json?limit=${DEFAULT_LIMIT}`,
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/test-data.json`,
         sinon.match.object,
       );
     });
@@ -757,7 +746,7 @@ describe('LlmoController', () => {
 
         await controller.getLlmoSheetData(mockContext);
 
-        expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, sinon.match.object);
+        expect(tracingFetchStub).to.have.been.calledWith(testUrl, sinon.match.object);
       });
     });
 
@@ -768,7 +757,7 @@ describe('LlmoController', () => {
 
       await controller.getLlmoSheetData(mockContext);
 
-      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, {
+      expect(tracingFetchStub).to.have.been.calledWith(testUrl, {
         headers: {
           Authorization: 'token hlx_api_key_missing',
           'User-Agent': TEST_USER_AGENT,
@@ -864,7 +853,7 @@ describe('LlmoController', () => {
       await controller.getLlmoSheetData(mockContext);
 
       expect(tracingFetchStub).to.have.been.calledWith(
-        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w01/test-data.json?limit=${DEFAULT_LIMIT}`,
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w01/test-data.json`,
         sinon.match.object,
       );
     });
@@ -893,7 +882,7 @@ describe('LlmoController', () => {
       await controller.getLlmoSheetData(mockContext);
 
       expect(tracingFetchStub).to.have.been.calledWith(
-        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json?limit=${DEFAULT_LIMIT}`,
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json`,
         sinon.match.object,
       );
     });
@@ -917,20 +906,10 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
-      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=${DEFAULT_LIMIT}`, sinon.match.object);
+      expect(tracingFetchStub).to.have.been.calledWith(testUrl, sinon.match.object);
     });
 
-    it('should add limit query parameter to URL when provided', async () => {
-      const mockResponse = createMockResponse({ data: 'test-data' });
-      tracingFetchStub.resolves(mockResponse);
-      mockContext.data.limit = '10';
-
-      await controller.getLlmoGlobalSheetData(mockContext);
-
-      expect(tracingFetchStub).to.have.been.calledWith(`${testUrl}?limit=10`, sinon.match.object);
-    });
-
-    ['offset', 'sheet'].forEach((param) => {
+    ['limit', 'offset', 'sheet'].forEach((param) => {
       it(`should add ${param} query parameter to URL when provided`, async () => {
         const mockResponse = createMockResponse({ data: 'test-data' });
         tracingFetchStub.resolves(mockResponse);
@@ -938,7 +917,7 @@ describe('LlmoController', () => {
 
         await controller.getLlmoGlobalSheetData(mockContext);
 
-        const expectedUrl = `${testUrl}?limit=${DEFAULT_LIMIT}&${param}=${mockContext.data[param]}`;
+        const expectedUrl = `${testUrl}?${param}=${mockContext.data[param]}`;
         expect(tracingFetchStub).to.have.been.calledWith(expectedUrl, sinon.match.object);
       });
     });
