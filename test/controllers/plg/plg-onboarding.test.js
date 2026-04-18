@@ -2002,6 +2002,8 @@ describe('PlgOnboardingController', () => {
       // Verify site org is reassigned to the new customer org
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
+      // Verify PlgOnboarding org is also updated to match
+      expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
     it('waitlists when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {
@@ -3183,8 +3185,11 @@ describe('PlgOnboardingController', () => {
       // Revocation and LD flag steps must run in the fast path
       expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
       expect(ldGetFeatureFlagStub).to.have.been.called;
-      // Should NOT run full onboarding steps
-      expect(createOrFindOrganizationStub).to.not.have.been.called;
+      // Organization must be resolved in fast path now
+      expect(createOrFindOrganizationStub).to.have.been.called;
+      // PlgOnboarding's organizationId should NOT be updated (site already in correct org)
+      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+      // Should NOT run other full onboarding steps
       expect(detectBotBlockerStub).to.not.have.been.called;
     });
 
@@ -3237,6 +3242,120 @@ describe('PlgOnboardingController', () => {
       // Falls through to full onboarding
       expect(response.status).to.equal(200);
       expect(createOrFindOrganizationStub).to.have.been.called;
+    });
+
+    it('reassigns preonboarded site from internal org to customer org', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-123';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findById.resolves(siteInInternalOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
+      expect(siteInInternalOrg.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(siteInInternalOrg.save).to.have.been.called;
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('does not reassign when preonboarded site already in customer org', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInCustomerOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(siteInCustomerOrg);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
+      // Site org should NOT be changed (already in customer org)
+      expect(siteInCustomerOrg.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org should NOT be updated (site org didn't change)
+      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips reassignment for internal org demo sites', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-123';
+      const DEMO_SITE_ID = 'demo-site-456';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: DEMO_SITE_ID,
+        organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const demoSite = createMockSite({ id: DEMO_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findById.resolves(demoSite);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = DEMO_SITE_ID;
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      // Demo site should NOT be reassigned (stays in internal org)
+      expect(demoSite.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org should NOT be updated (site org didn't change)
+      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+    });
+
+    it('waitlists when preonboarded site is in different customer org', async () => {
+      const OTHER_CUSTOMER_ORG = 'other-customer-org-789';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInOtherOrg = createMockSite({ id: TEST_SITE_ID, orgId: OTHER_CUSTOMER_ORG });
+      mockDataAccess.Site.findById.resolves(siteInOtherOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      // Should be WAITLISTED, not ONBOARDED
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
+        /different organization/,
+      );
+      // Site should NOT be changed
+      expect(siteInOtherOrg.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org should NOT be updated
+      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+      // Should NOT create entitlement
+      expect(tierClientCreateForSiteStub).to.not.have.been.called;
     });
   });
 
@@ -5800,6 +5919,161 @@ describe('PlgOnboardingController', () => {
           expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith(
             sinon.match({ status: 'PRE_ONBOARDING' }),
           );
+        });
+
+        it('creates preonboarding record with siteId, organizationId, and steps', async () => {
+          const preonboardingData = {
+            imsOrgId: TEST_IMS_ORG_ID,
+            domain: TEST_DOMAIN,
+            status: 'PRE_ONBOARDING',
+            siteId: TEST_SITE_ID,
+            organizationId: TEST_ORG_ID,
+            steps: { siteCreated: true, entitlementCreated: true },
+          };
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: preonboardingData,
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
+          expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+          expect(mockOnboarding.setSteps).to.have.been.calledWith(
+            sinon.match({ siteCreated: true, entitlementCreated: true }),
+          );
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates preonboarding record with botBlocker info', async () => {
+          const botBlockerInfo = {
+            type: 'Cloudflare',
+            ipsToAllowlist: ['1.2.3.4', '5.6.7.8'],
+          };
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'WAITING_FOR_IP_ALLOWLISTING',
+              botBlocker: botBlockerInfo,
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setBotBlocker).to.have.been.calledWith(
+            sinon.match(botBlockerInfo),
+          );
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates preonboarding record with completedAt timestamp', async () => {
+          const completedAt = '2026-04-18T12:00:00.000Z';
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'PRE_ONBOARDING',
+              completedAt,
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setCompletedAt).to.have.been.calledWith(completedAt);
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates preonboarding record with all optional fields', async () => {
+          const fullPreonboardingData = {
+            imsOrgId: TEST_IMS_ORG_ID,
+            domain: TEST_DOMAIN,
+            status: 'PRE_ONBOARDING',
+            siteId: TEST_SITE_ID,
+            organizationId: TEST_ORG_ID,
+            steps: { siteCreated: true, entitlementCreated: true, auditsEnabled: true },
+            completedAt: '2026-04-18T12:00:00.000Z',
+          };
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: fullPreonboardingData,
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
+          expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+          expect(mockOnboarding.setSteps).to.have.been.calledWith(
+            sinon.match({
+              siteCreated: true,
+              entitlementCreated: true,
+              auditsEnabled: true,
+            }),
+          );
+          expect(mockOnboarding.setCompletedAt).to.have.been.calledWith(
+            '2026-04-18T12:00:00.000Z',
+          );
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates record without optional fields when not provided', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'INACTIVE',
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSiteId).to.not.have.been.called;
+          expect(mockOnboarding.setOrganizationId).to.not.have.been.called;
+          expect(mockOnboarding.setSteps).to.not.have.been.called;
+          expect(mockOnboarding.setBotBlocker).to.not.have.been.called;
+          expect(mockOnboarding.setCompletedAt).to.not.have.been.called;
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('ignores invalid steps field (non-object)', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'PRE_ONBOARDING',
+              steps: 'invalid-string',
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSteps).to.not.have.been.called;
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('ignores invalid botBlocker field (non-object)', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'WAITING_FOR_IP_ALLOWLISTING',
+              botBlocker: 'invalid-string',
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setBotBlocker).to.not.have.been.called;
+          expect(mockOnboarding.save).to.have.been.called;
         });
       });
 

@@ -659,9 +659,56 @@ async function performAsoPlgOnboarding({
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
     const site = await Site.findById(onboarding.getSiteId());
     if (site) {
+      // Resolve customer's organization from imsOrgId
+      const organization = await createOrFindOrganization(imsOrgId, context);
+      const customerOrgId = organization.getId();
+
+      // Check if site needs to be moved from internal org to customer org
+      const currentSiteOrgId = site.getOrganizationId();
+      let needsOrgReassignment = false;
+
+      if (currentSiteOrgId !== customerOrgId) {
+        if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
+          log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
+          needsOrgReassignment = true;
+        } else {
+          // Site is in different customer org - cannot reassign, must waitlist
+          const existingOrg = await Organization.findById(currentSiteOrgId);
+          /* c8 ignore next */
+          const existingImsOrgId = existingOrg?.getImsOrgId?.() || currentSiteOrgId;
+          /* c8 ignore next */
+          const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
+          const customerOrgName = organization.getName();
+          const waitlistReason = `Preonboarded site is assigned to different organization (org: ${existingOrgName}, id: ${existingImsOrgId}). Cannot be moved to '${customerOrgName}'.`;
+
+          log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
+
+          onboarding.setStatus(STATUSES.WAITLISTED);
+          onboarding.setWaitlistReason(waitlistReason);
+          const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
+          onboarding.setSteps(steps);
+          if (updatedBy) {
+            onboarding.setUpdatedBy(updatedBy);
+          }
+          await onboarding.save();
+          await postPlgOnboardingNotification(onboarding, context);
+          return onboarding;
+        }
+      }
+
       const { entitlement } = await ensureAsoEntitlement(site, context);
       await revokePreOnboardedSiteEnrollment(site, entitlement, context);
       await updateLaunchDarklyFlags(site, context);
+
+      // Reassign site org if needed
+      if (needsOrgReassignment) {
+        site.setOrganizationId(customerOrgId);
+        await site.save();
+        // Update PlgOnboarding's organizationId to match the site's new org
+        onboarding.setOrganizationId(customerOrgId);
+        log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
+      }
+
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setWaitlistReason(null);
@@ -1064,6 +1111,8 @@ async function performAsoPlgOnboarding({
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
       site.setOrganizationId(organizationId);
       await site.save();
+      // Update PlgOnboarding's organizationId to match the site's new org
+      onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
     }
 
@@ -1618,7 +1667,8 @@ function PlgOnboardingController(ctx) {
   /**
    * POST /plg/records
    * Admin: create a PLG onboarding record with a given status (defaults to INACTIVE).
-   * Body: { imsOrgId, domain, status? }
+   * Body: { imsOrgId, domain, status?, siteId?, organizationId?, steps?,
+   *         botBlocker?, completedAt? }
    */
   const createOnboarding = async (context) => {
     const accessControlUtil = AccessControlUtil.fromContext(context);
@@ -1627,7 +1677,16 @@ function PlgOnboardingController(ctx) {
     }
 
     const { data } = context;
-    const { imsOrgId, domain, status = STATUSES.INACTIVE } = data || {};
+    const {
+      imsOrgId,
+      domain,
+      status = STATUSES.INACTIVE,
+      siteId,
+      organizationId,
+      steps,
+      botBlocker,
+      completedAt,
+    } = data || {};
 
     if (!hasText(imsOrgId) || !isValidIMSOrgId(imsOrgId)) {
       return badRequest('Valid imsOrgId is required');
@@ -1650,6 +1709,25 @@ function PlgOnboardingController(ctx) {
     const onboarding = await PlgOnboarding.create({
       imsOrgId, domain, baseURL, status,
     });
+
+    // Set optional preonboarding fields if provided
+    if (siteId) {
+      onboarding.setSiteId(siteId);
+    }
+    if (organizationId) {
+      onboarding.setOrganizationId(organizationId);
+    }
+    if (steps && typeof steps === 'object') {
+      onboarding.setSteps(steps);
+    }
+    if (botBlocker && typeof botBlocker === 'object') {
+      onboarding.setBotBlocker(botBlocker);
+    }
+    if (completedAt) {
+      onboarding.setCompletedAt(completedAt);
+    }
+
+    await onboarding.save();
     return created(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 
