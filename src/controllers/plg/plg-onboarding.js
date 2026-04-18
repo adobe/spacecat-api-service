@@ -659,9 +659,37 @@ async function performAsoPlgOnboarding({
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
     const site = await Site.findById(onboarding.getSiteId());
     if (site) {
+      // Resolve customer's organization from imsOrgId
+      const organization = await createOrFindOrganization(imsOrgId, context);
+      const customerOrgId = organization.getId();
+
+      // Check if site needs to be moved from internal org to customer org
+      const currentSiteOrgId = site.getOrganizationId();
+      let needsOrgReassignment = false;
+
+      if (currentSiteOrgId !== customerOrgId) {
+        if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
+          log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
+          needsOrgReassignment = true;
+        } else {
+          log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId}`);
+        }
+      }
+
       const { entitlement } = await ensureAsoEntitlement(site, context);
       await revokePreOnboardedSiteEnrollment(site, entitlement, context);
       await updateLaunchDarklyFlags(site, context);
+
+      // Reassign site org if needed
+      if (needsOrgReassignment) {
+        site.setOrganizationId(customerOrgId);
+        await site.save();
+        log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
+      }
+
+      // Update PlgOnboarding's organizationId to customer org
+      onboarding.setOrganizationId(customerOrgId);
+
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setWaitlistReason(null);
@@ -1064,6 +1092,8 @@ async function performAsoPlgOnboarding({
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
       site.setOrganizationId(organizationId);
       await site.save();
+      // Update PlgOnboarding's organizationId to match the site's new org
+      onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
     }
 

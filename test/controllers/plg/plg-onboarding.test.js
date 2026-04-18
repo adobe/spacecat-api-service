@@ -2002,6 +2002,8 @@ describe('PlgOnboardingController', () => {
       // Verify site org is reassigned to the new customer org
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
+      // Verify PlgOnboarding org is also updated to match
+      expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
     it('waitlists when site id is listed in ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS', async () => {
@@ -3183,8 +3185,11 @@ describe('PlgOnboardingController', () => {
       // Revocation and LD flag steps must run in the fast path
       expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
       expect(ldGetFeatureFlagStub).to.have.been.called;
-      // Should NOT run full onboarding steps
-      expect(createOrFindOrganizationStub).to.not.have.been.called;
+      // Organization must be resolved in fast path now
+      expect(createOrFindOrganizationStub).to.have.been.called;
+      // PlgOnboarding's organizationId must be updated to customer org
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      // Should NOT run other full onboarding steps
       expect(detectBotBlockerStub).to.not.have.been.called;
     });
 
@@ -3237,6 +3242,113 @@ describe('PlgOnboardingController', () => {
       // Falls through to full onboarding
       expect(response.status).to.equal(200);
       expect(createOrFindOrganizationStub).to.have.been.called;
+    });
+
+    it('reassigns preonboarded site from internal org to customer org', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-123';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findById.resolves(siteInInternalOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
+      expect(siteInInternalOrg.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(siteInInternalOrg.save).to.have.been.called;
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('does not reassign when preonboarded site already in customer org', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInCustomerOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(siteInCustomerOrg);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
+      // Site org should NOT be changed (already in customer org)
+      expect(siteInCustomerOrg.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org should still be updated to ensure consistency
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('skips reassignment for internal org demo sites', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-123';
+      const DEMO_SITE_ID = 'demo-site-456';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: DEMO_SITE_ID,
+        organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const demoSite = createMockSite({ id: DEMO_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findById.resolves(demoSite);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = DEMO_SITE_ID;
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      // Demo site should NOT be reassigned (stays in internal org)
+      expect(demoSite.setOrganizationId).to.not.have.been.called;
+      // But PlgOnboarding org should still be updated to customer org
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+    });
+
+    it('warns when preonboarded site is in different customer org', async () => {
+      const OTHER_CUSTOMER_ORG = 'other-customer-org-789';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInOtherOrg = createMockSite({ id: TEST_SITE_ID, orgId: OTHER_CUSTOMER_ORG });
+      mockDataAccess.Site.findById.resolves(siteInOtherOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      // Site should NOT be reassigned (different customer org)
+      expect(siteInOtherOrg.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org should be updated to current customer's org
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
   });
 
