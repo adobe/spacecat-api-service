@@ -1648,7 +1648,8 @@ function PlgOnboardingController(ctx) {
   /**
    * POST /plg/records
    * Admin: create a PLG onboarding record with a given status (defaults to INACTIVE).
-   * Body: { imsOrgId, domain, status? }
+   * Body: { imsOrgId, domain, status?, siteId?, organizationId?, steps?,
+   *         botBlocker?, completedAt? }
    */
   const createOnboarding = async (context) => {
     const accessControlUtil = AccessControlUtil.fromContext(context);
@@ -1657,7 +1658,16 @@ function PlgOnboardingController(ctx) {
     }
 
     const { data } = context;
-    const { imsOrgId, domain, status = STATUSES.INACTIVE } = data || {};
+    const {
+      imsOrgId,
+      domain,
+      status = STATUSES.INACTIVE,
+      siteId,
+      organizationId,
+      steps,
+      botBlocker,
+      completedAt,
+    } = data || {};
 
     if (!hasText(imsOrgId) || !isValidIMSOrgId(imsOrgId)) {
       return badRequest('Valid imsOrgId is required');
@@ -1680,6 +1690,25 @@ function PlgOnboardingController(ctx) {
     const onboarding = await PlgOnboarding.create({
       imsOrgId, domain, baseURL, status,
     });
+
+    // Set optional preonboarding fields if provided
+    if (siteId) {
+      onboarding.setSiteId(siteId);
+    }
+    if (organizationId) {
+      onboarding.setOrganizationId(organizationId);
+    }
+    if (steps && typeof steps === 'object') {
+      onboarding.setSteps(steps);
+    }
+    if (botBlocker && typeof botBlocker === 'object') {
+      onboarding.setBotBlocker(botBlocker);
+    }
+    if (completedAt) {
+      onboarding.setCompletedAt(completedAt);
+    }
+
+    await onboarding.save();
     return created(PlgOnboardingDto.toAdminJSON(onboarding));
   };
 

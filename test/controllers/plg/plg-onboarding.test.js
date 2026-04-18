@@ -5913,6 +5913,161 @@ describe('PlgOnboardingController', () => {
             sinon.match({ status: 'PRE_ONBOARDING' }),
           );
         });
+
+        it('creates preonboarding record with siteId, organizationId, and steps', async () => {
+          const preonboardingData = {
+            imsOrgId: TEST_IMS_ORG_ID,
+            domain: TEST_DOMAIN,
+            status: 'PRE_ONBOARDING',
+            siteId: TEST_SITE_ID,
+            organizationId: TEST_ORG_ID,
+            steps: { siteCreated: true, entitlementCreated: true },
+          };
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: preonboardingData,
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
+          expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+          expect(mockOnboarding.setSteps).to.have.been.calledWith(
+            sinon.match({ siteCreated: true, entitlementCreated: true }),
+          );
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates preonboarding record with botBlocker info', async () => {
+          const botBlockerInfo = {
+            type: 'Cloudflare',
+            ipsToAllowlist: ['1.2.3.4', '5.6.7.8'],
+          };
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'WAITING_FOR_IP_ALLOWLISTING',
+              botBlocker: botBlockerInfo,
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setBotBlocker).to.have.been.calledWith(
+            sinon.match(botBlockerInfo),
+          );
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates preonboarding record with completedAt timestamp', async () => {
+          const completedAt = '2026-04-18T12:00:00.000Z';
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'PRE_ONBOARDING',
+              completedAt,
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setCompletedAt).to.have.been.calledWith(completedAt);
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates preonboarding record with all optional fields', async () => {
+          const fullPreonboardingData = {
+            imsOrgId: TEST_IMS_ORG_ID,
+            domain: TEST_DOMAIN,
+            status: 'PRE_ONBOARDING',
+            siteId: TEST_SITE_ID,
+            organizationId: TEST_ORG_ID,
+            steps: { siteCreated: true, entitlementCreated: true, auditsEnabled: true },
+            completedAt: '2026-04-18T12:00:00.000Z',
+          };
+
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: fullPreonboardingData,
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
+          expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+          expect(mockOnboarding.setSteps).to.have.been.calledWith(
+            sinon.match({
+              siteCreated: true,
+              entitlementCreated: true,
+              auditsEnabled: true,
+            }),
+          );
+          expect(mockOnboarding.setCompletedAt).to.have.been.calledWith(
+            '2026-04-18T12:00:00.000Z',
+          );
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('creates record without optional fields when not provided', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'INACTIVE',
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSiteId).to.not.have.been.called;
+          expect(mockOnboarding.setOrganizationId).to.not.have.been.called;
+          expect(mockOnboarding.setSteps).to.not.have.been.called;
+          expect(mockOnboarding.setBotBlocker).to.not.have.been.called;
+          expect(mockOnboarding.setCompletedAt).to.not.have.been.called;
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('ignores invalid steps field (non-object)', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'PRE_ONBOARDING',
+              steps: 'invalid-string',
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setSteps).to.not.have.been.called;
+          expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('ignores invalid botBlocker field (non-object)', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).createOnboarding({
+            data: {
+              imsOrgId: TEST_IMS_ORG_ID,
+              domain: TEST_DOMAIN,
+              status: 'WAITING_FOR_IP_ALLOWLISTING',
+              botBlocker: 'invalid-string',
+            },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+
+          expect(res.status).to.equal(201);
+          expect(mockOnboarding.setBotBlocker).to.not.have.been.called;
+          expect(mockOnboarding.save).to.have.been.called;
+        });
       });
 
       describe('updateOnboardingStatus', () => {
