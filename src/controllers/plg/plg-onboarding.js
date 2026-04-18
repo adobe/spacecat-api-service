@@ -672,7 +672,27 @@ async function performAsoPlgOnboarding({
           log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
           needsOrgReassignment = true;
         } else {
-          log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId}`);
+          // Site is in different customer org - cannot reassign, must waitlist
+          const existingOrg = await Organization.findById(currentSiteOrgId);
+          /* c8 ignore next */
+          const existingImsOrgId = existingOrg?.getImsOrgId?.() || currentSiteOrgId;
+          /* c8 ignore next */
+          const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
+          const customerOrgName = organization.getName();
+          const waitlistReason = `Preonboarded site is assigned to different organization (org: ${existingOrgName}, id: ${existingImsOrgId}). Cannot be moved to '${customerOrgName}'.`;
+
+          log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
+
+          onboarding.setStatus(STATUSES.WAITLISTED);
+          onboarding.setWaitlistReason(waitlistReason);
+          const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
+          onboarding.setSteps(steps);
+          if (updatedBy) {
+            onboarding.setUpdatedBy(updatedBy);
+          }
+          await onboarding.save();
+          await postPlgOnboardingNotification(onboarding, context);
+          return onboarding;
         }
       }
 
@@ -684,11 +704,10 @@ async function performAsoPlgOnboarding({
       if (needsOrgReassignment) {
         site.setOrganizationId(customerOrgId);
         await site.save();
+        // Update PlgOnboarding's organizationId to match the site's new org
+        onboarding.setOrganizationId(customerOrgId);
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
-
-      // Update PlgOnboarding's organizationId to customer org
-      onboarding.setOrganizationId(customerOrgId);
 
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
