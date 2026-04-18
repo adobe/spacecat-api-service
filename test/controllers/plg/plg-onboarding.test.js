@@ -249,6 +249,7 @@ describe('PlgOnboardingController', () => {
         findByBaseURL: sandbox.stub().resolves(null),
         findById: sandbox.stub().resolves(null),
         create: sandbox.stub().resolves(mockSite),
+        allByOrganizationId: sandbox.stub().resolves([]),
       },
       Organization: {
         findByImsOrgId: sandbox.stub().resolves(mockOrganization),
@@ -2855,6 +2856,161 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Global ASO enrollment revocation from all other sites in org ---
+
+  describe('onboard - global ASO enrollment revocation from other sites', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('revokes ASO enrollments from all other sites in the organization', async () => {
+      const OTHER_SITE_ID_1 = 'other-site-1';
+      const OTHER_SITE_ID_2 = 'other-site-2';
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-id';
+
+      // Mock other sites in the organization
+      const otherSite1 = createMockSite({ id: OTHER_SITE_ID_1 });
+      const otherSite2 = createMockSite({ id: OTHER_SITE_ID_2 });
+      mockDataAccess.Site.allByOrganizationId.resolves([
+        mockSite, // the newly onboarded site
+        otherSite1,
+        otherSite2,
+      ]);
+
+      // Mock ASO entitlement
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+
+      // Mock enrollments for other sites
+      const enrollment1 = {
+        getId: sandbox.stub().returns('enrollment-1'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID_1),
+        remove: sandbox.stub().resolves(),
+      };
+      const enrollment2 = {
+        getId: sandbox.stub().returns('enrollment-2'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID_2),
+        remove: sandbox.stub().resolves(),
+      };
+
+      // First call for revokePreOnboardedSiteEnrollment, second for
+      // revokeAsoEnrollmentsFromOtherSites
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .onFirstCall().resolves([]) // No preonboarded enrollments to revoke
+        .onSecondCall().resolves([enrollment1, enrollment2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(mockDataAccess.Entitlement.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(enrollment1.remove).to.have.been.calledOnce;
+      expect(enrollment2.remove).to.have.been.calledOnce;
+    });
+
+    it('does not revoke when only the newly onboarded site exists in org', async () => {
+      // Only one site in the org
+      mockDataAccess.Site.allByOrganizationId.resolves([mockSite]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      // Should not check for entitlements when no other sites exist
+      expect(mockDataAccess.Entitlement.allByOrganizationId).to.not.have.been.called;
+    });
+
+    it('does not revoke when no ASO entitlement exists for the org', async () => {
+      const OTHER_SITE_ID = 'other-site-1';
+      const otherSite = createMockSite({ id: OTHER_SITE_ID });
+      mockDataAccess.Site.allByOrganizationId.resolves([mockSite, otherSite]);
+
+      // No ASO entitlement exists
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Entitlement.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+    });
+
+    it('does not revoke when other sites have no ASO enrollments', async () => {
+      const OTHER_SITE_ID = 'other-site-1';
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-id';
+
+      const otherSite = createMockSite({ id: OTHER_SITE_ID });
+      mockDataAccess.Site.allByOrganizationId.resolves([mockSite, otherSite]);
+
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+
+      // First call for revokePreOnboardedSiteEnrollment, second for
+      // revokeAsoEnrollmentsFromOtherSites
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .onFirstCall().resolves([])
+        .onSecondCall().resolves([]); // No enrollments exist for other sites
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId)
+        .to.have.been.calledWith(ASO_ENTITLEMENT_ID);
+    });
+
+    it('continues onboarding when global revocation fails (non-fatal)', async () => {
+      const OTHER_SITE_ID = 'other-site-1';
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-id';
+
+      const otherSite = createMockSite({ id: OTHER_SITE_ID });
+      mockDataAccess.Site.allByOrganizationId.resolves([mockSite, otherSite]);
+
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+
+      const failingEnrollment = {
+        getId: sandbox.stub().returns('enrollment-1'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID),
+        remove: sandbox.stub().rejects(new Error('Removal failed')),
+      };
+
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .onFirstCall().resolves([])
+        .onSecondCall().resolves([failingEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      // Should still succeed despite revocation failure (non-fatal)
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('handles Site.allByOrganizationId failure gracefully', async () => {
+      mockDataAccess.Site.allByOrganizationId.rejects(new Error('DB query failed'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      // Should still succeed despite lookup failure (non-fatal)
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+  });
+
   // --- LaunchDarkly feature flag update ---
 
   describe('onboard - LaunchDarkly flag update', () => {
@@ -3237,6 +3393,145 @@ describe('PlgOnboardingController', () => {
       // Falls through to full onboarding
       expect(response.status).to.equal(200);
       expect(createOrFindOrganizationStub).to.have.been.called;
+    });
+
+    it('revokes ASO enrollments from other sites in org during preonboarding fast path', async () => {
+      const OTHER_SITE_ID_1 = 'other-site-1';
+      const OTHER_SITE_ID_2 = 'other-site-2';
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-1';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      // Mock other sites in the organization
+      const otherSite1 = createMockSite({ id: OTHER_SITE_ID_1 });
+      const otherSite2 = createMockSite({ id: OTHER_SITE_ID_2 });
+      mockDataAccess.Site.allByOrganizationId.resolves([
+        mockSite, // the newly onboarded site
+        otherSite1,
+        otherSite2,
+      ]);
+
+      // Mock ASO entitlement for the org
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+
+      // Mock ASO enrollments for other sites
+      const enrollment1 = {
+        getId: sandbox.stub().returns('enrollment-1'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID_1),
+        remove: sandbox.stub().resolves(),
+      };
+      const enrollment2 = {
+        getId: sandbox.stub().returns('enrollment-2'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID_2),
+        remove: sandbox.stub().resolves(),
+      };
+      // First call is for revokePreOnboardedSiteEnrollment, second is for
+      // revokeAsoEnrollmentsFromOtherSites
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .onFirstCall().resolves([]) // No preonboarded enrollments
+        .onSecondCall().resolves([enrollment1, enrollment2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(enrollment1.remove).to.have.been.called;
+      expect(enrollment2.remove).to.have.been.called;
+    });
+
+    it('handles case when no other sites exist in org during preonboarding fast path', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      // Only the newly onboarded site exists
+      mockDataAccess.Site.allByOrganizationId.resolves([mockSite]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      // Should not attempt to revoke anything
+      expect(mockDataAccess.Entitlement.allByOrganizationId).to.not.have.been.called;
+    });
+
+    it('handles case when no ASO entitlement exists during preonboarding fast path', async () => {
+      const OTHER_SITE_ID = 'other-site-1';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const otherSite = createMockSite({ id: OTHER_SITE_ID });
+      mockDataAccess.Site.allByOrganizationId.resolves([mockSite, otherSite]);
+
+      // No ASO entitlement in org
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(mockDataAccess.Entitlement.allByOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+    });
+
+    it('continues onboarding when ASO enrollment revocation fails during preonboarding fast path', async () => {
+      const OTHER_SITE_ID = 'other-site-1';
+      const ASO_ENTITLEMENT_ID = 'aso-entitlement-1';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const otherSite = createMockSite({ id: OTHER_SITE_ID });
+      mockDataAccess.Site.allByOrganizationId.resolves([mockSite, otherSite]);
+
+      const mockAsoEntitlement = {
+        getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
+
+      const failingEnrollment = {
+        getId: sandbox.stub().returns('enrollment-1'),
+        getSiteId: sandbox.stub().returns(OTHER_SITE_ID),
+        remove: sandbox.stub().rejects(new Error('Failed to revoke')),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .onFirstCall().resolves([])
+        .onSecondCall().resolves([failingEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      // Should still succeed despite revocation failure
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
   });
 

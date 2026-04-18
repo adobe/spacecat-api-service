@@ -276,6 +276,65 @@ async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
 }
 
 /**
+ * Revokes ASO enrollments from all other sites in the organization to ensure only
+ * the newly onboarded PLG site has an active ASO enrollment. This enforces the
+ * "one PLG site per org" policy by removing ASO access from any other sites that
+ * may have been created outside the PLG onboarding flow.
+ * @param {object} site - The newly onboarded PLG site (keep this site's enrollment).
+ * @param {string} organizationId - The organization ID.
+ * @param {object} context - Request context.
+ */
+async function revokeAsoEnrollmentsFromOtherSites(site, organizationId, context) {
+  const { dataAccess, log } = context;
+  const { Site, Entitlement, SiteEnrollment } = dataAccess;
+
+  try {
+    // Get all sites in the organization
+    const allSites = await Site.allByOrganizationId(organizationId);
+    const otherSites = allSites.filter((s) => s.getId() !== site.getId());
+
+    if (otherSites.length === 0) {
+      log.info(`No other sites found in org ${organizationId}, skipping ASO enrollment revocation`);
+      return;
+    }
+
+    log.info(`Found ${otherSites.length} other site(s) in org ${organizationId}, checking for ASO enrollments to revoke`);
+
+    // Get ASO entitlement for the organization
+    const entitlements = await Entitlement.allByOrganizationId(organizationId);
+    const asoEntitlement = entitlements.find((e) => e.getProductCode() === ASO_PRODUCT_CODE);
+
+    if (!asoEntitlement) {
+      log.info(`No ASO entitlement found for org ${organizationId}, nothing to revoke`);
+      return;
+    }
+
+    // Get all ASO enrollments
+    const asoEnrollments = await SiteEnrollment.allByEntitlementId(asoEntitlement.getId());
+    const enrollmentsToRevoke = asoEnrollments.filter(
+      (e) => otherSites.some((s) => s.getId() === e.getSiteId()),
+    );
+
+    if (enrollmentsToRevoke.length === 0) {
+      log.info(`No ASO enrollments to revoke for other sites in org ${organizationId}`);
+      return;
+    }
+
+    // Revoke enrollments from other sites
+    await Promise.all(enrollmentsToRevoke.map(async (enrollment) => {
+      const siteId = enrollment.getSiteId();
+      log.info(`Revoking ASO enrollment ${enrollment.getId()} from site ${siteId} to ensure only the newly onboarded PLG site has ASO access`);
+      await enrollment.remove();
+    }));
+
+    log.info(`Successfully revoked ${enrollmentsToRevoke.length} ASO enrollment(s) from other sites in org ${organizationId}`);
+  } catch (error) {
+    // Non-fatal: log the error but don't block onboarding
+    log.error(`Failed to revoke ASO enrollments from other sites in org ${organizationId}: ${error.message}`);
+  }
+}
+
+/**
  * Disables the summit-plg config handler for a given site. Non-fatal.
  * @param {object} site - The site to disable the handler for.
  * @param {object} context - Request context.
@@ -659,8 +718,10 @@ async function performAsoPlgOnboarding({
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
     const site = await Site.findById(onboarding.getSiteId());
     if (site) {
+      const siteOrganizationId = site.getOrganizationId();
       const { entitlement } = await ensureAsoEntitlement(site, context);
       await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+      await revokeAsoEnrollmentsFromOtherSites(site, siteOrganizationId, context);
       await updateLaunchDarklyFlags(site, context);
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
@@ -1043,6 +1104,11 @@ async function performAsoPlgOnboarding({
     // Step 9: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
     const { entitlement } = await ensureAsoEntitlement(site, context);
     await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+
+    // Step 9b: Revoke ASO enrollments from all other sites in the organization
+    // This ensures only the newly onboarded PLG site has ASO access
+    await revokeAsoEnrollmentsFromOtherSites(site, organizationId, context);
+
     await updateLaunchDarklyFlags(site, context);
 
     steps.entitlementCreated = true;
