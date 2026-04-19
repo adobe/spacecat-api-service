@@ -667,6 +667,8 @@ async function performAsoPlgOnboarding({
       const currentSiteOrgId = site.getOrganizationId();
       let needsOrgReassignment = false;
 
+      // Note: On retry, currentSiteOrgId may already equal customerOrgId if a previous
+      // attempt successfully saved the org reassignment but failed during entitlement creation
       if (currentSiteOrgId !== customerOrgId) {
         if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
           log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
@@ -710,7 +712,13 @@ async function performAsoPlgOnboarding({
       await revokePreOnboardedSiteEnrollment(site, entitlement, context);
       await updateLaunchDarklyFlags(site, context);
 
-      const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
+      const steps = {
+        ...(onboarding.getSteps() || {}),
+        entitlementCreated: true,
+      };
+      if (needsOrgReassignment) {
+        steps.siteOrgReassigned = true;
+      }
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setWaitlistReason(null);
       onboarding.setBotBlocker(null);
@@ -780,8 +788,8 @@ async function performAsoPlgOnboarding({
 
       if (existingOrgId !== organizationId) {
         if (isInternalOrg(existingOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
-          log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — will reassign to new org ${organizationId} after successful onboarding`);
-          // Don't save yet - we'll reassign the org just before marking ONBOARDED
+          log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — will reassign to new org ${organizationId} before entitlement operations`);
+          // Will reassign at Step 9, before creating entitlements
           needsOrgReassignment = true;
         } else {
           const existingOrg = await Organization.findById(existingOrgId);
