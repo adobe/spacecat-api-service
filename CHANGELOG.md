@@ -1,3 +1,10 @@
+## [1.447.3](https://github.com/adobe/spacecat-api-service/compare/v1.447.2...v1.447.3) (2026-04-19)
+
+
+### Bug Fixes
+
+* **plg:** move org reassignment before entitlement operations ([#2239](https://github.com/adobe/spacecat-api-service/issues/2239)) ([b46b15a](https://github.com/adobe/spacecat-api-service/commit/b46b15ab9ef85004a87bde70400933fa01cfe6e4))
+
 ## [1.447.2](https://github.com/adobe/spacecat-api-service/compare/v1.447.1...v1.447.2) (2026-04-18)
 
 
