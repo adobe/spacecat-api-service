@@ -393,13 +393,6 @@ describe('getRouteHandlers', () => {
     getByTokenType: sinon.stub(),
   };
 
-  const mockPlgOnboardingController = {
-    onboard: sinon.stub(),
-    getAllOnboardings: sinon.stub(),
-    getStatus: sinon.stub(),
-    update: sinon.stub(),
-  };
-
   const mockImsOrgAccessController = {
     createGrant: sinon.stub(),
     listGrants: sinon.stub(),
@@ -431,6 +424,16 @@ describe('getRouteHandlers', () => {
 
   const mockAutofixChecksController = {
     runChecks: sinon.stub(),
+  };
+
+  const mockPlgOnboardingController = {
+    onboard: sinon.stub(),
+    getAllOnboardings: sinon.stub(),
+    getStatus: sinon.stub(),
+    update: sinon.stub(),
+    createOnboarding: sinon.stub(),
+    updateOnboardingStatus: sinon.stub(),
+    deleteOnboarding: sinon.stub(),
   };
 
   const mockDrsBpPgAuditController = {
@@ -481,13 +484,13 @@ describe('getRouteHandlers', () => {
       mockSentimentController,
       mockConsumersController,
       mockTokensController,
-      mockPlgOnboardingController,
       mockImsOrgAccessController,
       mockContactSalesLeadsController,
       mockFeatureFlagsController,
       mockPageRelationshipsController,
       mockEphemeralRunController,
       mockAutofixChecksController,
+      mockPlgOnboardingController,
       mockDrsBpPgAuditController,
     );
 
@@ -499,6 +502,9 @@ describe('getRouteHandlers', () => {
       'PUT /configurations/latest/queues',
       'GET /organizations',
       'POST /organizations',
+      'GET /plg/sites',
+      'POST /plg/onboard',
+      'POST /plg/records',
       'GET /projects',
       'POST /projects',
       'POST /preflight/jobs',
@@ -522,9 +528,6 @@ describe('getRouteHandlers', () => {
       'POST /llmo/onboard/update-query-index',
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
-      'POST /plg/onboard',
-      'GET /plg/sites',
-      'POST /plg/records',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -541,6 +544,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['PUT /configurations/latest/queues']).to.equal(mockConfigurationController.updateQueues);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
+    expect(staticRoutes['GET /plg/sites']).to.equal(mockPlgOnboardingController.getAllOnboardings);
+    expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
+    expect(staticRoutes['POST /plg/records']).to.equal(mockPlgOnboardingController.createOnboarding);
     expect(staticRoutes['GET /sites']).to.equal(mockSitesController.getAll);
     expect(staticRoutes['POST /sites']).to.equal(mockSitesController.createSite);
     expect(staticRoutes['GET /sites.csv']).to.equal(mockSitesController.getAllAsCsv);
@@ -870,10 +876,6 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/tokens/by-type/:tokenType',
       'GET /sites/:siteId/tokens/:tokenId/grants',
       'DELETE /sites/:siteId/suggestions/grants/:grantId',
-      'GET /plg/onboard/status/:imsOrgId',
-      'PATCH /plg/onboard/:onboardingId',
-      'PATCH /plg/records/:plgOnboardingId',
-      'DELETE /plg/records/:plgOnboardingId',
       'POST /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access',
       'GET /sites/:siteId/ims-org-access/:accessId',
@@ -883,6 +885,10 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
       'PATCH /contact-sales-leads/:contactSalesLeadId',
       'POST /sites/:siteId/autofix-checks',
+      'GET /plg/onboard/status/:imsOrgId',
+      'PATCH /plg/onboard/:onboardingId',
+      'PATCH /plg/records/:plgOnboardingId',
+      'DELETE /plg/records/:plgOnboardingId',
       'GET /sites/:siteId/agentic-traffic/kpis',
       'GET /sites/:siteId/agentic-traffic/kpis-trend',
       'GET /sites/:siteId/agentic-traffic/by-region',
@@ -1161,5 +1167,13 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/url-store/delete'].handler).to.equal(mockUrlStoreController.deleteUrls);
     expect(dynamicRoutes['POST /sites/:siteId/url-store/delete'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /plg/onboard/status/:imsOrgId'].handler).to.equal(mockPlgOnboardingController.getStatus);
+    expect(dynamicRoutes['GET /plg/onboard/status/:imsOrgId'].paramNames).to.deep.equal(['imsOrgId']);
+    expect(dynamicRoutes['PATCH /plg/onboard/:onboardingId'].handler).to.equal(mockPlgOnboardingController.update);
+    expect(dynamicRoutes['PATCH /plg/onboard/:onboardingId'].paramNames).to.deep.equal(['onboardingId']);
+    expect(dynamicRoutes['PATCH /plg/records/:plgOnboardingId'].handler).to.equal(mockPlgOnboardingController.updateOnboardingStatus);
+    expect(dynamicRoutes['PATCH /plg/records/:plgOnboardingId'].paramNames).to.deep.equal(['plgOnboardingId']);
+    expect(dynamicRoutes['DELETE /plg/records/:plgOnboardingId'].handler).to.equal(mockPlgOnboardingController.deleteOnboarding);
+    expect(dynamicRoutes['DELETE /plg/records/:plgOnboardingId'].paramNames).to.deep.equal(['plgOnboardingId']);
   });
 });

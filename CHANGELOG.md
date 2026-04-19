@@ -1,3 +1,59 @@
+## [1.447.2](https://github.com/adobe/spacecat-api-service/compare/v1.447.1...v1.447.2) (2026-04-18)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2238](https://github.com/adobe/spacecat-api-service/issues/2238)) ([f6dd8e4](https://github.com/adobe/spacecat-api-service/commit/f6dd8e4053fbe968dde6292054dbe3c71edb4255))
+
+## [1.447.1](https://github.com/adobe/spacecat-api-service/compare/v1.447.0...v1.447.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* **plg:** Enable automatic reassignment of pre-onboarded internal org sites during customer onboarding ([#2237](https://github.com/adobe/spacecat-api-service/issues/2237)) ([13e8398](https://github.com/adobe/spacecat-api-service/commit/13e8398975014c14178d9b9e32cb855dd79771ef))
+
+# [1.447.0](https://github.com/adobe/spacecat-api-service/compare/v1.446.3...v1.447.0) (2026-04-17)
+
+
+### Features
+
+* **plg:** add caller tracking, ESE Slack notifications, and onboarding ops backoffice support   ([#2212](https://github.com/adobe/spacecat-api-service/issues/2212)) ([1a0b6d9](https://github.com/adobe/spacecat-api-service/commit/1a0b6d9349936cdb5d1b8c41dc61619ab8e47ee6))
+
+## [1.446.3](https://github.com/adobe/spacecat-api-service/compare/v1.446.2...v1.446.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* **categories:** return 409 on duplicate name instead of 500 ([#2233](https://github.com/adobe/spacecat-api-service/issues/2233)) ([eeeddc0](https://github.com/adobe/spacecat-api-service/commit/eeeddc0594837e22deb9e93d7d96880dc661ddf2))
+
+## [1.446.2](https://github.com/adobe/spacecat-api-service/compare/v1.446.1...v1.446.2) (2026-04-17)
+
+
+### Bug Fixes
+
+* lower default limit for aem.live proxy requests from 10M to 5000 ([#2234](https://github.com/adobe/spacecat-api-service/issues/2234)) ([b0fe484](https://github.com/adobe/spacecat-api-service/commit/b0fe484fd04effc3eac4594e8bd2b853d96b6f3e)), closes [adobe/spacecat-api-service#2229](https://github.com/adobe/spacecat-api-service/issues/2229)
+
+## [1.446.1](https://github.com/adobe/spacecat-api-service/compare/v1.446.0...v1.446.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* edge-routing - consume promise token from header ([#2231](https://github.com/adobe/spacecat-api-service/issues/2231)) ([a62e57a](https://github.com/adobe/spacecat-api-service/commit/a62e57aa977cec5c19d40bc366d1a8e28ffbff77))
+
+# [1.446.0](https://github.com/adobe/spacecat-api-service/compare/v1.445.3...v1.446.0) (2026-04-17)
+
+
+### Features
+
+* view trial toggle ([#2197](https://github.com/adobe/spacecat-api-service/issues/2197)) ([c99aea7](https://github.com/adobe/spacecat-api-service/commit/c99aea7735b4d7aa1682a730d9228b8852f85547))
+
+## [1.445.3](https://github.com/adobe/spacecat-api-service/compare/v1.445.2...v1.445.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* lower default limit for aem.live proxy requests from 10M to 5000 ([#2229](https://github.com/adobe/spacecat-api-service/issues/2229)) ([a5ee1b0](https://github.com/adobe/spacecat-api-service/commit/a5ee1b0dfa1c972c6ae810f5355cac39bc96b3b4))
+
 ## [1.445.2](https://github.com/adobe/spacecat-api-service/compare/v1.445.1...v1.445.2) (2026-04-16)
 
 

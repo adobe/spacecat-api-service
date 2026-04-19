@@ -90,7 +90,7 @@ describe('LlmoController', () => {
   let getImsUserOrganizationsStub;
   let probeSiteAndResolveDomainStub;
   let callCdnRoutingApiStub;
-  let getImsTokenFromCookieStub;
+  let getImsTokenFromPromiseTokenStub;
   let edgeRoutingAuthReal;
   let detectCdnForDomainStub;
   let authorizeEdgeCdnRoutingStub;
@@ -190,7 +190,7 @@ describe('LlmoController', () => {
     });
 
     edgeRoutingAuthReal = await import('../../../src/support/edge-routing-auth.js');
-    getImsTokenFromCookieStub = sinon.stub().resolves('test-ims-user-token');
+    getImsTokenFromPromiseTokenStub = sinon.stub().resolves('test-ims-user-token');
     detectCdnForDomainStub = sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY);
     authorizeEdgeCdnRoutingStub = sinon.stub().callsFake((ctx, params, log) => (
       edgeRoutingAuthReal.authorizeEdgeCdnRouting(ctx, params, log)
@@ -231,7 +231,7 @@ describe('LlmoController', () => {
         fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
       },
       '../../../src/support/edge-routing-auth.js': {
-        getImsTokenFromCookie: (...args) => getImsTokenFromCookieStub(...args),
+        getImsTokenFromPromiseToken: (...args) => getImsTokenFromPromiseTokenStub(...args),
         authorizeEdgeCdnRouting: (...args) => authorizeEdgeCdnRoutingStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
@@ -647,8 +647,8 @@ describe('LlmoController', () => {
     getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
     getImsUserProfileStub = sinon.stub().resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
     getImsUserOrganizationsStub = sinon.stub().resolves([]);
-    getImsTokenFromCookieStub.reset();
-    getImsTokenFromCookieStub.resolves('test-ims-user-token');
+    getImsTokenFromPromiseTokenStub.reset();
+    getImsTokenFromPromiseTokenStub.resolves('test-ims-user-token');
     probeSiteAndResolveDomainStub = sinon.stub().resolves('www.example.com');
     detectCdnForDomainStub.reset();
     detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY);
@@ -5229,7 +5229,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5299,7 +5299,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5366,7 +5366,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5564,14 +5564,14 @@ describe('LlmoController', () => {
       });
 
       it('returns 400 when promiseToken cookie is missing for CDN routing', async () => {
-        getImsTokenFromCookieStub.callsFake((ctx) => (
-          edgeRoutingAuthReal.getImsTokenFromCookie(ctx)
+        getImsTokenFromPromiseTokenStub.callsFake((ctx) => (
+          edgeRoutingAuthReal.getImsTokenFromPromiseToken(ctx)
         ));
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ pathInfo: { headers: { cookie: '' } } }),
         );
         expect(result.status).to.equal(400);
-        expect((await result.json()).message).to.include('promiseToken cookie is required');
+        expect((await result.json()).message).to.include('Authentication failed: mandatory token missing');
       });
 
       it('returns 200 with routing data when CDN routing succeeds', async () => {
@@ -5646,10 +5646,10 @@ describe('LlmoController', () => {
         );
       });
 
-      it('uses tokenError.status when getImsTokenFromCookie fails with a status', async () => {
+      it('uses tokenError.status when getImsTokenFromPromiseToken fails with a status', async () => {
         const tokenErr = new Error('IMS cookie exchange failed');
         tokenErr.status = 503;
-        getImsTokenFromCookieStub.rejects(tokenErr);
+        getImsTokenFromPromiseTokenStub.rejects(tokenErr);
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(503);
         expect((await result.json()).message).to.equal('IMS cookie exchange failed');
@@ -5664,8 +5664,8 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.equal('Custom auth failure');
       });
 
-      it('returns 401 when getImsTokenFromCookie fails without a status', async () => {
-        getImsTokenFromCookieStub.rejects(new Error('token failure'));
+      it('returns 401 when getImsTokenFromPromiseToken fails without a status', async () => {
+        getImsTokenFromPromiseTokenStub.rejects(new Error('token failure'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(401);
       });
