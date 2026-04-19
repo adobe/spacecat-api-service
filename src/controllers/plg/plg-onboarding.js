@@ -696,11 +696,8 @@ async function performAsoPlgOnboarding({
         }
       }
 
-      const { entitlement } = await ensureAsoEntitlement(site, context);
-      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-      await updateLaunchDarklyFlags(site, context);
-
-      // Reassign site org if needed
+      // Reassign site org if needed BEFORE entitlement operations
+      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement
       if (needsOrgReassignment) {
         site.setOrganizationId(customerOrgId);
         await site.save();
@@ -708,6 +705,10 @@ async function performAsoPlgOnboarding({
         onboarding.setOrganizationId(customerOrgId);
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
+
+      const { entitlement } = await ensureAsoEntitlement(site, context);
+      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+      await updateLaunchDarklyFlags(site, context);
 
       const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
       onboarding.setStatus(STATUSES.ONBOARDED);
@@ -1087,26 +1088,8 @@ async function performAsoPlgOnboarding({
       log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
-    // Step 9: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
-    const { entitlement } = await ensureAsoEntitlement(site, context);
-    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-    await updateLaunchDarklyFlags(site, context);
-
-    steps.entitlementCreated = true;
-
-    // Step 10: Trigger audit runs
-    await triggerAudits(auditTypes, context, site);
-
-    // Step 11: Trigger brand profile (non-blocking)
-    try {
-      await triggerBrandProfileAgent({
-        context, site, reason: 'plg-onboarding',
-      });
-    } catch (error) {
-      log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
-    }
-
-    // Reassign site org if it was previously in an internal/demo org
+    // Step 9: Reassign site org if it was previously in an internal/demo org
+    // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
       site.setOrganizationId(organizationId);
@@ -1114,6 +1097,25 @@ async function performAsoPlgOnboarding({
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
+    }
+
+    // Step 10: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
+    const { entitlement } = await ensureAsoEntitlement(site, context);
+    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+    await updateLaunchDarklyFlags(site, context);
+
+    steps.entitlementCreated = true;
+
+    // Step 11: Trigger audit runs
+    await triggerAudits(auditTypes, context, site);
+
+    // Step 12: Trigger brand profile (non-blocking)
+    try {
+      await triggerBrandProfileAgent({
+        context, site, reason: 'plg-onboarding',
+      });
+    } catch (error) {
+      log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
     }
 
     // Mark as completed
