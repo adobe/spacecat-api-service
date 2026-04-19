@@ -667,6 +667,8 @@ async function performAsoPlgOnboarding({
       const currentSiteOrgId = site.getOrganizationId();
       let needsOrgReassignment = false;
 
+      // Note: On retry, currentSiteOrgId may already equal customerOrgId if a previous
+      // attempt successfully saved the org reassignment but failed during entitlement creation
       if (currentSiteOrgId !== customerOrgId) {
         if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
           log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
@@ -696,11 +698,8 @@ async function performAsoPlgOnboarding({
         }
       }
 
-      const { entitlement } = await ensureAsoEntitlement(site, context);
-      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-      await updateLaunchDarklyFlags(site, context);
-
-      // Reassign site org if needed
+      // Reassign site org if needed BEFORE entitlement operations
+      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement
       if (needsOrgReassignment) {
         site.setOrganizationId(customerOrgId);
         await site.save();
@@ -709,7 +708,17 @@ async function performAsoPlgOnboarding({
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 
-      const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
+      const { entitlement } = await ensureAsoEntitlement(site, context);
+      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+      await updateLaunchDarklyFlags(site, context);
+
+      const steps = {
+        ...(onboarding.getSteps() || {}),
+        entitlementCreated: true,
+      };
+      if (needsOrgReassignment) {
+        steps.siteOrgReassigned = true;
+      }
       onboarding.setStatus(STATUSES.ONBOARDED);
       onboarding.setWaitlistReason(null);
       onboarding.setBotBlocker(null);
@@ -779,8 +788,8 @@ async function performAsoPlgOnboarding({
 
       if (existingOrgId !== organizationId) {
         if (isInternalOrg(existingOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
-          log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — will reassign to new org ${organizationId} after successful onboarding`);
-          // Don't save yet - we'll reassign the org just before marking ONBOARDED
+          log.info(`Site ${site.getId()} org ${existingOrgId} is internal/demo — will reassign to new org ${organizationId} before entitlement operations`);
+          // Will reassign at Step 9, before creating entitlements
           needsOrgReassignment = true;
         } else {
           const existingOrg = await Organization.findById(existingOrgId);
@@ -1087,26 +1096,8 @@ async function performAsoPlgOnboarding({
       log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
-    // Step 9: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
-    const { entitlement } = await ensureAsoEntitlement(site, context);
-    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-    await updateLaunchDarklyFlags(site, context);
-
-    steps.entitlementCreated = true;
-
-    // Step 10: Trigger audit runs
-    await triggerAudits(auditTypes, context, site);
-
-    // Step 11: Trigger brand profile (non-blocking)
-    try {
-      await triggerBrandProfileAgent({
-        context, site, reason: 'plg-onboarding',
-      });
-    } catch (error) {
-      log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
-    }
-
-    // Reassign site org if it was previously in an internal/demo org
+    // Step 9: Reassign site org if it was previously in an internal/demo org
+    // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
       site.setOrganizationId(organizationId);
@@ -1114,6 +1105,25 @@ async function performAsoPlgOnboarding({
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
+    }
+
+    // Step 10: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
+    const { entitlement } = await ensureAsoEntitlement(site, context);
+    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
+    await updateLaunchDarklyFlags(site, context);
+
+    steps.entitlementCreated = true;
+
+    // Step 11: Trigger audit runs
+    await triggerAudits(auditTypes, context, site);
+
+    // Step 12: Trigger brand profile (non-blocking)
+    try {
+      await triggerBrandProfileAgent({
+        context, site, reason: 'plg-onboarding',
+      });
+    } catch (error) {
+      log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
     }
 
     // Mark as completed

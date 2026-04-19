@@ -3270,6 +3270,8 @@ describe('PlgOnboardingController', () => {
       expect(siteInInternalOrg.save).to.have.been.called;
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // Verify order: site org reassignment happens BEFORE entitlement operations
+      expect(siteInInternalOrg.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
     });
 
     it('does not reassign when preonboarded site already in customer org', async () => {
@@ -3356,6 +3358,30 @@ describe('PlgOnboardingController', () => {
       expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
       // Should NOT create entitlement
       expect(tierClientCreateForSiteStub).to.not.have.been.called;
+    });
+
+    it('reassigns site from internal org before entitlement in full onboarding path', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-999';
+
+      // Simulate full onboarding (not PRE_ONBOARDING)
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+      // Existing site in internal org
+      const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      // Verify site was reassigned
+      expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(existingSite.save).to.have.been.called;
+      // Verify order: site org reassignment happens BEFORE entitlement operations
+      expect(existingSite.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
     });
   });
 
