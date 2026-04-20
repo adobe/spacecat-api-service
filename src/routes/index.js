@@ -88,13 +88,13 @@ function isStaticRoute(routePattern) {
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} tokensController - The tokens controller.
- * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -141,13 +141,13 @@ export default function getRouteHandlers(
   sentimentController,
   consumersController,
   tokensController,
-  plgOnboardingController,
   imsOrgAccessController,
   contactSalesLeadsController,
   featureFlagsController,
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  plgOnboardingController,
   drsBpPgAuditController,
 ) {
   const staticRoutes = {};

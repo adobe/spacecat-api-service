@@ -12,7 +12,6 @@
 
 // LLMO constants
 export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
-export const DEFAULT_LLMO_GET_LIMIT = 5000;
 
 // Supported CDN types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
 export const CDN_TYPES = {

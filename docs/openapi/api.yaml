@@ -75,8 +75,6 @@ tags:
     description: Site URL tracking and management operations
   - name: sentiment
     description: Brand sentiment analysis topics and guidelines management
-  - name: plg
-    description: PLG (Product-Led Growth) ASO onboarding operations
 
 paths:
   /audits/latest/{auditType}:
@@ -123,6 +121,10 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/categories:
+    $ref: './categories-v2-api.yaml#/v2-categories-for-org'
+  /v2/orgs/{spaceCatId}/categories/{categoryId}:
+    $ref: './categories-v2-api.yaml#/v2-category-for-org'
   /v2/orgs/{spaceCatId}/topics:
     $ref: './topics-v2-api.yaml#/v2-topics-for-org'
   /v2/orgs/{spaceCatId}/topics/{topicId}:
@@ -548,14 +550,6 @@ paths:
     $ref: './guidelines-api.yaml#/sentiment-config'
   /sites/{siteId}/tokens/by-type/{tokenType}:
     $ref: './tokens-api.yaml#/site-token-by-type'
-  /plg/onboard:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard'
-  /plg/sites:
-    $ref: './plg-onboarding-api.yaml#/plg-sites'
-  /plg/onboard/{onboardingId}:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard-update'
-  /plg/onboard/status/{imsOrgId}:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard-status'
 
 components:
   securitySchemes:

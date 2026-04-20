@@ -1,3 +1,80 @@
+## [1.449.1](https://github.com/adobe/spacecat-api-service/compare/v1.449.0...v1.449.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* make POST /v2/orgs/:id/categories idempotent by name | LLMO-4370 ([#2240](https://github.com/adobe/spacecat-api-service/issues/2240)) ([dfdd0fa](https://github.com/adobe/spacecat-api-service/commit/dfdd0fa65210da8672ee83af2d7e1211d1e214b9))
+
+# [1.449.0](https://github.com/adobe/spacecat-api-service/compare/v1.448.1...v1.449.0) (2026-04-20)
+
+
+### Features
+
+* add VPC configuration support via helix-deploy 13.4 ([#1935](https://github.com/adobe/spacecat-api-service/issues/1935)) ([e593a1e](https://github.com/adobe/spacecat-api-service/commit/e593a1e43900a9809a0f9d17800f2ab03cb4dfa3)), closes [adobe/helix-deploy#898](https://github.com/adobe/helix-deploy/issues/898) [adobe/helix-deploy#897](https://github.com/adobe/helix-deploy/issues/897) [adobe/spacecat-infrastructure#375](https://github.com/adobe/spacecat-infrastructure/issues/375)
+
+## [1.448.1](https://github.com/adobe/spacecat-api-service/compare/v1.448.0...v1.448.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* **auth:** use audit:read capability for drs-bp-pg-audit endpoint ([#2228](https://github.com/adobe/spacecat-api-service/issues/2228)) ([86bd364](https://github.com/adobe/spacecat-api-service/commit/86bd364d0d44156882bf34edfab2476edd86a8a5))
+
+# [1.448.0](https://github.com/adobe/spacecat-api-service/compare/v1.447.3...v1.448.0) (2026-04-20)
+
+
+### Features
+
+* add successRate parameter handling | LLMO-4000 ([#2230](https://github.com/adobe/spacecat-api-service/issues/2230)) ([9f80d3d](https://github.com/adobe/spacecat-api-service/commit/9f80d3db12cb5a6e5d3ad61272d29888303efc19))
+
+## [1.447.3](https://github.com/adobe/spacecat-api-service/compare/v1.447.2...v1.447.3) (2026-04-19)
+
+
+### Bug Fixes
+
+* **plg:** move org reassignment before entitlement operations ([#2239](https://github.com/adobe/spacecat-api-service/issues/2239)) ([b46b15a](https://github.com/adobe/spacecat-api-service/commit/b46b15ab9ef85004a87bde70400933fa01cfe6e4))
+
+## [1.447.2](https://github.com/adobe/spacecat-api-service/compare/v1.447.1...v1.447.2) (2026-04-18)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2238](https://github.com/adobe/spacecat-api-service/issues/2238)) ([f6dd8e4](https://github.com/adobe/spacecat-api-service/commit/f6dd8e4053fbe968dde6292054dbe3c71edb4255))
+
+## [1.447.1](https://github.com/adobe/spacecat-api-service/compare/v1.447.0...v1.447.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* **plg:** Enable automatic reassignment of pre-onboarded internal org sites during customer onboarding ([#2237](https://github.com/adobe/spacecat-api-service/issues/2237)) ([13e8398](https://github.com/adobe/spacecat-api-service/commit/13e8398975014c14178d9b9e32cb855dd79771ef))
+
+# [1.447.0](https://github.com/adobe/spacecat-api-service/compare/v1.446.3...v1.447.0) (2026-04-17)
+
+
+### Features
+
+* **plg:** add caller tracking, ESE Slack notifications, and onboarding ops backoffice support   ([#2212](https://github.com/adobe/spacecat-api-service/issues/2212)) ([1a0b6d9](https://github.com/adobe/spacecat-api-service/commit/1a0b6d9349936cdb5d1b8c41dc61619ab8e47ee6))
+
+## [1.446.3](https://github.com/adobe/spacecat-api-service/compare/v1.446.2...v1.446.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* **categories:** return 409 on duplicate name instead of 500 ([#2233](https://github.com/adobe/spacecat-api-service/issues/2233)) ([eeeddc0](https://github.com/adobe/spacecat-api-service/commit/eeeddc0594837e22deb9e93d7d96880dc661ddf2))
+
+## [1.446.2](https://github.com/adobe/spacecat-api-service/compare/v1.446.1...v1.446.2) (2026-04-17)
+
+
+### Bug Fixes
+
+* lower default limit for aem.live proxy requests from 10M to 5000 ([#2234](https://github.com/adobe/spacecat-api-service/issues/2234)) ([b0fe484](https://github.com/adobe/spacecat-api-service/commit/b0fe484fd04effc3eac4594e8bd2b853d96b6f3e)), closes [adobe/spacecat-api-service#2229](https://github.com/adobe/spacecat-api-service/issues/2229)
+
+## [1.446.1](https://github.com/adobe/spacecat-api-service/compare/v1.446.0...v1.446.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* edge-routing - consume promise token from header ([#2231](https://github.com/adobe/spacecat-api-service/issues/2231)) ([a62e57a](https://github.com/adobe/spacecat-api-service/commit/a62e57aa977cec5c19d40bc366d1a8e28ffbff77))
+
 # [1.446.0](https://github.com/adobe/spacecat-api-service/compare/v1.445.3...v1.446.0) (2026-04-17)
 
 
