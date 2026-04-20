@@ -80,8 +80,6 @@ tags:
     description: Site URL tracking and management operations
   - name: sentiment
     description: Brand sentiment analysis topics and guidelines management
-  - name: plg
-    description: PLG (Product-Led Growth) ASO onboarding operations
 
 paths:
   /audits/latest/{auditType}:
@@ -555,14 +553,6 @@ paths:
     $ref: './guidelines-api.yaml#/sentiment-config'
   /sites/{siteId}/tokens/by-type/{tokenType}:
     $ref: './tokens-api.yaml#/site-token-by-type'
-  /plg/onboard:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard'
-  /plg/sites:
-    $ref: './plg-onboarding-api.yaml#/plg-sites'
-  /plg/onboard/{onboardingId}:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard-update'
-  /plg/onboard/status/{imsOrgId}:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard-status'
 
 components:
   securitySchemes:

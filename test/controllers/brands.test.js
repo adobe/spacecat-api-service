@@ -2307,6 +2307,74 @@ describe('Brands Controller', () => {
       });
       expect(response.status).to.equal(500);
     });
+
+    it('returns 409 when the storage layer throws a duplicate-name error', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_category_name_per_org"',
+              details: 'Key (organization_id, name)=(..., DupTest) already exists.',
+              hint: '',
+            },
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'DupTest' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.message).to.match(/already exists/i);
+    });
+
+    it('returns 500 when the storage layer returns a non-23505 PostgREST error', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({
+            data: null,
+            error: {
+              code: '23503',
+              message: 'insert or update on table "categories" violates foreign key constraint "categories_org_fk"',
+              details: '',
+              hint: '',
+            },
+          }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'DupTest' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.match(/Failed to create category/);
+    });
   });
 
   describe('updateCategoryForOrg', () => {

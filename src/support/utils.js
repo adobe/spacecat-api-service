@@ -1556,6 +1556,28 @@ export const onboardSingleSite = async (
       }
     }
 
+    // Validate tier before doing any DB work.
+    if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
+      reportLine.errors = `Invalid tier: ${tier}`;
+      reportLine.status = 'Failed';
+      log.error(`Invalid tier: ${tier}`);
+      await say(`:x: Invalid tier: ${tier}`);
+      return reportLine;
+    }
+
+    // Block internal-only tiers from being assigned via the onboard command.
+    // PLG is managed exclusively by the PLG onboarding flow (PlgOnboarding record,
+    // LD flags, summit-plg handler setup). PRE_ONBOARD is an internal staging tier
+    // with no follow-up promotion flow when created here.
+    const RESTRICTED_TIERS = [EntitlementModel.TIERS.PLG, EntitlementModel.TIERS.PRE_ONBOARD];
+    if (RESTRICTED_TIERS.includes(tier)) {
+      reportLine.errors = `Tier '${tier}' is reserved and cannot be assigned via the onboard command`;
+      reportLine.status = 'Failed';
+      log.error(`Attempted to assign restricted tier ${tier} via onboard command`);
+      await say(`:x: Tier *${tier}* is reserved and cannot be used here. Use \`FREE_TRIAL\` or \`PAID\`.`);
+      return reportLine;
+    }
+
     await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
     await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
@@ -1599,15 +1621,6 @@ export const onboardSingleSite = async (
       additionalParams.deliveryConfig,
       prefetchedSite,
     );
-
-    // Validate tier
-    if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
-      reportLine.errors = `Invalid tier: ${tier}`;
-      reportLine.status = 'Failed';
-      log.error(`Invalid tier: ${tier}`);
-      await say(`:x: Invalid tier: ${tier}`);
-      return reportLine;
-    }
 
     // Create entitlement and enrollment
     await createEntitlementAndEnrollment(
