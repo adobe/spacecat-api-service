@@ -40,14 +40,19 @@ function toAuditDto(row) {
  * DRS Lambdas run in a separate AWS account and cannot reach the private PostgREST endpoint
  * (`http://data-svc.internal`). This endpoint bridges the network gap.
  *
- * Auth note: DRS workers authenticate via admin x-api-key (not scoped S2S JWT). The
- * `drsBpPgAudit:read` capability in routeRequiredCapabilities gates the S2S JWT path only;
- * admin key callers bypass capability checks via LegacyApiKeyHandler. This is intentional —
- * DRS runs in a separate AWS account and does not hold an S2S consumer registration.
+ * Auth note: DRS workers authenticate via admin x-api-key (not scoped S2S JWT). S2S JWT
+ * consumers are denied at the gate because this route is absent from `routeRequiredCapabilities`
+ * in `src/routes/required-capabilities.js`; the route is also listed in `INTERNAL_ROUTES` there
+ * to document the decision. DRS runs in a separate AWS account and does not hold an S2S
+ * consumer registration, so admin key is the only caller today.
  *
- * TODO: When S2S JWT callers are onboarded, the `drsBpPgAudit:read` capability grants access
- * to query any siteId (cross-tenant). Implement site-scoped authorization before the S2S
- * transition so JWT callers can only access their own sites.
+ * TODO: When a concrete S2S JWT consumer is onboarded, remove this route from INTERNAL_ROUTES
+ * and add a dedicated resource-scoped capability in routeRequiredCapabilities (e.g.
+ * `drsBrandPresenceAudit:read`) rather than bundling into the site-scoped `audit:read` or a
+ * domain-bucket capability like `monitoring:read`. The new entity must also be registered in
+ * `@adobe/spacecat-shared-data-access` EntityRegistry so the capability can actually be
+ * granted to the consumer. Also add site-scoped authorization before the S2S transition so
+ * JWT callers can only access their own sites (today this endpoint can query any siteId).
  *
  * DB note: the PostgREST query filters on (scope_prefix, handler_name, projected_at, skipped).
  * A composite index on these columns is required for acceptable query performance on large tables.
