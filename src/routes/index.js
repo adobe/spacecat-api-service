@@ -446,6 +446,17 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
     'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
 
+    // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
+    'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
+    'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
+    'GET /sites/:siteId/referral-traffic/by-platform': llmoMysticatController.getReferralTrafficByPlatform,
+    'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
+    'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
+    'GET /sites/:siteId/referral-traffic/by-url': llmoMysticatController.getReferralTrafficByUrl,
+    'GET /sites/:siteId/referral-traffic/business-impact': llmoMysticatController.getReferralTrafficBusinessImpact,
+    'GET /sites/:siteId/referral-traffic/weeks': llmoMysticatController.getReferralTrafficWeeks,
+
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
     'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,

@@ -78,6 +78,17 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
 
+  // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/referral-traffic/filter-dimensions',
+  'GET /sites/:siteId/referral-traffic/kpis',
+  'GET /sites/:siteId/referral-traffic/trend',
+  'GET /sites/:siteId/referral-traffic/by-platform',
+  'GET /sites/:siteId/referral-traffic/by-region',
+  'GET /sites/:siteId/referral-traffic/by-page-intent',
+  'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/business-impact',
+  'GET /sites/:siteId/referral-traffic/weeks',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',

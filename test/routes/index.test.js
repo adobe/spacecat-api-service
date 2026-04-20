@@ -895,6 +895,14 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/weeks',
       'GET /sites/:siteId/agentic-traffic/movers',
       'GET /sites/:siteId/agentic-traffic/url-brand-presence',
+      'GET /sites/:siteId/referral-traffic/filter-dimensions',
+      'GET /sites/:siteId/referral-traffic/kpis',
+      'GET /sites/:siteId/referral-traffic/trend',
+      'GET /sites/:siteId/referral-traffic/by-platform',
+      'GET /sites/:siteId/referral-traffic/by-region',
+      'GET /sites/:siteId/referral-traffic/by-page-intent',
+      'GET /sites/:siteId/referral-traffic/by-url',
+      'GET /sites/:siteId/referral-traffic/business-impact',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
