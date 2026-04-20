@@ -393,8 +393,8 @@ Key properties:
 ### Rate Limiting & Alerting
 
 - Rate limiting is enforced on `/auth/s2s/login` per Technical Account
-- An alert fires on #spacecat-ops if a single TA requests tokens for an unusual spread of orgs
-- Future: automatic consumer SUSPEND on anomaly detection
+- An coralogix alert fires on #spacecat-ops if a single TA requests tokens for an unusual spread of orgs
+- Future: Use coralogix alert payload to create skyline on-call trigger, ticket to follow https://jira.corp.adobe.com/browse/AEMSRE-3408
 
 ### Audit Trail
 
