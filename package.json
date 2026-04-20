@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.448.1",
+  "version": "1.449.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -44,6 +44,13 @@
     "fastlyServiceId!important": "",
     "timeout": 900000,
     "nodeVersion": 24,
+    "awsVpcSubnetIds": [
+      "${env.VPC_SUBNET_1}",
+      "${env.VPC_SUBNET_2}"
+    ],
+    "awsVpcSecurityGroupIds": [
+      "${env.VPC_SG_ID}"
+    ],
     "static": [
       "static/onboard/profiles.json"
     ]
