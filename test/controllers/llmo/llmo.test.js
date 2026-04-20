@@ -6953,7 +6953,7 @@ describe('LlmoController', () => {
         probedUrl: 'https://www.example.com/',
       });
       // Default: edge optimize not yet active (customer not onboarded)
-      mockTokowakaClient.checkEdgeOptimizeStatus.resetBehavior();
+      mockTokowakaClient.checkEdgeOptimizeStatus.reset();
       mockTokowakaClient.checkEdgeOptimizeStatus.resolves({ edgeOptimizeEnabled: false });
     });
 
