@@ -2123,6 +2123,16 @@ llmo-probe-edge-optimize:
                   type: string
                   enum: [timeout, error]
                   description: Present only when `blocked` is null — explains why the probe failed.
+                edgeOptimizeEnabled:
+                  type:
+                    - boolean
+                    - 'null'
+                  description: >
+                    Present only when the probe is not a clean pass. Cross-checks with the
+                    edge-optimize-status API to handle the case where a customer has fixed
+                    their WAF but the low-level probe still returns a non-clean result.
+                    `true` — edge optimize is active (WAF was fixed); `false` — not active;
+                    `null` — status could not be determined.
             examples:
               hardBlock:
                 summary: WAF hard block (403)
@@ -2131,6 +2141,7 @@ llmo-probe-edge-optimize:
                   blocked: true
                   statusCode: 403
                   probedUrl: 'https://www.acme.com/'
+                  edgeOptimizeEnabled: false
               softBlock:
                 summary: Soft block — bot-challenge page (200)
                 value:
@@ -2138,6 +2149,7 @@ llmo-probe-edge-optimize:
                   blocked: true
                   statusCode: 200
                   probedUrl: 'https://www.acme.com/'
+                  edgeOptimizeEnabled: false
               cleanPass:
                 summary: No WAF blocking
                 value:
@@ -2152,6 +2164,15 @@ llmo-probe-edge-optimize:
                   blocked: null
                   reason: timeout
                   probedUrl: 'https://www.acme.com/'
+                  edgeOptimizeEnabled: false
+              blockedButFixed:
+                summary: Probe blocked but edge optimize confirms WAF was fixed
+                value:
+                  reachable: false
+                  blocked: true
+                  statusCode: 403
+                  probedUrl: 'https://www.acme.com/'
+                  edgeOptimizeEnabled: true
       '400':
         $ref: './responses.yaml#/400'
       '401':

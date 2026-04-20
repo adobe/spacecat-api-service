@@ -1895,6 +1895,21 @@ function LlmoController(ctx) {
 
     log.info(`[waf-probe] Result for site ${siteId}: reachable=${result.reachable}, blocked=${result.blocked}`);
 
+    // When the probe is not a clean pass, cross-check with edge-optimize-status.
+    // If edgeOptimizeEnabled=true, the customer's WAF has been fixed even though the
+    // low-level probe failed — avoids a permanently-stale "blocked" indicator.
+    if (!result.reachable) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const { edgeOptimizeEnabled } = await tokowakaClient.checkEdgeOptimizeStatus(site, '/');
+        log.info(`[waf-probe] Edge optimize status for site ${siteId}: edgeOptimizeEnabled=${edgeOptimizeEnabled}`);
+        return ok({ ...result, edgeOptimizeEnabled });
+      } catch (err) {
+        log.warn(`[waf-probe] Edge optimize status check failed for site ${siteId}: ${err.message}`);
+        return ok({ ...result, edgeOptimizeEnabled: null });
+      }
+    }
+
     return ok(result);
   };
 

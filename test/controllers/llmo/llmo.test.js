@@ -6973,9 +6973,12 @@ describe('LlmoController', () => {
         statusCode: 200,
         probedUrl: 'https://www.example.com/',
       });
+      // Default: edge optimize not yet active (customer not onboarded)
+      mockTokowakaClient.checkEdgeOptimizeStatus.resetBehavior();
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({ edgeOptimizeEnabled: false });
     });
 
-    it('should return 200 with clean-pass result when WAF allows the user-agent', async () => {
+    it('should return 200 with clean-pass result and no edgeOptimizeEnabled field when WAF allows the user-agent', async () => {
       const result = await controller.checkWafConnectivity(probeContext);
 
       expect(result.status).to.equal(200);
@@ -6983,10 +6986,12 @@ describe('LlmoController', () => {
       expect(body.reachable).to.be.true;
       expect(body.blocked).to.be.false;
       expect(body.statusCode).to.equal(200);
+      expect(body.edgeOptimizeEnabled).to.be.undefined;
       expect(probeWafConnectivityStub).to.have.been.calledWith('https://www.example.com', sinon.match.object);
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.not.have.been.called;
     });
 
-    it('should return 200 with blocked=true when WAF hard-blocks the user-agent (403)', async () => {
+    it('should include edgeOptimizeEnabled=false when WAF hard-blocks and edge optimize is inactive', async () => {
       probeWafConnectivityStub.resolves({
         reachable: false,
         blocked: true,
@@ -7001,15 +7006,36 @@ describe('LlmoController', () => {
       expect(body.reachable).to.be.false;
       expect(body.blocked).to.be.true;
       expect(body.statusCode).to.equal(403);
+      expect(body.edgeOptimizeEnabled).to.be.false;
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(mockSite, '/');
     });
 
-    it('should return 200 with blocked=null and reason=timeout on probe timeout', async () => {
+    it('should include edgeOptimizeEnabled=true when probe blocked but customer has fixed WAF', async () => {
+      probeWafConnectivityStub.resolves({
+        reachable: false,
+        blocked: true,
+        statusCode: 403,
+        probedUrl: 'https://www.example.com/',
+      });
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({ edgeOptimizeEnabled: true });
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.reachable).to.be.false;
+      expect(body.blocked).to.be.true;
+      expect(body.edgeOptimizeEnabled).to.be.true;
+    });
+
+    it('should include edgeOptimizeEnabled=true when probe times out but edge optimize is active', async () => {
       probeWafConnectivityStub.resolves({
         reachable: false,
         blocked: null,
         reason: 'timeout',
         probedUrl: 'https://www.example.com/',
       });
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({ edgeOptimizeEnabled: true });
 
       const result = await controller.checkWafConnectivity(probeContext);
 
@@ -7018,6 +7044,24 @@ describe('LlmoController', () => {
       expect(body.reachable).to.be.false;
       expect(body.blocked).to.be.null;
       expect(body.reason).to.equal('timeout');
+      expect(body.edgeOptimizeEnabled).to.be.true;
+    });
+
+    it('should include edgeOptimizeEnabled=null when probe fails and edge optimize status check throws', async () => {
+      probeWafConnectivityStub.resolves({
+        reachable: false,
+        blocked: null,
+        reason: 'error',
+        probedUrl: 'https://www.example.com/',
+      });
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(new Error('Tokowaka unavailable'));
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.reachable).to.be.false;
+      expect(body.edgeOptimizeEnabled).to.be.null;
     });
 
     it('should return 400 when siteId is invalid', async () => {
