@@ -186,6 +186,10 @@ export async function callCdnRoutingApi(
 // so the origin fetch happens from Fastly edge IPs with the AdobeEdgeOptimize UA.
 const TOKOWAKA_PROXY_BASE_URL_DEFAULT = 'https://live.edgeoptimize.net';
 
+// Regex matching loopback, link-local, and RFC1918 private address ranges.
+// These must never be forwarded to Tokowaka as probe targets.
+const PRIVATE_HOST_RE = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/i;
+
 const WAF_PROBE_TIMEOUT_MS = 15000;
 
 // Soft-block detection: bot-challenge pages are typically tiny HTML with these keywords.
@@ -277,11 +281,18 @@ export async function probeWafConnectivity(
   tokowakaProxyBaseUrl = TOKOWAKA_PROXY_BASE_URL_DEFAULT,
 ) {
   const normalizedUrl = siteBaseUrl.startsWith('http') ? siteBaseUrl : `https://${siteBaseUrl}`;
-  const { host: targetHost, href: probedUrl } = new URL(normalizedUrl);
+  const { host: targetHost, hostname, href: probedUrl } = new URL(normalizedUrl);
 
   const probeResult = {
     probedUrl,
   };
+
+  if (PRIVATE_HOST_RE.test(hostname)) {
+    log.warn(`[waf-probe] Refusing to probe private/loopback host: ${hostname}`);
+    return {
+      ...probeResult, reachable: false, blocked: null, reason: 'error',
+    };
+  }
 
   log.info(`[waf-probe] Probing ${targetHost} via Tokowaka proxy at ${tokowakaProxyBaseUrl}`);
 

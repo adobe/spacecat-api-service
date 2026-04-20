@@ -544,6 +544,26 @@ describe('edge-routing-utils', () => {
 
       expect(fetchStub.firstCall.args[0]).to.equal('https://live.edgeoptimize.net');
     });
+
+    const privateHosts = [
+      'http://127.0.0.1',
+      'http://localhost',
+      'http://10.0.0.1',
+      'http://192.168.1.1',
+      'http://172.16.0.1',
+      'http://169.254.169.254',
+    ];
+
+    privateHosts.forEach((url) => {
+      it(`refuses to probe private/loopback host: ${url}`, async () => {
+        const result = await edgeUtils.probeWafConnectivity(url, log, proxyBaseUrl);
+
+        expect(result.reachable).to.be.false;
+        expect(result.blocked).to.be.null;
+        expect(result.reason).to.equal('error');
+        expect(fetchStub.called).to.be.false;
+      });
+    });
   });
 
   describe('detectCdnForDomain (integration)', () => {
