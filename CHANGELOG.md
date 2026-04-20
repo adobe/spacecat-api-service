@@ -1,3 +1,17 @@
+## [1.448.1](https://github.com/adobe/spacecat-api-service/compare/v1.448.0...v1.448.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* **auth:** use audit:read capability for drs-bp-pg-audit endpoint ([#2228](https://github.com/adobe/spacecat-api-service/issues/2228)) ([86bd364](https://github.com/adobe/spacecat-api-service/commit/86bd364d0d44156882bf34edfab2476edd86a8a5))
+
+# [1.448.0](https://github.com/adobe/spacecat-api-service/compare/v1.447.3...v1.448.0) (2026-04-20)
+
+
+### Features
+
+* add successRate parameter handling | LLMO-4000 ([#2230](https://github.com/adobe/spacecat-api-service/issues/2230)) ([9f80d3d](https://github.com/adobe/spacecat-api-service/commit/9f80d3db12cb5a6e5d3ad61272d29888303efc19))
+
 ## [1.447.3](https://github.com/adobe/spacecat-api-service/compare/v1.447.2...v1.447.3) (2026-04-19)
 
 
