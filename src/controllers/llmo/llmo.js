@@ -1882,21 +1882,23 @@ function LlmoController(ctx) {
       return notFound(`Site with ID ${siteId} not found`);
     }
 
+    // Intentionally no isLLMOAdministrator() check here — this endpoint is designed for
+    // the customer-facing diagnostic UI so org members can diagnose their own WAF config.
+    // Compare with checkEdgeOptimizeStatus (admin-only) which exposes internal routing state.
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can check this site');
     }
 
     const baseURL = site.getBaseURL();
-    /* c8 ignore next 3 */
     if (!baseURL) {
       return internalServerError('Site has no baseURL configured');
     }
 
-    log.info(`[waf-probe] Starting WAF connectivity probe for site ${siteId} (${baseURL})`);
+    log.info(`[edge-routing-utils] Starting WAF connectivity probe for site ${siteId} (${baseURL})`);
 
     const result = await probeWafConnectivity(baseURL, log, context.env?.TOKOWAKA_PROXY_BASE_URL);
 
-    log.info(`[waf-probe] Result for site ${siteId}: reachable=${result.reachable}, blocked=${result.blocked}`);
+    log.info(`[edge-routing-utils] Result for site ${siteId}: reachable=${result.reachable}, blocked=${result.blocked}`);
 
     // When the probe is not a clean pass, cross-check with edge-optimize-status.
     // If edgeOptimizeEnabled=true, the customer's WAF has been fixed even though the
@@ -1905,10 +1907,10 @@ function LlmoController(ctx) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
         const { edgeOptimizeEnabled } = await tokowakaClient.checkEdgeOptimizeStatus(site, '/');
-        log.info(`[waf-probe] Edge optimize status for site ${siteId}: edgeOptimizeEnabled=${edgeOptimizeEnabled}`);
+        log.info(`[edge-routing-utils] Edge optimize status for site ${siteId}: edgeOptimizeEnabled=${edgeOptimizeEnabled}`);
         return ok({ ...result, edgeOptimizeEnabled });
       } catch (err) {
-        log.warn(`[waf-probe] Edge optimize status check failed for site ${siteId}: ${err.message}`);
+        log.warn(`[edge-routing-utils] Edge optimize status check failed for site ${siteId}: ${err.message}`);
         return ok({ ...result, edgeOptimizeEnabled: null });
       }
     }

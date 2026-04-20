@@ -389,10 +389,12 @@ describe('edge-routing-utils', () => {
       expect(result.statusCode).to.equal(406);
     });
 
-    it('returns reachable:true on clean pass with large content-length', async () => {
+    it('returns reachable:true on clean pass (large HTML body, no challenge keywords)', async () => {
+      // Body is larger than BOT_CHALLENGE_BODY_MAX_BYTES; keyword check runs on first 2048 chars.
+      // content-length header is no longer used as a fast-path skip — body is always checked.
       fetchStub.resolves({
         status: 200,
-        headers: new Headers({ 'content-type': 'text/html', 'content-length': '50000' }),
+        headers: new Headers({ 'content-type': 'text/html' }),
         text: async () => '<html>'.padEnd(50000, 'x'),
       });
 
@@ -401,6 +403,23 @@ describe('edge-routing-utils', () => {
       expect(result.reachable).to.be.true;
       expect(result.blocked).to.be.false;
       expect(result.statusCode).to.equal(200);
+    });
+
+    it('returns blocked:true for soft-block body larger than 2048 bytes with challenge keyword in first chunk', async () => {
+      // Previously, bodies > 2048 bytes without content-length would silently skip keyword
+      // matching and return reachable:true. Verify the false-negative is closed.
+      const preamble = '<html><body>captcha required — ';
+      const padding = 'x'.repeat(3000);
+      fetchStub.resolves({
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/html' }),
+        text: async () => preamble + padding,
+      });
+
+      const result = await edgeUtils.probeWafConnectivity('https://www.verbose-challenge.com', log, proxyBaseUrl);
+
+      expect(result.blocked).to.be.true;
+      expect(result.reachable).to.be.false;
     });
 
     it('returns reachable:true on 200 with real HTML body (no challenge keywords)', async () => {
@@ -510,6 +529,18 @@ describe('edge-routing-utils', () => {
       expect(result.reason).to.equal('timeout');
     });
 
+    it('returns reason:timeout on AbortError (manual AbortController abort)', async () => {
+      const err = new Error('The user aborted a request');
+      err.name = 'AbortError';
+      fetchStub.rejects(err);
+
+      const result = await edgeUtils.probeWafConnectivity('https://www.aborted.com', log, proxyBaseUrl);
+
+      expect(result.reachable).to.be.false;
+      expect(result.blocked).to.be.null;
+      expect(result.reason).to.equal('timeout');
+    });
+
     it('returns reason:error on network error', async () => {
       fetchStub.rejects(new Error('ECONNREFUSED'));
 
@@ -523,7 +554,7 @@ describe('edge-routing-utils', () => {
     it('normalizes URL without scheme', async () => {
       fetchStub.resolves({
         status: 200,
-        headers: new Headers({ 'content-type': 'text/html', 'content-length': '50000' }),
+        headers: new Headers({ 'content-type': 'text/html' }),
         text: async () => '<html>big page</html>',
       });
 
@@ -531,6 +562,17 @@ describe('edge-routing-utils', () => {
 
       expect(result.probedUrl).to.equal('https://www.noscheme.com/');
       expect(fetchStub.firstCall.args[1].headers['x-forwarded-host']).to.equal('www.noscheme.com');
+    });
+
+    it('returns reason:error without throwing when siteBaseUrl is malformed', async () => {
+      // new URL() throws TypeError for inputs like empty string or bare scheme.
+      // The never-throws guarantee is maintained by catching inside the try block.
+      const result = await edgeUtils.probeWafConnectivity('https://', log, proxyBaseUrl);
+
+      expect(result.reachable).to.be.false;
+      expect(result.blocked).to.be.null;
+      expect(result.reason).to.equal('error');
+      expect(fetchStub.called).to.be.false;
     });
 
     it('uses default Tokowaka proxy URL when none provided', async () => {

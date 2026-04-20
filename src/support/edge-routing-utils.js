@@ -193,12 +193,21 @@ const PRIVATE_HOST_RE = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0
 const WAF_PROBE_TIMEOUT_MS = 15000;
 
 // Soft-block detection: bot-challenge pages are typically tiny HTML with these keywords.
+// Only include phrases that appear exclusively in challenge/block pages — broad terms like
+// 'blocked' or 'cloudflare' cause false positives on legitimate Cloudflare-proxied pages.
 const BOT_CHALLENGE_BODY_MAX_BYTES = 2048;
 const BOT_CHALLENGE_KEYWORDS = [
-  'challenge', 'captcha', 'bot manager', 'access denied', 'blocked', 'cloudflare',
+  'challenge',
+  'captcha',
+  'bot manager',
+  'access denied',
+  'cf-chl-widget', // Cloudflare challenge widget element id
+  'completing the challenge', // Cloudflare challenge instruction text
 ];
 
 // HTTP status codes that indicate a hard WAF/bot-manager block.
+// 403 and 429 are universal block signals; 406 is returned by Signal Sciences
+// (Fastly Next-Gen WAF) and some Imperva configurations as their block response.
 const HARD_BLOCK_STATUS_CODES = new Set([403, 406, 429]);
 
 /**
@@ -214,7 +223,7 @@ async function classifyProbeResponse(response, targetHost, log) {
 
   // Hard block: WAF explicitly rejects the request.
   if (HARD_BLOCK_STATUS_CODES.has(status)) {
-    log.info(`[waf-probe] Hard block for ${targetHost}: HTTP ${status}`);
+    log.info(`[edge-routing-utils] Hard block for ${targetHost}: HTTP ${status}`);
     return { reachable: false, blocked: true, statusCode: status };
   }
 
@@ -223,33 +232,24 @@ async function classifyProbeResponse(response, targetHost, log) {
     const contentType = response.headers.get('content-type') || '';
 
     if (contentType.includes('text/html')) {
-      const contentLengthHeader = response.headers.get('content-length');
-      const contentLengthNum = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
-
-      // Large HTML response — real content, not a challenge page.
-      if (contentLengthNum !== null && contentLengthNum > BOT_CHALLENGE_BODY_MAX_BYTES) {
-        log.info(`[waf-probe] Clean pass for ${targetHost}: HTTP ${status} (large content-length)`);
-        return { reachable: true, blocked: false, statusCode: status };
-      }
-
-      // Read body snippet for keyword matching.
+      // Always read and keyword-match the body — never trust content-length to skip this,
+      // as a WAF can serve a challenge page with a spoofed large content-length header.
+      // Keyword matching runs on the first BOT_CHALLENGE_BODY_MAX_BYTES characters only.
       const text = await response.text();
-      if (text.length <= BOT_CHALLENGE_BODY_MAX_BYTES) {
-        const lower = text.toLowerCase();
-        const isSoftBlock = BOT_CHALLENGE_KEYWORDS.some((kw) => lower.includes(kw));
-        if (isSoftBlock) {
-          log.info(`[waf-probe] Soft block (challenge page) for ${targetHost}: HTTP ${status}`);
-          return { reachable: false, blocked: true, statusCode: status };
-        }
+      const snippet = text.slice(0, BOT_CHALLENGE_BODY_MAX_BYTES).toLowerCase();
+      const isSoftBlock = BOT_CHALLENGE_KEYWORDS.some((kw) => snippet.includes(kw));
+      if (isSoftBlock) {
+        log.info(`[edge-routing-utils] Soft block (challenge page) for ${targetHost}: HTTP ${status}`);
+        return { reachable: false, blocked: true, statusCode: status };
       }
     }
 
-    log.info(`[waf-probe] Clean pass for ${targetHost}: HTTP ${status}`);
+    log.info(`[edge-routing-utils] Clean pass for ${targetHost}: HTTP ${status}`);
     return { reachable: true, blocked: false, statusCode: status };
   }
 
   // Other non-2xx (404, 500, 502, etc.) — not a WAF block, but not reachable either.
-  log.info(`[waf-probe] Unexpected status for ${targetHost}: HTTP ${status}`);
+  log.info(`[edge-routing-utils] Unexpected status for ${targetHost}: HTTP ${status}`);
   return { reachable: false, blocked: false, statusCode: status };
 }
 
@@ -280,23 +280,25 @@ export async function probeWafConnectivity(
   log,
   tokowakaProxyBaseUrl = TOKOWAKA_PROXY_BASE_URL_DEFAULT,
 ) {
-  const normalizedUrl = siteBaseUrl.startsWith('http') ? siteBaseUrl : `https://${siteBaseUrl}`;
-  const { host: targetHost, hostname, href: probedUrl } = new URL(normalizedUrl);
-
-  const probeResult = {
-    probedUrl,
-  };
-
-  if (PRIVATE_HOST_RE.test(hostname)) {
-    log.warn(`[waf-probe] Refusing to probe private/loopback host: ${hostname}`);
-    return {
-      ...probeResult, reachable: false, blocked: null, reason: 'error',
-    };
-  }
-
-  log.info(`[waf-probe] Probing ${targetHost} via Tokowaka proxy at ${tokowakaProxyBaseUrl}`);
+  // Seed with the raw input so the catch block always has a probedUrl to return,
+  // even when URL parsing itself throws (e.g. empty string, null, malformed input).
+  let probeResult = { probedUrl: String(siteBaseUrl) };
 
   try {
+    const normalizedUrl = siteBaseUrl.startsWith('http') ? siteBaseUrl : `https://${siteBaseUrl}`;
+    const { host: targetHost, hostname, href: probedUrl } = new URL(normalizedUrl);
+
+    probeResult = { probedUrl };
+
+    if (PRIVATE_HOST_RE.test(hostname)) {
+      log.warn(`[edge-routing-utils] Refusing to probe private/loopback host: ${hostname}`);
+      return {
+        ...probeResult, reachable: false, blocked: null, reason: 'error',
+      };
+    }
+
+    log.info(`[edge-routing-utils] Probing ${targetHost} via Tokowaka proxy at ${tokowakaProxyBaseUrl}`);
+
     const response = await fetch(tokowakaProxyBaseUrl, {
       method: 'GET',
       headers: {
@@ -310,7 +312,7 @@ export async function probeWafConnectivity(
   } catch (error) {
     const isTimeout = error.name === 'TimeoutError' || error.name === 'AbortError';
     const reason = isTimeout ? 'timeout' : 'error';
-    log.warn(`[waf-probe] ${reason} probing ${targetHost} via Tokowaka: ${error.message}`);
+    log.warn(`[edge-routing-utils] ${reason} during WAF probe: ${error.message}`);
     return {
       ...probeResult, reachable: false, blocked: null, reason,
     };

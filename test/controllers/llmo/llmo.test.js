@@ -7076,5 +7076,16 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       expect(probeWafConnectivityStub).to.not.have.been.called;
     });
+
+    it('should return 500 when site has no baseURL configured', async () => {
+      mockSite.getBaseURL.returns(null);
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('no baseURL');
+      expect(probeWafConnectivityStub).to.not.have.been.called;
+    });
   });
 });
