@@ -675,7 +675,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledTwice;
+      expect(ackMock).to.have.been.calledOnce;
 
       // Note: delivery config is now set during site creation, not afterward
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
@@ -840,6 +840,121 @@ describe('onboard-modal', () => {
         },
       });
       expect(clientMock.chat.postMessage).to.not.have.been.called;
+    });
+
+    it('should post error to channel when onboarding throws after modal is acknowledged', async () => {
+      const onboardError = new Error('enableHandlerForSite failed: missing deps');
+      const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().rejects(onboardError),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalThrows } = mockedModuleThrows;
+      configurationMock.findLatest.resolves(configurationMock);
+
+      const onboardSiteModalAction = onboardSiteModalThrows(context);
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      // ack called once (no errors object) since error happened after modal was acknowledged
+      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.not.have.been.calledWith(sinon.match({ response_action: 'errors' }));
+      // error posted to channel instead
+      expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
+        channel: 'C12345',
+        text: sinon.match(':x: Onboarding failed for'),
+        thread_ts: '1234567890.123456',
+      }));
+    });
+
+    it('should use fallbacks in error message when user name and imsOrgId are absent', async () => {
+      const onboardError = new Error('onboarding failed');
+      const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().rejects(onboardError),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalThrows } = mockedModuleThrows;
+      configurationMock.findLatest.resolves(configurationMock);
+
+      // user has no name, imsOrgId inputs are both empty
+      const bodyNoName = JSON.parse(JSON.stringify(body));
+      delete bodyNoName.user.name;
+      bodyNoName.view.state.values.ims_org_input.ims_org_id.value = '';
+      const contextNoOrg = { ...context, env: { ...context.env, DEMO_IMS_ORG: '' } };
+
+      const onboardSiteModalAction = onboardSiteModalThrows(contextNoOrg);
+      await onboardSiteModalAction({ ack: ackMock, body: bodyNoName, client: clientMock });
+
+      expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
+        text: sinon.match('*Triggered by:* unknown').and(sinon.match('*IMS Org:* unknown')),
+      }));
+    });
+
+    it('should log error when channel notification fails after modal is acknowledged', async () => {
+      const onboardError = new Error('onboarding failed');
+      const postMessageError = new Error('Slack API error');
+      const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().rejects(onboardError),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+      });
+
+      clientMock.chat.postMessage.rejects(postMessageError);
+
+      const { onboardSiteModal: onboardSiteModalThrows } = mockedModuleThrows;
+      configurationMock.findLatest.resolves(configurationMock);
+
+      const onboardSiteModalAction = onboardSiteModalThrows(context);
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Failed to notify channel of onboarding error:',
+        postMessageError,
+      );
     });
 
     it('should post error message when onboarding returns errors', async () => {

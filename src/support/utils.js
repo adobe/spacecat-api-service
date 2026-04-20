@@ -1791,8 +1791,12 @@ export const onboardSingleSite = async (
       /* eslint-disable no-await-in-loop */
       const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
       if (!isEnabled) {
-        latestConfiguration.enableHandlerForSite(auditType, site);
-        auditsEnabled.push(auditType);
+        try {
+          latestConfiguration.enableHandlerForSite(auditType, site);
+          auditsEnabled.push(auditType);
+        } catch (error) {
+          log.warn(`Unable to enable audit ${auditType} for site ${siteID}: ${error.message}`);
+        }
       }
     }
 
