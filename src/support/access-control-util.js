@@ -18,6 +18,8 @@ import {
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { UnauthorizedProductError } from './errors.js';
+import { CUSTOMER_VISIBLE_TIERS } from './utils.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -58,6 +60,7 @@ export default class AccessControlUtil {
       this.SiteEnrollment = context.dataAccess.SiteEnrollment;
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
+      this.SiteImsOrgAccess = context.dataAccess.SiteImsOrgAccess;
       this.xProductHeader = pathInfo.headers[X_PRODUCT_HEADER];
     }
 
@@ -65,6 +68,7 @@ export default class AccessControlUtil {
     this.context = context;
     // Always assign the log property
     this.log = log;
+    this._lastAccessWasDelegated = false;
   }
 
   isAccessTypeJWT() {
@@ -93,8 +97,27 @@ export default class AccessControlUtil {
     return this.authInfo.isS2SAdmin();
   }
 
+  /**
+   * Returns true if the authenticated user holds the LLMO administrator role
+   * AND the last {@link hasAccess} check did not resolve via a delegation grant.
+   *
+   * **Ordering contract**: {@link hasAccess} must be called before this method
+   * whenever delegation-aware behaviour is required. Without a prior `hasAccess()`
+   * call the delegation flag defaults to `false` (non-delegated) and the raw JWT
+   * claim is returned unchecked — meaning a delegated user would incorrectly be
+   * treated as an LLMO administrator on the target org's sites.
+   *
+   * @returns {boolean}
+   */
   isLLMOAdministrator() {
-    return this.authInfo.isLLMOAdministrator();
+    return this.authInfo.isLLMOAdministrator() && !this._lastAccessWasDelegated;
+  }
+
+  canManageImsOrgAccess() {
+    if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) {
+      return false;
+    }
+    return this.authInfo.isAdmin();
   }
 
   async validateEntitlement(org, site, productCode) {
@@ -114,6 +137,11 @@ export default class AccessControlUtil {
 
     if (!hasText(entitlement.getTier())) {
       throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
+    }
+
+    // PLG tier is internal-only; block customer-facing product access
+    if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+      throw new UnauthorizedProductError('[Error] Unauthorized request');
     }
 
     if (site && !siteEnrollment) {
@@ -139,6 +167,7 @@ export default class AccessControlUtil {
   }
 
   async hasAccess(entity, subService = '', productCode = '') {
+    this._lastAccessWasDelegated = false;
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
@@ -152,7 +181,7 @@ export default class AccessControlUtil {
     // For non-admin users, validate x-product header
     if (hasText(productCode) && this.xProductHeader !== productCode) {
       this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
-      throw new Error('[Error] Unauthorized request');
+      throw new UnauthorizedProductError('[Error] Unauthorized request');
     }
 
     let imsOrgId;
@@ -166,7 +195,76 @@ export default class AccessControlUtil {
       imsOrgId = entity.getImsOrgId();
     }
 
-    const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+    let hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+    let isDelegatedAccess = false;
+
+    if (!hasOrgAccess && this.SiteImsOrgAccess && productCode) {
+      // Phase 1: Site entities only
+      if (entity.constructor.ENTITY_NAME === 'Site') {
+        const siteId = entity.getId();
+        let sourceOrganizationId;
+        let grant;
+
+        if (authInfo.isDelegatedTenantsComplete()) {
+          // Path A: JWT list is complete — fast deny if org not listed
+          const delegatedTenant = authInfo.getDelegatedTenant(imsOrgId, productCode);
+          if (!delegatedTenant) {
+            return false; // zero DB calls
+          }
+          sourceOrganizationId = delegatedTenant.sourceOrganizationId;
+          if (!sourceOrganizationId) {
+            this.log.warn('[AccessControl] Path A: missing sourceOrganizationId in delegatedTenant');
+            return false;
+          }
+          const now = new Date();
+          const candidate = await this.SiteImsOrgAccess
+            .findBySiteIdAndOrganizationIdAndProductCode(siteId, sourceOrganizationId, productCode);
+          // Expiry checked here so the outer if(grant) is unconditional for both paths
+          const notExpired = !candidate?.getExpiresAt()
+            || new Date(candidate.getExpiresAt()) > now;
+          if (candidate && notExpired) {
+            grant = candidate;
+          }
+        } else {
+          // Path B: JWT list was truncated — query all site grants and match against any of
+          // the user's source org IDs (one DB call avoids N queries for multi-org users).
+          const tenantOrgIds = new Set(
+            authInfo.getDelegatedTenants().map((t) => t.sourceOrganizationId).filter(Boolean),
+          );
+          if (tenantOrgIds.size === 0) {
+            this.log.warn('[AccessControl] Path B: no sourceOrganizationId in delegatedTenants');
+            return false;
+          }
+          const now = new Date();
+          const siteGrants = await this.SiteImsOrgAccess.allBySiteId(siteId);
+          grant = siteGrants.find(
+            (g) => g.getProductCode() === productCode
+              && tenantOrgIds.has(g.getOrganizationId())
+              && (!g.getExpiresAt() || new Date(g.getExpiresAt()) > now),
+          );
+          if (grant) {
+            sourceOrganizationId = grant.getOrganizationId();
+          }
+        }
+
+        // grant is either null or an already-verified active grant from either path
+        if (grant) {
+          this.log.info('[AccessControl] Delegated access granted', {
+            actorOrg: sourceOrganizationId,
+            resourceOrg: imsOrgId,
+            grantId: grant.getId(),
+            role: grant.getRole(),
+            productCode,
+            siteId,
+          });
+          hasOrgAccess = true;
+          isDelegatedAccess = true;
+        }
+      }
+    }
+
+    this._lastAccessWasDelegated = isDelegatedAccess;
+
     if (hasOrgAccess && productCode.length > 0) {
       let org;
       let site;
@@ -179,6 +277,9 @@ export default class AccessControlUtil {
       await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
+      if (isDelegatedAccess) {
+        return hasOrgAccess; // productCode scoping replaces subService check
+      }
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }
     return hasOrgAccess;

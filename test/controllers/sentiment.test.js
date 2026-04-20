@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -52,7 +50,6 @@ describe('Sentiment Controller', () => {
     getTopicId: () => data.topicId || topicUUID,
     getName: () => data.name || 'Test Topic',
     getDescription: () => data.description,
-    getUrls: () => data.urls || [],
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
     getUpdatedAt: () => data.updatedAt || '2026-01-01T00:00:00Z',
@@ -60,7 +57,6 @@ describe('Sentiment Controller', () => {
     getUpdatedBy: () => data.updatedBy || 'system',
     setName: sandbox.stub(),
     setDescription: sandbox.stub(),
-    setUrls: sandbox.stub(),
     setEnabled: sandbox.stub(),
     setUpdatedBy: sandbox.stub(),
     save: sandbox.stub().resolvesThis(),
@@ -351,24 +347,6 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(201);
     });
 
-    it('creates topics with non-array urls defaulting to empty array', async () => {
-      context.data = [{ name: 'New Topic', urls: 'not-an-array' }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-    });
-
-    it('creates topics with urls array', async () => {
-      const urls = [{
-        url: 'https://example.com',
-        timesCited: 3,
-        category: 'tech',
-        subPrompts: ['prompt1'],
-      }];
-      context.data = [{ name: 'New Topic', urls }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-    });
-
     it('uses profile.name when email is not available', async () => {
       const authInfoWithNameOnly = new AuthInfo()
         .withType('jwt')
@@ -429,34 +407,6 @@ describe('Sentiment Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.failures).to.have.lengthOf(1);
       expect(body.failures[0].reason).to.equal('Duplicate topic name within the same request');
-    });
-
-    it('creates topic with urls', async () => {
-      const urls = [{ url: 'https://example.com', timesCited: 5, category: 'tech' }];
-      context.data = [{ name: 'New Topic', urls }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-      expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('urls', urls),
-      );
-    });
-
-    it('defaults urls to empty array when not provided', async () => {
-      context.data = [{ name: 'New Topic' }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-      expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('urls', []),
-      );
-    });
-
-    it('defaults urls to empty array when non-array provided', async () => {
-      context.data = [{ name: 'New Topic', urls: 'not-an-array' }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-      expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('urls', []),
-      );
     });
 
     it('handles null data from allBySiteId when checking duplicates', async () => {
@@ -528,19 +478,6 @@ describe('Sentiment Controller', () => {
       context.data = { description: 'Updated description' };
       const result = await sentimentController.updateTopic(context);
       expect(result.status).to.equal(200);
-    });
-
-    it('updates topic urls', async () => {
-      const urls = [{
-        url: 'https://example.com',
-        timesCited: 10,
-        category: 'tech',
-        subPrompts: ['prompt1'],
-      }];
-      context.data = { urls };
-      const result = await sentimentController.updateTopic(context);
-      expect(result.status).to.equal(200);
-      expect(mockTopics[0].setUrls).to.have.been.calledWith(urls);
     });
 
     it('returns forbidden if user does not have access', async () => {

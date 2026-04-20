@@ -150,6 +150,7 @@ AuditType:
     - 'experimentation-opportunities'
     - 'llm-error-pages'
     - 'prerender'
+    - 'related-urls'
     - 'summarization'
     - 'faqs'
   example: 'cwv'
@@ -262,13 +263,55 @@ Config:
     edgeOptimizeConfig:
       description: Optional. The edge optimize configuration for the site.
       $ref: '#/EdgeOptimizeConfig'
+    enableMoneyPageUrls:
+      description: Optional. Whether money page URLs are included in audit targets. Defaults to true.
+      type: boolean
+      default: true
+    auditTargetURLs:
+      description: Optional. Custom audit target URLs grouped by source (manual, moneyPages).
+      $ref: '#/AuditTargetURLs'
+AuditTargetURLs:
+  type: object
+  description: Custom audit target URLs grouped by source. HTTPS only, hostname must match the site base URL.
+  properties:
+    manual:
+      description: Manually curated list of URLs to include in audits. Maximum 500 entries.
+      type: array
+      maxItems: 500
+      items:
+        $ref: '#/AuditTargetURL'
+    moneyPages:
+      description: Revenue generating pages. Maximum 1000 entries.
+      type: array
+      maxItems: 1000
+      items:
+        $ref: '#/AuditTargetURL'
+  additionalProperties: true
+AuditTargetURL:
+  type: object
+  required:
+    - url
+  additionalProperties: false
+  properties:
+    url:
+      type: string
+      format: uri
+      description: The URL to audit. Must use HTTPS and hostname must match the site base URL (www prefix is treated as equivalent).
+      example: 'https://example.com/high-value-page'
 EdgeOptimizeConfig:
   type: object
   description: Edge optimize configuration for a site
   properties:
     enabled:
-      description: Whether edge optimize is enabled for the site
-      type: boolean
+      description: Indicates when edge optimization was enabled for the site
+      oneOf:
+        - type: boolean
+          deprecated: true
+          example: true
+          description: Deprecated. Use timestamp format instead.
+        - type: number
+          example: 1772531669121
+          description: Timestamp (milliseconds since epoch) indicating when edge optimization was enabled for the site.
     opted:
       description: Timestamp (milliseconds since epoch) when the site opted into edge optimize
       type: number
@@ -1143,6 +1186,30 @@ AuditResult:
                 description: A list of prompts for this URL and topic
                 items:
                   type: string
+    - type: object
+      description: The result of related-urls audit (brand presence prompts by region)
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        baseURL:
+          type: string
+          description: Base URL of the site (present when success is true)
+        fanoutCount:
+          type: integer
+          description: Number of URLs to fan out for related-urls processing (present when success is true)
+        promptRegions:
+          type: array
+          description: List of prompt and region pairs used for related-urls
+          items:
+            type: object
+            properties:
+              prompt:
+                type: string
+                description: The brand presence prompt
+              region:
+                type: string
+                description: Region for the prompt (e.g. GLOBAL or region code)
 AuditList:
   type: array
   items:
@@ -1707,7 +1774,7 @@ SiteTopPage:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     url: 'https://example-site.com/foo/bar'
     traffic: 360420000
-    source: 'ahrefs'
+    source: 'seo'
     geo: 'au'
     importedAt: '2024-04-29T15:14:33.653Z'
 SiteTopPageList:
@@ -2135,7 +2202,7 @@ SiteMetric:
       $ref: '#/DateTime'
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-traffic'
     value: 37900
     time: '2024-04-29T00:00:00.000Z'
@@ -2185,7 +2252,7 @@ PageOrganicKeywords:
       type: boolean
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    source: 'ahrefs'
+    source: 'seo'
     name: 'organic-keywords'
     time: '2024-04-29T00:00:00.000Z'
     url: 'https://example.com/foo/bar'
@@ -2695,6 +2762,7 @@ OpportunityType:
   enum:
     - 'broken-backlinks'
     - 'broken-internal-links'
+    - 'info-gain'
   example: 'broken-backlinks'
 OpportunityOrigin:
   description: |
@@ -2768,6 +2836,9 @@ Opportunity:
       $ref: '#/DateTime'
     updatedAt:
       description: UTC timestamp of when the opportunity was last updated
+      $ref: '#/DateTime'
+    lastAuditedAt:
+      description: UTC timestamp of when the opportunity was last audited
       $ref: '#/DateTime'
   required:
     - id
@@ -3529,6 +3600,14 @@ Brand:
     name:
       description: The name of the brand
       type: string
+    baseSiteId:
+      description: UUID of the brand's primary site. Immutable once set. Unique per organization.
+      type: string
+      format: uuid
+    baseUrl:
+      description: Read-only. The base URL of the primary site, resolved from baseSiteId.
+      type: string
+      readOnly: true
     imsOrgId:
       description: The IMS Organization ID of the brand
       $ref: '#/ImsOrganizationId'
@@ -3969,6 +4048,74 @@ FixStatusUpdateListResponse:
   required:
     - fixes
     - metadata
+
+FixRollbackResponse:
+  type: object
+  description: Response after successfully rolling back a failed fix
+  properties:
+    fix:
+      type: object
+      description: The rolled back fix with metadata
+      properties:
+        index:
+          type: integer
+          description: Index of the fix in the response
+          example: 0
+        uuid:
+          type: string
+          format: uuid
+          description: UUID of the fix entity
+        fix:
+          $ref: '#/Fix'
+          description: The updated fix entity with ROLLED_BACK status
+        statusCode:
+          type: integer
+          description: HTTP status code for this fix operation
+          example: 200
+      required:
+        - index
+        - uuid
+        - fix
+        - statusCode
+    suggestions:
+      type: object
+      description: Summary of suggestions that were updated
+      properties:
+        updated:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+                description: Index of the suggestion in the response array
+              uuid:
+                type: string
+                format: uuid
+                description: UUID of the suggestion entity
+              suggestion:
+                $ref: '#/Suggestion'
+                description: The updated suggestion entity with SKIPPED status
+              statusCode:
+                type: integer
+                description: HTTP status code for this suggestion operation
+                example: 200
+            required:
+              - index
+              - uuid
+              - suggestion
+              - statusCode
+          description: List of suggestions that were marked as SKIPPED
+      required:
+        - updated
+    message:
+      type: string
+      description: Human-readable message describing the result
+      example: "Fix rolled back successfully. All 3 suggestion(s) marked as SKIPPED."
+  required:
+    - fix
+    - suggestions
+    - message
 
 PaidSiteTopPage:
   type: object
@@ -5002,6 +5149,101 @@ Entitlement:
     updatedAt: "2024-01-15T10:30:00Z"
     updatedBy: "system"
 
+FeatureFlagProduct:
+  type: string
+  description: Product surface for org-scoped feature flags (matches mysticat enum)
+  enum: [ASO, LLMO]
+
+FeatureFlag:
+  type: object
+  description: Org-scoped boolean feature flag (mysticat `feature_flags`)
+  properties:
+    id:
+      description: Row id (UUIDv7)
+      $ref: '#/Id'
+    organizationId:
+      description: Organization id (SpaceCat / mysticat `organizations.id`)
+      $ref: '#/Id'
+    product:
+      $ref: '#/FeatureFlagProduct'
+    flagName:
+      description: Stable flag key
+      type: string
+    flagValue:
+      description: Whether the flag is enabled
+      type: boolean
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      description: IMS user id, service id, or similar; who last changed the row
+      oneOf:
+        - type: string
+        - type: 'null'
+
+FeatureFlagList:
+  type: array
+  items:
+    $ref: '#/FeatureFlag'
+
+AgenticTrafficGlobalWeek:
+  type: object
+  description: Weekly aggregate global agentic traffic row from mysticat `agentic_traffic_global`
+  properties:
+    id:
+      $ref: '#/Id'
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      oneOf:
+        - type: string
+        - type: 'null'
+  required:
+    - id
+    - year
+    - week
+    - hits
+    - createdAt
+    - updatedAt
+
+AgenticTrafficGlobalWeekList:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficGlobalWeek'
+
+AgenticTrafficGlobalWeekUpsert:
+  type: object
+  properties:
+    year:
+      type: integer
+      minimum: 2000
+      maximum: 9999
+    week:
+      type: integer
+      minimum: 1
+      maximum: 53
+    hits:
+      type: integer
+      minimum: 0
+  required:
+    - year
+    - week
+    - hits
+
 SiteEnrollment:
   type: object
   description: A site enrollment represents a site's participation in a product or service
@@ -5467,43 +5709,107 @@ PreflightJobResponse:
       type: object
       description: The error of the preflight job if it failed
 
+PreflightOpportunityElementSelector:
+  type: object
+  description: DOM element selector for locating the issue on the page (e.g. for link audits). CSS selector for use with document.querySelector.
+  properties:
+    selector:
+      type: string
+      description: CSS selector string (e.g. body > a, cq[data-path="..."], or data-aue-resource for Universal Editor).
+  required: [selector]
+
+PreflightOpportunityIssueItem:
+  type: object
+  description: |
+    A single occurrence when the opportunity groups multiple items. Used when opportunity.issue is an array.
+    - Links audit (broken-internal-links, broken-external-links): url, issue, seoImpact, seoRecommendation, elements, aiSuggestion, aiRationale.
+    - Alt-text audit: src, alt, issue, seoImpact, seoRecommendation.
+    All properties are optional; presence depends on audit type.
+  properties:
+    url:
+      type: string
+      description: Affected URL (e.g. broken link target). Used by links audit.
+    issue:
+      type: string
+      description: Human-readable description for this occurrence (e.g. "Status 404" for links, or alt-text issue message).
+    seoImpact:
+      type: string
+      description: SEO impact of this occurrence.
+    seoRecommendation:
+      type: string
+      description: Recommendation to fix this occurrence.
+    src:
+      type: string
+      description: Image source URL. Used by alt-text audit.
+    alt:
+      type: string
+      description: Current alt attribute value. Used by alt-text audit.
+    elements:
+      type: array
+      description: DOM element selectors for this occurrence. Used by links audit; format matches PreflightOpportunityElementSelector.
+      items:
+        $ref: '#/PreflightOpportunityElementSelector'
+    aiSuggestion:
+      type: string
+      description: AI-generated suggestion for this occurrence (e.g. suggested fix URL from suggest step). Used by links audit.
+    aiRationale:
+      type: string
+      description: AI rationale for the suggestion. Used by links audit.
+
 PreflightResultItem:
   type: object
+  description: One page's preflight result; each item in the job result array corresponds to one audited page URL.
   properties:
     audits:
       type: array
+      description: Audits run for this page (e.g. links, alt-text, metatags, body-size, h1-count).
       items:
         type: object
         properties:
           name:
             type: string
-            description: The name of the audit
+            description: The name of the audit (e.g. links, alt-text, metatags).
           opportunities:
             type: array
+            description: Findings for this audit. Each opportunity has a check and an issue (string or array of issue items).
             items:
               type: object
+              description: |
+                One finding. issue is either a single string (single-summary audits like body-size, lorem-ipsum, h1-count)
+                or an array of PreflightOpportunityIssueItem (links, alt-text) with per-item url/issue, and for links
+                optionally elements, aiSuggestion, aiRationale.
               properties:
                 check:
                   type: string
-                  description: The title of the opportunity
+                  description: The title of the opportunity (e.g. broken-internal-links, missing-alt, meta-description).
                 issue:
-                  type: string
-                  description: The description of the opportunity
+                  oneOf:
+                    - type: string
+                      description: |
+                        Single issue description. Used when the opportunity has one summary (e.g. body-size,
+                        lorem-ipsum, h1-count, headings, metatags).
+                    - type: array
+                      description: |
+                        List of structured issue occurrences. Used by links audit (broken-internal-links,
+                        broken-external-links) and alt-text audit; each item is a PreflightOpportunityIssueItem
+                        with url/issue/elements/aiSuggestion/aiRationale for links or src/alt/issue for alt-text.
+                      items:
+                        $ref: '#/PreflightOpportunityIssueItem'
                 seoImpact:
                   type: string
-                  description: The SEO impact of the opportunity
+                  description: SEO impact of the opportunity (when issue is a string).
                 seoRecommendation:
                   type: string
-                  description: The SEO recommendation of the opportunity
+                  description: SEO recommendation for the opportunity (when issue is a string).
                 aiSuggestion:
                   type: string
-                  description: The AI suggestion of the opportunity
+                  description: AI suggestion at opportunity level (when issue is a string).
                 aiRationale:
                   type: string
-                  description: The AI rationale of the opportunity
+                  description: AI rationale at opportunity level (when issue is a string).
           type:
             type: string
-            description: The type of the audit
+            description: The type/category of the audit (e.g. seo, accessibility).
     pageUrl:
       type: string
       format: uri
@@ -5604,6 +5910,187 @@ CustomerConfigTopic:
       type: string
       description: ID of the category this topic belongs to
       example: "photoshop-photo-editing"
+V2PromptListResponse:
+  type: object
+  description: Paginated list of prompts for a brand
+  required:
+    - items
+    - total
+    - limit
+    - page
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/V2Prompt'
+    total:
+      type: integer
+      description: Total number of prompts matching the filter
+    limit:
+      type: integer
+      description: Page size (items per page)
+    page:
+      type: integer
+      description: Current page number (1-based)
+
+V2Prompt:
+  type: object
+  description: A prompt with brand, category, and topic enrichment
+  properties:
+    id:
+      type: string
+      description: Business key (prompt_id)
+      example: "photoshop-prompt-1"
+    uuid:
+      type: string
+      format: uuid
+      description: UUID primary key (prompts.id)
+    prompt:
+      type: string
+      description: The search query prompt text
+    name:
+      type: string
+      description: Display name
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this prompt is applicable
+    categoryId:
+      type: string
+      description: Category business key
+    topicId:
+      type: string
+      description: Topic business key
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      default: active
+    origin:
+      type: string
+      enum: [ai, human]
+      default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      example: "config"
+      default: "config"
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      type: string
+    brandId:
+      type: string
+      format: uuid
+      description: brands.id (uuid)
+    brandName:
+      type: string
+    category:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Business key (category_id)
+        uuid:
+          type: string
+          format: uuid
+          description: UUID primary key (categories.id)
+        name:
+          type: string
+        origin:
+          type: string
+    topic:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Business key (topic_id)
+        uuid:
+          type: string
+          format: uuid
+          description: UUID primary key (topics.id)
+        name:
+          type: string
+        categoryId:
+          type: string
+
+V2PromptInput:
+  type: object
+  description: Input for creating/updating a prompt
+  required:
+    - prompt
+  properties:
+    id:
+      type: string
+      description: Optional business key; auto-generated if omitted
+    prompt:
+      type: string
+      description: The search query prompt text
+    name:
+      type: string
+      description: Display name (defaults to prompt slice)
+    regions:
+      type: array
+      items:
+        type: string
+      default: []
+    categoryId:
+      type: string
+    topicId:
+      type: string
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      default: active
+    origin:
+      type: string
+      enum: [ai, human]
+      default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      default: "config"
+
+V2PromptBulkDeleteRequest:
+  type: object
+  description: Request body for bulk-deleting prompts
+  required:
+    - promptIds
+  properties:
+    promptIds:
+      type: array
+      items:
+        type: string
+      minItems: 1
+      maxItems: 100
+      description: Array of prompt business keys to soft-delete
+
+V2PromptBulkDeleteResponse:
+  type: object
+  description: Response from bulk-deleting prompts
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of prompt IDs in request
+        success:
+          type: integer
+          description: Number of successfully deleted prompts
+        failure:
+          type: integer
+          description: Number of failed deletions
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          promptId:
+            type: string
+          reason:
+            type: string
+
 CustomerConfigPrompt:
   type: object
   description: A search prompt with category and topic ID references
@@ -6146,7 +6633,7 @@ SentimentGuideline:
       items:
         type: string
       description: Enabled audit types
-      example: ["wikipedia-analysis", "reddit-analysis"]
+      example: ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
     enabled:
       type: boolean
       description: Whether guideline is active
@@ -6183,7 +6670,7 @@ SentimentGuidelineInput:
       items:
         type: string
       description: Audit types to associate
-      example: ["wikipedia-analysis", "reddit-analysis"]
+      example: ["wikipedia-analysis", "reddit-analysis", "youtube-analysis", "cited-analysis"]
     enabled:
       type: boolean
       default: true
@@ -6308,3 +6795,1147 @@ StageConfigsResponse:
   description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
   items:
     $ref: '#/StageConfigItem'
+Token:
+  type: object
+  description: A token allocation for a site within a billing cycle
+  properties:
+    id:
+      $ref: '#/Id'
+    siteId:
+      $ref: '#/Id'
+    tokenType:
+      type: string
+      description: Token type key, e.g. `grant_cwv`, `grant_broken_backlinks`
+      example: grant_cwv
+    cycle:
+      type: string
+      description: Billing cycle identifier, e.g. `2025-03`
+      example: '2025-03'
+    total:
+      type: integer
+      description: Total tokens allocated for this cycle
+      example: 3
+    used:
+      type: integer
+      description: Tokens consumed so far in this cycle
+      example: 1
+    remaining:
+      type: integer
+      description: Tokens remaining (total - used)
+      example: 2
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+  required:
+    - id
+    - siteId
+    - tokenType
+    - cycle
+    - total
+    - used
+    - remaining
+    - createdAt
+    - updatedAt
+
+PresignedUrlResponse:
+  type: object
+  description: A short-lived presigned S3 URL and its expiry time
+  properties:
+    presignedUrl:
+      type: string
+      format: uri
+      description: Presigned S3 URL to download the resource
+    expiresAt:
+      type: string
+      format: date-time
+      description: ISO 8601 timestamp when the presigned URL expires
+      example: '2026-06-15T12:00:00.000Z'
+  required:
+    - presignedUrl
+    - expiresAt
+  additionalProperties: false
+
+# ── V2 Brand schemas (PostgREST-backed, /v2/orgs/{spaceCatId}/brands) ──
+
+V2BrandUrl:
+  type: object
+  properties:
+    value:
+      type: string
+      description: Full URL (base URL + optional path)
+      example: 'https://www.example.com/products'
+  required:
+    - value
+
+V2BrandSocialAccount:
+  type: object
+  properties:
+    url:
+      type: string
+      description: Social media account URL
+      example: 'https://twitter.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes this account targets
+      example: ['US', 'DE']
+
+V2BrandEarnedContent:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Name of the earned content source
+      example: 'TechCrunch'
+    url:
+      type: string
+      description: URL of the earned content source
+      example: 'https://techcrunch.com/example'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandAlias:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Alias name for the brand
+      example: 'Example Corp'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2BrandCompetitor:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Competitor name
+      example: 'Acme Inc'
+    url:
+      type:
+        - string
+        - 'null'
+      description: Competitor URL
+      example: 'https://www.acme.com'
+    regions:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes
+      example: ['US']
+
+V2Brand:
+  type: object
+  description: A brand managed via the v2 PostgREST-backed API
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Brand UUID
+    name:
+      type: string
+      description: Brand name (unique per organization)
+    status:
+      type: string
+      enum: [active, pending, deleted]
+      description: Brand status
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      description: How the brand was created
+      default: human
+    description:
+      type:
+        - string
+        - 'null'
+      description: Brand description
+    vertical:
+      type:
+        - string
+        - 'null'
+      description: Industry vertical
+    region:
+      type: array
+      items:
+        type: string
+      description: ISO-3166 country codes the brand targets
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+      description: Brand site URLs (derived from brand_sites)
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+    siteIds:
+      type: array
+      items:
+        type: string
+        format: uuid
+      description: IDs of sites linked to this brand (read-only, derived from brand_sites)
+    updatedAt:
+      $ref: '#/DateTime'
+    updatedBy:
+      type:
+        - string
+        - 'null'
+      description: Email of the user who last modified the brand
+  required:
+    - id
+    - name
+    - status
+    - origin
+    - region
+    - urls
+    - socialAccounts
+    - earnedContent
+    - brandAliases
+    - competitors
+    - siteIds
+    - updatedAt
+  example:
+    id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    name: 'Example Brand'
+    status: 'active'
+    origin: 'human'
+    description: 'An example brand'
+    vertical: 'technology'
+    region: ['US', 'DE']
+    urls:
+      - value: 'https://www.example.com'
+      - value: 'https://www.example.com/products'
+    socialAccounts:
+      - url: 'https://twitter.com/example'
+        regions: ['US']
+    earnedContent:
+      - name: 'TechCrunch'
+        url: 'https://techcrunch.com/example'
+        regions: ['US']
+    brandAliases:
+      - name: 'Example Corp'
+        regions: ['US']
+    competitors:
+      - name: 'Acme Inc'
+        url: 'https://www.acme.com'
+        regions: ['US']
+    siteIds: ['b2c3d4e5-6789-01ab-cdef-2345678901ab']
+    updatedAt: '2026-03-15T10:30:00Z'
+    updatedBy: 'user@adobe.com'
+
+V2BrandInput:
+  type: object
+  description: Request body for creating a brand. Upserts on conflict (organization_id, name).
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      description: Brand name (unique per organization, used as upsert key)
+    status:
+      type: string
+      enum: [active, pending]
+      default: active
+    origin:
+      type: string
+      enum: [human, ai]
+      default: human
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandUpdateInput:
+  type: object
+  description: Request body for updating a brand. All fields are optional.
+  properties:
+    name:
+      type: string
+    status:
+      type: string
+      enum: [active, pending]
+    origin:
+      type: string
+      enum: [human, ai]
+    description:
+      type: string
+    vertical:
+      type: string
+    region:
+      type: array
+      items:
+        type: string
+    urls:
+      type: array
+      items:
+        $ref: '#/V2BrandUrl'
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/V2BrandSocialAccount'
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/V2BrandEarnedContent'
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/V2BrandAlias'
+    competitors:
+      type: array
+      items:
+        $ref: '#/V2BrandCompetitor'
+
+V2BrandListResponse:
+  type: object
+  description: Response envelope for listing brands
+  required:
+    - brands
+  properties:
+    brands:
+      type: array
+      items:
+        $ref: '#/V2Brand'
+
+V2Topic:
+  type: object
+  description: A topic in the normalized topics table
+  required:
+    - id
+    - uuid
+    - name
+    - status
+  properties:
+    id:
+      type: string
+      description: Topic business key (topic_id)
+      example: 'baseurl-discovery-research-topic'
+    uuid:
+      type: string
+      format: uuid
+      description: UUID primary key (topics.id)
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type:
+        - string
+        - 'null'
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+      description: Topic status
+      example: 'active'
+    brandId:
+      type:
+        - string
+        - 'null'
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    updatedAt:
+      type: string
+      format: date-time
+      description: Last update timestamp
+    updatedBy:
+      type: string
+      description: User or system that last updated the topic
+
+V2TopicInput:
+  type: object
+  description: Request body for creating a topic
+  required:
+    - name
+  properties:
+    id:
+      type: string
+      description: Topic business key. Auto-generated from name if omitted.
+      example: 'baseurl-discovery-research-topic'
+    name:
+      type: string
+      description: Human-readable topic name
+      example: 'Discovery & Research'
+    description:
+      type: string
+      description: Optional topic description
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID this topic belongs to
+    status:
+      type: string
+      enum: [active, pending, ignored]
+      default: 'active'
+
+V2TopicUpdateInput:
+  type: object
+  description: Request body for updating a topic (partial update)
+  properties:
+    name:
+      type: string
+      description: Human-readable topic name
+    description:
+      type: string
+      description: Optional topic description
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+    brandId:
+      type: string
+      format: uuid
+      description: Optional brand UUID
+
+V2TopicListResponse:
+  type: object
+  description: Response envelope for listing topics
+  required:
+    - topics
+  properties:
+    topics:
+      type: array
+      items:
+        $ref: '#/V2Topic'
+
+PageRelationshipsSearchPage:
+  x-experimental: true
+  type: object
+  required:
+    - pageUrl
+    - key
+  properties:
+    pageUrl:
+      type: string
+      description: Page path or absolute URL to resolve.
+      example: '/us/en/products'
+    suggestionType:
+      type: string
+      description: Suggestion/issue classifier used by the backend to apply relationship checks.
+      example: 'Missing Title'
+    key:
+      type: string
+      description: Caller-provided key used in relationships/errors maps.
+      example: 'row-1'
+
+PageRelationshipChainItem:
+  x-experimental: true
+  type: object
+  description: |
+    A single step in the relationship lineage.
+    Chain items are ordered from the requested page's immediate parent upward through ancestors.
+  required:
+    - pageId
+    - pagePath
+  properties:
+    pageId:
+      type: string
+      description: page identifier for this chain.
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    pagePath:
+      type: string
+      description: Page path for this chain hop.
+      example: '/language-masters/en/adventures'
+    metadata:
+      $ref: '#/PageRelationshipMetadata'
+
+PageRelationshipMetadata:
+  x-experimental: true
+  type: object
+  additionalProperties: true
+  properties:
+    sourceType:
+      oneOf:
+        - type: string
+        - type: "null"
+      description: |
+        Source classification for this chain entry from the relationship provider.
+        Value is provider-defined and intentionally not constrained.
+
+PageRelationship:
+  x-experimental: true
+  type: object
+  required:
+    - pagePath
+    - pageId
+    - chain
+  properties:
+    pagePath:
+      type: string
+      description: Normalized page path or absolute URL for the requested page.
+      example: '/us/en/adventures'
+    pageId:
+      type: string
+      description: Resolved page identifier used by downstream fix operations.
+      example: 'pg-123'
+    chain:
+      type: array
+      description: |
+        Ordered relationship lineage returned by content API.
+        Sequence starts with the immediate parent of the requested page,
+        then grandparent, and so on.
+      items:
+        $ref: '#/PageRelationshipChainItem'
+
+PageRelationshipError:
+  x-experimental: true
+  type: object
+  required:
+    - error
+  properties:
+    error:
+      type: string
+      example: 'Could not determine page ID'
+    detail:
+      type: string
+      example: 'HTTP 404'
+
+PageRelationshipsMapping:
+  x-experimental: true
+  type: object
+  additionalProperties:
+    $ref: '#/PageRelationship'
+
+PageRelationshipsErrorMapping:
+  x-experimental: true
+  type: object
+  additionalProperties:
+    $ref: '#/PageRelationshipError'
+
+PageRelationshipsSearchRequest:
+  x-experimental: true
+  type: object
+  description: |
+    Experimental request schema for the page-relationships proxy endpoint.
+    Used by UI-facing, on-demand relationship lookups backed by AEM Content API.
+  required:
+    - pages
+  properties:
+    pages:
+      type: array
+      items:
+        $ref: '#/PageRelationshipsSearchPage'
+
+PageRelationshipsSearchResponse:
+  x-experimental: true
+  type: object
+  description: |
+    Experimental response schema for the page-relationships proxy endpoint.
+    Returned by the API proxy over AEM Content API relationship lookup results.
+  required:
+    - supported
+    - relationships
+    - errors
+  properties:
+    supported:
+      type: boolean
+      example: true
+    relationships:
+      $ref: '#/PageRelationshipsMapping'
+    errors:
+      $ref: '#/PageRelationshipsErrorMapping'
+
+BrandPresenceLlmModel:
+  type: string
+  description: |
+    LLM model key for brand presence executions (`llm_model` in mysticat-data-service).
+    The HTTP API also accepts query aliases and legacy names via `resolveModelFromRequest`.
+  enum:
+    - chatgpt-paid
+    - chatgpt-free
+    - google-ai-overview
+    - perplexity
+    - google-ai-mode
+    - copilot
+    - gemini
+    - google
+    - microsoft
+    - mistral
+    - anthropic
+    - amazon
+
+BrandPresenceExecutionSourceItem:
+  type: object
+  description: One cited source row for a brand presence execution (slim shape).
+  required:
+    - urlId
+    - contentType
+    - isOwned
+    - url
+    - hostname
+  properties:
+    urlId:
+      type: string
+      description: FK to `source_urls.id` (stringified UUID or empty when unknown)
+    contentType:
+      type: string
+    isOwned:
+      type: boolean
+    url:
+      type: string
+      description: Resolved URL from embedded `source_urls`
+    hostname:
+      type: string
+      description: Resolved hostname from embedded `source_urls`
+
+BrandPresenceExecutionSummary:
+  type: object
+  description: Minimal execution metadata returned with execution-sources.
+  required:
+    - executionId
+    - executionDate
+    - brandId
+    - siteId
+    - model
+  properties:
+    executionId:
+      type: string
+    executionDate:
+      type: string
+      format: date
+      description: Partition key date for `brand_presence_sources`
+    brandId:
+      type: string
+    siteId:
+      type: string
+    model:
+      type: string
+      description: Model key on the execution row
+
+BrandPresenceExecutionSourcesResponse:
+  type: object
+  required:
+    - execution
+    - sources
+  properties:
+    execution:
+      $ref: '#/BrandPresenceExecutionSummary'
+    sources:
+      type: array
+      items:
+        $ref: '#/BrandPresenceExecutionSourceItem'
+
+AgenticTrafficUrlBrandPresencePrompt:
+  type: object
+  description: A prompt that cited the URL as a source in a brand presence LLM execution
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      example: 'best poster maker with templates'
+    topic:
+      oneOf:
+        - type: string
+        - type: 'null'
+      description: Topic the prompt belongs to
+      example: 'Poster Maker'
+    topicId:
+      oneOf:
+        - type: string
+        - type: 'null'
+      description: UUID of the topic
+      example: '019ce794-f3ab-7d3c-8f0a-46a0f08484d0'
+    regionCode:
+      oneOf:
+        - type: string
+        - type: 'null'
+      description: Region/market code
+      example: 'GB'
+    citations:
+      type: integer
+      description: Number of executions where the URL was cited
+      example: 13
+    mentions:
+      type: integer
+      description: Number of executions where the brand was mentioned
+      example: 13
+    avgSentiment:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Average sentiment score (-1 negative, 0 neutral, 1 positive)
+      example: 0.77
+    avgVisibilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Average visibility score (0-100)
+      example: 100.0
+    executionCount:
+      type: integer
+      description: Total number of LLM executions in this group
+      example: 13
+    categories:
+      type: array
+      items:
+        type: string
+      description: Distinct category names from the executions
+      example: ['Express']
+  required:
+    - prompt
+    - citations
+    - mentions
+    - executionCount
+    - categories
+
+AgenticTrafficUrlBrandPresenceWeeklyTrend:
+  type: object
+  description: Weekly citation counts for a URL
+  properties:
+    weekStr:
+      type: string
+      description: ISO week label (YYYY-WNN)
+      example: '2026-W06'
+    citationCount:
+      type: integer
+      description: Number of executions where the URL was cited that week
+      example: 314
+    mentionCount:
+      type: integer
+      description: Number of executions where the brand was mentioned that week
+      example: 295
+  required:
+    - weekStr
+    - citationCount
+    - mentionCount
+
+AgenticTrafficUrlBrandPresence:
+  type: object
+  description: Brand presence citation detail for a specific URL
+  properties:
+    totalCitations:
+      type: integer
+      description: Total number of LLM executions where this URL was cited
+      example: 314
+    totalMentions:
+      type: integer
+      description: Total number of LLM executions where the brand was mentioned
+      example: 295
+    uniquePrompts:
+      type: integer
+      description: Number of distinct prompts that cited this URL
+      example: 47
+    weeklyTrends:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficUrlBrandPresenceWeeklyTrend'
+      description: Weekly citation trend, ordered oldest to newest
+    prompts:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficUrlBrandPresencePrompt'
+      description: Top 50 prompts by execution count that cited this URL
+  required:
+    - totalCitations
+    - totalMentions
+    - uniquePrompts
+    - weeklyTrends
+    - prompts
+
+# ── Agentic Traffic PG (site-scoped) ─────────────────────────────────────────
+
+AgenticTrafficKpis:
+  type: object
+  description: Aggregated KPI metrics for a site's agentic traffic
+  properties:
+    totalHits:
+      type: integer
+      example: 4200
+    successRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Percentage of 2xx–3xx responses (0–100)
+      example: 94.5
+    avgTtfbMs:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Weighted average Time To First Byte in milliseconds
+      example: 182.3
+    avgCitabilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Average citability score (0–100); null when no data
+      example: 76.0
+  required:
+    - totalHits
+
+AgenticTrafficKpisTrendRow:
+  type: object
+  description: KPI metrics for a single time period
+  properties:
+    periodStart:
+      type: string
+      format: date
+      description: Start date of the period (ISO 8601)
+      example: '2026-03-02'
+    totalHits:
+      type: integer
+      example: 600
+    successRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 92.0
+    avgTtfbMs:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 175.0
+    avgCitabilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 75.0
+  required:
+    - periodStart
+    - totalHits
+
+AgenticTrafficKpisTrend:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficKpisTrendRow'
+  description: KPI time series ordered by period ascending
+
+AgenticTrafficByRegionRow:
+  type: object
+  properties:
+    region:
+      type: string
+      example: 'US'
+    totalHits:
+      type: integer
+      example: 800
+  required:
+    - region
+    - totalHits
+
+AgenticTrafficByRegion:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByRegionRow'
+  description: Traffic grouped by region, ordered by total hits descending
+
+AgenticTrafficByCategoryRow:
+  type: object
+  properties:
+    categoryName:
+      type: string
+      example: 'Poster Maker'
+    totalHits:
+      type: integer
+      example: 400
+  required:
+    - categoryName
+    - totalHits
+
+AgenticTrafficByCategory:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByCategoryRow'
+  description: Traffic grouped by category, ordered by total hits descending
+
+AgenticTrafficByPageTypeRow:
+  type: object
+  properties:
+    pageType:
+      type: string
+      example: 'article'
+    totalHits:
+      type: integer
+      example: 300
+  required:
+    - pageType
+    - totalHits
+
+AgenticTrafficByPageType:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByPageTypeRow'
+  description: Traffic grouped by page type, ordered by total hits descending
+
+AgenticTrafficByStatusRow:
+  type: object
+  properties:
+    httpStatus:
+      type: integer
+      example: 200
+    totalHits:
+      type: integer
+      example: 3900
+  required:
+    - httpStatus
+    - totalHits
+
+AgenticTrafficByStatus:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByStatusRow'
+  description: Traffic grouped by HTTP status code, ordered by total hits descending
+
+AgenticTrafficByUserAgentRow:
+  type: object
+  properties:
+    pageType:
+      type: string
+      example: 'article'
+    agentType:
+      type: string
+      example: 'Chatbots'
+    uniqueAgents:
+      type: integer
+      example: 5
+    totalHits:
+      type: integer
+      example: 200
+  required:
+    - pageType
+    - agentType
+    - uniqueAgents
+    - totalHits
+
+AgenticTrafficByUserAgent:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByUserAgentRow'
+  description: Traffic grouped by page type and agent type
+
+AgenticTrafficByUrlRow:
+  type: object
+  properties:
+    host:
+      type: string
+      example: 'www.adobe.com'
+    urlPath:
+      type: string
+      example: '/express/create/poster'
+    totalHits:
+      type: integer
+      example: 150
+    uniqueAgents:
+      type: integer
+      example: 3
+    topAgent:
+      type: string
+      example: 'ChatGPT-User'
+    topAgentType:
+      type: string
+      example: 'Chatbots'
+    responseCodes:
+      type: array
+      items:
+        type: integer
+      example: [200, 301]
+    successRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 98.5
+    avgTtfbMs:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 120.5
+    categoryName:
+      type: string
+      example: 'Poster Maker'
+    avgCitabilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 65.0
+    deployedAtEdge:
+      type: boolean
+      example: true
+  required:
+    - host
+    - urlPath
+    - totalHits
+    - uniqueAgents
+    - topAgent
+    - topAgentType
+    - responseCodes
+    - deployedAtEdge
+
+AgenticTrafficByUrl:
+  type: object
+  description: Paginated per-URL performance analysis
+  properties:
+    totalCount:
+      type: integer
+      description: Total number of URLs matching the filters (across all pages)
+      example: 1240
+    rows:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficByUrlRow'
+      description: URLs for the requested page
+  required:
+    - totalCount
+    - rows
+
+AgenticTrafficFilterDimensions:
+  type: object
+  description: Distinct filter values available for the selected site and date range
+  properties:
+    categories:
+      type: array
+      items:
+        type: string
+      example: ['Poster Maker', 'Electronics']
+    agentTypes:
+      type: array
+      items:
+        type: string
+      example: ['Chatbots', 'Research']
+    platforms:
+      type: array
+      items:
+        type: string
+      example: ['ChatGPT', 'Perplexity']
+    contentTypes:
+      type: array
+      items:
+        type: string
+      example: ['html', 'pdf']
+    userAgents:
+      type: array
+      items:
+        type: string
+      example: ['ChatGPT-User', 'GPTBot']
+  required:
+    - categories
+    - agentTypes
+    - platforms
+    - contentTypes
+    - userAgents
+
+AgenticTrafficWeekEntry:
+  type: object
+  description: An ISO week for which the site has agentic traffic data
+  properties:
+    week:
+      type: string
+      description: ISO week label (YYYY-WNN)
+      example: '2026-W10'
+    startDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-02'
+    endDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-08'
+  required:
+    - week
+
+AgenticTrafficWeeks:
+  type: object
+  description: Available ISO weeks for the site's agentic traffic data
+  properties:
+    weeks:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficWeekEntry'
+  required:
+    - weeks
+
+AgenticTrafficMoverRow:
+  type: object
+  description: A URL with significant traffic change between the oldest and newest date in range
+  properties:
+    host:
+      type: string
+      example: 'www.adobe.com'
+    urlPath:
+      type: string
+      example: '/express/create/poster'
+    previousHits:
+      type: integer
+      description: Hits on the oldest date in the range
+      example: 100
+    currentHits:
+      type: integer
+      description: Hits on the newest date in the range
+      example: 200
+    hitsChange:
+      type: integer
+      description: Absolute change (positive = top mover, negative = bottom mover)
+      example: 100
+    changePercent:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Percentage change; null when previousHits is zero
+      example: 100.0
+    direction:
+      type: string
+      enum: ['up', 'down']
+      example: 'up'
+  required:
+    - host
+    - urlPath
+    - previousHits
+    - currentHits
+    - hitsChange
+    - direction
+
+AgenticTrafficMovers:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficMoverRow'
+  description: |
+    Top and bottom URL movers ordered by `direction DESC, abs(hitsChange) DESC`.
+    Returns up to `limit` rows each for direction=up and direction=down.

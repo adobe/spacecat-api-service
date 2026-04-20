@@ -10,14 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import SiteEnrollmentController from '../../src/controllers/site-enrollments.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
@@ -39,7 +38,6 @@ describe('Site Enrollment Controller', () => {
       getId: () => 'enrollment-1',
       getSiteId: () => siteId,
       getEntitlementId: () => 'ent1',
-      getStatus: () => 'ACTIVE',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedBy: () => 'user1@example.com',
@@ -48,12 +46,31 @@ describe('Site Enrollment Controller', () => {
       getId: () => 'enrollment-2',
       getSiteId: () => siteId,
       getEntitlementId: () => 'ent2',
-      getStatus: () => 'PENDING',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedBy: () => 'user2@example.com',
     },
   ];
+
+  const orgId = '456e7890-e89b-12d3-a456-426614174001';
+  const entitlementId = '789e0123-e89b-12d3-a456-426614174002';
+
+  const mockSiteWithOrg = {
+    getId: () => siteId,
+    getOrganizationId: () => orgId,
+  };
+
+  const mockAsoEntitlement = { getId: () => entitlementId, getTier: () => 'FREE_TRIAL' };
+
+  const mockNewEnrollment = {
+    getId: () => 'new-enrollment-1',
+    getSiteId: () => siteId,
+    getEntitlementId: () => entitlementId,
+    getStatus: () => 'ACTIVE',
+    getCreatedAt: () => '2023-01-01T00:00:00Z',
+    getUpdatedAt: () => '2023-01-01T00:00:00Z',
+    getUpdatedBy: () => 'system',
+  };
 
   const mockDataAccess = {
     Site: {
@@ -61,6 +78,12 @@ describe('Site Enrollment Controller', () => {
     },
     SiteEnrollment: {
       allBySiteId: sandbox.stub().resolves(mockSiteEnrollments),
+    },
+    Configuration: {
+      findLatest: sandbox.stub(),
+    },
+    Entitlement: {
+      findByOrganizationIdAndProductCode: sandbox.stub(),
     },
   };
 
@@ -76,6 +99,7 @@ describe('Site Enrollment Controller', () => {
     // Create a mock AccessControlUtil instance that will be used by the controller
     const mockAccessControlUtilInstance = {
       hasAccess: sandbox.stub().resolves(true),
+      hasAdminAccess: sandbox.stub().returns(true),
     };
 
     // Stub AccessControlUtil.fromContext to return our mock instance
@@ -94,6 +118,8 @@ describe('Site Enrollment Controller', () => {
     // Reset stubs
     mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
     mockDataAccess.SiteEnrollment.allBySiteId = sandbox.stub().resolves(mockSiteEnrollments);
+    mockDataAccess.Configuration.findLatest = sandbox.stub();
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode = sandbox.stub();
 
     // Store reference to the mock instance for test manipulation
     mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
@@ -283,6 +309,108 @@ describe('Site Enrollment Controller', () => {
 
       // Verify that log.error was called
       expect(context.log.error).to.have.been.calledWith(`Error getting site enrollments for site ${siteId}: ${siteError.message}`);
+    });
+  });
+
+  describe('createPlgEnrollment', () => {
+    let mockConfiguration;
+    let mockTierClientInstance;
+
+    const makeContext = () => ({
+      params: { siteId },
+      log: { error: sandbox.stub() },
+    });
+
+    beforeEach(() => {
+      mockTierClientInstance = {
+        createEntitlement: sandbox.stub().resolves({ siteEnrollment: mockNewEnrollment }),
+      };
+      sandbox.stub(TierClient, 'createForSite').resolves(mockTierClientInstance);
+
+      mockConfiguration = { isHandlerEnabledForSite: sandbox.stub().returns(true) };
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSiteWithOrg);
+      mockDataAccess.SiteEnrollment.allBySiteId = sandbox.stub().resolves([]);
+      mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(mockConfiguration);
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode = sandbox.stub()
+        .resolves(mockAsoEntitlement);
+    });
+
+    it('returns 403 when caller is not admin', async () => {
+      AccessControlUtil.fromContext.returns({
+        hasAccess: sandbox.stub().resolves(true),
+        hasAdminAccess: sandbox.stub().returns(false),
+      });
+      const ctrl = SiteEnrollmentController({ dataAccess: mockDataAccess, attributes: {} });
+      const result = await ctrl.createPlgEnrollment(makeContext());
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 400 for invalid site ID', async () => {
+      const result = await siteEnrollmentController.createPlgEnrollment({
+        params: { siteId: 'not-a-uuid' },
+        log: { error: sandbox.stub() },
+      });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Site ID required');
+    });
+
+    it('returns 404 when site not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 400 when summit-plg handler is not enabled for site', async () => {
+      mockConfiguration.isHandlerEnabledForSite.returns(false);
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('summit-plg');
+    });
+
+    it('returns 200 skipped when org has no ASO entitlement', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.skipped).to.be.true;
+      expect(body.reason).to.equal('no_aso_entitlement');
+      expect(body.organizationId).to.equal(orgId);
+    });
+
+    it('returns 200 skipped when site is already enrolled', async () => {
+      const existingEnrollment = {
+        getId: () => 'existing-1',
+        getSiteId: () => siteId,
+        getEntitlementId: () => entitlementId,
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'system',
+      };
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([existingEnrollment]);
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.skipped).to.be.true;
+      expect(body.reason).to.equal('already_enrolled');
+      expect(body.enrollment.id).to.equal('existing-1');
+    });
+
+    it('creates enrollment and returns 201', async () => {
+      const result = await siteEnrollmentController.createPlgEnrollment(makeContext());
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.siteId).to.equal(siteId);
+      expect(body.entitlementId).to.equal(entitlementId);
+    });
+
+    it('returns 500 on unexpected error', async () => {
+      mockDataAccess.Configuration.findLatest.rejects(new Error('DB failure'));
+      const context = makeContext();
+      const result = await siteEnrollmentController.createPlgEnrollment(context);
+      expect(result.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWithMatch(`Error creating enrollment for site ${siteId}`);
     });
   });
 });

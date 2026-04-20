@@ -19,20 +19,30 @@
  * @returns {boolean} True if objects are deeply equal.
  */
 export const deepEqual = (obj1, obj2) => {
-  if (obj1 === obj2) return true;
-  if (obj1 === null || obj2 === null || typeof obj1 !== 'object' || typeof obj2 !== 'object') return false;
+  if (obj1 === obj2) {
+    return true;
+  }
+  if (obj1 === null || obj2 === null || typeof obj1 !== 'object' || typeof obj2 !== 'object') {
+    return false;
+  }
 
   const isArray1 = Array.isArray(obj1);
   const isArray2 = Array.isArray(obj2);
 
-  if (isArray1 !== isArray2) return false;
+  if (isArray1 !== isArray2) {
+    return false;
+  }
 
   if (isArray1) {
-    if (obj1.length !== obj2.length) return false;
+    if (obj1.length !== obj2.length) {
+      return false;
+    }
     const copy2 = [...obj2];
     for (const item1 of obj1) {
       const index = copy2.findIndex((item2) => deepEqual(item1, item2));
-      if (index === -1) return false;
+      if (index === -1) {
+        return false;
+      }
       copy2.splice(index, 1);
     }
     return true;
@@ -41,10 +51,14 @@ export const deepEqual = (obj1, obj2) => {
   const keys1 = Object.keys(obj1);
   const keys2 = Object.keys(obj2);
 
-  if (keys1.length !== keys2.length) return false;
+  if (keys1.length !== keys2.length) {
+    return false;
+  }
 
   for (const key of keys1) {
-    if (!keys2.includes(key) || !deepEqual(obj1[key], obj2[key])) return false;
+    if (!keys2.includes(key) || !deepEqual(obj1[key], obj2[key])) {
+      return false;
+    }
   }
   return true;
 };
@@ -55,7 +69,9 @@ export const deepEqual = (obj1, obj2) => {
  * @returns {object} A new object without metadata fields.
  */
 const stripMetadata = (obj) => {
-  if (!obj || typeof obj !== 'object') return obj;
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
   const {
     // eslint-disable-next-line no-unused-vars
     updatedAt, updatedBy, status, id, ...rest
@@ -70,7 +86,9 @@ const stripMetadata = (obj) => {
  * @returns {string} A deterministic string representation.
  */
 const getDeterministicKey = (obj) => {
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (obj === null || typeof obj !== 'object') {
+    return JSON.stringify(obj);
+  }
 
   if (Array.isArray(obj)) {
     return JSON.stringify(obj.map(getDeterministicKey).sort());
@@ -95,8 +113,12 @@ const updateEntityMetadata = (newEntity, oldEntity, userId, timestamp) => {
 
   if (oldEntity && deepEqual(cleanNew, cleanOld)) {
     // Content hasn't changed, preserve old metadata
-    if (oldEntity.updatedBy) newEntity.updatedBy = oldEntity.updatedBy;
-    if (oldEntity.updatedAt) newEntity.updatedAt = oldEntity.updatedAt;
+    if (oldEntity.updatedBy) {
+      newEntity.updatedBy = oldEntity.updatedBy;
+    }
+    if (oldEntity.updatedAt) {
+      newEntity.updatedAt = oldEntity.updatedAt;
+    }
     return false;
   }
   // Content changed or new, set new metadata
@@ -142,7 +164,9 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
   if (newConfig.categories) {
     Object.entries(newConfig.categories).forEach(([id, category]) => {
       stats.categories.total += 1;
-      if (category.urls) stats.categoryUrls.total += category.urls.length;
+      if (category.urls) {
+        stats.categoryUrls.total += category.urls.length;
+      }
 
       const oldCategory = oldCategories[id];
       const modified = updateEntityMetadata(category, oldCategory, userId, timestamp);
@@ -158,7 +182,9 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
     Object.entries(topics).forEach(([id, topic]) => {
       statsCounter.total += 1;
       const oldTopic = oldTopicsSource[id];
-      if (!oldTopic) statsCounter.modified += 1;
+      if (!oldTopic) {
+        statsCounter.modified += 1;
+      }
 
       const oldPrompts = oldTopic?.prompts || [];
       if (topic.prompts) {
@@ -208,8 +234,12 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
           }
 
           if (match) {
-            if (match.updatedBy) prompt.updatedBy = match.updatedBy;
-            if (match.updatedAt) prompt.updatedAt = match.updatedAt;
+            if (match.updatedBy) {
+              prompt.updatedBy = match.updatedBy;
+            }
+            if (match.updatedAt) {
+              prompt.updatedAt = match.updatedAt;
+            }
           } else {
             // No match, it's new or modified
             prompt.updatedBy = userId;
@@ -243,8 +273,12 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
 
       if (matchIndex !== -1) {
         const match = remainingOldAliases[matchIndex];
-        if (match.updatedBy) alias.updatedBy = match.updatedBy;
-        if (match.updatedAt) alias.updatedAt = match.updatedAt;
+        if (match.updatedBy) {
+          alias.updatedBy = match.updatedBy;
+        }
+        if (match.updatedAt) {
+          alias.updatedAt = match.updatedAt;
+        }
         remainingOldAliases.splice(matchIndex, 1);
       } else {
         alias.updatedBy = userId;
@@ -266,8 +300,12 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
 
       if (matchIndex !== -1) {
         const match = remainingOldCompetitors[matchIndex];
-        if (match.updatedBy) competitor.updatedBy = match.updatedBy;
-        if (match.updatedAt) competitor.updatedAt = match.updatedAt;
+        if (match.updatedBy) {
+          competitor.updatedBy = match.updatedBy;
+        }
+        if (match.updatedAt) {
+          competitor.updatedAt = match.updatedAt;
+        }
         remainingOldCompetitors.splice(matchIndex, 1);
       } else {
         competitor.updatedBy = userId;
@@ -284,8 +322,12 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
       const oldPrompt = oldDeletedPrompts[id];
 
       if (oldPrompt) {
-        if (oldPrompt.updatedBy) prompt.updatedBy = oldPrompt.updatedBy;
-        if (oldPrompt.updatedAt) prompt.updatedAt = oldPrompt.updatedAt;
+        if (oldPrompt.updatedBy) {
+          prompt.updatedBy = oldPrompt.updatedBy;
+        }
+        if (oldPrompt.updatedAt) {
+          prompt.updatedAt = oldPrompt.updatedAt;
+        }
       } else {
         prompt.updatedBy = userId;
         prompt.updatedAt = timestamp;
@@ -301,8 +343,12 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
       const oldPrompt = oldIgnoredPrompts[id];
 
       if (oldPrompt) {
-        if (oldPrompt.updatedBy) prompt.updatedBy = oldPrompt.updatedBy;
-        if (oldPrompt.updatedAt) prompt.updatedAt = oldPrompt.updatedAt;
+        if (oldPrompt.updatedBy) {
+          prompt.updatedBy = oldPrompt.updatedBy;
+        }
+        if (oldPrompt.updatedAt) {
+          prompt.updatedAt = oldPrompt.updatedAt;
+        }
       } else {
         prompt.updatedBy = userId;
         prompt.updatedAt = timestamp;

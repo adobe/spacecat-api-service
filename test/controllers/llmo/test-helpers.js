@@ -14,18 +14,18 @@ import esmock from 'esmock';
 import sinon from 'sinon';
 
 /**
- * Creates a mock Ahrefs client with configurable responses
+ * Creates a mock SEO client with configurable responses
  * @param {Object} responses - Map of URL to response data (array of pages)
- * @returns {Object} Mock Ahrefs client
+ * @returns {Object} Mock SEO client
  */
-export const createMockAhrefsClient = (responses = {}) => {
+export const createMockSeoClient = (responses = {}) => {
   const mockClient = {
     getTopPages: sinon.stub(),
   };
 
   Object.entries(responses).forEach(([url, pages]) => {
     mockClient.getTopPages
-      .withArgs(url, 1)
+      .withArgs(url, { limit: 1 })
       .resolves({ result: { pages } });
   });
 
@@ -33,14 +33,14 @@ export const createMockAhrefsClient = (responses = {}) => {
 };
 
 /**
- * Sets up a test for determineOverrideBaseURL with mocked Ahrefs client
- * @param {Object} mockAhrefsClient - Mock Ahrefs client
+ * Sets up a test for determineOverrideBaseURL with mocked SEO client
+ * @param {Object} mockSeoClient - Mock SEO client
  * @returns {Promise<Object>} Mocked module
  */
-export const setupDetermineOverrideBaseURLTest = async (mockAhrefsClient) => esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
-  '@adobe/spacecat-shared-ahrefs-client': {
+export const setupDetermineOverrideBaseURLTest = async (mockSeoClient) => esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+  '@adobe/mysticat-shared-seo-client': {
     default: {
-      createFrom: sinon.stub().returns(mockAhrefsClient),
+      createFrom: sinon.stub().returns(mockSeoClient),
     },
   },
 });
@@ -50,12 +50,12 @@ export const setupDetermineOverrideBaseURLTest = async (mockAhrefsClient) => esm
  * @param {string} baseURL - The base URL to test
  * @param {Object} responses - Map of URL to response data (array of pages)
  * @param {Object} context - Test context with log and env
- * @returns {Promise<Object>} Object containing result and mockAhrefsClient
+ * @returns {Promise<Object>} Object containing result and mockSeoClient
  */
 export const testDetermineOverrideBaseURL = async (baseURL, responses, context) => {
-  const mockAhrefsClient = createMockAhrefsClient(responses);
-  const { determineOverrideBaseURL } = await setupDetermineOverrideBaseURLTest(mockAhrefsClient);
+  const mockSeoClient = createMockSeoClient(responses);
+  const { determineOverrideBaseURL } = await setupDetermineOverrideBaseURLTest(mockSeoClient);
   const result = await determineOverrideBaseURL(baseURL, context);
 
-  return { result, mockAhrefsClient };
+  return { result, mockSeoClient };
 };

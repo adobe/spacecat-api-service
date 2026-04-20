@@ -18,6 +18,9 @@ import {
   ORG_1_IMS_ORG_ID,
   ORG_2_ID,
   ORG_2_IMS_ORG_ID,
+  ORG_3_ID,
+  SITE_1_ID,
+  SITE_4_ID,
   NON_EXISTENT_ORG_ID,
   NON_EXISTENT_IMS_ORG_ID,
 } from '../seed-ids.js';
@@ -53,11 +56,15 @@ export default function organizationTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/organizations');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(2);
+        // ORG_1 + ORG_2 + ORG_3 (delegate agency org) +
+        // ORG_LEGACY_LLMO + ORG_NEW_LLMO (LLMO-4176 mode-resolution test fixtures)
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         const sorted = sortById(res.body);
         sorted.forEach((org) => expectOrgDto(org));
-        expect(sorted[0].id).to.equal(ORG_1_ID);
-        expect(sorted[1].id).to.equal(ORG_2_ID);
+        const ids = sorted.map((org) => org.id);
+        expect(ids).to.include(ORG_1_ID);
+        expect(ids).to.include(ORG_2_ID);
+        expect(ids).to.include(ORG_3_ID);
       });
 
       it('user: returns 403', async () => {
@@ -178,6 +185,71 @@ export default function organizationTests(getHttpClient, resetData) {
           { 'x-product': undefined },
         );
         expect(res.status).to.equal(400);
+      });
+
+      // ── Delegation: getSitesForOrganization merges delegated sites ──
+
+      it('delegatedUser: x-product=LLMO, ORG_3 → returns own site (SITE_4) + delegated site (SITE_1)', async () => {
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(
+          `/organizations/${ORG_3_ID}/sites`,
+          { 'x-product': 'LLMO' },
+        );
+        expect(res.status).to.equal(200);
+        // SITE_4 (ORG_3 own) + SITE_1 (delegated via active LLMO grant ACCESS_1)
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        const ids = res.body.map((s) => s.id);
+        expect(ids).to.include(SITE_1_ID);
+        expect(ids).to.include(SITE_4_ID);
+      });
+
+      it('delegatedUser: x-product=LLMO, ORG_1 → 403 (ORG_1 is not delegatedUser primary org)', async () => {
+        // hasAccess(organization) is called without productCode, so delegation does NOT fire.
+        // delegatedUser primary tenant is ORG_3, not ORG_1 → forbidden.
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'LLMO' },
+        );
+        expect(res.status).to.equal(403);
+      });
+
+      it('delegatedUser: x-product=ASO, ORG_3 → 200 with 0 sites (SITE_1 not enrolled under ORG_1 ASO)', async () => {
+        // ACCESS_3 (ASO) targets ORG_1 which has an ASO entitlement (ENT_2), but SITE_1
+        // is not enrolled under ENT_2. The retrieval-time enrollment check excludes it.
+        const http = getHttpClient();
+        const res = await http.delegatedUser.get(
+          `/organizations/${ORG_3_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('delegatedUserTruncated: x-product=LLMO, ORG_3 → returns same 2 sites as Path A', async () => {
+        // Path B JWT persona: same underlying grants → same result set.
+        const http = getHttpClient();
+        const res = await http.delegatedUserTruncated.get(
+          `/organizations/${ORG_3_ID}/sites`,
+          { 'x-product': 'LLMO' },
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        const ids = res.body.map((s) => s.id);
+        expect(ids).to.include(SITE_1_ID);
+        expect(ids).to.include(SITE_4_ID);
+      });
+
+      it('user (ORG_1): x-product=LLMO, ORG_1 → 200 with SITE_1 (enrolled in FREE_TRIAL entitlement)', async () => {
+        // ORG_1 has ENTITLEMENT_1 (LLMO, FREE_TRIAL) and SITE_1 is enrolled via SITE_ENROLLMENT_1.
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'LLMO' },
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(SITE_1_ID);
       });
     });
 

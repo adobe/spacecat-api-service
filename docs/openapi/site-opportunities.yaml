@@ -504,6 +504,358 @@ site-opportunity-suggestions-status:
     security:
       - ims_key: [ ]
 
+site-opportunity-suggestions-edge-deploy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  post:
+    operationId: deploySuggestionsToEdge
+    summary: Deploy suggestions to edge
+    description: |
+      Deploys one or more suggestions to the edge. Supports two modes:
+
+      **Synchronous (default):** Deploys suggestions directly via the Tokowaka client
+      and returns a 207 Multi-Status response with per-suggestion results.
+
+      **Async experiment mode (with `Prefer: respond-async` header):** Initiates a
+      geo-experiment with DRS pre/post analysis. Creates a GeoExperiment record,
+      uploads prompts to S3, submits a pre-analysis schedule to DRS, creates an
+      AsyncJob for tracking, and returns a 207 Multi-Status with experiment details.
+      The experiment proceeds through: pre-analysis -> edge deploy -> post-analysis.
+
+      Requires LLMO administrator role and site ownership.
+    tags:
+      - opportunity-suggestions
+    parameters:
+      - name: Prefer
+        in: header
+        required: false
+        schema:
+          type: string
+          enum: [respond-async]
+        description: |
+          Set to `respond-async` to initiate a geo-experiment with DRS pre/post
+          analysis instead of a direct synchronous deployment.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - suggestionIds
+            properties:
+              suggestionIds:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+                minItems: 1
+                description: Array of suggestion UUIDs to deploy
+              name:
+                type: string
+                description: Optional experiment name (defaults to opportunity type). Only used in async experiment mode.
+    responses:
+      '207':
+        description: |
+          Multi-Status response. Each suggestion has its own status code.
+          In async experiment mode, includes additional experiment tracking fields.
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - title: Synchronous deployment response
+                  type: object
+                  properties:
+                    suggestions:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          uuid:
+                            type: string
+                            format: uuid
+                          index:
+                            type: integer
+                            description: Position in the original request array
+                          statusCode:
+                            type: integer
+                            description: Per-suggestion HTTP status (200 for success, 400/404/500 for failure)
+                          suggestion:
+                            type: object
+                            description: Full suggestion object (present on success)
+                          message:
+                            type: string
+                            description: Error message (present on failure)
+                    metadata:
+                      type: object
+                      properties:
+                        total:
+                          type: integer
+                        success:
+                          type: integer
+                        failed:
+                          type: integer
+                        autoCovered:
+                          type: integer
+                          description: Number of additional suggestions auto-marked as deployed by domain-wide config
+                        message:
+                          type: string
+                          description: Present when autoCovered > 0
+                - title: Async experiment response
+                  type: object
+                  properties:
+                    suggestions:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          uuid:
+                            type: string
+                            format: uuid
+                          index:
+                            type: integer
+                          statusCode:
+                            type: integer
+                            description: 202 for accepted, 400/404 for failed
+                          suggestion:
+                            type: object
+                            description: Full suggestion object (present on accepted)
+                          message:
+                            type: string
+                            description: Error message (present on failure)
+                    metadata:
+                      type: object
+                      properties:
+                        total:
+                          type: integer
+                        success:
+                          type: integer
+                        failed:
+                          type: integer
+                    jobId:
+                      type: string
+                      format: uuid
+                      description: AsyncJob ID for tracking experiment progress
+                    geoExperimentId:
+                      type: string
+                      format: uuid
+                      description: GeoExperiment record ID
+                    geoExperimentStatus:
+                      type: string
+                      enum: [GENERATING_BASELINE]
+                    geoExperimentPhase:
+                      type: string
+                      enum: [pre_analysis_submitted]
+                    prePhaseScheduleId:
+                      type: string
+                      format: uuid
+                      description: DRS schedule ID for the pre-analysis phase
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+site-geo-experiments:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    operationId: listGeoExperiments
+    summary: List geo experiments for a site
+    description: |
+      Returns all geo experiments associated with the given site.
+      Prompts are not included in the list response; use the detail endpoint
+      to fetch prompts and associated async jobs.
+    tags:
+      - geo-experiments
+    responses:
+      '200':
+        description: List of geo experiments
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/GeoExperiment'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - ims_key: [ ]
+
+site-geo-experiment:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: geoExperimentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The GeoExperiment ID
+  get:
+    operationId: getGeoExperiment
+    summary: Get geo experiment details
+    description: |
+      Returns the full details of a geo experiment, including prompts (fetched from S3).
+    tags:
+      - geo-experiments
+    responses:
+      '200':
+        description: Geo experiment details
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/GeoExperiment'
+                - type: object
+                  properties:
+                    prompts:
+                      type:
+                        - array
+                        - 'null'
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                          prompt:
+                            type: string
+                          origin:
+                            type: string
+                          source:
+                            type: string
+                          regions:
+                            type: array
+                            items:
+                              type: string
+                      description: Prompts from S3, or null if not yet available
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - ims_key: [ ]
+
+GeoExperiment:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    type:
+      type: string
+      enum:
+        - onsite_opportunity_deployment
+    status:
+      type: string
+      description: High-level experiment state
+      enum:
+        - GENERATING_BASELINE
+        - IN_PROGRESS
+        - COMPLETED
+        - FAILED
+    phase:
+      type: string
+      description: Detailed step within the experiment lifecycle
+      enum:
+        - pre_analysis_submitted
+        - pre_analysis_done
+        - deployment_started
+        - deployment_completed
+        - post_analysis_submitted
+        - post_analysis_done
+    siteId:
+      type: string
+      format: uuid
+    opportunityId:
+      type: string
+      format: uuid
+    preScheduleId:
+      type:
+        - string
+        - 'null'
+      description: DRS schedule ID for the pre-analysis phase
+    postScheduleId:
+      type:
+        - string
+        - 'null'
+      description: DRS schedule ID for the post-analysis phase
+    suggestionIds:
+      type: array
+      items:
+        type: string
+        format: uuid
+    promptsCount:
+      type: integer
+    promptsLocation:
+      type:
+        - string
+        - 'null'
+      description: S3 key of the uploaded prompts JSON file
+    metadata:
+      type:
+        - object
+        - 'null'
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        jobType:
+          type: string
+        profile:
+          type: object
+          properties:
+            email:
+              type: string
+    error:
+      type:
+        - object
+        - 'null'
+      properties:
+        message:
+          type: string
+    startTime:
+      type:
+        - string
+        - 'null'
+      format: date-time
+    endTime:
+      type:
+        - string
+        - 'null'
+      format: date-time
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    updatedBy:
+      type: string
+
 site-opportunity-suggestions-auto-fix:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -594,6 +946,82 @@ site-opportunity-suggestions-auto-fix:
                       description: |
                         Optional. Meaningful for action assess or assess-urls. When true, worker
                         runs only no-AEM checks; for assess, promise token is not required.
+                    fixTargetGroups:
+                      type: array
+                      x-experimental: true
+                      description: |
+                        Experimental (meta-tags only). Optional override for fix-target grouping.
+                        When provided, suggestions
+                        are grouped by the given relationshipContext.fixTargetPageId instead of
+                        by each suggestion's detected page URL. The worker applies the fix to
+                        the specified page directly. Typically populated by the UI when the
+                        page-relationship dialog resolves a source (blueprint/language-master)
+                        page.
+
+                        Effective only for AEM CS meta-tags autofix on the Content API path.
+                        If meta-tags are routed to PSS (for example, disableContentApiForMetaTags=true),
+                        this field is accepted but ignored.
+
+                        When absent, the API falls back to grouping by suggestion URL.
+                      minItems: 1
+                      items:
+                        type: object
+                        required:
+                          - suggestionIds
+                          - relationshipContext
+                        properties:
+                          suggestionIds:
+                            type: array
+                            minItems: 1
+                            items:
+                              $ref: './schemas.yaml#/Id'
+                          relationshipContext:
+                            type: object
+                            x-experimental: true
+                            description: |
+                              Experimental relationship metadata forwarded to the autofix worker.
+                              Required for relationship-aware grouping.
+                              When fixTargetMode is source, appliedOnPagePath should be provided.
+                              Effective only on the AEM CS Content API path for meta-tags;
+                              ignored when meta-tags are handled via PSS.
+                            additionalProperties: false
+                            required:
+                              - fixTargetPageId
+                            properties:
+                              fixTargetPageId:
+                                type: string
+                                minLength: 1
+                                description: |
+                                  Page identifier to apply this group to. For relationship-source
+                                  flows this is typically the source page ID resolved by the UI.
+                                  Used only on Content API meta-tags execution path.
+                                example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+                              fixTargetMode:
+                                type: string
+                                enum: [source, local]
+                                description: |
+                                  Whether this group is being fixed at source or locally.
+                                  Used for Content API relationship-aware meta-tags flow.
+                              cancelInheritance:
+                                type: boolean
+                                description: |
+                                  Experimental. Optional. When true, indicates the fix is intentionally
+                                  applied at a local inheriting page and inheritance should remain cancelled.
+                                  Currently applied for Content API title/description flows only.
+                              appliedOnPagePath:
+                                type: string
+                                minLength: 1
+                                description: |
+                                  Source page path where the fix is applied for source-targeted groups.
+                                  Used for relationship context and downstream reporting.
+                        example:
+                          suggestionIds:
+                            - '2eb0ae0d-baa8-4668-abf5-8b22ef75b95f'
+                            - '85d87ee0-5818-419a-863f-dcb90630ba11'
+                          relationshipContext:
+                            fixTargetPageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+                            fixTargetMode: source
+                            appliedOnPagePath: /content/wknd/language-masters/en/adventures/bali-surf-camp
                     customData:
                       description: Additional custom data to forward to the autofix worker
 
@@ -1058,7 +1486,49 @@ site-opportunity-fix-suggestions:
     security:
       - ims_key: [ ]
 
+site-opportunity-fix-rollback:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/fixId'
+  post:
+    operationId: rollbackSiteOpportunityFix
+    summary: |
+      Roll back a failed fix and mark associated suggestions as skipped
+    description: |
+      Atomically rolls back a failed fix:
+      - Marks the Fix as ROLLED_BACK (only if currently in FAILED status)
+      - Marks all associated suggestions as SKIPPED
 
+      This operation will fail if:
+      - The fix is not in FAILED status
+      - No suggestions are found for the fix
+      - Not all suggestions are in ERROR status
+
+      Either all updates succeed or none are applied.
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: Fix successfully rolled back
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixRollbackResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
 
 site-opportunity-status:
   parameters:

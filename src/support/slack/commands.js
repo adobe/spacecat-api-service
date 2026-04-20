@@ -28,6 +28,7 @@ import getGoogleLink from './commands/create-google-link.js';
 import help from './commands/help.js';
 import toggleSiteAudit from './commands/toggle-site-audit.js';
 import onboard from './commands/onboard.js';
+import onboardStatus from './commands/onboard-status.js';
 import llmoOnboard from './commands/llmo-onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
@@ -47,6 +48,12 @@ import detectBotBlocker from './commands/detect-bot-blocker.js';
 import runPageCitability from './commands/run-page-citability.js';
 import runA11yCodefix from './commands/run-a11y-codefix.js';
 import identifyRedirects from './commands/identify-redirects.js';
+import identifyAndUpdateRedirects from './commands/identify-and-update-redirects.js';
+import detectCdn from './commands/detect-cdn.js';
+import setLlmoCountryCodeIgnoreList from './commands/set-llmo-country-code-ignore-list.js';
+import addDelegate from './commands/add-delegate.js';
+import listDelegates from './commands/list-delegates.js';
+import removeDelegate from './commands/remove-delegate.js';
 
 /**
  * Returns all commands.
@@ -74,6 +81,7 @@ export default (context) => [
   help(context),
   toggleSiteAudit(context),
   onboard(context),
+  onboardStatus(context),
   llmoOnboard(context),
   setSiteOrganizationCommand(context),
   toggleSiteImport(context),
@@ -92,4 +100,10 @@ export default (context) => [
   runPageCitability(context),
   runA11yCodefix(context),
   identifyRedirects(context),
+  identifyAndUpdateRedirects(context),
+  detectCdn(context),
+  setLlmoCountryCodeIgnoreList(context),
+  addDelegate(context),
+  listDelegates(context),
+  removeDelegate(context),
 ];

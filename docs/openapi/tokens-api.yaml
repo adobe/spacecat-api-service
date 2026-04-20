@@ -1,0 +1,45 @@
+site-token-by-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: tokenType
+      in: path
+      required: true
+      description: |
+        Token type key, e.g. `grant_cwv`, `grant_broken_backlinks`, `grant_alt_text`.
+        Must match a configured entry in the token grant configuration.
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9_]*$'
+        example: grant_cwv
+  get:
+    tags:
+      - site
+    summary: Get token allocation for a site by type
+    description: |
+      Returns the current-cycle token allocation for the given site and token type.
+      No token is auto-created on reads; if no token exists for the current cycle a 404 is returned.
+    operationId: getSiteTokenByType
+    responses:
+      '200':
+        description: Token allocation for the current cycle
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Token'
+            examples:
+              token:
+                $ref: './examples.yaml#/TokenExample'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Site not found or no token exists for the current cycle
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []

@@ -29,12 +29,17 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+// eslint-disable-next-line import/no-extraneous-dependencies -- listed in package.json dependencies
+import { ContentClient } from '@adobe/spacecat-shared-content-client';
 import {
   hasText, isArray, isIsoDate, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { FixEntity as FixEntityModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { resolveDocumentPath } from '../support/document-path-resolver.js';
+import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -68,12 +73,16 @@ export class FixesController {
   /** @type {AccessControlUtil} */
   #accessControl;
 
+  /** @type {LambdaContext} */
+  #ctx;
+
   /**
    * @param {LambdaContext} ctx
    * @param {AccessControlUtil} [accessControl]
    */
   constructor(ctx, accessControl = new AccessControlUtil(ctx)) {
     const { dataAccess } = ctx;
+    this.#ctx = ctx;
     this.#FixEntity = dataAccess.FixEntity;
     this.#Opportunity = dataAccess.Opportunity;
     this.#Site = dataAccess.Site;
@@ -92,7 +101,9 @@ export class FixesController {
     const { fixCreatedDate } = context.data || {};
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     let fixEntities = [];
     let fixes = [];
@@ -117,7 +128,9 @@ export class FixesController {
       // Check ownership for the first fix entity to ensure
       // the opportunity belongs to the site
       res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-      if (res) return res;
+      if (res) {
+        return res;
+      }
 
       fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
       return ok(fixes);
@@ -128,7 +141,9 @@ export class FixesController {
     // Check whether the suggestion belongs to the opportunity,
     // and the opportunity belongs to the site.
     res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
@@ -143,7 +158,9 @@ export class FixesController {
   async getByStatus(context) {
     const { siteId, opportunityId, status } = context.params;
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!hasText(status)) {
       return badRequest('Status is required');
@@ -151,7 +168,9 @@ export class FixesController {
 
     const fixEntities = await this.#FixEntity.allByOpportunityIdAndStatus(opportunityId, status);
     res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     return ok(fixEntities.map((fix) => FixDto.toJSON(fix)));
   }
@@ -166,12 +185,18 @@ export class FixesController {
     const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     return ok(FixDto.toJSON(fix));
   }
@@ -186,12 +211,18 @@ export class FixesController {
     const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const suggestions = await fix.getSuggestions();
     const results = await Promise.all(suggestions.map(async (s) => {
@@ -211,19 +242,38 @@ export class FixesController {
     const { siteId, opportunityId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     res = await checkOwnership(null, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!Array.isArray(context.data)) {
       return context.data ? badRequest('Request body must be an array') : badRequest('No updates provided');
     }
 
+    const log = this.#ctx.log || console;
+
+    // Pre-fetch site and opportunity info for documentPath enrichment of manual fixes
+    const enrichmentCtx = await this.#prepareDocumentPathEnrichment(
+      context.data,
+      siteId,
+      opportunityId,
+      log,
+    );
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
-        const fixEntity = await FixEntity.create({ ...fixData, opportunityId });
+        const enrichedFixData = await FixesController.#enrichWithDocumentPath(
+          fixData,
+          enrichmentCtx,
+          log,
+        );
+
+        const fixEntity = await FixEntity.create({ ...enrichedFixData, opportunityId });
         if (fixData.suggestionIds) {
           const suggestions = await Promise.all(
             fixData.suggestionIds.map((id) => this.#Suggestion.findById(id)),
@@ -255,6 +305,96 @@ export class FixesController {
   }
 
   /**
+   * Prepares context for documentPath enrichment by pre-fetching site and opportunity.
+   * Only performs lookups when at least one fix in the batch is a manual fix (origin: 'aso')
+   * that doesn't already have a documentPath.
+   * For AEM Edge sites, also creates ContentClient when deliveryType is 'aem_edge'.
+   * @returns {Promise<{site, opportunityType, bearerToken, contentClient?}|null>}
+   */
+  async #prepareDocumentPathEnrichment(fixDataArray, siteId, opportunityId, log) {
+    const needsEnrichment = fixDataArray.some(
+      (fixData) => fixData.origin === 'aso' && !fixData.changeDetails?.documentPath,
+    );
+    if (!needsEnrichment) {
+      return null;
+    }
+
+    try {
+      const [site, opportunity] = await Promise.all([
+        this.#Site.findById(siteId),
+        this.#Opportunity.findById(opportunityId),
+      ]);
+
+      if (!site || !opportunity) {
+        return null;
+      }
+      const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      const imsAccessToken = await exchangePromiseToken(
+        this.#ctx,
+        promiseTokenResponse.promise_token,
+      );
+      const bearerToken = `Bearer ${imsAccessToken}`;
+      const enrichmentCtx = {
+        site,
+        opportunityType: opportunity.getType(),
+        bearerToken,
+      };
+
+      if (site.getDeliveryType() === 'aem_edge') {
+        try {
+          enrichmentCtx.contentClient = await ContentClient.createFrom(this.#ctx, site);
+        } catch (contentClientErr) {
+          log.warn(
+            `Could not create ContentClient for AEM Edge documentPath enrichment: ${contentClientErr.message}`,
+          );
+        }
+      }
+
+      return enrichmentCtx;
+    } catch (e) {
+      log.warn(`Could not prepare documentPath enrichment: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Enriches a fix data object with documentPath when it's a manual fix without one.
+   * Returns the original fixData unchanged if enrichment is not needed or fails.
+   */
+  static async #enrichWithDocumentPath(fixData, enrichmentCtx, log) {
+    if (!enrichmentCtx) {
+      return fixData;
+    }
+    if (fixData.origin !== 'aso') {
+      return fixData;
+    }
+    if (fixData.changeDetails?.documentPath) {
+      return fixData;
+    }
+
+    const {
+      site, opportunityType, bearerToken, contentClient,
+    } = enrichmentCtx;
+    const documentPath = await resolveDocumentPath(
+      site,
+      opportunityType,
+      fixData.changeDetails,
+      bearerToken,
+      log,
+      contentClient ?? undefined, // used for AEM Edge
+    );
+
+    if (!documentPath) {
+      return fixData;
+    }
+
+    return {
+      ...fixData,
+      changeDetails: { ...fixData.changeDetails, documentPath },
+    };
+  }
+
+  /**
    * Update the status of one or multiple fixes in one transaction
    *
    * @param {RequestContext} context - request context
@@ -264,7 +404,9 @@ export class FixesController {
     const { siteId, opportunityId } = context.params;
 
     const res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!Array.isArray(context.data)) {
       return (
@@ -345,12 +487,18 @@ export class FixesController {
   async patchFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     if (!context.data) {
       return badRequest('No updates provided');
@@ -418,18 +566,116 @@ export class FixesController {
     const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     const fix = await this.#FixEntity.findById(fixId);
-    if (!fix) return notFound('Fix not found');
+    if (!fix) {
+      return notFound('Fix not found');
+    }
     res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
-    if (res) return res;
+    if (res) {
+      return res;
+    }
 
     try {
       await fix.remove();
       return noContent();
     } catch (e) {
       return createResponse({ message: `Error removing fix: ${e.message}` }, 500);
+    }
+  }
+
+  /**
+   * Rolls back a failed fix: marks the Fix as ROLLED_BACK and all linked
+   * suggestions as SKIPPED. Uses two sequential updates (fix entity, then
+   * bulk suggestion status); no single transaction.
+   *
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>} the updated fix and suggestions data
+   */
+  async rollbackFailedFix(context) {
+    const { siteId, opportunityId, fixId } = context.params;
+
+    // Validate request params and access
+    let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
+    if (res) {
+      return res;
+    }
+
+    // Find the fix
+    const fix = await this.#FixEntity.findById(fixId);
+    if (!fix) {
+      return notFound('Fix not found');
+    }
+
+    // Check ownership
+    res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
+    if (res) {
+      return res;
+    }
+
+    // Validate fix is in FAILED status
+    const currentFixStatus = fix.getStatus();
+    if (currentFixStatus !== FixEntityModel.STATUSES.FAILED) {
+      return badRequest(`Fix cannot be rolled back: current status is '${currentFixStatus}', expected 'FAILED'`);
+    }
+
+    try {
+      fix.setStatus(FixEntityModel.STATUSES.ROLLED_BACK);
+      await fix.save();
+
+      // Step 2: Get linked suggestions and bulk update their status to SKIPPED
+      const suggestions = await this.#FixEntity.getSuggestionsByFixEntityId(fixId);
+      if (Array.isArray(suggestions) && suggestions.length > 0) {
+        try {
+          await this.#Suggestion.bulkUpdateStatus(suggestions, 'SKIPPED');
+        } catch (bulkError) {
+          // Revert fix status so retry can succeed (same pattern as initial update)
+          try {
+            fix.setStatus(currentFixStatus);
+            await fix.save();
+          } catch (revertError) {
+            // Log but don't mask the original error
+            context.log?.error?.('Failed to revert fix status after suggestion update failure', {
+              fixId,
+              revertError: revertError?.message,
+            });
+          }
+          throw bulkError;
+        }
+      }
+
+      // suggestions already has updated status from bulkUpdateStatus when length > 0; else []
+      const updatedSuggestions = suggestions;
+      const updatedFix = fix;
+
+      return ok({
+        fix: {
+          index: 0,
+          uuid: updatedFix.getId(),
+          fix: FixDto.toJSON(updatedFix),
+          statusCode: 200,
+        },
+        suggestions: {
+          updated: updatedSuggestions.map((suggestion, index) => ({
+            index,
+            uuid: suggestion.getId(),
+            suggestion: SuggestionDto.toJSON(suggestion),
+            statusCode: 200,
+          })),
+        },
+        message: `Fix rolled back successfully. All ${updatedSuggestions.length} suggestion(s) marked as SKIPPED.`,
+      });
+    } catch (e) {
+      /* c8 ignore next 3 */
+      if (e?.name === VALIDATION_ERROR_NAME) {
+        return badRequest(e.message);
+      }
+      return createResponse({
+        message: `Error rolling back fix: ${e.message}`,
+      }, 500);
     }
   }
 
