@@ -144,6 +144,14 @@ export const INTERNAL_ROUTES = [
 
   // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
   'GET /v2/regions',
+
+  // Monitoring — DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
+  // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
+  // registration). Kept internal because reusing `audit:read` would silently broaden that
+  // site-scoped capability to cover platform/infra monitoring data. Revisit when a concrete
+  // S2S consumer exists and introduce a dedicated capability (e.g. `monitoring:read`) at
+  // that time rather than bundling into `audit:read`.
+  'GET /monitoring/drs-bp-pg-audit',
 ];
 
 /**
@@ -389,12 +397,6 @@ const routeRequiredCapabilities = {
 
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
-
-  // Monitoring
-  // Note: DRS workers call this via admin x-api-key (not S2S JWT) — they run in a separate
-  // AWS account and do not hold an S2S consumer registration. The capability here gates
-  // future S2S JWT callers only; admin key access bypasses capability checks entirely.
-  'GET /monitoring/drs-bp-pg-audit': 'audit:read',
 
   // API Keys
   'POST /tools/api-keys': 'apiKey:write',

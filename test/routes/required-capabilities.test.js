@@ -69,6 +69,24 @@ describe('routeRequiredCapabilities', () => {
     });
   });
 
+  describe('pinned mappings', () => {
+    // Pin specific route-to-placement decisions so a silent regression (e.g. granting a
+    // broader capability to a platform-scoped route) fails loudly in review.
+    it('keeps GET /monitoring/drs-bp-pg-audit in INTERNAL_ROUTES, not routeRequiredCapabilities', () => {
+      const route = 'GET /monitoring/drs-bp-pg-audit';
+      expect(INTERNAL_ROUTES).to.include(
+        route,
+        'DRS Brand Presence PG audit is admin-key only; bundling into audit:read would silently '
+        + 'broaden that site-scoped capability to infra monitoring data.',
+      );
+      expect(routeRequiredCapabilities).to.not.have.property(
+        route,
+        'DRS Brand Presence PG audit must not be mapped to an S2S capability until a dedicated '
+        + 'monitoring capability exists.',
+      );
+    });
+  });
+
   describe('route coverage', () => {
     it('every route from routes/index.js must be in routeRequiredCapabilities or INTERNAL_ROUTES', () => {
       const routesPath = join(testDir, '../../src/routes/index.js');
