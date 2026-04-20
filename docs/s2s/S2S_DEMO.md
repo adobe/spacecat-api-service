@@ -400,12 +400,15 @@ Key properties:
 
 Every S2S token issuance is logged: consumer name, org_id, timestamp, caller IP.  
 Every lifecycle event (register, update, suspend, revoke) fires a Slack notification:
+example:
+<img width="832" height="246" alt="image" src="https://github.com/user-attachments/assets/0e111da2-452c-48b2-bdeb-48cdaf4ddfef" />
 
 
-| Event       | Channel                  |
-| ----------- | ------------------------ |
-| Dev / Stage | `#spacecat-services-dev` |
-| Production  | `#spacecat-services`     |
+
+| Event       | Channel                           |
+| ----------- | --------------------------------- |
+| Dev / Stage | `#s2s-services-dev` |
+| Production  | `#s2s-spacecat-notifications-dev` |
 
 
 Consumer records are **never deleted** — revoked consumers remain in the database with a `revokedAt` timestamp for forensics.
