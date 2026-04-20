@@ -179,6 +179,12 @@ DRS:       site:read, content:read
 Cursor:    site:read, experiments:read
 ```
 
+### Capability definition
+
+capabilities is structrured in `entity:operation` fashion and each route in api-service is assign with one capability. for example
+
+`'GET /sites/:siteId/opportunities': 'opportunity:read'`
+
 ### Capability Tiers
 
 ```
