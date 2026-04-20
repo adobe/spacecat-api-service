@@ -100,11 +100,13 @@ describe('topics-storage', () => {
     });
 
     it('throws on database error', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const dbError = { message: 'DB error' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(listTopics({ organizationId: ORG_ID, postgrestClient }))
-        .to.be.rejectedWith('Failed to list topics');
+      const err = await listTopics({ organizationId: ORG_ID, postgrestClient }).catch((e) => e);
+      expect(err.message).to.include('Failed to list topics');
+      expect(err.cause).to.equal(dbError);
     });
   });
 
@@ -249,27 +251,28 @@ describe('topics-storage', () => {
     });
 
     it('throws on database error during create', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'unique violation' } });
+      const dbError = { message: 'unique violation' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(createTopic({
+      const err = await createTopic({
         organizationId: ORG_ID,
         topic: { name: 'Duplicate Topic' },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to create topic');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to create topic');
+      expect(err.cause).to.equal(dbError);
     });
 
     it('throws a 409-typed error echoing the constraint name on a 23505 unique violation', async () => {
+      const raw = {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "uq_topic_per_org"',
+        details: '',
+        hint: '',
+      };
       const postgrestClient = {
-        from: sinon.stub().returns(createChainableQuery({
-          data: null,
-          error: {
-            code: '23505',
-            message: 'duplicate key value violates unique constraint "uq_topic_per_org"',
-            details: '',
-            hint: '',
-          },
-        })),
+        from: sinon.stub().returns(createChainableQuery({ data: null, error: raw })),
       };
 
       const err = await createTopic({
@@ -282,6 +285,10 @@ describe('topics-storage', () => {
       expect(err).to.be.instanceOf(Error);
       expect(err.status).to.equal(409);
       expect(err.message).to.include('uq_topic_per_org');
+      // Original PostgREST error preserved as `cause` so operators reading
+      // the WARN-level conflict log can still reach the raw DB payload
+      // during triage. LLMO-4370 #14.
+      expect(err.cause).to.equal(raw);
     });
 
     it('still surfaces 409 with a generic message when the 23505 error lacks a constraint clause', async () => {
@@ -387,15 +394,18 @@ describe('topics-storage', () => {
     });
 
     it('throws on database error during update', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'connection timeout' } });
+      const dbError = { message: 'connection timeout' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(updateTopic({
+      const err = await updateTopic({
         organizationId: ORG_ID,
         topicId: 'test',
         updates: { name: 'Will Fail' },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to update topic');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to update topic');
+      expect(err.cause).to.equal(dbError);
     });
   });
 
@@ -434,14 +444,17 @@ describe('topics-storage', () => {
     });
 
     it('throws on database error during delete', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'permission denied' } });
+      const dbError = { message: 'permission denied' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(deleteTopic({
+      const err = await deleteTopic({
         organizationId: ORG_ID,
         topicId: 'test',
         postgrestClient,
-      })).to.be.rejectedWith('Failed to delete topic');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to delete topic');
+      expect(err.cause).to.equal(dbError);
     });
   });
 

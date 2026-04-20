@@ -116,7 +116,13 @@ export async function createTopic({
     if (error.code === '23505') {
       const match = /unique constraint "([^"]+)"/.exec(error.message || '');
       const constraint = match ? match[1] : 'unique constraint';
-      const conflict = new Error(`Topic conflicts with ${constraint} for this organization`);
+      // Chain the original PostgREST error as `cause` so operators reading
+      // WARN-level conflict logs can still reach the raw DB error during
+      // triage — symmetric with categories-storage. LLMO-4370 #14.
+      const conflict = new Error(
+        `Topic conflicts with ${constraint} for this organization`,
+        { cause: error },
+      );
       conflict.status = 409;
       throw conflict;
     }

@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import {
-  listCategories, createCategory, updateCategory, deleteCategory,
+  listCategories, createCategory, updateCategory, deleteCategory, escapeIlike,
 } from '../../src/support/categories-storage.js';
 
 use(sinonChai);
@@ -134,11 +134,32 @@ describe('categories-storage', () => {
     });
 
     it('throws on database error', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const dbError = { message: 'DB error' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(listCategories({ organizationId: ORG_ID, postgrestClient }))
-        .to.be.rejectedWith('Failed to list categories');
+      const err = await listCategories({ organizationId: ORG_ID, postgrestClient }).catch((e) => e);
+      expect(err.message).to.include('Failed to list categories');
+      // Error.cause preserves the original PostgREST error for diagnostics.
+      expect(err.cause).to.equal(dbError);
+    });
+  });
+
+  describe('escapeIlike', () => {
+    // Regression guard: a future refactor that drops the `.replace` would
+    // otherwise silently re-enable PostgREST ILIKE pattern injection —
+    // `%` and `_` would become wildcards and match rows they shouldn't.
+    it('escapes percent, underscore, and backslash literals', () => {
+      expect(escapeIlike('50% Off')).to.equal('50\\% Off');
+      expect(escapeIlike('foo_bar')).to.equal('foo\\_bar');
+      expect(escapeIlike('with\\backslash')).to.equal('with\\\\backslash');
+      // Compound: all three literals in one string.
+      expect(escapeIlike('a%b_c\\d')).to.equal('a\\%b\\_c\\\\d');
+    });
+
+    it('leaves regular strings untouched', () => {
+      expect(escapeIlike('Discovery & Research')).to.equal('Discovery & Research');
+      expect(escapeIlike('')).to.equal('');
     });
   });
 
@@ -155,11 +176,64 @@ describe('categories-storage', () => {
       })).to.be.rejectedWith('Category name is required');
     });
 
-    it('rejects names that are only whitespace / zero-width after NFC canonicalization', async () => {
+    it('rejects names that are only whitespace after canonicalization', async () => {
       const postgrestClient = { from: () => { } };
       await expect(createCategory({
         organizationId: ORG_ID, category: { name: '   ' }, postgrestClient,
       })).to.be.rejectedWith('Category name is required');
+    });
+
+    it('strips zero-width / BOM characters before validation (U+200B/C/D and U+FEFF)', async () => {
+      const postgrestClient = { from: () => { } };
+      // trim() does NOT remove these — without the explicit strip they
+      // would slip past hasText() and produce an invisible row.
+      await expect(createCategory({
+        organizationId: ORG_ID, category: { name: '\u200B\u200C\u200D\uFEFF' }, postgrestClient,
+      })).to.be.rejectedWith('Category name is required');
+    });
+
+    it('rejects names that canonicalize to a degenerate slug when no id is supplied', async () => {
+      // Non-ASCII-only names collapse to a bare "-" via the slug derivation
+      // `replace(/[^a-z0-9]+/g, '-')`. Rejecting at the API boundary keeps
+      // such rows from landing with meaningless FKs. Caller can opt out
+      // by supplying an explicit `id`.
+      const postgrestClient = createSequentialClient([
+        { data: null, error: null },
+      ]);
+      await expect(createCategory({
+        organizationId: ORG_ID,
+        category: { name: '日本語' },
+        postgrestClient,
+      })).to.be.rejectedWith(/empty slug/);
+    });
+
+    it('accepts non-ASCII names when the client supplies an explicit slug', async () => {
+      const insertedRow = {
+        id: 'uuid-jp',
+        category_id: 'japanese-cat',
+        name: '日本語',
+        status: 'active',
+        origin: 'human',
+        created_at: '2026-04-20',
+        created_by: 'user@test.com',
+        updated_at: '2026-04-20',
+        updated_by: 'user@test.com',
+      };
+      const postgrestClient = createSequentialClient([
+        { data: null, error: null },
+        { data: insertedRow, error: null },
+      ]);
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { id: 'japanese-cat', name: '日本語' },
+        postgrestClient,
+        updatedBy: 'user@test.com',
+      });
+
+      expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('insert');
+      expect(result.category.id).to.equal('japanese-cat');
     });
 
     it('canonicalizes the stored name (trim, whitespace-collapse, NFC) and finds case-variants as existing', async () => {
@@ -266,6 +340,7 @@ describe('categories-storage', () => {
       });
 
       expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('insert');
       expect(result.category.id).to.equal('my-new-category');
       expect(result.category.name).to.equal('My New Category');
       expect(result.category.createdAt).to.equal('2026-03-01T00:00:00Z');
@@ -301,6 +376,7 @@ describe('categories-storage', () => {
       });
 
       expect(result.created).to.be.false;
+      expect(result.outcome).to.equal('noop');
       expect(result.category.uuid).to.equal('uuid-existing');
       expect(result.category.id).to.equal('baseurl-discovery-research');
       // Audit fields preserved — no UPDATE fired.
@@ -341,39 +417,100 @@ describe('categories-storage', () => {
       });
 
       expect(result.created).to.be.false;
+      expect(result.outcome).to.equal('update');
       expect(result.category.status).to.equal('active');
       expect(result.category.origin).to.equal('human');
       expect(result.category.updatedBy).to.equal('editor@test.com');
     });
 
+    it('captures the exact patch sent to .update() on an idempotent update', async () => {
+      // Regression guard: if buildCategoryPatch ever leaks an unintended
+      // field (e.g. `name`) into the update path, this capture-and-assert
+      // pattern catches it. LLMO-4370 #12.
+      const existingRow = {
+        id: 'uuid-patch',
+        category_id: 'patchable',
+        name: 'Patchable',
+        status: 'pending',
+        origin: 'ai',
+        created_at: '2026-01-01',
+        created_by: 'system',
+        updated_at: '2026-01-01',
+        updated_by: 'system',
+      };
+      const capturedUpdate = { row: null };
+      const postgrestClient = {
+        from: sinon.stub().callsFake(() => ({
+          select: sinon.stub().returnsThis(),
+          eq: sinon.stub().returnsThis(),
+          ilike: sinon.stub().returnsThis(),
+          neq: sinon.stub().returnsThis(),
+          order: sinon.stub().returnsThis(),
+          maybeSingle: sinon.stub().resolves({ data: existingRow, error: null }),
+          update: sinon.stub().callsFake((row) => {
+            capturedUpdate.row = row;
+            return {
+              eq: sinon.stub().returnsThis(),
+              select: () => ({
+                maybeSingle: () => Promise.resolve({
+                  data: {
+                    ...existingRow, status: 'active', origin: 'human', updated_by: 'editor@test.com',
+                  },
+                  error: null,
+                }),
+              }),
+            };
+          }),
+        })),
+      };
+
+      await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'Patchable', origin: 'human', status: 'active' },
+        postgrestClient,
+        updatedBy: 'editor@test.com',
+      });
+
+      // Only non-key fields flow into the update; `name` is never patched
+      // (lookup canonicalized match guarantees identity).
+      expect(capturedUpdate.row).to.have.property('status', 'active');
+      expect(capturedUpdate.row).to.have.property('origin', 'human');
+      expect(capturedUpdate.row).to.have.property('updated_by', 'editor@test.com');
+      expect(capturedUpdate.row).to.not.have.property('name');
+      expect(capturedUpdate.row).to.not.have.property('category_id');
+    });
+
     it('rethrows when the lookup-by-name query fails', async () => {
+      const lookupError = { message: 'connection refused' };
       const postgrestClient = createSequentialClient([
-        { data: null, error: { message: 'connection refused' } },
+        { data: null, error: lookupError },
       ]);
 
-      await expect(createCategory({
+      const err = await createCategory({
         organizationId: ORG_ID,
         category: { name: 'Lookup Fail' },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to lookup category by name: connection refused');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to lookup category by name: connection refused');
+      expect(err.cause).to.equal(lookupError);
     });
 
     it('rethrows when the insert hits a non-uniqueness database error', async () => {
+      const fkError = { code: '23503', message: 'foreign key violation' };
       const postgrestClient = createSequentialClient([
         // lookup — not found
         { data: null, error: null },
         // insert — unrelated FK violation
-        {
-          data: null,
-          error: { code: '23503', message: 'foreign key violation' },
-        },
+        { data: null, error: fkError },
       ]);
 
-      await expect(createCategory({
+      const err = await createCategory({
         organizationId: ORG_ID,
         category: { name: 'Bad Insert' },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to create category: foreign key violation');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to create category: foreign key violation');
+      expect(err.cause).to.equal(fkError);
     });
 
     it('recovers idempotently when a concurrent insert wins the 23505 race', async () => {
@@ -419,43 +556,94 @@ describe('categories-storage', () => {
       });
 
       expect(result.created).to.be.false;
+      expect(result.outcome).to.equal('race_retry_noop');
       expect(result.category.uuid).to.equal('uuid-raced');
       expect(result.category.id).to.equal('concurrent');
     });
 
-    it('throws the original create error when a 23505 fires without matching the name-unique constraint', async () => {
+    it('marks the race-recovery path outcome as race_retry when a patch actually applies', async () => {
+      // Same 23505 race, but this time the losing writer has fresh
+      // non-key fields to apply (status change), so the race-recovery
+      // resolve path takes the update branch, not the no-op.
+      const racedRow = {
+        id: 'uuid-raced-patch',
+        category_id: 'rpatch',
+        name: 'RacePatch',
+        status: 'pending',
+        origin: 'human',
+        created_at: '2026-04-01',
+        created_by: 'racer@test.com',
+        updated_at: '2026-04-01',
+        updated_by: 'racer@test.com',
+      };
+      const updatedRow = {
+        ...racedRow, status: 'active', updated_at: '2026-04-01T00:00:01Z', updated_by: 'loser@test.com',
+      };
       const postgrestClient = createSequentialClient([
         { data: null, error: null },
         {
           data: null,
           error: {
             code: '23505',
-            message: 'duplicate key value violates unique constraint "some_other_constraint"',
+            message: 'duplicate key value violates unique constraint "uq_category_name_per_org"',
           },
         },
+        { data: racedRow, error: null },
+        { data: updatedRow, error: null },
       ]);
 
-      await expect(createCategory({
+      const result = await createCategory({
         organizationId: ORG_ID,
-        category: { name: 'Weird' },
+        category: { name: 'RacePatch', status: 'active' },
         postgrestClient,
-      })).to.be.rejectedWith(/Failed to create category/);
+        updatedBy: 'loser@test.com',
+      });
+
+      expect(result.outcome).to.equal('race_retry');
+      expect(result.category.status).to.equal('active');
     });
 
-    it('falls back to the empty-string regex test when a 23505 error has no message', async () => {
+    it('surfaces a typed 409 when a 23505 fires against a non-name constraint (slug collision)', async () => {
+      // Scenario: client POSTs {id: 'foo', name: 'NewName'}. Lookup by
+      // 'NewName' finds nothing. INSERT trips `uq_category_id_per_org`
+      // because slug `foo` is already occupied by a different row with a
+      // different name. Mirror the topics pattern — surface as a typed
+      // 409 with constraint echo so callers don't see a generic 500 on
+      // what is really a constraint conflict. LLMO-4370 #5/#6.
+      const insertError = {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "uq_category_id_per_org"',
+      };
       const postgrestClient = createSequentialClient([
         { data: null, error: null },
-        {
-          data: null,
-          error: { code: '23505' }, // message intentionally omitted
-        },
+        { data: null, error: insertError },
       ]);
 
-      await expect(createCategory({
+      const err = await createCategory({
+        organizationId: ORG_ID,
+        category: { id: 'foo', name: 'NewName' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.message).to.include('uq_category_id_per_org');
+      expect(err.cause).to.equal(insertError);
+    });
+
+    it('surfaces a generic-constraint 409 when a 23505 has no quoted constraint name', async () => {
+      const postgrestClient = createSequentialClient([
+        { data: null, error: null },
+        { data: null, error: { code: '23505' } }, // no message — generic fallback
+      ]);
+
+      const err = await createCategory({
         organizationId: ORG_ID,
         category: { name: 'NoMsg' },
         postgrestClient,
-      })).to.be.rejectedWith(/Failed to create category/);
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.message).to.match(/unique constraint/i);
     });
 
     it('throws when the retry lookup after a 23505 race still finds nothing', async () => {
@@ -600,9 +788,115 @@ describe('categories-storage', () => {
 
       // Client-visible: the resource reappears -> created:true -> 201.
       expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('resurrect');
       expect(result.category.uuid).to.equal('uuid-deleted');
       expect(result.category.status).to.equal('active');
       expect(result.category.id).to.equal('legacy-slug');
+    });
+
+    // Resurrection × provenance matrix — LLMO-4370 #10.
+    it('resurrects a soft-deleted human-origin row on ai POST WITHOUT downgrading origin', async () => {
+      const deletedHuman = {
+        id: 'uuid-dh',
+        category_id: 'curated-legacy',
+        name: 'Curated',
+        status: 'deleted',
+        origin: 'human',
+        created_at: '2026-01-01',
+        created_by: 'curator@test.com',
+        updated_at: '2026-02-01',
+        updated_by: 'curator@test.com',
+      };
+      const resurrectedRow = {
+        ...deletedHuman, status: 'active', updated_by: 'drs', updated_at: '2026-04-20',
+      };
+      const postgrestClient = createSequentialClient([
+        { data: deletedHuman, error: null },
+        { data: resurrectedRow, error: null },
+      ]);
+      const log = { warn: sinon.stub() };
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'Curated', origin: 'ai' },
+        postgrestClient,
+        updatedBy: 'drs',
+        log,
+      });
+
+      expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('resurrect');
+      expect(result.category.origin).to.equal('human');
+      // Downgrade attempt is surfaced to operators so misconfigured DRS
+      // taxonomies are findable in Coralogix.
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/downgrade/i);
+    });
+
+    it('resurrects a soft-deleted ai-origin row on human POST AND upgrades origin', async () => {
+      const deletedAi = {
+        id: 'uuid-da',
+        category_id: 'auto-legacy',
+        name: 'Auto-Legacy',
+        status: 'deleted',
+        origin: 'ai',
+        created_at: '2026-01-01',
+        created_by: 'system',
+        updated_at: '2026-01-01',
+        updated_by: 'system',
+      };
+      const resurrectedRow = {
+        ...deletedAi, status: 'active', origin: 'human', updated_by: 'curator@test.com', updated_at: '2026-04-20',
+      };
+      const postgrestClient = createSequentialClient([
+        { data: deletedAi, error: null },
+        { data: resurrectedRow, error: null },
+      ]);
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'Auto-Legacy', origin: 'human' },
+        postgrestClient,
+        updatedBy: 'curator@test.com',
+      });
+
+      expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('resurrect');
+      expect(result.category.origin).to.equal('human');
+    });
+
+    it('resurrects a soft-deleted row on a POST without an origin field — preserves existing origin', async () => {
+      const deletedHuman = {
+        id: 'uuid-dnone',
+        category_id: 'noorigin',
+        name: 'NoOrigin',
+        status: 'deleted',
+        origin: 'human',
+        created_at: '2026-01-01',
+        created_by: 'curator@test.com',
+        updated_at: '2026-02-01',
+        updated_by: 'curator@test.com',
+      };
+      const resurrectedRow = {
+        ...deletedHuman, status: 'active', updated_by: 'recreator@test.com', updated_at: '2026-04-20',
+      };
+      const postgrestClient = createSequentialClient([
+        { data: deletedHuman, error: null },
+        { data: resurrectedRow, error: null },
+      ]);
+
+      const result = await createCategory({
+        organizationId: ORG_ID,
+        // No `origin` field — client didn't assert a provenance opinion.
+        category: { name: 'NoOrigin' },
+        postgrestClient,
+        updatedBy: 'recreator@test.com',
+      });
+
+      expect(result.created).to.be.true;
+      expect(result.outcome).to.equal('resurrect');
+      // Existing origin preserved unchanged.
+      expect(result.category.origin).to.equal('human');
     });
 
     it('does NOT downgrade origin from human to ai on an idempotent re-POST', async () => {
@@ -634,10 +928,48 @@ describe('categories-storage', () => {
       });
 
       expect(result.created).to.be.false;
+      expect(result.outcome).to.equal('noop');
       expect(result.category.origin).to.equal('human');
       expect(result.category.updatedBy).to.equal('curator@test.com');
       // No update round-trip fires for a pure provenance-downgrade attempt.
       expect(postgrestClient.from).to.have.been.calledOnce;
+    });
+
+    it('logs a WARN when a human->ai downgrade is blocked (active row, no other diffs)', async () => {
+      const humanRow = {
+        id: 'uuid-warn',
+        category_id: 'curated-warn',
+        name: 'CuratedWarn',
+        status: 'active',
+        origin: 'human',
+        created_at: '2026-01-01',
+        created_by: 'curator@test.com',
+        updated_at: '2026-02-01',
+        updated_by: 'curator@test.com',
+      };
+      const postgrestClient = createSequentialClient([
+        { data: humanRow, error: null },
+      ]);
+      const log = { warn: sinon.stub() };
+
+      await createCategory({
+        organizationId: ORG_ID,
+        category: { name: 'CuratedWarn', origin: 'ai' },
+        postgrestClient,
+        updatedBy: 'drs',
+        log,
+      });
+
+      expect(log.warn).to.have.been.calledOnce;
+      // Structured fields are passed as a second arg so operators can
+      // filter by organization_id / category_id in Coralogix.
+      const [, fields] = log.warn.firstCall.args;
+      expect(fields).to.include({
+        organization_id: ORG_ID,
+        category_id: 'curated-warn',
+        attempted_origin: 'ai',
+        current_origin: 'human',
+      });
     });
 
     it('does allow origin upgrade from ai to human', async () => {
@@ -672,6 +1004,7 @@ describe('categories-storage', () => {
       });
 
       expect(result.created).to.be.false;
+      expect(result.outcome).to.equal('update');
       expect(result.category.origin).to.equal('human');
       expect(result.category.updatedBy).to.equal('curator@test.com');
     });
@@ -728,15 +1061,42 @@ describe('categories-storage', () => {
     });
 
     it('throws on database error during update', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'update failed' } });
+      const dbError = { message: 'update failed' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(updateCategory({
+      const err = await updateCategory({
         organizationId: ORG_ID,
         categoryId: 'test',
         updates: { name: 'Will Fail' },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to update category: update failed');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to update category: update failed');
+      expect(err.cause).to.equal(dbError);
+    });
+
+    it('surfaces a typed 409 when PATCH name collides with a sibling in the same org', async () => {
+      // PATCH was previously unguarded: a rename to a name already taken
+      // by another row in the same org tripped `uq_category_name_per_org`
+      // and surfaced as a 500. Symmetric with POST now — 409 with
+      // constraint echo. LLMO-4370 #9.
+      const collisionError = {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "uq_category_name_per_org"',
+      };
+      const query = createChainableQuery({ data: null, error: collisionError });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const err = await updateCategory({
+        organizationId: ORG_ID,
+        categoryId: 'test',
+        updates: { name: 'Taken Name' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.message).to.include('uq_category_name_per_org');
+      expect(err.cause).to.equal(collisionError);
     });
   });
 
@@ -775,14 +1135,17 @@ describe('categories-storage', () => {
     });
 
     it('throws on database error during delete', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'delete failed' } });
+      const dbError = { message: 'delete failed' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(deleteCategory({
+      const err = await deleteCategory({
         organizationId: ORG_ID,
         categoryId: 'test',
         postgrestClient,
-      })).to.be.rejectedWith('Failed to delete category: delete failed');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to delete category: delete failed');
+      expect(err.cause).to.equal(dbError);
     });
   });
 });

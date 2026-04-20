@@ -2393,6 +2393,76 @@ describe('Brands Controller', () => {
       const body = await response.json();
       expect(body.message).to.match(/Failed to lookup category by name/);
     });
+
+    it('returns 409 and logs at warn (not error) when storage raises concurrent-hard-delete 409', async () => {
+      // Storage surfaces the race as a typed 409. The controller must
+      // mirror the topics pattern and demote these to WARN to avoid
+      // re-polluting Coralogix ERROR severity — the explicit goal of
+      // LLMO-4370.
+      const existingRow = {
+        id: 'uuid-vanishing',
+        category_id: 'vanishing',
+        name: 'Vanishing',
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+      // Shared across every .from() call, so the first maybeSingle() (the
+      // lookup) finds the row and the second (post-update) returns null —
+      // simulating the row being hard-deleted between the two round-trips.
+      const sharedMaybeSingle = sandbox.stub();
+      sharedMaybeSingle.onCall(0).resolves({ data: existingRow, error: null });
+      sharedMaybeSingle.onCall(1).resolves({ data: null, error: null });
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sharedMaybeSingle,
+        })),
+      };
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        // Force the update path (differing status) so the race path is hit.
+        data: { name: 'Vanishing', status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      expect(loggerStub.warn).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
+    });
+
+    it('logs the outcome tag for post-deploy Coralogix quantification', async () => {
+      loggerStub.info.resetHistory();
+      await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'My Category' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      // info call includes {organization_id, category_id, outcome} for
+      // aggregatable log-storm metrics — see LLMO-4370 #15.
+      expect(loggerStub.info).to.have.been.called;
+      const infoCall = loggerStub.info.getCalls().find(
+        (c) => /Category POST resolved/.test(c.args[0] || ''),
+      );
+      expect(infoCall).to.exist;
+      expect(infoCall.args[1]).to.have.property('outcome', 'insert');
+      expect(infoCall.args[1]).to.have.property('organization_id', ORGANIZATION_ID);
+    });
   });
 
   describe('updateCategoryForOrg', () => {
@@ -2549,6 +2619,43 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    it('returns 409 and logs at warn when PATCH name collides with a sibling in the same org', async () => {
+      // Storage layer maps 23505 on `uq_category_name_per_org` to a typed
+      // 409. The controller must surface that at WARN to keep the PATCH
+      // path symmetric with POST's no-storm contract. LLMO-4370 #9.
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_category_name_per_org"',
+            },
+          }),
+        })),
+      };
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Collides With Sibling' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      expect(loggerStub.warn).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
     });
   });
 
