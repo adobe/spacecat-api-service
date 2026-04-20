@@ -44,6 +44,8 @@
     "fastlyServiceId!important": "",
     "timeout": 900000,
     "nodeVersion": 24,
+    "awsVpcSubnetIds": ["${env.VPC_SUBNET_1}", "${env.VPC_SUBNET_2}"],
+    "awsVpcSecurityGroupIds": ["${env.VPC_SG_ID}"],
     "static": [
       "static/onboard/profiles.json"
     ]
