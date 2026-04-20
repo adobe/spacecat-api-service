@@ -1592,7 +1592,16 @@ export const onboardSingleSite = async (
     // Auto-detect locale if language and/or region is not provided
     if (!languageValid || !regionValid) {
       try {
-        const locale = await detectLocale({ baseUrl: baseURL });
+        const LOCALE_DETECT_TIMEOUT_MS = 10000;
+        const locale = await Promise.race([
+          detectLocale({ baseUrl: baseURL }),
+          new Promise((_, reject) => {
+            setTimeout(
+              () => reject(new Error(`Locale detection timed out after ${LOCALE_DETECT_TIMEOUT_MS}ms`)),
+              LOCALE_DETECT_TIMEOUT_MS,
+            );
+          }),
+        ]);
         if (!language && locale.language) {
           language = locale.language;
         }
@@ -1600,12 +1609,11 @@ export const onboardSingleSite = async (
           region = locale.region;
         }
       } catch (error) {
-        log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
-        await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
+        log.warn(`Unable to detect locale for site ${baseURL}, using defaults: ${error.message}`);
 
         // Fallback to default language and region
-        language = 'en';
-        region = 'US';
+        language = language || 'en';
+        region = region || 'US';
       }
     }
 
