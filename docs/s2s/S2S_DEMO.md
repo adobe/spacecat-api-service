@@ -398,7 +398,8 @@ Key properties:
 
 ### Audit Trail
 
-Every S2S token issuance is logged: consumer name, org_id, timestamp, caller IP.  
+Every S2S token issuance is logged: consumer name, org_id, timestamp, caller IP. for example :
+`[jwt] S2S consumer XXX-XXXXX-XXXX token used on route GET /sites/123435-78978-490`
 Every lifecycle event (register, update, suspend, revoke) fires a Slack notification:
 example:
 <img width="832" height="246" alt="image" src="https://github.com/user-attachments/assets/0e111da2-452c-48b2-bdeb-48cdaf4ddfef" />
