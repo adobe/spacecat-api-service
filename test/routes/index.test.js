@@ -903,6 +903,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/by-page-intent',
       'GET /sites/:siteId/referral-traffic/by-url',
       'GET /sites/:siteId/referral-traffic/business-impact',
+      'GET /sites/:siteId/referral-traffic/weeks',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
