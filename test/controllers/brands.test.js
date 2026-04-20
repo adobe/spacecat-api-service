@@ -2185,6 +2185,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           insert: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
@@ -2316,7 +2317,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
 
-    it('returns 201 with the existing row when a category with the same name already exists (idempotent)', async () => {
+    it('returns 200 with the existing row when a category with the same name already exists (idempotent update)', async () => {
       const existingRow = {
         id: 'uuid-existing',
         category_id: 'baseurl-discovery-research',
@@ -2331,6 +2332,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           insert: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
@@ -2350,7 +2352,7 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
       });
 
-      expect(response.status).to.equal(201);
+      expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.id).to.equal('baseurl-discovery-research');
       expect(body.uuid).to.equal('uuid-existing');
@@ -2362,6 +2364,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           insert: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
@@ -2945,7 +2948,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
 
-    it('returns 409 and logs at info (not error) when the storage layer raises a 23505 unique violation', async () => {
+    it('returns 409 and logs at warn (not error) when the storage layer raises a 23505 unique violation', async () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
@@ -2964,7 +2967,7 @@ describe('Brands Controller', () => {
           }),
         })),
       };
-      loggerStub.info.resetHistory();
+      loggerStub.warn.resetHistory();
       loggerStub.error.resetHistory();
       brandsController = BrandsController(context, loggerStub, mockEnv);
 
@@ -2978,8 +2981,8 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(409);
       const body = await response.json();
-      expect(body.message).to.match(/already exists/i);
-      expect(loggerStub.info).to.have.been.called;
+      expect(body.message).to.include('uq_topic_per_org');
+      expect(loggerStub.warn).to.have.been.called;
       expect(loggerStub.error).to.not.have.been.called;
     });
   });

@@ -62,7 +62,7 @@ export async function listTopics({
 
   const { data, error } = await query;
   if (error) {
-    throw new Error(`Failed to list topics: ${error.message}`);
+    throw new Error(`Failed to list topics: ${error.message}`, { cause: error });
   }
 
   return (data || []).map(mapDbTopicToV2);
@@ -108,15 +108,19 @@ export async function createTopic({
     .single();
 
   if (error) {
-    // Symmetry with categories: surface unique-constraint violations as 409
-    // so callers can handle conflicts idempotently without relying on 500
-    // bodies. LLMO-4370.
+    // Any unique-constraint violation that escapes the `organization_id,
+    // topic_id` upsert target is surfaced as a typed 409 so callers can
+    // handle it without mining 500 bodies. The message echoes the actual
+    // constraint name rather than hard-coding a field (the colliding
+    // column may not be `name`). LLMO-4370.
     if (error.code === '23505') {
-      const conflict = new Error(`Topic with name '${topic.name}' already exists for this organization`);
+      const match = /unique constraint "([^"]+)"/.exec(error.message || '');
+      const constraint = match ? match[1] : 'unique constraint';
+      const conflict = new Error(`Topic conflicts with ${constraint} for this organization`);
       conflict.status = 409;
       throw conflict;
     }
-    throw new Error(`Failed to create topic: ${error.message}`);
+    throw new Error(`Failed to create topic: ${error.message}`, { cause: error });
   }
 
   // Link topic to category via the topic_categories junction table.
@@ -181,7 +185,7 @@ export async function updateTopic({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to update topic: ${error.message}`);
+    throw new Error(`Failed to update topic: ${error.message}`, { cause: error });
   }
   if (!data) {
     return null;
@@ -215,7 +219,7 @@ export async function deleteTopic({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to delete topic: ${error.message}`);
+    throw new Error(`Failed to delete topic: ${error.message}`, { cause: error });
   }
   return !!data;
 }

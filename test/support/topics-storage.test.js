@@ -259,7 +259,7 @@ describe('topics-storage', () => {
       })).to.be.rejectedWith('Failed to create topic');
     });
 
-    it('throws a 409-typed error when the DB returns a 23505 unique violation', async () => {
+    it('throws a 409-typed error echoing the constraint name on a 23505 unique violation', async () => {
       const postgrestClient = {
         from: sinon.stub().returns(createChainableQuery({
           data: null,
@@ -281,8 +281,25 @@ describe('topics-storage', () => {
 
       expect(err).to.be.instanceOf(Error);
       expect(err.status).to.equal(409);
-      expect(err.message).to.match(/already exists/i);
-      expect(err.message).to.include('DupTopic');
+      expect(err.message).to.include('uq_topic_per_org');
+    });
+
+    it('still surfaces 409 with a generic message when the 23505 error lacks a constraint clause', async () => {
+      const postgrestClient = {
+        from: sinon.stub().returns(createChainableQuery({
+          data: null,
+          error: { code: '23505', message: '' },
+        })),
+      };
+
+      const err = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Whatever' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.message).to.match(/unique constraint/i);
     });
   });
 

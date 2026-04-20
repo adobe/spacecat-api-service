@@ -752,18 +752,20 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      const created = await createCategory({
+      const { category, created } = await createCategory({
         organizationId: spaceCatId,
         category: categoryData,
         postgrestClient,
         updatedBy,
       });
 
-      return createResponse(created, 201);
+      // 201 on insert, 200 on idempotent update — lets callers (UI toast,
+      // DRS audit log) distinguish "created new" from "ensured existing".
+      return createResponse(category, created ? 201 : 200);
     } catch (error) {
-      // Storage is idempotent by name: matching rows return 201 with the
-      // existing row, so we never see a 409 here. Anything caught here is a
-      // real failure.
+      // Storage is idempotent by name: matching rows return via the normal
+      // path, so we never see a 409 here. Anything caught here is a real
+      // failure.
       log.error(`Error creating category for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
     }
@@ -948,7 +950,10 @@ function BrandsController(ctx, log, env) {
       return createResponse(created, 201);
     } catch (error) {
       if (error?.status === 409) {
-        log.info(`Topic already exists for organization ${spaceCatId}: ${error.message}`);
+        // Warn (not error) — DRS-style idempotent retries stop polluting
+        // ERROR severity, but legitimate duplicate-submit bugs (UI double-
+        // click, malformed payload) remain visible at WARN for triage.
+        log.warn(`Topic conflict for organization ${spaceCatId}: ${error.message}`);
       } else {
         log.error(`Error creating topic for organization ${spaceCatId}:`, error);
       }

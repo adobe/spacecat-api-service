@@ -12,6 +12,22 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+// Canonicalize a display name for storage and comparison. Non-lossy:
+// preserves the client's casing and punctuation, but folds whitespace and
+// unicode-composition variants so that "  Taxonomy " and "Taxonomy" — or an
+// NFD vs NFC é — collapse to the same stored form. Semantic variants like
+// "A & B" vs "A and B" are intentionally NOT folded here; that requires a
+// business rule, not a canonical form.
+function canonicalizeName(name) {
+  return name.normalize('NFC').trim().replace(/\s+/g, ' ');
+}
+
+// PostgREST-pattern-safe escape of literal `%` and `_` so ilike() matches
+// an exact canonical string rather than a wildcard pattern.
+function escapeIlike(s) {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
 function mapDbCategoryToV2(row) {
   return {
     id: row.category_id,
@@ -56,45 +72,94 @@ export async function listCategories({
 
   const { data, error } = await query;
   if (error) {
-    throw new Error(`Failed to list categories: ${error.message}`);
+    throw new Error(`Failed to list categories: ${error.message}`, { cause: error });
   }
 
   return (data || []).map(mapDbCategoryToV2);
 }
 
+// Finds ANY row for the org whose canonical name matches (case-insensitive,
+// whitespace-folded, NFC). Includes soft-deleted rows so callers can choose
+// between idempotent update and resurrection. Note: DB unique constraint
+// `uq_category_name_per_org` is case-sensitive, so two concurrent inserts
+// with different cases can still both succeed — a full schema-level fix
+// requires a partial-index or generated-column migration (out of scope).
 async function findCategoryByName(postgrestClient, organizationId, name) {
+  const canonical = canonicalizeName(name);
   const { data, error } = await postgrestClient
     .from('categories')
     .select('*')
     .eq('organization_id', organizationId)
-    .eq('name', name)
-    .neq('status', 'deleted')
+    .ilike('name', escapeIlike(canonical))
     .maybeSingle();
   if (error) {
-    throw new Error(`Failed to lookup category by name: ${error.message}`);
+    throw new Error(`Failed to lookup category by name: ${error.message}`, { cause: error });
   }
-  return data || null;
+  return data;
 }
 
-async function updateExistingCategory(postgrestClient, existing, category, updatedBy) {
-  const patch = { updated_by: updatedBy };
-  if (category.origin && category.origin !== existing.origin) {
-    patch.origin = category.origin;
-  }
-  if (category.status && category.status !== existing.status) {
+// Builds the patch an idempotent re-POST should apply on top of an existing
+// row. Returns null when nothing meaningful changes — callers use that as a
+// signal to short-circuit without writing (and without bumping updated_by /
+// updated_at), so a no-op DRS heartbeat preserves the last human edit's
+// audit trail.
+//
+// Provenance rule: never downgrade `origin: 'human'` to `'ai'`. A scheduler
+// asserting `ai` must not erase a human curator's explicit labeling.
+// Resurrection from soft-deleted is always a write regardless of field diff.
+function buildCategoryPatch(existing, category, { resurrect }) {
+  const patch = {};
+
+  if (resurrect) {
+    patch.status = 'active';
+  } else if (category.status && category.status !== existing.status) {
     patch.status = category.status;
   }
 
+  if (category.origin && category.origin !== existing.origin) {
+    const downgrade = existing.origin === 'human' && category.origin === 'ai';
+    if (!downgrade) {
+      patch.origin = category.origin;
+    }
+  }
+
+  return Object.keys(patch).length === 0 ? null : patch;
+}
+
+async function updateExistingCategory(postgrestClient, existing, patch, updatedBy) {
   const { data, error } = await postgrestClient
     .from('categories')
-    .update(patch)
+    .update({ ...patch, updated_by: updatedBy })
     .eq('id', existing.id)
     .select()
-    .single();
+    .maybeSingle();
   if (error) {
-    throw new Error(`Failed to update existing category: ${error.message}`);
+    throw new Error(`Failed to update existing category: ${error.message}`, { cause: error });
+  }
+  if (!data) {
+    // Row was hard-deleted between lookup and update. Surface as a typed
+    // 409 so callers can retry the full POST — which will then take the
+    // insert path against a now-absent row.
+    const conflict = new Error('Category was concurrently modified; please retry');
+    conflict.status = 409;
+    throw conflict;
   }
   return mapDbCategoryToV2(data);
+}
+
+// Resolves an existing row against an incoming idempotent POST: either
+// short-circuits (no write, no audit-trail churn) or applies a patch —
+// including resurrecting soft-deleted rows. Returns { category, created }:
+// `created: true` when the row was resurrected (client-visible: the
+// resource reappears), otherwise false.
+async function resolveExistingCategory(postgrestClient, existing, category, updatedBy) {
+  const resurrect = existing.status === 'deleted';
+  const patch = buildCategoryPatch(existing, category, { resurrect });
+  if (!patch) {
+    return { category: mapDbCategoryToV2(existing), created: false };
+  }
+  const updated = await updateExistingCategory(postgrestClient, existing, patch, updatedBy);
+  return { category: updated, created: resurrect };
 }
 
 /**
@@ -116,7 +181,10 @@ async function updateExistingCategory(postgrestClient, existing, category, updat
  * @param {object} params.category - Category data { name, id?, origin?, status? }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
- * @returns {Promise<object>} Created or updated category
+ * @returns {Promise<{category: object, created: boolean}>}
+ *   `category` is the resulting row (mapped); `created` is true when a new
+ *   row was inserted and false when an existing row was updated. Callers
+ *   map this to HTTP 201 vs 200.
  */
 export async function createCategory({
   organizationId, category, postgrestClient, updatedBy = 'system',
@@ -128,16 +196,21 @@ export async function createCategory({
     throw new Error('Category name is required');
   }
 
-  const existing = await findCategoryByName(postgrestClient, organizationId, category.name);
-  if (existing) {
-    return updateExistingCategory(postgrestClient, existing, category, updatedBy);
+  const canonicalName = canonicalizeName(category.name);
+  if (!hasText(canonicalName)) {
+    throw new Error('Category name is required');
   }
 
-  const categoryId = category.id || category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const existing = await findCategoryByName(postgrestClient, organizationId, canonicalName);
+  if (existing) {
+    return resolveExistingCategory(postgrestClient, existing, category, updatedBy);
+  }
+
+  const categoryId = category.id || canonicalName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const row = {
     organization_id: organizationId,
     category_id: categoryId,
-    name: category.name,
+    name: canonicalName,
     origin: category.origin || 'human',
     status: category.status || 'active',
     updated_by: updatedBy,
@@ -152,15 +225,22 @@ export async function createCategory({
   if (error) {
     if (error.code === '23505' && /uq_category_name_per_org/.test(error.message || '')) {
       // Race: another writer inserted the same name between our lookup and
-      // insert. Retry the lookup once and fold into the normal update path.
-      const raced = await findCategoryByName(postgrestClient, organizationId, category.name);
+      // insert. Retry the lookup once and fold into the normal resolve path.
+      // If the retry lookup itself fails, preserve the original 23505 as
+      // the primary cause — it's the more diagnostic error for this path.
+      let raced = null;
+      try {
+        raced = await findCategoryByName(postgrestClient, organizationId, canonicalName);
+      } catch (_lookupErr) {
+        // Intentionally swallow — fall through to the original-error throw.
+      }
       if (raced) {
-        return updateExistingCategory(postgrestClient, raced, category, updatedBy);
+        return resolveExistingCategory(postgrestClient, raced, category, updatedBy);
       }
     }
-    throw new Error(`Failed to create category: ${error.message}`);
+    throw new Error(`Failed to create category: ${error.message}`, { cause: error });
   }
-  return mapDbCategoryToV2(data);
+  return { category: mapDbCategoryToV2(data), created: true };
 }
 
 /**
@@ -183,7 +263,7 @@ export async function updateCategory({
 
   const patch = { updated_by: updatedBy };
   if (updates.name !== undefined) {
-    patch.name = updates.name;
+    patch.name = canonicalizeName(updates.name);
   }
   if (updates.origin !== undefined) {
     patch.origin = updates.origin;
@@ -201,7 +281,7 @@ export async function updateCategory({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to update category: ${error.message}`);
+    throw new Error(`Failed to update category: ${error.message}`, { cause: error });
   }
   if (!data) {
     return null;
@@ -235,7 +315,7 @@ export async function deleteCategory({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to delete category: ${error.message}`);
+    throw new Error(`Failed to delete category: ${error.message}`, { cause: error });
   }
   return !!data;
 }

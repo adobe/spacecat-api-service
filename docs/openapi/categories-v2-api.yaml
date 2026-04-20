@@ -1,0 +1,192 @@
+v2-categories-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: status
+      in: query
+      required: false
+      description: Filter by category status. Default excludes deleted categories.
+      schema:
+        type: string
+        enum: [active, pending, deleted, ignored]
+        example: 'active'
+  get:
+    tags:
+      - customer-config
+    summary: List categories for an organization (v2)
+    description: |
+      Returns all categories for the given organization, backed by
+      PostgREST/Aurora. By default, deleted categories are excluded. Use the
+      `status` query parameter to filter by specific status or include deleted
+      categories.
+    operationId: listCategoriesForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Categories retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2CategoryListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  post:
+    tags:
+      - customer-config
+    summary: Create a category (idempotent by name) (v2)
+    description: |
+      Creates a new category for the organization, idempotent by name.
+
+      Name matching is case-insensitive and whitespace-normalized (NFC),
+      so `"Discovery & Research"`, `"  discovery  &  research  "`, and
+      `"DISCOVERY & RESEARCH"` resolve to the same category.
+
+      Behavior by outcome:
+      - **New row inserted** — returns `201 Created` with the new row.
+      - **Existing row matched with identical fields** — no-op; returns
+        `200 OK` with the existing row. Audit trail (`updatedAt`,
+        `updatedBy`) is preserved.
+      - **Existing row matched with differing fields** — patch applied to
+        `origin` / `status` (with provenance guard: `origin` is never
+        downgraded from `human` to `ai`), returns `200 OK` with the
+        updated row.
+      - **Soft-deleted row matched** — resurrected: status flipped to
+        `active`, stable `id` (slug) preserved, returns `201 Created`.
+
+      Clients discriminating creation from idempotent update should inspect
+      the HTTP status, not the response body (identical in both cases).
+
+      Never returns `409`: duplicate-name reposts are absorbed by design.
+    operationId: createCategoryForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2CategoryInput'
+    responses:
+      '200':
+        description: |
+          Existing category returned (idempotent update or no-op).
+          The `id` (slug) of the returned row is authoritative — it may
+          differ from a client-supplied `id` if the stored row was created
+          with a different slug.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Category'
+      '201':
+        description: |
+          New category created, or a soft-deleted category with the same
+          name was resurrected (status flipped back to `active`).
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Category'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-category-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: categoryId
+      in: path
+      required: true
+      description: Category business key (category_id slug)
+      schema:
+        type: string
+        example: 'baseurl-discovery-research'
+  patch:
+    tags:
+      - customer-config
+    summary: Update a category (v2)
+    description: |
+      Updates an existing category. Only provided fields are updated. The
+      `name` field is canonicalized (trim + whitespace-collapse + NFC) on
+      write.
+    operationId: updateCategoryForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2CategoryUpdateInput'
+    responses:
+      '200':
+        description: Category updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Category'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or category not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  delete:
+    tags:
+      - customer-config
+    summary: Delete a category (v2)
+    description: |
+      Soft-deletes a category by setting its status to `deleted`. The
+      category remains queryable with `?status=deleted` and can be
+      resurrected by POSTing a category with the same name.
+    operationId: deleteCategoryForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '204':
+        description: Category deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or category not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)

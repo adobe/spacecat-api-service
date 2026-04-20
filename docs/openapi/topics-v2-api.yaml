@@ -83,6 +83,14 @@ v2-topics-for-org:
         description: User does not have access to this organization
       '404':
         $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '409':
+        description: |
+          A unique-constraint violation escaped the `organization_id,
+          topic_id` upsert target. The response `message` echoes the actual
+          constraint name that fired (e.g. `uq_topic_per_org`) so callers
+          can discriminate between constraint classes without parsing 500
+          bodies. Treated as an idempotent retry signal by DRS-class
+          clients; logged at WARN (not ERROR) server-side.
       '500':
         $ref: './responses.yaml#/500'
       '503':
