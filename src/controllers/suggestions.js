@@ -45,6 +45,7 @@ import {
   ErrorWithStatusCode,
   getHostName,
   getIsSummitPlgEnabled,
+  isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
@@ -1102,7 +1103,10 @@ function SuggestionsController(ctx, sqs, env) {
     if (await getIsSummitPlgEnabled(site, ctx, context)) {
       const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
       if (notGrantedIds.length > 0) {
-        return forbidden(`The following suggestions are not granted: ${notGrantedIds.join(', ')}`);
+        const trialSuffix = isViewAsTrialRequest(context)
+          ? ' (trial simulation mode is active - disable the View as Trial toggle to deploy)'
+          : '';
+        return forbidden(`The following suggestions are not granted: ${notGrantedIds.join(', ')}${trialSuffix}`);
       }
     }
 

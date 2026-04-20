@@ -744,6 +744,112 @@ describe('Suggestions Controller', () => {
     expect(grantStub).to.not.have.been.called;
   });
 
+  it('filters suggestions by grant status when x-view-as-trial header is present', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: [],
+      grantIds: [`grant-${grantedId}`],
+    });
+    const ControllerWithTrial = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithTrial = ControllerWithTrial({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithTrial.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+  });
+
+  it('calls grantSuggestionsForOpportunity when x-view-as-trial is true', async () => {
+    const grantStub = sandbox.stub().resolves();
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(grantStub).to.have.been.calledOnce;
+    expect(grantStub).to.have.been.calledWith(mockSuggestionDataAccess, site, sinon.match.object);
+  });
+
+  it('grants and filters suggestions for view-as-trial request end-to-end', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: SUGGESTION_IDS.slice(1),
+      grantIds: [`grant-${grantedId}`],
+    });
+    const grantStub = sandbox.stub().resolves();
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    // grants are written first so filtering can find them
+    expect(grantStub).to.have.been.calledOnce;
+    // response is filtered to only granted suggestions
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(result[0].id).to.equal(grantedId);
+  });
+
+  it('filters suggestions by grant status for getByStatus when x-view-as-trial header is present', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: [],
+      grantIds: [`grant-${grantedId}`],
+    });
+    const response = await suggestionsController.getByStatus({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+  });
+
   it('does not call grantSuggestionsForOpportunity when no suggestions exist', async () => {
     const grantStub = sandbox.stub().resolves();
     mockSuggestion.allByOpportunityId.resolves([]);
@@ -3727,6 +3833,30 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.include('not granted');
       expect(body.message).to.include(SUGGESTION_IDS[2]);
       expect(body.message).to.not.include(SUGGESTION_IDS[0]);
+      expect(body.message).to.not.include('trial simulation');
+    });
+
+    it('includes trial simulation hint in 403 message when x-view-as-trial header is present', async () => {
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0]],
+        notGrantedIds: [SUGGESTION_IDS[2]],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`],
+      });
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.include('not granted');
+      expect(body.message).to.include('trial simulation');
+      expect(body.message).to.include('View as Trial');
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {

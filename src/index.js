@@ -77,7 +77,6 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
-import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -99,6 +98,7 @@ import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
+import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -128,7 +128,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -191,7 +191,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -243,12 +243,12 @@ async function run(request, context) {
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
     const tokensController = TokensController(context);
-    const plgOnboardingController = PlgOnboardingController(context);
     const imsOrgAccessController = ImsOrgAccessController(context);
     const contactSalesLeadsController = ContactSalesLeadsController(context);
     const featureFlagsController = FeatureFlagsController(context);
     const autofixChecksController = AutofixChecksController(context);
     const pageRelationshipsController = PageRelationshipsController(context);
+    const plgOnboardingController = PlgOnboardingController(context);
     const drsBpPgAuditController = DrsBpPgAuditController(context);
 
     const routeHandlers = getRouteHandlers(
@@ -294,13 +294,13 @@ async function run(request, context) {
       sentimentController,
       consumersController,
       tokensController,
-      plgOnboardingController,
       imsOrgAccessController,
       contactSalesLeadsController,
       featureFlagsController,
       pageRelationshipsController,
       ephemeralRunController,
       autofixChecksController,
+      plgOnboardingController,
       drsBpPgAuditController,
     );
 
@@ -312,9 +312,6 @@ async function run(request, context) {
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
-      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
-        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
-      }
       if (params.organizationId
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
@@ -324,6 +321,12 @@ async function run(request, context) {
       }
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
+      }
+      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.onboardingId && !isValidUUIDV4(params.onboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
       }
       if (params.executionId && !isValidUUID(params.executionId)) {
         return badRequest('Execution Id is invalid. Please provide a valid UUID.');
