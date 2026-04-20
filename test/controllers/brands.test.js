@@ -2166,24 +2166,32 @@ describe('Brands Controller', () => {
   });
 
   describe('createCategoryForOrg', () => {
+    const CATEGORY_ROW = {
+      id: 'cat-uuid',
+      category_id: 'my-category',
+      name: 'My Category',
+      status: 'active',
+      origin: 'human',
+      updated_at: '2026-01-01T00:00:00Z',
+      updated_by: 'user@test.com',
+    };
+
     beforeEach(() => {
+      // Lookup returns null (not found) on first .maybeSingle(), and .single()
+      // (from insert path) resolves the happy-path row. Tests that want the
+      // "existing row" path override maybeSingle to return CATEGORY_ROW.
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          insert: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
           single: sandbox.stub().resolves({
-            data: {
-              id: 'cat-uuid',
-              category_id: 'my-category',
-              name: 'My Category',
-              status: 'active',
-              origin: 'human',
-              updated_at: '2026-01-01T00:00:00Z',
-              updated_by: 'user@test.com',
-            },
+            data: CATEGORY_ROW,
             error: null,
           }),
         })),
@@ -2308,23 +2316,27 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
 
-    it('returns 409 when the storage layer throws a duplicate-name error', async () => {
+    it('returns 201 with the existing row when a category with the same name already exists (idempotent)', async () => {
+      const existingRow = {
+        id: 'uuid-existing',
+        category_id: 'baseurl-discovery-research',
+        name: 'Discovery & Research',
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-03-15T00:00:00Z',
+        updated_by: 'tester@adobe.com',
+      };
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          insert: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
-          single: sandbox.stub().resolves({
-            data: null,
-            error: {
-              code: '23505',
-              message: 'duplicate key value violates unique constraint "uq_category_name_per_org"',
-              details: 'Key (organization_id, name)=(..., DupTest) already exists.',
-              hint: '',
-            },
-          }),
+          maybeSingle: sandbox.stub().resolves({ data: existingRow, error: null }),
+          single: sandbox.stub().resolves({ data: existingRow, error: null }),
         })),
       };
       brandsController = BrandsController(context, loggerStub, mockEnv);
@@ -2332,33 +2344,36 @@ describe('Brands Controller', () => {
       const response = await brandsController.createCategoryForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID },
-        data: { name: 'DupTest' },
+        // Client posts a drifted slug; the stable `category_id` must be preserved.
+        data: { id: 'discovery-research', name: 'Discovery & Research' },
         dataAccess: mockDataAccess,
         attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
       });
 
-      expect(response.status).to.equal(409);
+      expect(response.status).to.equal(201);
       const body = await response.json();
-      expect(body.message).to.match(/already exists/i);
+      expect(body.id).to.equal('baseurl-discovery-research');
+      expect(body.uuid).to.equal('uuid-existing');
     });
 
-    it('returns 500 when the storage layer returns a non-23505 PostgREST error', async () => {
+    it('returns 500 when the lookup-by-name query fails with a non-23505 PostgREST error', async () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          insert: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
-          single: sandbox.stub().resolves({
+          maybeSingle: sandbox.stub().resolves({
             data: null,
             error: {
               code: '23503',
               message: 'insert or update on table "categories" violates foreign key constraint "categories_org_fk"',
-              details: '',
-              hint: '',
             },
           }),
+          single: sandbox.stub().resolves({ data: null, error: null }),
         })),
       };
       brandsController = BrandsController(context, loggerStub, mockEnv);
@@ -2373,7 +2388,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(500);
       const body = await response.json();
-      expect(body.message).to.match(/Failed to create category/);
+      expect(body.message).to.match(/Failed to lookup category by name/);
     });
   });
 
@@ -2928,6 +2943,44 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    it('returns 409 and logs at info (not error) when the storage layer raises a 23505 unique violation', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_topic_per_org"',
+              details: '',
+              hint: '',
+            },
+          }),
+        })),
+      };
+      loggerStub.info.resetHistory();
+      loggerStub.error.resetHistory();
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createTopicForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'DupTopic' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.message).to.match(/already exists/i);
+      expect(loggerStub.info).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
     });
   });
 

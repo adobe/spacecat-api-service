@@ -108,6 +108,14 @@ export async function createTopic({
     .single();
 
   if (error) {
+    // Symmetry with categories: surface unique-constraint violations as 409
+    // so callers can handle conflicts idempotently without relying on 500
+    // bodies. LLMO-4370.
+    if (error.code === '23505') {
+      const conflict = new Error(`Topic with name '${topic.name}' already exists for this organization`);
+      conflict.status = 409;
+      throw conflict;
+    }
     throw new Error(`Failed to create topic: ${error.message}`);
   }
 

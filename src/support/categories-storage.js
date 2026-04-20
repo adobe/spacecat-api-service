@@ -62,15 +62,61 @@ export async function listCategories({
   return (data || []).map(mapDbCategoryToV2);
 }
 
+async function findCategoryByName(postgrestClient, organizationId, name) {
+  const { data, error } = await postgrestClient
+    .from('categories')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('name', name)
+    .neq('status', 'deleted')
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to lookup category by name: ${error.message}`);
+  }
+  return data || null;
+}
+
+async function updateExistingCategory(postgrestClient, existing, category, updatedBy) {
+  const patch = { updated_by: updatedBy };
+  if (category.origin && category.origin !== existing.origin) {
+    patch.origin = category.origin;
+  }
+  if (category.status && category.status !== existing.status) {
+    patch.status = category.status;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('categories')
+    .update(patch)
+    .eq('id', existing.id)
+    .select()
+    .single();
+  if (error) {
+    throw new Error(`Failed to update existing category: ${error.message}`);
+  }
+  return mapDbCategoryToV2(data);
+}
+
 /**
- * Creates a category in the categories table.
+ * Creates a category in the categories table, idempotent by name.
+ *
+ * If a non-deleted category with the same name already exists for the
+ * organization, its non-key fields are refreshed (origin/status/updated_by)
+ * and the existing row is returned — the stable `category_id` slug is
+ * preserved so foreign-key references remain valid.
+ *
+ * Rationale: clients (notably DRS) re-post the same canonical categories
+ * on every sync run with a potentially drifted slug. Without name-level
+ * idempotency, every such re-post trips `uq_category_name_per_org` and
+ * surfaces as a 409 — thousands per day of false-positive ERROR logs.
+ * See LLMO-4370.
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
- * @param {object} params.category - Category data { name, origin? }
+ * @param {object} params.category - Category data { name, id?, origin?, status? }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
- * @returns {Promise<object>} Created category
+ * @returns {Promise<object>} Created or updated category
  */
 export async function createCategory({
   organizationId, category, postgrestClient, updatedBy = 'system',
@@ -82,8 +128,12 @@ export async function createCategory({
     throw new Error('Category name is required');
   }
 
-  const categoryId = category.id || category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const existing = await findCategoryByName(postgrestClient, organizationId, category.name);
+  if (existing) {
+    return updateExistingCategory(postgrestClient, existing, category, updatedBy);
+  }
 
+  const categoryId = category.id || category.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const row = {
     organization_id: organizationId,
     category_id: categoryId,
@@ -95,15 +145,18 @@ export async function createCategory({
 
   const { data, error } = await postgrestClient
     .from('categories')
-    .upsert(row, { onConflict: 'organization_id,category_id' })
+    .insert(row)
     .select()
     .single();
 
   if (error) {
     if (error.code === '23505' && /uq_category_name_per_org/.test(error.message || '')) {
-      const conflict = new Error(`Category with name '${category.name}' already exists for this organization`);
-      conflict.status = 409;
-      throw conflict;
+      // Race: another writer inserted the same name between our lookup and
+      // insert. Retry the lookup once and fold into the normal update path.
+      const raced = await findCategoryByName(postgrestClient, organizationId, category.name);
+      if (raced) {
+        return updateExistingCategory(postgrestClient, raced, category, updatedBy);
+      }
     }
     throw new Error(`Failed to create category: ${error.message}`);
   }

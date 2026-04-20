@@ -761,6 +761,9 @@ function BrandsController(ctx, log, env) {
 
       return createResponse(created, 201);
     } catch (error) {
+      // Storage is idempotent by name: matching rows return 201 with the
+      // existing row, so we never see a 409 here. Anything caught here is a
+      // real failure.
       log.error(`Error creating category for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
     }
@@ -944,7 +947,11 @@ function BrandsController(ctx, log, env) {
 
       return createResponse(created, 201);
     } catch (error) {
-      log.error(`Error creating topic for organization ${spaceCatId}:`, error);
+      if (error?.status === 409) {
+        log.info(`Topic already exists for organization ${spaceCatId}: ${error.message}`);
+      } else {
+        log.error(`Error creating topic for organization ${spaceCatId}:`, error);
+      }
       return createErrorResponse(error);
     }
   };
