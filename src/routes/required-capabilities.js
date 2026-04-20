@@ -12,8 +12,16 @@
 
 /**
  * Routes that are intentionally excluded from S2S consumer access.
- * Deny-by-default blocks these for S2S consumers. Every omission is a conscious decision
- * documented below. These must never be added to routeRequiredCapabilities.
+ *
+ * Enforcement note: deny-by-default for S2S JWT callers is driven by *absence* of a route
+ * from `routeRequiredCapabilities` (see `s2sAuthWrapper` in `@adobe/spacecat-shared-http-utils`).
+ * This list is documentation + a coverage-test assertion — it records the deliberate decision
+ * to leave a route out of `routeRequiredCapabilities` so the decision is visible, greppable,
+ * and reviewable. Admin `x-api-key` callers bypass the S2S path entirely and are unaffected
+ * by either list.
+ *
+ * Every omission is a conscious decision documented below. A route must never appear in both
+ * this list and `routeRequiredCapabilities` — the disjointness invariant is enforced by test.
  *
  * @type {string[]}
  */
@@ -145,12 +153,14 @@ export const INTERNAL_ROUTES = [
   // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
   'GET /v2/regions',
 
-  // Monitoring — DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
+  // Monitoring - DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
   // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
   // registration). Kept internal because reusing `audit:read` would silently broaden that
   // site-scoped capability to cover platform/infra monitoring data. Revisit when a concrete
-  // S2S consumer exists and introduce a dedicated capability (e.g. `monitoring:read`) at
-  // that time rather than bundling into `audit:read`.
+  // S2S consumer exists and introduce a dedicated capability scoped to the exposed resource
+  // (e.g. `drsBrandPresenceAudit:read`) rather than bundling into `audit:read` or a domain
+  // bucket like `monitoring:read` that would re-create the same problem for the next
+  // monitoring endpoint.
   'GET /monitoring/drs-bp-pg-audit',
 ];
 
@@ -159,6 +169,12 @@ export const INTERNAL_ROUTES = [
  * Format: 'entity:action' where action is 'read' for GET, 'write' for all other methods.
  * Entity names use camelCase consistently (e.g. apiKey, botBlocker, importJob) to avoid
  * silent auth failures when granting capabilities — consumers must use exact entity names.
+ *
+ * Authoritative entity list: entity names must match those registered in
+ * `@adobe/spacecat-shared-data-access` at `src/models/base/entity.registry.js` (plus the
+ * S3-backed `configuration` entity). Capability strings referencing unregistered entities are
+ * schema-valid but can never be granted to an S2S consumer — `Consumer.validateCapabilities`
+ * in the data-access layer rejects them. Do not invent entity names here.
  *
  * Routes not listed here (and not in INTERNAL_ROUTES) are denied for S2S consumers.
  * Only routes explicitly defined with a capability in this mapping can be called by S2S consumers.

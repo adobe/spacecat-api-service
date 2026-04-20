@@ -17,11 +17,12 @@ drs-bp-pg-audit:
       `(scope_prefix, handler_name, projected_at, skipped)`. A composite index on these
       columns is required for acceptable query performance on large tables.
 
-      Auth note: this endpoint is admin `x-api-key` only — it is listed in `INTERNAL_ROUTES`
-      and not exposed to S2S JWT consumers. DRS workers run in a separate AWS account without
-      an S2S consumer registration. If a future S2S consumer needs access, introduce a
-      dedicated capability (e.g. `monitoring:read`) rather than reusing the site-scoped
-      `audit:read` capability.
+      Auth note: this endpoint is admin `x-api-key` only — S2S JWT consumers are denied at the
+      gate because the route is absent from `routeRequiredCapabilities` (and listed in
+      `INTERNAL_ROUTES` for visibility). DRS workers run in a separate AWS account without an
+      S2S consumer registration. If a future S2S consumer needs access, introduce a dedicated
+      resource-scoped capability (e.g. `drsBrandPresenceAudit:read`) rather than reusing the
+      site-scoped `audit:read` or a domain-bucket capability like `monitoring:read`.
 
       Results are paginated. Inspect `hasMore` in the response to determine whether additional
       pages exist. Increment `offset` by `limit` (default 500) and repeat while `hasMore` is
