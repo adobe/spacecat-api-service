@@ -916,7 +916,7 @@ llmo-onboard:
                   type:
                     - string
                     - 'null'
-                  enum: [aem-cs-fastly, other, null]
+                  enum: [aem-cs-fastly, commerce-fastly, other, null]
                   description: CDN provider detected via DNS during onboarding. null when detection is inconclusive.
                   example: "aem-cs-fastly"
                 status:

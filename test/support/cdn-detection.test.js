@@ -35,6 +35,7 @@ describe('cdn-detection', () => {
     dnsStubs = {
       resolveCname: sandbox.stub(),
       resolve4: sandbox.stub(),
+      resolve6: sandbox.stub().resolves([]),
     };
 
     ({ detectCdnForDomain } = await esmock('../../src/support/cdn-detection.js', {
@@ -108,12 +109,15 @@ describe('cdn-detection', () => {
     expect(result).to.equal('aem-cs-fastly');
   });
 
-  it('matches CNAME with includes (same as edge-routing-utils)', async () => {
+  it('does NOT match an attacker-suffixed CNAME (suffix match, not substring)', async () => {
+    // Demonstrates the tightening from includes() to endsWith(): an attacker
+    // cannot add additional labels after a known Fastly target and still be
+    // classified as AEM CS Fastly.
     dnsStubs.resolveCname.resolves(['evil.cdn.adobeaemcloud.com.attacker.com']);
     dnsStubs.resolve4.resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.equal('aem-cs-fastly');
+    expect(result).to.equal('other');
   });
 
   it('returns other when domain does not match Fastly CNAME or IPs', async () => {
@@ -143,6 +147,7 @@ describe('cdn-detection', () => {
   it('returns other when domain does not exist (ENOTFOUND) for all lookups', async () => {
     dnsStubs.resolveCname.rejects(dnsError('ENOTFOUND'));
     dnsStubs.resolve4.rejects(dnsError('ENOTFOUND'));
+    dnsStubs.resolve6.rejects(dnsError('ENOTFOUND'));
 
     const result = await detectCdnForDomain('nonexistent.example.com');
     expect(result).to.equal('other');
@@ -159,6 +164,7 @@ describe('cdn-detection', () => {
   it('returns null when all DNS calls fail with SERVFAIL', async () => {
     dnsStubs.resolveCname.rejects(dnsError('SERVFAIL'));
     dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
+    dnsStubs.resolve6.rejects(dnsError('SERVFAIL'));
 
     const result = await detectCdnForDomain('example.com');
     expect(result).to.be.null;
@@ -223,6 +229,141 @@ describe('cdn-detection', () => {
     expect(result).to.be.null;
   });
 
+  describe('commerce-fastly', () => {
+    const commerceIPs = [
+      '151.101.1.124',
+      '151.101.65.124',
+      '151.101.129.124',
+      '151.101.193.124',
+    ];
+    const commerceIPv6 = [
+      '2a04:4e42:200::380',
+      '2a04:4e42:400::380',
+      '2a04:4e42:600::380',
+      '2a04:4e42::380',
+    ];
+
+    it('returns commerce-fastly when www CNAME matches prod.magentocloud.map.fastly.net', async () => {
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves(['prod.magentocloud.map.fastly.net.']);
+      dnsStubs.resolve4.resolves([]);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('commerce-fastly');
+    });
+
+    it('returns commerce-fastly when www CNAME matches basic.magentocloud.map.fastly.net', async () => {
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves(['basic.magentocloud.map.fastly.net.']);
+      dnsStubs.resolve4.resolves([]);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('commerce-fastly');
+    });
+
+    it('returns commerce-fastly when bare CNAME matches commerce pattern', async () => {
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves([]);
+      dnsStubs.resolve4.withArgs('www.example.com').resolves([]);
+      dnsStubs.resolveCname.withArgs('example.com').resolves(['prod.magentocloud.map.fastly.net']);
+      dnsStubs.resolve4.withArgs('example.com').resolves([]);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('commerce-fastly');
+    });
+
+    it('returns commerce-fastly when CNAME is a chained subdomain of the commerce target', async () => {
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves(['foo.prod.magentocloud.map.fastly.net.']);
+      dnsStubs.resolve4.resolves([]);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('commerce-fastly');
+    });
+
+    it('returns commerce-fastly for each of the 4 known Commerce A-record IPs', async () => {
+      for (const ip of commerceIPs) {
+        dnsStubs.resolveCname.reset();
+        dnsStubs.resolve4.reset();
+        dnsStubs.resolve6.reset();
+        dnsStubs.resolveCname.resolves([]);
+        dnsStubs.resolve4.withArgs('www.example.com').resolves([ip]);
+        dnsStubs.resolve6.resolves([]);
+
+        // eslint-disable-next-line no-await-in-loop
+        const result = await detectCdnForDomain('example.com');
+        expect(result).to.equal('commerce-fastly', `Expected commerce-fastly for IP ${ip}`);
+      }
+    });
+
+    it('returns commerce-fastly for each of the 4 known Commerce AAAA-record IPs', async () => {
+      for (const ipv6 of commerceIPv6) {
+        dnsStubs.resolveCname.reset();
+        dnsStubs.resolve4.reset();
+        dnsStubs.resolve6.reset();
+        dnsStubs.resolveCname.resolves([]);
+        dnsStubs.resolve4.resolves([]);
+        dnsStubs.resolve6.withArgs('www.example.com').resolves([ipv6]);
+
+        // eslint-disable-next-line no-await-in-loop
+        const result = await detectCdnForDomain('example.com');
+        expect(result).to.equal('commerce-fastly', `Expected commerce-fastly for IPv6 ${ipv6}`);
+      }
+    });
+
+    it('returns commerce-fastly when only AAAA matches (CNAME and A return ENODATA)', async () => {
+      dnsStubs.resolveCname.rejects(dnsError('ENODATA'));
+      dnsStubs.resolve4.rejects(dnsError('ENODATA'));
+      dnsStubs.resolve6.withArgs('www.example.com').resolves(['2a04:4e42::380']);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('commerce-fastly');
+    });
+
+    it('returns other when CNAME/A/AAAA all resolve but none match', async () => {
+      dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
+      dnsStubs.resolve4.resolves(['1.2.3.4']);
+      dnsStubs.resolve6.resolves(['2001:db8::1']);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('other');
+    });
+
+    it('returns null when AAAA lookup fails with SERVFAIL on www and bare returns other', async () => {
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves([]);
+      dnsStubs.resolve4.withArgs('www.example.com').resolves([]);
+      dnsStubs.resolve6.withArgs('www.example.com').rejects(dnsError('SERVFAIL'));
+      dnsStubs.resolveCname.withArgs('example.com').resolves(['other-cdn.example.net.']);
+      dnsStubs.resolve4.withArgs('example.com').resolves(['1.2.3.4']);
+      dnsStubs.resolve6.withArgs('example.com').resolves([]);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.be.null;
+    });
+
+    it('AEM CS Fastly wins when both CNAME signature sets theoretically match at the CNAME layer', async () => {
+      // Contrived: a CNAME answer containing both an AEM CS target and a
+      // Commerce target. Per the detection contract, AEM CS is evaluated
+      // first within each layer as a deterministic tie-breaker.
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves([
+        'cdn.adobeaemcloud.com',
+        'prod.magentocloud.map.fastly.net',
+      ]);
+      dnsStubs.resolve4.resolves([]);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('aem-cs-fastly');
+    });
+
+    it('AEM CS Fastly wins when both A-record signature sets theoretically match at the A layer', async () => {
+      // Contrived: an A answer containing both an AEM CS IP and a Commerce IP.
+      dnsStubs.resolveCname.resolves([]);
+      dnsStubs.resolve4.withArgs('www.example.com').resolves([
+        '151.101.195.10',
+        '151.101.1.124',
+      ]);
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('aem-cs-fastly');
+    });
+  });
+
   describe('logging', () => {
     let log;
 
@@ -266,6 +407,26 @@ describe('cdn-detection', () => {
       expect(result).to.be.null;
       expect(log.info).to.have.been.calledWith(sinon.match('Detected CNAMES for domain www.example.com'));
       expect(log.info).to.have.been.calledWith(sinon.match('DNS lookup failed for www.example.com (A record)'));
+    });
+
+    it('logs AAAA failure when resolve6 fails with SERVFAIL', async () => {
+      dnsStubs.resolveCname.resolves(['other-cdn.example.net.']);
+      dnsStubs.resolve4.resolves(['1.2.3.4']);
+      dnsStubs.resolve6.rejects(dnsError('SERVFAIL'));
+
+      const result = await detectCdnForDomain('example.com', log);
+      expect(result).to.be.null;
+      expect(log.info).to.have.been.calledWith(sinon.match('DNS lookup failed for www.example.com (AAAA record)'));
+    });
+
+    it('logs IPv6 answer when AAAA records are present', async () => {
+      dnsStubs.resolveCname.resolves([]);
+      dnsStubs.resolve4.resolves([]);
+      dnsStubs.resolve6.withArgs('www.example.com').resolves(['2a04:4e42::380']);
+
+      const result = await detectCdnForDomain('example.com', log);
+      expect(result).to.equal('commerce-fastly');
+      expect(log.info).to.have.been.calledWith(sinon.match('Detected IPv6 for domain www.example.com'));
     });
 
     it('logs empty CNAME and IP arrays like edge-routing-utils (template interpolation)', async () => {
