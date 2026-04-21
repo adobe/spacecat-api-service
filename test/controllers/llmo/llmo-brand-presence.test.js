@@ -6166,7 +6166,7 @@ describe('llmo-brand-presence', () => {
     it('returns topicId when path is UUID and no execution rows', async () => {
       const topicUuid = 'd4e5f6a7-b8c9-0123-def0-123456789012';
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = topicUuid;
@@ -6206,7 +6206,7 @@ describe('llmo-brand-presence', () => {
 
     it('filters by topics column using decoded topicId', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'AI%20Overview';
@@ -6220,7 +6220,7 @@ describe('llmo-brand-presence', () => {
 
     it('filters by topic_id when topicId path is a UUID', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
@@ -6259,7 +6259,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = topicUuid;
@@ -6300,7 +6300,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = topicUuid;
@@ -6317,7 +6317,7 @@ describe('llmo-brand-presence', () => {
 
     it('filters by brand_id when brandId is a UUID', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000001';
@@ -6356,7 +6356,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'AI%20Overview';
@@ -6420,7 +6420,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'AI%20Overview';
@@ -6501,7 +6501,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: execRows, error: null },
+        brand_presence_executions_active: { data: execRows, error: null },
         brand_presence_sources: { data: sourceRows, error: null },
       });
       mockContext.params.topicId = 'T';
@@ -6550,7 +6550,7 @@ describe('llmo-brand-presence', () => {
 
     it('applies regionCode and origin filters from ctx.data', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'T';
@@ -6604,7 +6604,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'T';
@@ -6704,7 +6704,7 @@ describe('llmo-brand-presence', () => {
     it('returns topicId when path is UUID and no execution rows (prompt-detail)', async () => {
       const topicUuid = 'e5f6a7b8-c9d0-1234-e789-012345678902';
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = topicUuid;
@@ -6744,7 +6744,7 @@ describe('llmo-brand-presence', () => {
 
     it('filters by topics and prompt columns', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'AI%20Overview';
@@ -6760,7 +6760,7 @@ describe('llmo-brand-presence', () => {
 
     it('filters by topic_id when topicId path is a UUID', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       const topicUuid = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
@@ -6801,7 +6801,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = topicUuid;
@@ -6844,7 +6844,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = topicUuid;
@@ -6862,7 +6862,7 @@ describe('llmo-brand-presence', () => {
 
     it('applies region_code filter when promptRegion is provided', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.data = { prompt: 'What is AI?', promptRegion: 'US' };
@@ -6876,7 +6876,7 @@ describe('llmo-brand-presence', () => {
 
     it('applies regionCode and origin filters from ctx.data via buildDetailExecQuery', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.data = { prompt: 'What is AI?', region: 'DE', origin: 'paid' };
@@ -6891,7 +6891,7 @@ describe('llmo-brand-presence', () => {
 
     it('also accepts prompt_region (snake_case alias)', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.data = { prompt: 'What is AI?', prompt_region: 'DE' };
@@ -6952,7 +6952,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.data = { prompt: 'What is AI?' };
@@ -7023,7 +7023,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'T';
@@ -7060,7 +7060,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'T';
@@ -7076,7 +7076,7 @@ describe('llmo-brand-presence', () => {
 
     it('filters by brand_id when brandId is a UUID', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
@@ -7139,7 +7139,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'T';
@@ -7192,7 +7192,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: execRows, error: null },
+        brand_presence_executions_active: { data: execRows, error: null },
         brand_presence_sources: { data: sourceRows, error: null },
       });
       mockContext.params.topicId = 'T';
@@ -7333,7 +7333,7 @@ describe('llmo-brand-presence', () => {
         model: 'chatgpt-free',
       };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_executions_active: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7352,7 +7352,7 @@ describe('llmo-brand-presence', () => {
         platform: 'chatgpt-free',
       };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_executions_active: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7371,7 +7371,7 @@ describe('llmo-brand-presence', () => {
         platform: 'chatgpt-free',
       };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_executions_active: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7390,7 +7390,7 @@ describe('llmo-brand-presence', () => {
         platform: 'chatgpt-free',
       };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_executions_active: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7418,7 +7418,7 @@ describe('llmo-brand-presence', () => {
 
     it('returns notFound when execution row is missing', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7432,7 +7432,7 @@ describe('llmo-brand-presence', () => {
     it('returns notFound when execution_date is empty on the row', async () => {
       const row = { ...fullExecRow, execution_date: '' };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [row], error: null },
+        brand_presence_executions_active: { data: [row], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7445,7 +7445,7 @@ describe('llmo-brand-presence', () => {
 
     it('returns internalServerError when execution query returns PostgREST error', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: null, error: { message: 'exec failed' } },
+        brand_presence_executions_active: { data: null, error: { message: 'exec failed' } },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7461,7 +7461,7 @@ describe('llmo-brand-presence', () => {
 
     it('returns internalServerError when sources query returns PostgREST error', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_executions_active: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: null, error: { message: 'sources failed' } },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7535,7 +7535,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_executions_active: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: sourceRows, error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7580,7 +7580,7 @@ describe('llmo-brand-presence', () => {
         site_id: null,
       };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [execRow], error: null },
+        brand_presence_executions_active: { data: [execRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7596,7 +7596,7 @@ describe('llmo-brand-presence', () => {
     it('returns empty executionId on execution summary when id is null on row', async () => {
       const execRow = { ...fullExecRow, id: null };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [execRow], error: null },
+        brand_presence_executions_active: { data: [execRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7611,7 +7611,7 @@ describe('llmo-brand-presence', () => {
     it('returns empty model on execution summary when model is null on row', async () => {
       const execRow = { ...fullExecRow, model: null };
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [execRow], error: null },
+        brand_presence_executions_active: { data: [execRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7625,7 +7625,7 @@ describe('llmo-brand-presence', () => {
 
     it('returns empty sources when none exist for the execution', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [fullExecRow], error: null },
+        brand_presence_executions_active: { data: [fullExecRow], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.dataAccess.Site.postgrestService = client;
@@ -7639,7 +7639,7 @@ describe('llmo-brand-presence', () => {
 
     it('filters by brand_id when brandId is a UUID', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000001';
@@ -7653,7 +7653,7 @@ describe('llmo-brand-presence', () => {
 
     it('applies regionCode and origin filters from ctx.data', async () => {
       const client = createTableAwareMock({
-        brand_presence_executions: { data: [], error: null },
+        brand_presence_executions_active: { data: [], error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.data = {
