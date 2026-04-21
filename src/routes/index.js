@@ -468,6 +468,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
     'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,

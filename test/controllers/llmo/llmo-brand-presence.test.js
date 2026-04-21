@@ -17,6 +17,7 @@ import {
   addDaysToDate,
   applyTopicPathFilter,
   topicIdForDetailResponse,
+  promptIdForDetailResponse,
   topicLabelForDetailResponse,
   aggregateDetailSources,
   aggregateSentimentByWeek,
@@ -37,6 +38,8 @@ import {
   fetchBrandsForOrgSite,
   resolveSiteIdsForConfigPageIntents,
   createPromptDetailHandler,
+  createPromptDetailByPromptIdHandler,
+  promptTextForDetailEnvelope,
   createExecutionSourcesHandler,
   createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler,
@@ -332,9 +335,26 @@ describe('llmo-brand-presence', () => {
   });
 
   describe('topicIdForDetailResponse', () => {
-    it('returns topic_id from first row when present', () => {
+    it('returns topic_id from the only row when present', () => {
       const id = 'f6a7b8c9-d0e1-2345-f678-901234567890';
       expect(topicIdForDetailResponse([{ topic_id: id }], 'Any Topic')).to.equal(id);
+    });
+
+    it('prefers topic_id on the newest execution_date row', () => {
+      const newest = '019cb903-1184-7f92-8325-f9d1176af099';
+      const older = '019cb903-1184-7f92-8325-f9d1176af088';
+      expect(topicIdForDetailResponse([
+        { topic_id: older, execution_date: '2026-03-01' },
+        { topic_id: newest, execution_date: '2026-03-08' },
+      ], 'Any Topic')).to.equal(newest);
+    });
+
+    it('falls back to an older row when newest has no topic_id', () => {
+      const older = '019cb903-1184-7f92-8325-f9d1176af088';
+      expect(topicIdForDetailResponse([
+        { topic_id: older, execution_date: '2026-03-01' },
+        { topic_id: null, execution_date: '2026-03-08' },
+      ], 'Any Topic')).to.equal(older);
     });
 
     it('returns trimmed UUID path when rows lack topic_id', () => {
@@ -347,9 +367,61 @@ describe('llmo-brand-presence', () => {
       expect(topicIdForDetailResponse([], 'My Topic')).to.be.null;
     });
 
-    it('returns UUID path when first row topic_id is empty string', () => {
+    it('returns UUID path when no row has a usable topic_id', () => {
       const id = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
-      expect(topicIdForDetailResponse([{ topic_id: '' }], id)).to.equal(id);
+      expect(topicIdForDetailResponse([{ topic_id: '', execution_date: '2026-03-01' }], id)).to.equal(id);
+    });
+  });
+
+  describe('promptIdForDetailResponse', () => {
+    it('returns empty string when there are no rows', () => {
+      expect(promptIdForDetailResponse([])).to.equal('');
+      expect(promptIdForDetailResponse(null)).to.equal('');
+    });
+
+    it('returns empty string when no row has prompt_id', () => {
+      expect(promptIdForDetailResponse([
+        { prompt_id: null, execution_date: '2026-03-02' },
+        { execution_date: '2026-03-01' },
+      ])).to.equal('');
+    });
+
+    it('prefers prompt_id on the newest execution_date row', () => {
+      const newest = '019cb903-1184-7f92-8325-f9d1176af099';
+      const older = '019cb903-1184-7f92-8325-f9d1176af088';
+      expect(promptIdForDetailResponse([
+        { prompt_id: older, execution_date: '2026-03-01' },
+        { prompt_id: newest, execution_date: '2026-03-08' },
+      ])).to.equal(newest);
+    });
+
+    it('falls back to an older row when newest has no prompt_id', () => {
+      const older = '019cb903-1184-7f92-8325-f9d1176af088';
+      expect(promptIdForDetailResponse([
+        { prompt_id: older, execution_date: '2026-03-01' },
+        { prompt_id: null, execution_date: '2026-03-08' },
+      ])).to.equal(older);
+    });
+  });
+
+  describe('promptTextForDetailEnvelope', () => {
+    it('returns empty string when there are no rows', () => {
+      expect(promptTextForDetailEnvelope([])).to.equal('');
+      expect(promptTextForDetailEnvelope(null)).to.equal('');
+    });
+
+    it('prefers prompt text on the newest execution_date row', () => {
+      expect(promptTextForDetailEnvelope([
+        { prompt: 'older text', execution_date: '2026-03-01' },
+        { prompt: 'newer text', execution_date: '2026-03-08' },
+      ])).to.equal('newer text');
+    });
+
+    it('falls back to an older row when newest has empty prompt', () => {
+      expect(promptTextForDetailEnvelope([
+        { prompt: 'older text', execution_date: '2026-03-01' },
+        { prompt: '', execution_date: '2026-03-08' },
+      ])).to.equal('older text');
     });
   });
 
@@ -358,8 +430,22 @@ describe('llmo-brand-presence', () => {
       expect(topicLabelForDetailResponse([], 'My Topic')).to.equal('My Topic');
     });
 
-    it('returns first row topics when present', () => {
+    it('returns topics from the only row when present', () => {
       expect(topicLabelForDetailResponse([{ topics: 'AI Overview' }], 'ignored')).to.equal('AI Overview');
+    });
+
+    it('prefers topics on the newest execution_date row', () => {
+      expect(topicLabelForDetailResponse([
+        { topics: 'Older Label', execution_date: '2026-03-01' },
+        { topics: 'Newer Label', execution_date: '2026-03-08' },
+      ], 'ignored')).to.equal('Newer Label');
+    });
+
+    it('falls back to an older row when newest has empty topics', () => {
+      expect(topicLabelForDetailResponse([
+        { topics: 'Legacy Label', execution_date: '2026-03-01' },
+        { topics: '', execution_date: '2026-03-08' },
+      ], 'fallback')).to.equal('Legacy Label');
     });
 
     it('returns path when first row topics is null', () => {
@@ -4454,6 +4540,8 @@ describe('llmo-brand-presence', () => {
       expect(item.position).to.equal('3');
       expect(item.sentiment).to.equal('Positive');
       expect(item.origin).to.equal('human');
+      expect(item.topicId).to.equal('');
+      expect(item.promptId).to.equal('');
     });
 
     it('deduplicates by prompt|region_code keeping latest execution', () => {
@@ -4477,6 +4565,8 @@ describe('llmo-brand-presence', () => {
       expect(result).to.have.lengthOf(1);
       expect(result[0].executionDate).to.equal('2026-03-10');
       expect(result[0].visibilityScore).to.equal(90);
+      expect(result[0].topicId).to.equal('');
+      expect(result[0].promptId).to.equal('');
     });
 
     it('sets isAnswered to false when error_code is present', () => {
@@ -4521,6 +4611,8 @@ describe('llmo-brand-presence', () => {
       expect(result[0].sentiment).to.equal('');
       expect(result[0].errorCode).to.equal('');
       expect(result[0].origin).to.equal('');
+      expect(result[0].topicId).to.equal('');
+      expect(result[0].promptId).to.equal('');
     });
 
     it('aggregates mentions and citations across all execution rows per prompt', () => {
@@ -4560,6 +4652,8 @@ describe('llmo-brand-presence', () => {
       // Latest execution's metadata is used
       expect(result[0].executionDate).to.equal('2026-03-15');
       expect(result[0].visibilityScore).to.equal(90);
+      expect(result[0].topicId).to.equal('');
+      expect(result[0].promptId).to.equal('');
     });
 
     it('uses "Unknown" for null topics and counts citations correctly', () => {
@@ -4578,6 +4672,37 @@ describe('llmo-brand-presence', () => {
       expect(result[0].topic).to.equal('Unknown');
       expect(result[0].citationsCount).to.equal(1);
       expect(result[0].mentionsCount).to.equal(0);
+      expect(result[0].topicId).to.equal('');
+      expect(result[0].promptId).to.equal('');
+    });
+
+    it('includes topicId and promptId from the latest execution row', () => {
+      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const promptUuid = 'f1e2d3c4-b5a6-9876-5432-10fedcba9876';
+      const rows = [
+        {
+          topics: 'PDF',
+          topic_id: topicUuid,
+          prompt: 'q1',
+          prompt_id: promptUuid,
+          region_code: 'US',
+          execution_date: '2026-03-01',
+          visibility_score: 50,
+        },
+        {
+          topics: 'PDF',
+          topic_id: topicUuid,
+          prompt: 'q1',
+          prompt_id: 'should-not-win',
+          region_code: 'US',
+          execution_date: '2026-03-10',
+          visibility_score: 90,
+        },
+      ];
+      const result = buildPromptDetails(rows);
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].topicId).to.equal(topicUuid);
+      expect(result[0].promptId).to.equal('should-not-win');
     });
   });
 
@@ -4948,6 +5073,8 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.items).to.have.lengthOf(1);
       expect(body.items[0].prompt).to.equal('q1');
+      expect(body.items[0].topicId).to.equal('');
+      expect(body.items[0].promptId).to.equal('');
       expect(body.totalCount).to.equal(1);
       expect(body.topic).to.equal('PDF');
       expect(body.topicId).to.be.null;
@@ -4960,6 +5087,7 @@ describe('llmo-brand-presence', () => {
           topic_id: topicUuid,
           topics: 'Resolved Label',
           prompt: 'q1',
+          prompt_id: 'prompt-row-uuid',
           region_code: 'US',
           mentions: true,
           citations: false,
@@ -4986,6 +5114,8 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topic).to.equal('Resolved Label');
       expect(body.topicId).to.equal(topicUuid);
+      expect(body.items[0].topicId).to.equal(topicUuid);
+      expect(body.items[0].promptId).to.equal('prompt-row-uuid');
       expect(body.totalCount).to.equal(1);
     });
 
@@ -6436,8 +6566,10 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[1].executionDate).to.equal('2026-03-01');
       expect(body.executions[0].prompt).to.equal('q2');
       expect(body.executions[0].promptId).to.equal('p2-id');
+      expect(body.executions[0].topicId).to.equal(topicRowId);
       expect(body.executions[0].executionId).to.equal('exec-2');
       expect(body.executions[1].promptId).to.equal('p1-id');
+      expect(body.executions[1].topicId).to.equal(topicRowId);
       expect(body.executions[1].executionId).to.equal('exec-1');
       expect(body.executions[0].mentions).to.equal(false);
       expect(body.executions[0].citations).to.equal(true);
@@ -6617,6 +6749,7 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.executions[0].prompt).to.equal('');
       expect(body.executions[0].promptId).to.equal('');
+      expect(body.executions[0].topicId).to.equal('');
       expect(body.executions[0].executionId).to.equal('');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
@@ -6694,6 +6827,7 @@ describe('llmo-brand-presence', () => {
       expect(body.topic).to.equal('AI Overview');
       expect(body.topicId).to.be.null;
       expect(body.prompt).to.equal('What is AI?');
+      expect(body.promptId).to.equal('');
       expect(body.weeklyStats).to.deep.equal([]);
       expect(body.executions).to.deep.equal([]);
       expect(body.sources).to.deep.equal([]);
@@ -6717,6 +6851,7 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topic).to.equal(topicUuid);
       expect(body.topicId).to.equal(topicUuid);
+      expect(body.promptId).to.equal('');
     });
 
     it('returns ok with zeroed stats when data is null', async () => {
@@ -6783,6 +6918,7 @@ describe('llmo-brand-presence', () => {
           topics: 'Shown Topic Name',
           topic_id: topicUuid,
           prompt: 'What is AI?',
+          prompt_id: 'prompt-envelope-1',
           region_code: 'US',
           mentions: true,
           citations: true,
@@ -6815,6 +6951,7 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topic).to.equal('Shown Topic Name');
       expect(body.topicId).to.equal(topicUuid);
+      expect(body.promptId).to.equal('prompt-envelope-1');
     });
 
     it('uses path param for body.topic when rows have null topics (prompt-detail)', async () => {
@@ -6858,6 +6995,7 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topic).to.equal(topicUuid);
       expect(body.topicId).to.equal(topicUuid);
+      expect(body.promptId).to.equal('p1');
     });
 
     it('applies region_code filter when promptRegion is provided', async () => {
@@ -6974,6 +7112,8 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[1].executionDate).to.equal('2026-03-01');
       expect(body.executions[0].promptId).to.equal('pd-newer');
       expect(body.executions[1].promptId).to.equal('pd-older');
+      expect(body.executions[0].topicId).to.equal(topicRowId);
+      expect(body.executions[1].topicId).to.equal(topicRowId);
       expect(body.executions[0].executionId).to.equal('e2');
       expect(body.executions[1].executionId).to.equal('e1');
       expect(body.executions[0].businessCompetitors).to.equal('Rival;OtherCo');
@@ -6981,6 +7121,7 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[1].businessCompetitors).to.equal('');
       expect(body.executions[1].detectedBrandMentions).to.equal('');
       expect(body.topicId).to.equal(topicRowId);
+      expect(body.promptId).to.equal('pd-newer');
     });
 
     it('counts negative sentiment rows but scores them at 0', async () => {
@@ -7153,12 +7294,14 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.executions[0].prompt).to.equal('');
       expect(body.executions[0].promptId).to.equal('');
+      expect(body.executions[0].topicId).to.equal('');
       expect(body.executions[0].executionId).to.equal('e1');
       expect(body.executions[0].region).to.equal('');
       expect(body.executions[0].executionDate).to.equal('');
       expect(body.executions[0].businessCompetitors).to.equal('');
       expect(body.executions[0].detectedBrandMentions).to.equal('');
       expect(body.executions[1].executionId).to.equal('e2');
+      expect(body.promptId).to.equal('');
     });
 
     it('includes sources aggregated from fetchSourcesForExecutions', async () => {
@@ -7206,6 +7349,121 @@ describe('llmo-brand-presence', () => {
       expect(body.sources).to.have.lengthOf(1);
       expect(body.sources[0].hostname).to.equal('docs.example.com');
       expect(body.sources[0].contentType).to.equal('pdf');
+    });
+  });
+
+  // ── createPromptDetailByPromptIdHandler ─────────────────────────────────────
+  describe('createPromptDetailByPromptIdHandler', () => {
+    const promptUuid = 'c3d4e5f6-a7b8-9012-cdef-123456789012';
+
+    beforeEach(() => {
+      mockContext.params.promptId = promptUuid;
+      delete mockContext.params.topicId;
+      mockContext.data = {};
+    });
+
+    it('returns badRequest when prompt id is not a UUID', async () => {
+      mockContext.params.promptId = 'not-a-uuid';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+
+      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('filters brand_presence_executions by prompt_id', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('prompt_id', promptUuid);
+    });
+
+    it('returns prompt detail shape scoped by prompt_id', async () => {
+      const topicUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const rows = [
+        {
+          id: 'e1',
+          topic_id: topicUuid,
+          topics: 'AI Overview',
+          prompt: 'What is AI?',
+          prompt_id: promptUuid,
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          volume: '100',
+          origin: 'organic',
+          category_name: 'Search',
+          execution_date: '2026-03-01',
+          answer: 'Answer A',
+          url: 'https://a.com',
+          error_code: null,
+          business_competitors: '',
+          detected_brand_mentions: '',
+        },
+      ];
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: rows, error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.promptId).to.equal(promptUuid);
+      expect(body.prompt).to.equal('What is AI?');
+      expect(body.topic).to.equal('AI Overview');
+      expect(body.topicId).to.equal(topicUuid);
+      expect(body.region).to.equal('');
+      expect(body.executions).to.have.lengthOf(1);
+    });
+
+    it('returns empty executions but keeps requested promptId when no rows', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.promptId).to.equal(promptUuid);
+      expect(body.prompt).to.equal('');
+      expect(body.executions).to.deep.equal([]);
+    });
+
+    it('applies optional promptRegion filter', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.data = { promptRegion: 'DE' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'DE');
     });
   });
 

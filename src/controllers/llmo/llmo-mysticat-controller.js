@@ -19,6 +19,7 @@ import {
   createSearchHandler,
   createTopicDetailHandler,
   createPromptDetailHandler,
+  createPromptDetailByPromptIdHandler,
   createExecutionSourcesHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
@@ -107,6 +108,7 @@ function LlmoMysticatController(ctx) {
   const getSearch = createSearchHandler(getOrgAndValidateAccess);
   const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
   const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetailByPromptId = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
   const getExecutionSources = createExecutionSourcesHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
@@ -170,6 +172,7 @@ function LlmoMysticatController(ctx) {
     getSearch,
     getTopicDetail,
     getPromptDetail,
+    getPromptDetailByPromptId,
     getExecutionSources,
     getSentimentMovers,
     getShareOfVoice,
