@@ -44,6 +44,7 @@ describe('PlgOnboardingController', () => {
   let enableImportsStub;
   let triggerAuditsStub;
   let autoResolveAuthorUrlStub;
+  let resolveWwwUrlStub;
   let updateCodeConfigStub;
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
@@ -186,6 +187,7 @@ describe('PlgOnboardingController', () => {
 
     // Support utils stubs
     autoResolveAuthorUrlStub = sandbox.stub().resolves(null);
+    resolveWwwUrlStub = sandbox.stub().resolves(TEST_DOMAIN);
     updateCodeConfigStub = sandbox.stub().resolves();
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
@@ -372,6 +374,7 @@ describe('PlgOnboardingController', () => {
         },
         '../../../src/support/utils.js': {
           autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+          resolveWwwUrl: resolveWwwUrlStub,
           updateCodeConfig: updateCodeConfigStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
@@ -2126,6 +2129,19 @@ describe('PlgOnboardingController', () => {
     let controller;
     beforeEach(() => {
       controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('verifies RUM using www-resolved domain so www-keyed sites are not wrongly waitlisted', async () => {
+      const wwwDomain = `www.${TEST_DOMAIN}`;
+      resolveWwwUrlStub.resolves(wwwDomain);
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(wwwDomain);
     });
 
     it('waitlists domain when RUM check fails and delivery type is OTHER', async () => {
