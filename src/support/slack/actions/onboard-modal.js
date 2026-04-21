@@ -734,7 +734,9 @@ export function onboardSiteModal(lambdaContext) {
         thread_ts: responseThreadTs,
       });
 
+      log.info(`[onboard] detecting bot blocker for ${siteUrl}`);
       const botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
+      log.info(`[onboard] bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable} type=${botProtectionResult.type}`);
 
       // Send warning if bot protection is detected
       if (!botProtectionResult.crawlable) {
@@ -752,6 +754,7 @@ export function onboardSiteModal(lambdaContext) {
         });
       }
 
+      log.info(`[onboard] starting onboardSingleSiteFromModal for ${siteUrl}`);
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,
         imsOrgId,
@@ -762,6 +765,7 @@ export function onboardSiteModal(lambdaContext) {
         lambdaContext,
         additionalParams,
       );
+      log.info(`[onboard] onboardSingleSiteFromModal completed for ${siteUrl} status=${reportLine.status}`);
 
       // Note: Configuration is already saved by sharedOnboardSingleSite in utils.js
       // No need to call configuration.save() here as it would overwrite the changes

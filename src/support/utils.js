@@ -907,7 +907,15 @@ export const autoResolveAuthorUrl = async (site, context) => {
       return null;
     }
 
-    const data = await response.json();
+    const data = await Promise.race([
+      response.json(),
+      new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error('RUM bundles response timed out after 10000ms')),
+          10000,
+        );
+      }),
+    ]);
     const rumBundles = data?.rumBundles || [];
 
     if (rumBundles.length === 0) {
@@ -1519,14 +1527,24 @@ export const onboardSingleSite = async (
     }
 
     // Single site lookup shared between the guard and createSiteAndOrganization.
-    // Fail-open on DB error: guard is skipped, onboarding proceeds normally.
+    // Fail-open on DB error or timeout: guard is skipped, onboarding proceeds normally.
     const { Site: SiteLookup } = dataAccess;
     let prefetchedSite = null;
+    log.info(`[onboard] looking up site ${baseURL} in DB`);
     try {
-      prefetchedSite = await SiteLookup.findByBaseURL(baseURL);
+      prefetchedSite = await Promise.race([
+        SiteLookup.findByBaseURL(baseURL),
+        new Promise((_, reject) => {
+          setTimeout(
+            () => reject(new Error('Site lookup timed out after 10000ms')),
+            10000,
+          );
+        }),
+      ]);
     } catch (lookupError) {
       log.warn(`Site lookup failed for ${baseURL}, skipping paid profile guard:`, lookupError);
     }
+    log.info(`[onboard] site lookup done for ${baseURL}: existing=${!!prefetchedSite}`);
 
     // Prevent downgrading a site that was previously onboarded with the paid profile.
     // A non-protected incoming profile cannot override a paid onboarding unless force=true.
@@ -1591,6 +1609,7 @@ export const onboardSingleSite = async (
 
     // Auto-detect locale if language and/or region is not provided
     if (!languageValid || !regionValid) {
+      log.info(`[onboard] detecting locale for ${baseURL}`);
       try {
         const LOCALE_DETECT_TIMEOUT_MS = 10000;
         const locale = await Promise.race([
@@ -1615,9 +1634,11 @@ export const onboardSingleSite = async (
         language = language || 'en';
         region = region || 'US';
       }
+      log.info(`[onboard] locale for ${baseURL}: language=${language} region=${region}`);
     }
 
     // Create or retrieve site and organization
+    log.info(`[onboard] creating site and organization for ${baseURL}`);
     const { site, organizationId } = await createSiteAndOrganization(
       baseURL,
       imsOrgID,
@@ -1629,6 +1650,7 @@ export const onboardSingleSite = async (
       additionalParams.deliveryConfig,
       prefetchedSite,
     );
+    log.info(`[onboard] site and organization ready for ${baseURL}: siteId=${site.getId()} orgId=${organizationId}`);
 
     // Create entitlement and enrollment
     await createEntitlementAndEnrollment(
@@ -1933,7 +1955,9 @@ export const onboardSingleSite = async (
       input: JSON.stringify(workflowInput),
       name: workflowName,
     });
+    log.info(`[onboard] starting step function workflow for ${baseURL}: ${workflowName}`);
     await sfnClient.send(startCommand);
+    log.info(`[onboard] workflow started successfully for ${baseURL}`);
   } catch (error) {
     await say(`:x: Failed to start onboarding for site ${baseURL}: ${error.message}`);
     log.error(error);
