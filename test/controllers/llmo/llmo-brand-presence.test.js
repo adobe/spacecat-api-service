@@ -423,6 +423,20 @@ describe('llmo-brand-presence', () => {
         { prompt: '', execution_date: '2026-03-08' },
       ])).to.equal('older text');
     });
+
+    it('falls back to an older row when newest has null prompt', () => {
+      expect(promptTextForDetailEnvelope([
+        { prompt: 'older text', execution_date: '2026-03-01' },
+        { prompt: null, execution_date: '2026-03-08' },
+      ])).to.equal('older text');
+    });
+
+    it('returns empty string when every row has null or undefined prompt', () => {
+      expect(promptTextForDetailEnvelope([
+        { prompt: null, execution_date: '2026-03-08' },
+        { prompt: undefined, execution_date: '2026-03-01' },
+      ])).to.equal('');
+    });
   });
 
   describe('topicLabelForDetailResponse', () => {
