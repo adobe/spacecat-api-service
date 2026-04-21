@@ -208,6 +208,60 @@ describe('URL Inspector Handlers', () => {
       expect(context.log.error).to.have.been.calledWithMatch(/rpc_url_inspector_unique_urls/);
     });
 
+    it('includes PostgREST code/details/hint in the error log when present', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: statsRpcResults({
+          error: {
+            message: 'pq: column "x" does not exist',
+            code: 'PGRST202',
+            details: 'col "x"',
+            hint: 'try reloading schema',
+          },
+          errorOnFn: 'rpc_url_inspector_unique_urls',
+        }),
+      });
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWithMatch(/code=PGRST202/);
+      expect(context.log.error).to.have.been.calledWithMatch(/details=col "x"/);
+      expect(context.log.error).to.have.been.calledWithMatch(/hint=try reloading schema/);
+    });
+
+    it('returns internalServerError when a split RPC rejects with an Error', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: {
+          rpc_url_inspector_total_prompts_cited: () => Promise.reject(new Error('network boom')),
+        },
+      });
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.not.include('boom');
+      expect(context.log.error).to.have.been.calledWithMatch(/URL Inspector stats RPC threw: network boom/);
+    });
+
+    it('returns internalServerError when a split RPC rejects with a non-Error value', async () => {
+      /* eslint-disable prefer-promise-reject-errors */
+      const { context } = createContext({}, {}, {
+        rpcResults: {
+          rpc_url_inspector_total_prompts_cited: () => Promise.reject('bare-string-reject'),
+        },
+      });
+      /* eslint-enable prefer-promise-reject-errors */
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWithMatch(/URL Inspector stats RPC threw: bare-string-reject/);
+    });
+
     it('returns empty stats when all split RPCs return empty data', async () => {
       const { context } = createContext({}, {}, {
         rpcResults: statsRpcResults(),
