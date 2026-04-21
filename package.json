@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.448.1",
+  "version": "1.449.1",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -44,6 +44,13 @@
     "fastlyServiceId!important": "",
     "timeout": 900000,
     "nodeVersion": 24,
+    "awsVpcSubnetIds": [
+      "${env.VPC_SUBNET_1}",
+      "${env.VPC_SUBNET_2}"
+    ],
+    "awsVpcSecurityGroupIds": [
+      "${env.VPC_SG_ID}"
+    ],
     "static": [
       "static/onboard/profiles.json"
     ]
@@ -120,8 +127,8 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "@adobe/eslint-config-helix": "3.0.24",
-    "@adobe/helix-deploy": "14.0.0",
+    "@adobe/eslint-config-helix": "3.0.25",
+    "@adobe/helix-deploy": "14.0.1",
     "@adobe/helix-universal": "5.4.1",
     "@adobe/helix-universal-devserver": "1.1.147",
     "@adobe/semantic-release-coralogix": "1.1.41",
