@@ -1272,7 +1272,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const model = resolveModelFromRequest(params.model);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select('execution_date, sentiment, prompt, region_code, topics')
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -1683,7 +1683,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       }
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(PROMPTS_SELECT)
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -1808,7 +1808,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const pattern = buildSearchPattern(bounded);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(TOPICS_SELECT)
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -2088,7 +2088,7 @@ function buildDetailExecQuery(client, organizationId, params, defaults, filterBy
   const model = resolveModelFromRequest(params.model);
 
   let q = client
-    .from('brand_presence_executions')
+    .from('brand_presence_executions_active')
     .select(DETAIL_SELECT)
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
@@ -2154,7 +2154,7 @@ function buildSingleExecutionSourcesExecQuery(
   const model = resolveModelFromRequest(modelParam);
 
   let q = client
-    .from('brand_presence_executions')
+    .from('brand_presence_executions_active')
     .select(EXECUTION_SOURCES_EXEC_SELECT)
     .eq('organization_id', organizationId)
     .eq('id', executionId)
