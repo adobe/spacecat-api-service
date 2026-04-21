@@ -33,6 +33,7 @@ const ERR_NOT_FOUND = 'not found';
 
 const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
+const VALID_SUCCESS_RATE_BUCKETS = new Set(['high', 'medium', 'low']);
 // Allowlists mirror the CASE whitelists in the DB RPCs — unknown values are already
 // rejected server-side, but we validate here too for defence-in-depth.
 const VALID_SORT_COLUMNS_BY_URL = new Set([
@@ -93,6 +94,11 @@ function parseAgenticTrafficParams(context) {
     agentType: q.agentType || q.agent_type || null,
     userAgent: q.userAgent || q.user_agent || null,
     contentType: q.contentType || q.content_type || null,
+    // Normalise to null for unknown buckets — mirrors how PLATFORM_CODE_TO_DB handles
+    // unknown platform codes, preventing a DB exception (500) for invalid input.
+    successRate: VALID_SUCCESS_RATE_BUCKETS.has(q.successRate || q.success_rate)
+      ? (q.successRate || q.success_rate)
+      : null,
   };
 }
 
@@ -109,6 +115,7 @@ function buildRpcParams(siteId, parsed) {
     p_agent_type: parsed.agentType,
     p_user_agent: parsed.userAgent,
     p_content_type: parsed.contentType,
+    p_success_rate: parsed.successRate,
   };
 }
 

@@ -62,7 +62,7 @@ export async function listTopics({
 
   const { data, error } = await query;
   if (error) {
-    throw new Error(`Failed to list topics: ${error.message}`);
+    throw new Error(`Failed to list topics: ${error.message}`, { cause: error });
   }
 
   return (data || []).map(mapDbTopicToV2);
@@ -108,7 +108,25 @@ export async function createTopic({
     .single();
 
   if (error) {
-    throw new Error(`Failed to create topic: ${error.message}`);
+    // Any unique-constraint violation that escapes the `organization_id,
+    // topic_id` upsert target is surfaced as a typed 409 so callers can
+    // handle it without mining 500 bodies. The message echoes the actual
+    // constraint name rather than hard-coding a field (the colliding
+    // column may not be `name`). LLMO-4370.
+    if (error.code === '23505') {
+      const match = /unique constraint "([^"]+)"/.exec(error.message || '');
+      const constraint = match ? match[1] : 'unique constraint';
+      // Chain the original PostgREST error as `cause` so operators reading
+      // WARN-level conflict logs can still reach the raw DB error during
+      // triage — symmetric with categories-storage. LLMO-4370 #14.
+      const conflict = new Error(
+        `Topic conflicts with ${constraint} for this organization`,
+        { cause: error },
+      );
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw new Error(`Failed to create topic: ${error.message}`, { cause: error });
   }
 
   // Link topic to category via the topic_categories junction table.
@@ -173,7 +191,7 @@ export async function updateTopic({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to update topic: ${error.message}`);
+    throw new Error(`Failed to update topic: ${error.message}`, { cause: error });
   }
   if (!data) {
     return null;
@@ -207,7 +225,7 @@ export async function deleteTopic({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to delete topic: ${error.message}`);
+    throw new Error(`Failed to delete topic: ${error.message}`, { cause: error });
   }
   return !!data;
 }

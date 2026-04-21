@@ -752,16 +752,38 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      const created = await createCategory({
+      const { category, created, outcome } = await createCategory({
         organizationId: spaceCatId,
         category: categoryData,
         postgrestClient,
         updatedBy,
+        log,
       });
 
-      return createResponse(created, 201);
+      // Log-storm quantification tag: lets Coralogix aggregate
+      // category_post_result by outcome so the LLMO-4370 cleanup can be
+      // quantified post-deploy (insert/resurrect/update/noop/race_retry*)
+      // without grepping messages. LLMO-4370 #15.
+      log.info(`Category POST resolved for organization ${spaceCatId}`, {
+        organization_id: spaceCatId,
+        category_id: category.id,
+        outcome,
+      });
+
+      // 201 on insert, 200 on idempotent update — lets callers (UI toast,
+      // DRS audit log) distinguish "created new" from "ensured existing".
+      return createResponse(category, created ? 201 : 200);
     } catch (error) {
-      log.error(`Error creating category for organization ${spaceCatId}:`, error);
+      // Storage is idempotent by name on the happy path, but still raises
+      // a typed 409 on the concurrent hard-delete race (row vanishes
+      // between lookup and update) and on non-name uniqueness collisions
+      // (slug drift). Those are retry signals, not server faults — warn,
+      // don't error, to keep Coralogix ERROR severity clean. LLMO-4370 #2.
+      if (error?.status === 409) {
+        log.warn(`Category conflict for organization ${spaceCatId}: ${error.message}`);
+      } else {
+        log.error(`Error creating category for organization ${spaceCatId}:`, error);
+      }
       return createErrorResponse(error);
     }
   };
@@ -810,7 +832,14 @@ function BrandsController(ctx, log, env) {
       }
       return ok(updated);
     } catch (error) {
-      log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
+      // PATCH to a name colliding with a sibling row in the same org
+      // surfaces from storage as a typed 409. Mirror the POST handler so
+      // legitimate name-conflict retries don't pollute ERROR severity.
+      if (error?.status === 409) {
+        log.warn(`Category update conflict for organization ${spaceCatId}: ${error.message}`);
+      } else {
+        log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
+      }
       return createErrorResponse(error);
     }
   };
@@ -944,7 +973,14 @@ function BrandsController(ctx, log, env) {
 
       return createResponse(created, 201);
     } catch (error) {
-      log.error(`Error creating topic for organization ${spaceCatId}:`, error);
+      if (error?.status === 409) {
+        // Warn (not error) — DRS-style idempotent retries stop polluting
+        // ERROR severity, but legitimate duplicate-submit bugs (UI double-
+        // click, malformed payload) remain visible at WARN for triage.
+        log.warn(`Topic conflict for organization ${spaceCatId}: ${error.message}`);
+      } else {
+        log.error(`Error creating topic for organization ${spaceCatId}:`, error);
+      }
       return createErrorResponse(error);
     }
   };
