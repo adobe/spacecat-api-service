@@ -113,7 +113,9 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
   "items": [
     {
       "topic": "PDF Editing",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "prompt": "best pdf editor for mac",
+      "promptId": "019cb903-1184-7f92-8325-f9d1176af316",
       "region": "US",
       "category": "Acrobat",
       "executionDate": "2026-03-08",
@@ -134,14 +136,18 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 }
 ```
 
-Root **`topic`** and **`topicId`** mirror the [Topic Detail API](topic-detail-api.md) conventions: same resolution from execution rows and the `:topicId` path (UUID path filters by `topic_id` but still returns a display label and stable id when the query returns rows). `topicId` is `null` when the path is a topic name and rows have no `topic_id`.
+Root **`topic`** and **`topicId`** mirror the [Topic Detail API](topic-detail-api.md) conventions: values are taken from execution rows (preferring the **newest `execution_date`** row that has `topics` / `topic_id`, then scanning older rows), with the same `:topicId` path fallbacks as topic detail. `topicId` is `null` when the path is a topic name and no row carries a `topic_id`.
+
+Each **`items[]`** row includes **`topicId`** and **`promptId`** as strings when the backing execution row has `topic_id` / `prompt_id`; otherwise those fields are the empty string (`""`). Legacy data may omit UUIDs in Postgres — clients should treat empty string like “unknown id” (same as [Topic Detail](topic-detail-api.md) / [Prompt Detail](prompt-detail-api.md) envelopes, where `topicId` can still be `null` at the root when the topic cannot be resolved to a UUID).
 
 ### Prompt Object Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `topic` | string | Topic name |
+| `topicId` | string | Topic UUID from the latest execution row for this prompt+region; `""` when null |
 | `prompt` | string | The prompt text |
+| `promptId` | string | Prompt UUID from the latest execution row; `""` when null |
 | `region` | string | Region code (e.g. US, DE) |
 | `category` | string | Category name |
 | `executionDate` | string | Date of the latest execution (YYYY-MM-DD) |
