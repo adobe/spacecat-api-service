@@ -45,7 +45,6 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectCdnForDomain,
-  probeWafConnectivity,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1894,26 +1893,12 @@ function LlmoController(ctx) {
       return internalServerError('Site has no baseURL configured');
     }
 
-    log.info(`[edge-routing-utils] Starting WAF connectivity probe for site ${siteId} (${baseURL})`);
+    log.info(`[edge-optimize-probe] Starting WAF connectivity probe for site ${siteId} (${baseURL})`);
 
-    const result = await probeWafConnectivity(baseURL, log, context.env?.TOKOWAKA_PROXY_BASE_URL);
+    const tokowakaClient = TokowakaClient.createFrom(context);
+    const result = await tokowakaClient.checkWafConnectivity(site);
 
-    log.info(`[edge-routing-utils] Result for site ${siteId}: reachable=${result.reachable}, blocked=${result.blocked}`);
-
-    // When the probe is not a clean pass, cross-check with edge-optimize-status.
-    // If edgeOptimizeEnabled=true, the customer's WAF has been fixed even though the
-    // low-level probe failed — avoids a permanently-stale "blocked" indicator.
-    if (!result.reachable) {
-      try {
-        const tokowakaClient = TokowakaClient.createFrom(context);
-        const { edgeOptimizeEnabled } = await tokowakaClient.checkEdgeOptimizeStatus(site, '/');
-        log.info(`[edge-routing-utils] Edge optimize status for site ${siteId}: edgeOptimizeEnabled=${edgeOptimizeEnabled}`);
-        return ok({ ...result, edgeOptimizeEnabled });
-      } catch (err) {
-        log.warn(`[edge-routing-utils] Edge optimize status check failed for site ${siteId}: ${err.message}`);
-        return ok({ ...result, edgeOptimizeEnabled: null });
-      }
-    }
+    log.info(`[edge-optimize-probe] Result for site ${siteId}: reachable=${result.reachable}, blocked=${result.blocked}`);
 
     return ok(result);
   };

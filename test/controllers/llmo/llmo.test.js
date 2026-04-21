@@ -90,7 +90,6 @@ describe('LlmoController', () => {
   let getImsUserOrganizationsStub;
   let probeSiteAndResolveDomainStub;
   let callCdnRoutingApiStub;
-  let probeWafConnectivityStub;
   let getImsTokenFromPromiseTokenStub;
   let edgeRoutingAuthReal;
   let detectCdnForDomainStub;
@@ -176,6 +175,7 @@ describe('LlmoController', () => {
       createMetaconfig: sinon.stub(),
       updateMetaconfig: sinon.stub(),
       checkEdgeOptimizeStatus: sinon.stub(),
+      checkWafConnectivity: sinon.stub(),
     };
     exchangePromiseTokenStub = sinon.stub().resolves({ access_token: 'fake-ims-token' });
 
@@ -295,7 +295,7 @@ describe('LlmoController', () => {
         probeSiteAndResolveDomain: (...args) => probeSiteAndResolveDomainStub(...args),
         callCdnRoutingApi: (...args) => callCdnRoutingApiStub(...args),
         detectCdnForDomain: (...args) => detectCdnForDomainStub(...args),
-        probeWafConnectivity: (...args) => probeWafConnectivityStub(...args),
+
         getHostnameWithoutWww(url, log) {
           try {
             const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -652,9 +652,6 @@ describe('LlmoController', () => {
     getImsTokenFromPromiseTokenStub.reset();
     getImsTokenFromPromiseTokenStub.resolves('test-ims-user-token');
     probeSiteAndResolveDomainStub = sinon.stub().resolves('www.example.com');
-    probeWafConnectivityStub = sinon.stub().resolves({
-      reachable: true, blocked: false, statusCode: 200, probedUrl: 'https://www.example.com/',
-    });
     detectCdnForDomainStub.reset();
     detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY);
     authorizeEdgeCdnRoutingStub.resetBehavior();
@@ -6945,19 +6942,16 @@ describe('LlmoController', () => {
       mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
       mockDataAccess.Site.findById.resetBehavior();
       mockDataAccess.Site.findById.resolves(mockSite);
-      probeWafConnectivityStub.resetBehavior();
-      probeWafConnectivityStub.resolves({
+      mockTokowakaClient.checkWafConnectivity.reset();
+      mockTokowakaClient.checkWafConnectivity.resolves({
         reachable: true,
         blocked: false,
         statusCode: 200,
         probedUrl: 'https://www.example.com/',
       });
-      // Default: edge optimize not yet active (customer not onboarded)
-      mockTokowakaClient.checkEdgeOptimizeStatus.reset();
-      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({ edgeOptimizeEnabled: false });
     });
 
-    it('should return 200 with clean-pass result and no edgeOptimizeEnabled field when WAF allows the user-agent', async () => {
+    it('should return 200 with probe result from TokowakaClient', async () => {
       const result = await controller.checkWafConnectivity(probeContext);
 
       expect(result.status).to.equal(200);
@@ -6965,17 +6959,16 @@ describe('LlmoController', () => {
       expect(body.reachable).to.be.true;
       expect(body.blocked).to.be.false;
       expect(body.statusCode).to.equal(200);
-      expect(body.edgeOptimizeEnabled).to.be.undefined;
-      expect(probeWafConnectivityStub).to.have.been.calledWith('https://www.example.com', sinon.match.object);
-      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.not.have.been.called;
+      expect(mockTokowakaClient.checkWafConnectivity).to.have.been.calledWith(mockSite);
     });
 
-    it('should include edgeOptimizeEnabled=false when WAF hard-blocks and edge optimize is inactive', async () => {
-      probeWafConnectivityStub.resolves({
+    it('should pass through blocked result with edgeOptimizeEnabled from shared lib', async () => {
+      mockTokowakaClient.checkWafConnectivity.resolves({
         reachable: false,
         blocked: true,
         statusCode: 403,
         probedUrl: 'https://www.example.com/',
+        edgeOptimizeEnabled: false,
       });
 
       const result = await controller.checkWafConnectivity(probeContext);
@@ -6984,63 +6977,24 @@ describe('LlmoController', () => {
       const body = await result.json();
       expect(body.reachable).to.be.false;
       expect(body.blocked).to.be.true;
-      expect(body.statusCode).to.equal(403);
       expect(body.edgeOptimizeEnabled).to.be.false;
-      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(mockSite, '/');
     });
 
-    it('should include edgeOptimizeEnabled=true when probe blocked but customer has fixed WAF', async () => {
-      probeWafConnectivityStub.resolves({
-        reachable: false,
-        blocked: true,
-        statusCode: 403,
-        probedUrl: 'https://www.example.com/',
-      });
-      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({ edgeOptimizeEnabled: true });
-
-      const result = await controller.checkWafConnectivity(probeContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.reachable).to.be.false;
-      expect(body.blocked).to.be.true;
-      expect(body.edgeOptimizeEnabled).to.be.true;
-    });
-
-    it('should include edgeOptimizeEnabled=true when probe times out but edge optimize is active', async () => {
-      probeWafConnectivityStub.resolves({
+    it('should pass through timeout result with edgeOptimizeEnabled from shared lib', async () => {
+      mockTokowakaClient.checkWafConnectivity.resolves({
         reachable: false,
         blocked: null,
         reason: 'timeout',
         probedUrl: 'https://www.example.com/',
+        edgeOptimizeEnabled: true,
       });
-      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({ edgeOptimizeEnabled: true });
 
       const result = await controller.checkWafConnectivity(probeContext);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.reachable).to.be.false;
-      expect(body.blocked).to.be.null;
       expect(body.reason).to.equal('timeout');
       expect(body.edgeOptimizeEnabled).to.be.true;
-    });
-
-    it('should include edgeOptimizeEnabled=null when probe fails and edge optimize status check throws', async () => {
-      probeWafConnectivityStub.resolves({
-        reachable: false,
-        blocked: null,
-        reason: 'error',
-        probedUrl: 'https://www.example.com/',
-      });
-      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(new Error('Tokowaka unavailable'));
-
-      const result = await controller.checkWafConnectivity(probeContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.reachable).to.be.false;
-      expect(body.edgeOptimizeEnabled).to.be.null;
     });
 
     it('should return 400 when siteId is invalid', async () => {
@@ -7063,7 +7017,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(404);
       const body = await result.json();
       expect(body.message).to.include(validSiteId);
-      expect(probeWafConnectivityStub).to.not.have.been.called;
+      expect(mockTokowakaClient.checkWafConnectivity).to.not.have.been.called;
     });
 
     it('should return 403 when user does not have access to the site', async () => {
@@ -7074,7 +7028,7 @@ describe('LlmoController', () => {
       const result = await deniedController.checkWafConnectivity(probeContext);
 
       expect(result.status).to.equal(403);
-      expect(probeWafConnectivityStub).to.not.have.been.called;
+      expect(mockTokowakaClient.checkWafConnectivity).to.not.have.been.called;
     });
 
     it('should return 500 when site has no baseURL configured', async () => {
@@ -7085,7 +7039,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.include('no baseURL');
-      expect(probeWafConnectivityStub).to.not.have.been.called;
+      expect(mockTokowakaClient.checkWafConnectivity).to.not.have.been.called;
     });
   });
 });
