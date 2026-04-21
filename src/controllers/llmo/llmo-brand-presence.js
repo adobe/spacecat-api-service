@@ -442,8 +442,19 @@ export function applyTopicPathFilter(query, decodedTopicParam) {
 }
 
 /**
- * Response topic label: use row topics when present, else the path param
- * (e.g. UUID when no rows or null topics).
+ * Newest-first sort for detail / envelope helpers (PostgREST row order is not guaranteed).
+ * @param {Array<Object>} rows - Raw execution rows (mutated copy only)
+ * @returns {Array<Object>}
+ */
+export function sortDetailRowsByExecutionDateDesc(rows) {
+  return [...rows].sort(
+    (a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''),
+  );
+}
+
+/**
+ * Response topic label: prefer `topics` on the newest `execution_date` row with a label,
+ * then older rows; else the path param (e.g. UUID when no rows or no labels).
  * @param {Array<Object>} rows - execution rows
  * @param {string} decodedTopicParam - decoded :topicId
  */
@@ -451,26 +462,62 @@ export function topicLabelForDetailResponse(rows, decodedTopicParam) {
   if (!rows || rows.length === 0) {
     return decodedTopicParam;
   }
-  const label = rows[0].topics;
-  return hasText(label) ? label : decodedTopicParam;
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.topics != null ? String(r.topics) : ''));
+  return row ? String(row.topics) : decodedTopicParam;
 }
 
 /**
- * Stable topic id for JSON: prefer DB topic_id on first row, else UUID path param if valid.
+ * Stable topic id for JSON: prefer `topic_id` on the newest row that has one, then older
+ * rows; else UUID path param if valid; else null.
  * @param {Array<Object>} rows - execution rows (may be empty)
  * @param {string} decodedTopicParam - decoded :topicId
  * @returns {string|null}
  */
 export function topicIdForDetailResponse(rows, decodedTopicParam) {
   const trimmedParam = String(decodedTopicParam).trim();
-  const rowId = rows?.[0]?.topic_id;
-  if (hasText(rowId)) {
-    return String(rowId).trim();
+  if (!rows || rows.length === 0) {
+    return isValidUUID(trimmedParam) ? trimmedParam : null;
+  }
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.topic_id != null ? String(r.topic_id) : ''));
+  if (row) {
+    return String(row.topic_id).trim();
   }
   if (isValidUUID(trimmedParam)) {
     return trimmedParam;
   }
   return null;
+}
+
+/**
+ * Prompt id for prompt-detail envelope: prefers `prompt_id` on the newest execution row
+ * (by `execution_date`), then scans older rows. Empty string when no row carries an id.
+ * @param {Array<Object>} rows - Raw `brand_presence_executions` rows
+ * @returns {string}
+ */
+export function promptIdForDetailResponse(rows) {
+  if (!rows?.length) {
+    return '';
+  }
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.prompt_id != null ? String(r.prompt_id) : ''));
+  return row && row.prompt_id != null ? String(row.prompt_id) : '';
+}
+
+/**
+ * Prompt text for prompt-detail envelope when rows were loaded by `prompt_id`
+ * (newest execution with non-empty `prompt` wins).
+ * @param {Array<Object>} rows - Raw `brand_presence_executions` rows
+ * @returns {string}
+ */
+export function promptTextForDetailEnvelope(rows) {
+  if (!rows?.length) {
+    return '';
+  }
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.prompt != null ? String(r.prompt) : ''));
+  return row && row.prompt != null ? String(row.prompt) : '';
 }
 
 export function parseFilterDimensionsParams(context) {
@@ -1835,7 +1882,9 @@ export function buildPromptDetails(rows) {
 
     return {
       topic: r.topics || 'Unknown',
+      topicId: r.topic_id != null ? String(r.topic_id) : '',
       prompt: r.prompt || '',
+      promptId: r.prompt_id != null ? String(r.prompt_id) : '',
       region: r.region_code || '',
       category: r.category_name || '',
       executionDate: r.execution_date || '',
@@ -1968,7 +2017,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
 }
 
 // eslint-disable-next-line max-len
-const PROMPTS_SELECT = 'topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+const PROMPTS_SELECT = 'topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
 
 /**
  * Creates the getTopicPrompts handler.
@@ -2253,6 +2302,7 @@ function mapBrandPresenceDetailExecutionRow(r, { includeAnswer = true } = {}) {
   return {
     prompt: r.prompt || '',
     promptId: r.prompt_id != null ? String(r.prompt_id) : '',
+    topicId: r.topic_id != null ? String(r.topic_id) : '',
     executionId: r.id != null ? String(r.id) : '',
     region: r.region_code || '',
     executionDate: r.execution_date || '',
@@ -2723,6 +2773,137 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
 }
 
 /**
+ * Builds the JSON body for prompt-detail and prompt-detail-by-prompt-id responses.
+ * @param {Object} client - PostgREST client
+ * @param {string} organizationId - Organization UUID
+ * @param {Object} params - Parsed filter params (includes startDate, endDate, model, siteId, …)
+ * @param {Object} defaults - Default date range
+ * @param {Array<Object>} rows - Raw execution rows (possibly empty)
+ * @param {Object} envelope
+ * @param {string} envelope.topicPathParam - Decoded `:topicId` path segment, or empty string if N/A
+ * @param {string} envelope.promptEnvelopeText - Human-readable prompt text for the envelope
+ * @param {string} envelope.envelopePromptId - Stable `promptId` field for the envelope
+ * @param {string} [envelope.regionCode] - Optional region filter applied for this response
+ * @returns {Promise<Object>} Serializable payload (not wrapped in `ok()`)
+ */
+async function assemblePromptDetailPayload(
+  client,
+  organizationId,
+  params,
+  defaults,
+  rows,
+  {
+    topicPathParam,
+    promptEnvelopeText,
+    envelopePromptId,
+    regionCode,
+  },
+) {
+  const topicResponseLabel = topicLabelForDetailResponse(rows, topicPathParam);
+  const topicIdResponse = topicIdForDetailResponse(rows, topicPathParam);
+  const region = regionCode || '';
+
+  if (!rows.length) {
+    return {
+      topic: topicResponseLabel,
+      topicId: topicIdResponse,
+      prompt: promptEnvelopeText,
+      promptId: envelopePromptId,
+      region,
+      stats: {
+        visibilityScore: 0,
+        position: '',
+        sentiment: -1,
+        mentions: 0,
+        citations: 0,
+      },
+      weeklyStats: [],
+      executions: [],
+      sources: [],
+    };
+  }
+
+  let visSum = 0;
+  let visCount = 0;
+  let posSum = 0;
+  let posCount = 0;
+  let sentSum = 0;
+  let sentCount = 0;
+  let mentionTotal = 0;
+  let citationTotal = 0;
+
+  rows.forEach((r) => {
+    const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+    if (!Number.isNaN(vs)) {
+      visSum += vs;
+      visCount += 1;
+    }
+    const pos = r.position;
+    if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
+      posSum += Number(pos);
+      posCount += 1;
+    }
+    const sentiment = (r.sentiment || '').toLowerCase().trim();
+    if (sentiment === 'positive') {
+      sentSum += 100;
+      sentCount += 1;
+    } else if (sentiment === 'neutral') {
+      sentSum += 50;
+      sentCount += 1;
+    } else if (sentiment === 'negative') {
+      sentCount += 1;
+    }
+    if (r.mentions === true || r.mentions === 'true') {
+      mentionTotal += 1;
+    }
+    if (r.citations === true || r.citations === 'true') {
+      citationTotal += 1;
+    }
+  });
+
+  const avgVisibility = visCount > 0
+    ? Math.round((visSum / visCount) * 100) / 100 : 0;
+  const avgPosition = posCount > 0
+    ? Math.round((posSum / posCount) * 100) / 100 : 0;
+  const avgSentiment = sentCount > 0
+    ? Math.round(sentSum / sentCount) : -1;
+
+  const weeklyStats = aggregateWeeklyDetailStats(rows);
+
+  const executions = rows
+    .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
+    .map(mapBrandPresenceDetailExecutionRow);
+
+  const execIdMap = new Map(rows.map((r) => [r.id, r]));
+  const execIds = rows.map((r) => r.id).filter(Boolean);
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+
+  // eslint-disable-next-line max-len
+  const rawSources = await fetchSourcesForExecutions(client, organizationId, execIds, startDate, endDate);
+  const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
+  const sources = aggregateDetailSources(flatSources);
+
+  return {
+    topic: topicResponseLabel,
+    topicId: topicIdResponse,
+    prompt: promptEnvelopeText,
+    promptId: envelopePromptId,
+    region,
+    stats: {
+      visibilityScore: avgVisibility,
+      position: avgPosition > 0 ? String(avgPosition) : '',
+      sentiment: avgSentiment,
+      mentions: mentionTotal,
+      citations: citationTotal,
+    },
+    weeklyStats,
+    executions,
+    sources,
+  };
+}
+
+/**
  * Creates the getPromptDetail handler.
  * Returns all execution rows, weekly stats, and sources for a specific
  * prompt+region combination within a topic.
@@ -2782,106 +2963,95 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       }
 
       const rows = execRows || [];
-      const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
-      const topicIdResponse = topicIdForDetailResponse(rows, topicName);
-      if (rows.length === 0) {
-        return cachedOk({
-          topic: topicResponseLabel,
-          topicId: topicIdResponse,
-          prompt: promptText,
-          region: regionCode || '',
-          stats: {
-            visibilityScore: 0,
-            position: '',
-            sentiment: -1,
-            mentions: 0,
-            citations: 0,
-          },
-          weeklyStats: [],
-          executions: [],
-          sources: [],
-        });
+      const envelopePromptId = promptIdForDetailResponse(rows);
+      const payload = await assemblePromptDetailPayload(
+        client,
+        organizationId,
+        params,
+        defaults,
+        rows,
+        {
+          topicPathParam: topicName,
+          promptEnvelopeText: promptText,
+          envelopePromptId,
+          regionCode,
+        },
+      );
+      return cachedOk(payload);
+    },
+  );
+}
+
+/**
+ * Creates the getPromptDetailByPromptId handler.
+ * Same response shape as {@link createPromptDetailHandler}, but scopes executions by
+ * `prompt_id` (path UUID) and the shared date/model/site/origin filters — no topic path
+ * or `prompt` query string required.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createPromptDetailByPromptIdHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'prompt-detail-by-prompt-id',
+    async (ctx, client) => {
+      const { spaceCatId, brandId, promptId } = ctx.params;
+      const trimmedPromptId = String(promptId || '').trim();
+      if (!isValidUUID(trimmedPromptId)) {
+        return badRequest('Invalid prompt id');
       }
 
-      // Compute stats
-      let visSum = 0;
-      let visCount = 0;
-      let posSum = 0;
-      let posCount = 0;
-      let sentSum = 0;
-      let sentCount = 0;
-      let mentionTotal = 0;
-      let citationTotal = 0;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-      rows.forEach((r) => {
-        const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-        if (!Number.isNaN(vs)) {
-          visSum += vs;
-          visCount += 1;
+      const promptData = ctx.data || {};
+      const regionCode = promptData.promptRegion || promptData.prompt_region;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
         }
-        const pos = r.position;
-        if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
-          posSum += Number(pos);
-          posCount += 1;
-        }
-        const sentiment = (r.sentiment || '').toLowerCase().trim();
-        if (sentiment === 'positive') {
-          sentSum += 100;
-          sentCount += 1;
-        } else if (sentiment === 'neutral') {
-          sentSum += 50;
-          sentCount += 1;
-        } else if (sentiment === 'negative') {
-          sentCount += 1;
-        }
-        if (r.mentions === true || r.mentions === 'true') {
-          mentionTotal += 1;
-        }
-        if (r.citations === true || r.citations === 'true') {
-          citationTotal += 1;
-        }
-      });
+      }
 
-      const avgVisibility = visCount > 0
-        ? Math.round((visSum / visCount) * 100) / 100 : 0;
-      const avgPosition = posCount > 0
-        ? Math.round((posSum / posCount) * 100) / 100 : 0;
-      const avgSentiment = sentCount > 0
-        ? Math.round(sentSum / sentCount) : -1;
+      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
+        .eq('prompt_id', trimmedPromptId);
 
-      const weeklyStats = aggregateWeeklyDetailStats(rows);
+      if (shouldApplyFilter(regionCode)) {
+        q = q.eq('region_code', regionCode);
+      }
 
-      const executions = rows
-        .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map(mapBrandPresenceDetailExecutionRow);
+      const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
 
-      // Fetch sources
-      const execIdMap = new Map(rows.map((r) => [r.id, r]));
-      const execIds = rows.map((r) => r.id).filter(Boolean);
-      const startDate = params.startDate || defaults.startDate;
-      const endDate = params.endDate || defaults.endDate;
+      if (execError) {
+        ctx.log.error(
+          `Brand presence prompt-detail-by-prompt-id PostgREST error: ${execError.message}`,
+        );
+        return badRequest(execError.message);
+      }
 
-      // eslint-disable-next-line max-len
-      const rawSources = await fetchSourcesForExecutions(client, organizationId, execIds, startDate, endDate);
-      const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
-      const sources = aggregateDetailSources(flatSources);
-
-      return cachedOk({
-        topic: topicResponseLabel,
-        topicId: topicIdResponse,
-        prompt: promptText,
-        region: regionCode || '',
-        stats: {
-          visibilityScore: avgVisibility,
-          position: avgPosition > 0 ? String(avgPosition) : '',
-          sentiment: avgSentiment,
-          mentions: mentionTotal,
-          citations: citationTotal,
+      const rows = execRows || [];
+      const promptEnvelopeText = promptTextForDetailEnvelope(rows);
+      const payload = await assemblePromptDetailPayload(
+        client,
+        organizationId,
+        params,
+        defaults,
+        rows,
+        {
+          topicPathParam: '',
+          promptEnvelopeText,
+          envelopePromptId: trimmedPromptId,
+          regionCode,
         },
-        weeklyStats,
-        executions,
-        sources,
-      });
+      );
+      return cachedOk(payload);
     },
   );
 }
