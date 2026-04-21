@@ -1,8 +1,8 @@
 # URL Inspector Stats API
 
-Aggregate citation statistics (total prompts cited, total prompts, unique URLs, total citations) plus a per-ISO-week sparkline breakdown for the URL Inspector dashboard. Data is computed via the `rpc_url_inspector_stats` RPC in mysticat-data-service against the `url_inspector_domain_stats` summary table.
+Aggregate citation statistics (total prompts cited, total prompts, unique URLs, total citations) plus a per-ISO-week sparkline breakdown for the URL Inspector dashboard. The controller fans out four per-KPI RPCs in mysticat-data-service in parallel (`Promise.all`) and assembles the response.
 
-Unlike `/brand-presence/stats`, trends are **always returned** (no `showTrends` flag) because the sparklines are a first-class part of every URL Inspector stats card.
+Trends are **always returned** (no `showTrends` flag) because the sparklines are a first-class part of every URL Inspector stats card.
 
 ---
 
@@ -11,18 +11,22 @@ Unlike `/brand-presence/stats`, trends are **always returned** (no `showTrends` 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/org/:spaceCatId/brands/all/brand-presence/url-inspector/stats` | Stats for the site (all brands) |
-| GET | `/org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/stats` | Same stats (brandId in path is accepted but **not applied** — see "Scope" below) |
+| GET | `/org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/stats` | Stats scoped to a single brand on the site |
 
 **Path parameters:**
 - `spaceCatId` — Organization UUID
-- `brandId` — `all` or a specific brand UUID (ignored by the underlying RPC)
+- `brandId` — `all` (no brand filter) or a specific brand UUID (scopes `totalPrompts` / `totalPromptsCited` to that brand's prompts)
 
 ---
 
 ## Scope
 
-- URL Inspector endpoints are **site-scoped**, not brand-scoped. `siteId` is **required**.
-- The underlying `rpc_url_inspector_stats` RPC does **not** accept `p_brand_id`. The summary table `url_inspector_domain_stats` does not carry a `brand_id` dimension, so the `:brandId` path segment does not filter results.
+- URL Inspector endpoints are **site-scoped**; `siteId` is **required**.
+- When `brandId` is a specific UUID, the split RPCs take a brand-aware plan:
+  - `totalPrompts` — distinct `prompts.id` rows that are `status = 'active'` for the brand AND ran in the window (driven from `prompts`, semi-joined to `brand_presence_executions`).
+  - `totalPromptsCited` — same brand-active prompts, further filtered by existence of at least one owned citation in `brand_presence_sources` in the window.
+  - `uniqueUrls` / `totalCitations` — raw owned citations, filtered by the brand's execution rows (via `brand_presence_executions.brand_id`).
+- When `brandId` is `all`, the split RPCs take a brand-agnostic plan driven from `brand_presence_executions` / `brand_presence_sources` in the window. This is the fast path for site-wide totals.
 - The site is always validated against the organization (`spaceCatId`) before querying.
 
 ---
@@ -37,59 +41,42 @@ Parameters are read from `ctx.data` (merged query string / body) via `parseFilte
 | `startDate` | `start_date` | string (YYYY-MM-DD) | no | 28 days ago | Start of date range |
 | `endDate` | `end_date` | string (YYYY-MM-DD) | no | today | End of date range |
 | `model` | `platform` | string | no | **unset (no platform filter)** | LLM model. If provided, validated against the `llmo_execution_model` enum (e.g. `chatgpt`, `gemini`). |
-| `categoryId` | `category_id`, `category` | string | no | — | Category filter. Matched via `ANY(categories)` on the summary row. |
-| `regionCode` | `region_code`, `region` | string | no | — | Region filter. Matched via `ANY(regions)` on the summary row. |
+| `categoryId` | `category_id`, `category` | string | no | — | Category filter. Matched against `brand_presence_executions.category_name`. |
+| `regionCode` | `region_code`, `region` | string | no | — | Region filter. Matched against `brand_presence_executions.region_code`. |
 
 **Differences vs `/brand-presence/stats`:**
 - `siteId` is **required** (not optional).
 - `model` has **no default** — omitted means "no model filter" (unlike brand-presence which defaults to `chatgpt-free`).
 - `topicIds`, `origin`, and `showTrends` are **not supported**. Trends are always returned.
-- Category/region filtering matches via array-containment on the aggregated summary table, so values must match the tokens stored there exactly.
 
 ---
 
 ## RPC Usage
 
-**Function:** `rpc_url_inspector_stats(UUID, DATE, DATE, TEXT, TEXT, TEXT)`
+The controller calls four per-KPI RPCs in parallel. Each RPC has the same 7-parameter signature and returns rows shaped as `(week, week_number, year_val, value)`; the `week IS NULL` row is the aggregate for the full window, the remaining rows are the per-ISO-week breakdown.
+
+| Metric | RPC |
+|--------|-----|
+| `totalPromptsCited` | `rpc_url_inspector_total_prompts_cited(UUID, DATE, DATE, TEXT, TEXT, TEXT, UUID)` |
+| `totalPrompts` | `rpc_url_inspector_total_prompts(UUID, DATE, DATE, TEXT, TEXT, TEXT, UUID)` |
+| `uniqueUrls` | `rpc_url_inspector_unique_urls(UUID, DATE, DATE, TEXT, TEXT, TEXT, UUID)` |
+| `totalCitations` | `rpc_url_inspector_total_citations(UUID, DATE, DATE, TEXT, TEXT, TEXT, UUID)` |
 
 | RPC Parameter | API Source | Description |
 |---------------|------------|-------------|
 | `p_site_id` | `siteId` | Site UUID (required) |
 | `p_start_date` | `startDate` | Start of range |
 | `p_end_date` | `endDate` | End of range |
-| `p_category` | `categoryId` | Category token or NULL |
+| `p_category` | `categoryId` | Category name or NULL |
 | `p_region` | `regionCode` | Region code or NULL |
 | `p_platform` | `model` | Mapped to `llmo_execution_model` via `map_llmo_execution_model_input()`; NULL means no model filter |
+| `p_brand_id` | `brandId` (path) | Specific brand UUID; `all` maps to NULL (no brand filter) |
 
-**Data source:** `public.url_inspector_domain_stats` — a pre-aggregated summary table keyed by `(site_id, execution_date, model, hostname, content_type)` with `unique_prompts`, `unique_urls`, `citation_count`, `categories TEXT[]`, `regions TEXT[]`. Summary-table queries return in ~1 s on large sites where the raw-table equivalent would take 100+ s.
+**Data source:** `public.brand_presence_executions` and `public.brand_presence_sources` (raw partitioned tables), joined to `public.prompts` when `p_brand_id` is set. Each RPC uses `GROUPING SETS ((), (week_expr))` so the aggregate and per-week breakdown come from a single scan.
 
-**Conceptual SQL (summary table):**
-```sql
-WITH base AS (
-  SELECT execution_date, content_type, unique_prompts, unique_urls, citation_count
-  FROM url_inspector_domain_stats
-  WHERE site_id = p_site_id
-    AND execution_date BETWEEN p_start_date AND p_end_date
-    AND (v_platform IS NULL OR model = v_platform)
-    AND (p_category IS NULL OR p_category = ANY(categories))
-    AND (p_region IS NULL OR p_region = ANY(regions))
-),
-owned AS (
-  SELECT execution_date,
-         SUM(unique_prompts) AS owned_prompts,
-         SUM(unique_urls)    AS owned_urls,
-         SUM(citation_count) AS owned_citations
-  FROM base WHERE content_type = 'owned'
-  GROUP BY execution_date
-),
-all_data AS (
-  SELECT execution_date, SUM(unique_prompts) AS total_prompts
-  FROM base GROUP BY execution_date
-)
--- Aggregate row (week = NULL) + one row per ISO week (TO_CHAR(date, 'IYYY-"W"IW')).
-```
+**Plan-shape note:** The split RPCs always repeat the `execution_date` range and `site_id` predicate on both `brand_presence_executions` and `brand_presence_sources` so the planner can prune partitions on both sides of the join. Skipping this makes the planner scan every partition of the other table and blows latency up from ~1 s to ~100 s on large sites.
 
-**Approximation note:** `unique_urls` and `totalPromptsCited` are **sums of per-group distinct counts** over the summary table — a URL or prompt that appears in multiple (hostname, date, model, content_type) groups is counted once per group. Accepted trade-off for the 100× query speedup. Exact counts require the raw-table path (off by default).
+**Why fan-out and not a single RPC:** End-to-end latency is `max(t_totalPromptsCited, t_totalPrompts, t_uniqueUrls, t_totalCitations)` ≈ the single slowest metric, not the sum. The four RPCs also let Postgres compile a specialized plan per KPI instead of one generic plan that has to serve all four, which matters because `COUNT(DISTINCT …)` plans are very different across the four metrics. See [`mysticat-data-service/docs/plans/2026-04-02-url-inspector-performance.md`](../../../mysticat-data-service/docs/plans/2026-04-02-url-inspector-performance.md) §6 Experiment 6 for the benchmarks and rationale.
 
 ---
 
@@ -122,16 +109,21 @@ all_data AS (
 }
 ```
 
-- `stats` — aggregate across the full `[startDate, endDate]` window (owned content only for cited/URLs/citations; all prompts for `totalPrompts`).
-- `weeklyTrends` — one entry per ISO week (`IYYY-"W"IW`), **ascending** (oldest first, since trends are returned sorted NULLS FIRST).
+- `stats` — aggregate across the full `[startDate, endDate]` window. Every metric measures owned citations / brand-active prompts only (see Scope above for the exact definitions).
+- `weeklyTrends` — one entry per ISO week (`IYYY-"W"IW`), **ascending** (oldest first). Weeks are unioned across the four RPCs; if one metric has no data for a week, that metric is reported as `0` for the week rather than dropping the row.
 
 ---
 
 ## Sample URLs
 
-**Default (last 28 days, no platform filter):**
+**Default (last 28 days, no platform filter, all brands):**
 ```
 GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/url-inspector/stats?siteId=c2473d89-e997-458d-a86d-b4096649c12b
+```
+
+**Single brand:**
+```
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/e0a9a1f2-1b4c-4d0e-8f11-8f0a0c2b3d4e/brand-presence/url-inspector/stats?siteId=c2473d89-e997-458d-a86d-b4096649c12b
 ```
 
 **Custom date range + platform:**
@@ -150,9 +142,11 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/url-insp
 
 | Status | Condition |
 |--------|-----------|
-| 400 | `siteId` missing; invalid `model` value; RPC error |
+| 400 | `siteId` missing; invalid `model` value |
 | 403 | Site does not belong to the organization; user has no org access |
-| 500 | RPC exception (logged as `URL Inspector stats RPC error`) |
+| 500 | Any of the four split RPCs errored (logged as `URL Inspector stats RPC error (<fn>): <message>`) |
+
+On a 500, only the generic `Internal error processing URL Inspector stats` message is returned to the caller; the specific RPC name and the Postgres error are written to the server log.
 
 ---
 

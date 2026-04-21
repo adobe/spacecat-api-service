@@ -50,6 +50,25 @@ function resolveUrlInspectorPlatform(params) {
 }
 
 /**
+ * Stats card KPI → RPC name mapping. Each RPC returns rows shaped as
+ * { week, week_number, year_val, value } where the week=null row is the
+ * overall aggregate and the remaining rows are the per-week breakdown.
+ *
+ * The controller fans these four RPCs out in parallel (Promise.all) and
+ * reassembles them into the response shape. See
+ * mysticat-data-service/docs/plans/2026-04-02-url-inspector-performance.md
+ * §6 Experiment 6 for why we split stats into four per-KPI RPCs instead of
+ * a monolithic function (partition pruning, plan specialization per
+ * brand_id branch, parallel fanout giving ~max-of-four latency).
+ */
+const URL_INSPECTOR_STATS_RPCS = [
+  { key: 'totalPromptsCited', fn: 'rpc_url_inspector_total_prompts_cited' },
+  { key: 'totalPrompts', fn: 'rpc_url_inspector_total_prompts' },
+  { key: 'uniqueUrls', fn: 'rpc_url_inspector_unique_urls' },
+  { key: 'totalCitations', fn: 'rpc_url_inspector_total_citations' },
+];
+
+/**
  * Creates the getUrlInspectorStats handler.
  * Aggregate citation statistics and weekly sparkline trends.
  * Returns an aggregate stats object plus per-week breakdown rows.
@@ -61,7 +80,7 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
     getOrgAndValidateAccess,
     'url-inspector-stats',
     async (ctx, client) => {
-      const { spaceCatId } = ctx.params;
+      const { spaceCatId, brandId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
       const defaults = defaultDateRange();
 
@@ -83,38 +102,72 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
         return badRequest(modelError);
       }
 
-      const { data, error } = await client.rpc('rpc_url_inspector_stats', {
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+      const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate || defaults.startDate,
         p_end_date: params.endDate || defaults.endDate,
         p_category: shouldApplyFilter(params.categoryId) ? params.categoryId : null,
         p_region: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
         p_platform: model,
-      });
+        p_brand_id: filterByBrandId,
+      };
 
-      if (error) {
-        ctx.log.error(`URL Inspector stats RPC error: ${error.message}`);
+      let results;
+      try {
+        results = await Promise.all(
+          URL_INSPECTOR_STATS_RPCS.map(({ fn }) => client.rpc(fn, rpcParams)),
+        );
+      } catch (e) {
+        ctx.log.error(`URL Inspector stats RPC threw: ${e?.message || e}`);
         return internalServerError('Internal error processing URL Inspector stats');
       }
 
-      const rows = data || [];
-      const aggregateRow = rows.find((r) => r.week == null);
-      const weeklyRows = rows.filter((r) => r.week != null);
+      const failedIndex = results.findIndex((r) => r.error);
+      if (failedIndex !== -1) {
+        const failedFn = URL_INSPECTOR_STATS_RPCS[failedIndex].fn;
+        const { error: failedError } = results[failedIndex];
+        const codePart = failedError.code ? ` [code=${failedError.code}]` : '';
+        const detailsPart = failedError.details ? ` [details=${failedError.details}]` : '';
+        const hintPart = failedError.hint ? ` [hint=${failedError.hint}]` : '';
+        ctx.log.error(
+          `URL Inspector stats RPC error (${failedFn}): ${failedError.message}${codePart}${detailsPart}${hintPart}`,
+        );
+        return internalServerError('Internal error processing URL Inspector stats');
+      }
 
       const stats = {
-        totalPromptsCited: Number(aggregateRow?.total_prompts_cited ?? 0),
-        totalPrompts: Number(aggregateRow?.total_prompts ?? 0),
-        uniqueUrls: Number(aggregateRow?.unique_urls ?? 0),
-        totalCitations: Number(aggregateRow?.total_citations ?? 0),
+        totalPromptsCited: 0,
+        totalPrompts: 0,
+        uniqueUrls: 0,
+        totalCitations: 0,
       };
+      const weeklyByKey = new Map();
 
-      const weeklyTrends = weeklyRows.map((r) => ({
-        week: r.week,
-        totalPromptsCited: Number(r.total_prompts_cited ?? 0),
-        totalPrompts: Number(r.total_prompts ?? 0),
-        uniqueUrls: Number(r.unique_urls ?? 0),
-        totalCitations: Number(r.total_citations ?? 0),
-      }));
+      URL_INSPECTOR_STATS_RPCS.forEach(({ key }, idx) => {
+        const rows = results[idx].data || [];
+        rows.forEach((row) => {
+          const value = Number(row.value ?? 0);
+          if (row.week == null) {
+            stats[key] = value;
+            return;
+          }
+          let weekly = weeklyByKey.get(row.week);
+          if (!weekly) {
+            weekly = {
+              week: row.week,
+              totalPromptsCited: 0,
+              totalPrompts: 0,
+              uniqueUrls: 0,
+              totalCitations: 0,
+            };
+            weeklyByKey.set(row.week, weekly);
+          }
+          weekly[key] = value;
+        });
+      });
+
+      const weeklyTrends = [...weeklyByKey.values()].sort((a, b) => a.week.localeCompare(b.week));
 
       return ok({ stats, weeklyTrends });
     },

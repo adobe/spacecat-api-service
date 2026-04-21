@@ -82,6 +82,32 @@ function getOrgAndValidateAccess() {
   return async () => ({ organization: { getId: () => ORG_ID } });
 }
 
+// Helper: build rpcResults for the four split stats RPCs from a simple
+// per-metric object. Each entry is a list of rows (one aggregate row with
+// week=null and any number of per-week rows). When `error` is present,
+// every split RPC returns that error; pass `errorOnFn` to target a single
+// RPC.
+function statsRpcResults({
+  totalPromptsCited = [], totalPrompts = [], uniqueUrls = [], totalCitations = [],
+  error = null, errorOnFn = null, data = undefined,
+} = {}) {
+  const rpcs = {
+    rpc_url_inspector_total_prompts_cited: totalPromptsCited,
+    rpc_url_inspector_total_prompts: totalPrompts,
+    rpc_url_inspector_unique_urls: uniqueUrls,
+    rpc_url_inspector_total_citations: totalCitations,
+  };
+  const out = {};
+  Object.entries(rpcs).forEach(([fn, rows]) => {
+    if (error && (!errorOnFn || errorOnFn === fn)) {
+      out[fn] = { data: null, error };
+    } else {
+      out[fn] = { data: data === undefined ? rows : data, error: null };
+    }
+  });
+  return out;
+}
+
 describe('URL Inspector Handlers', () => {
   afterEach(() => {
     sinon.restore();
@@ -89,24 +115,29 @@ describe('URL Inspector Handlers', () => {
 
   describe('createUrlInspectorStatsHandler', () => {
     it('returns stats and weekly trends on success', async () => {
-      const rpcData = [
-        {
-          week: null,
-          total_prompts_cited: 10,
-          total_prompts: 50,
-          unique_urls: 5,
-          total_citations: 100,
-        },
-        {
-          week: '2026-W10', total_prompts_cited: 4, total_prompts: 20, unique_urls: 3, total_citations: 40,
-        },
-        {
-          week: '2026-W11', total_prompts_cited: 6, total_prompts: 30, unique_urls: 4, total_citations: 60,
-        },
-      ];
-
       const { context, rpcStub } = createContext({}, {}, {
-        rpcResults: { rpc_url_inspector_stats: { data: rpcData, error: null } },
+        rpcResults: statsRpcResults({
+          totalPromptsCited: [
+            { week: null, value: 10 },
+            { week: '2026-W10', value: 4 },
+            { week: '2026-W11', value: 6 },
+          ],
+          totalPrompts: [
+            { week: null, value: 50 },
+            { week: '2026-W10', value: 20 },
+            { week: '2026-W11', value: 30 },
+          ],
+          uniqueUrls: [
+            { week: null, value: 5 },
+            { week: '2026-W10', value: 3 },
+            { week: '2026-W11', value: 4 },
+          ],
+          totalCitations: [
+            { week: null, value: 100 },
+            { week: '2026-W10', value: 40 },
+            { week: '2026-W11', value: 60 },
+          ],
+        }),
       });
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
@@ -119,8 +150,26 @@ describe('URL Inspector Handlers', () => {
       expect(body.stats.uniqueUrls).to.equal(5);
       expect(body.stats.totalCitations).to.equal(100);
       expect(body.weeklyTrends).to.have.length(2);
-      expect(body.weeklyTrends[0].week).to.equal('2026-W10');
-      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_stats');
+      expect(body.weeklyTrends[0]).to.deep.equal({
+        week: '2026-W10',
+        totalPromptsCited: 4,
+        totalPrompts: 20,
+        uniqueUrls: 3,
+        totalCitations: 40,
+      });
+      expect(body.weeklyTrends[1]).to.deep.equal({
+        week: '2026-W11',
+        totalPromptsCited: 6,
+        totalPrompts: 30,
+        uniqueUrls: 4,
+        totalCitations: 60,
+      });
+
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_total_prompts_cited');
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_total_prompts');
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_unique_urls');
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_total_citations');
+      expect(rpcStub.callCount).to.equal(4);
     });
 
     it('returns badRequest when siteId is missing', async () => {
@@ -142,11 +191,12 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(403);
     });
 
-    it('returns internalServerError on RPC error without leaking details', async () => {
+    it('returns internalServerError when any split RPC errors, without leaking details', async () => {
       const { context } = createContext({}, {}, {
-        rpcResults: {
-          rpc_url_inspector_stats: { data: null, error: { message: 'pq: column "x" does not exist' } },
-        },
+        rpcResults: statsRpcResults({
+          error: { message: 'pq: column "x" does not exist' },
+          errorOnFn: 'rpc_url_inspector_unique_urls',
+        }),
       });
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
@@ -155,11 +205,12 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
       const body = await response.json();
       expect(body.message).to.not.include('pq:');
+      expect(context.log.error).to.have.been.calledWithMatch(/rpc_url_inspector_unique_urls/);
     });
 
-    it('returns empty stats when RPC returns empty data', async () => {
+    it('returns empty stats when all split RPCs return empty data', async () => {
       const { context } = createContext({}, {}, {
-        rpcResults: { rpc_url_inspector_stats: { data: [], error: null } },
+        rpcResults: statsRpcResults(),
       });
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
@@ -167,84 +218,102 @@ describe('URL Inspector Handlers', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(body.stats.totalPromptsCited).to.equal(0);
+      expect(body.stats).to.deep.equal({
+        totalPromptsCited: 0,
+        totalPrompts: 0,
+        uniqueUrls: 0,
+        totalCitations: 0,
+      });
       expect(body.weeklyTrends).to.have.length(0);
     });
 
-    it('does not pass brandId to summary-table RPC', async () => {
+    it('passes brandId to the split RPCs as p_brand_id', async () => {
       const { context, rpcStub } = createContext(
         { brandId: BRAND_ID },
         {},
-        { rpcResults: { rpc_url_inspector_stats: { data: [], error: null } } },
+        { rpcResults: statsRpcResults() },
       );
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       await handler(context);
 
-      const rpcCall = rpcStub.firstCall;
-      expect(rpcCall.args[1]).to.not.have.property('p_brand_id');
+      expect(rpcStub.callCount).to.equal(4);
+      rpcStub.getCalls().forEach((call) => {
+        expect(call.args[1]).to.have.property('p_brand_id', BRAND_ID);
+      });
+    });
+
+    it('passes p_brand_id=null when brandId is "all"', async () => {
+      const { context, rpcStub } = createContext(
+        { brandId: 'all' },
+        {},
+        { rpcResults: statsRpcResults() },
+      );
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      rpcStub.getCalls().forEach((call) => {
+        expect(call.args[1].p_brand_id).to.equal(null);
+      });
     });
 
     it('passes null for platform when not provided', async () => {
       const { context, rpcStub } = createContext(
         {},
         {},
-        { rpcResults: { rpc_url_inspector_stats: { data: [], error: null } } },
+        { rpcResults: statsRpcResults() },
       );
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       await handler(context);
 
-      const rpcCall = rpcStub.firstCall;
-      expect(rpcCall.args[1].p_platform).to.equal(null);
+      expect(rpcStub.firstCall.args[1].p_platform).to.equal(null);
     });
 
-    it('passes valid model to RPC when platform is provided', async () => {
+    it('passes valid model to all RPCs when platform is provided', async () => {
       const { context, rpcStub } = createContext(
         {},
         { platform: 'perplexity' },
-        { rpcResults: { rpc_url_inspector_stats: { data: [], error: null } } },
+        { rpcResults: statsRpcResults() },
       );
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       await handler(context);
 
-      const rpcCall = rpcStub.firstCall;
-      expect(rpcCall.args[1].p_platform).to.equal('perplexity');
+      rpcStub.getCalls().forEach((call) => {
+        expect(call.args[1].p_platform).to.equal('perplexity');
+      });
     });
 
-    it('passes category and region filters to RPC', async () => {
+    it('passes category and region filters to all RPCs', async () => {
       const { context, rpcStub } = createContext(
         {},
         {
           categoryId: 'cat-1', regionCode: 'US', startDate: '2026-01-01', endDate: '2026-02-01',
         },
-        { rpcResults: { rpc_url_inspector_stats: { data: [], error: null } } },
+        { rpcResults: statsRpcResults() },
       );
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
       await handler(context);
 
-      const rpcCall = rpcStub.firstCall;
-      expect(rpcCall.args[1].p_category).to.equal('cat-1');
-      expect(rpcCall.args[1].p_region).to.equal('US');
-      expect(rpcCall.args[1].p_start_date).to.equal('2026-01-01');
-      expect(rpcCall.args[1].p_end_date).to.equal('2026-02-01');
+      rpcStub.getCalls().forEach((call) => {
+        expect(call.args[1].p_category).to.equal('cat-1');
+        expect(call.args[1].p_region).to.equal('US');
+        expect(call.args[1].p_start_date).to.equal('2026-01-01');
+        expect(call.args[1].p_end_date).to.equal('2026-02-01');
+      });
     });
 
-    it('handles weekly rows with null fields', async () => {
-      const rpcData = [
-        {
-          week: '2026-W10',
-          total_prompts_cited: null,
-          total_prompts: null,
-          unique_urls: null,
-          total_citations: null,
-        },
-      ];
-
+    it('handles weekly rows with null values', async () => {
       const { context } = createContext({}, {}, {
-        rpcResults: { rpc_url_inspector_stats: { data: rpcData, error: null } },
+        rpcResults: statsRpcResults({
+          totalPromptsCited: [{ week: '2026-W10', value: null }],
+          totalPrompts: [{ week: '2026-W10', value: null }],
+          uniqueUrls: [{ week: '2026-W10', value: null }],
+          totalCitations: [{ week: '2026-W10', value: null }],
+        }),
       });
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
@@ -253,10 +322,59 @@ describe('URL Inspector Handlers', () => {
 
       expect(body.stats.totalPromptsCited).to.equal(0);
       expect(body.weeklyTrends).to.have.length(1);
-      expect(body.weeklyTrends[0].totalPromptsCited).to.equal(0);
-      expect(body.weeklyTrends[0].totalPrompts).to.equal(0);
-      expect(body.weeklyTrends[0].uniqueUrls).to.equal(0);
-      expect(body.weeklyTrends[0].totalCitations).to.equal(0);
+      expect(body.weeklyTrends[0]).to.deep.equal({
+        week: '2026-W10',
+        totalPromptsCited: 0,
+        totalPrompts: 0,
+        uniqueUrls: 0,
+        totalCitations: 0,
+      });
+    });
+
+    it('unions weeks across split RPCs (missing metric for a week stays 0)', async () => {
+      const { context } = createContext({}, {}, {
+        rpcResults: statsRpcResults({
+          totalPromptsCited: [
+            { week: null, value: 4 },
+            { week: '2026-W10', value: 4 },
+          ],
+          totalPrompts: [
+            { week: null, value: 20 },
+            { week: '2026-W10', value: 10 },
+            { week: '2026-W11', value: 10 },
+          ],
+          uniqueUrls: [
+            { week: null, value: 3 },
+            { week: '2026-W11', value: 3 },
+          ],
+          totalCitations: [
+            { week: null, value: 40 },
+          ],
+        }),
+      });
+
+      const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.weeklyTrends).to.have.length(2);
+      const w10 = body.weeklyTrends.find((w) => w.week === '2026-W10');
+      const w11 = body.weeklyTrends.find((w) => w.week === '2026-W11');
+      expect(w10).to.deep.equal({
+        week: '2026-W10',
+        totalPromptsCited: 4,
+        totalPrompts: 10,
+        uniqueUrls: 0,
+        totalCitations: 0,
+      });
+      expect(w11).to.deep.equal({
+        week: '2026-W11',
+        totalPromptsCited: 0,
+        totalPrompts: 10,
+        uniqueUrls: 3,
+        totalCitations: 0,
+      });
     });
   });
 
@@ -1107,7 +1225,7 @@ describe('URL Inspector Handlers', () => {
   describe('null data from RPC', () => {
     it('stats handles null data from RPC gracefully', async () => {
       const { context } = createContext({}, {}, {
-        rpcResults: { rpc_url_inspector_stats: { data: null, error: null } },
+        rpcResults: statsRpcResults({ data: null }),
       });
 
       const handler = createUrlInspectorStatsHandler(getOrgAndValidateAccess());
@@ -1116,6 +1234,7 @@ describe('URL Inspector Handlers', () => {
 
       expect(response.status).to.equal(200);
       expect(body.stats.totalPromptsCited).to.equal(0);
+      expect(body.weeklyTrends).to.have.length(0);
     });
 
     it('owned-urls handles null data from RPC gracefully', async () => {
@@ -1206,14 +1325,7 @@ describe('URL Inspector Handlers', () => {
       const { context } = createContext(
         {},
         { platform: 'invalid-model-name' },
-        {
-          rpcResults: {
-            rpc_url_inspector_stats: {
-              data: [],
-              error: null,
-            },
-          },
-        },
+        { rpcResults: statsRpcResults() },
       );
 
       const handler = createUrlInspectorStatsHandler(
