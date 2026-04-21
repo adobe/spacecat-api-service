@@ -47,7 +47,7 @@ import {
   detectCdnForDomain,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
-import { getImsTokenFromCookie, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
+import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
 import {
   applyFilters,
   applyInclusions,
@@ -590,7 +590,7 @@ function LlmoController(ctx) {
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
       log.error(`User ${userId} error updating llmo config for siteId: ${siteId}, error: ${msg}`);
-      return badRequest(msg);
+      return badRequest(cleanupHeaderValue(msg));
     }
   }
 
@@ -1322,7 +1322,7 @@ function LlmoController(ctx) {
         // Exchange promise token from cookie for an IMS user token
         let imsUserToken;
         try {
-          imsUserToken = await getImsTokenFromCookie(context);
+          imsUserToken = await getImsTokenFromPromiseToken(context);
           log.info(`[edge-optimize-routing] IMS user token obtained for site ${siteId}`);
         } catch (tokenError) {
           log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to get IMS user token: ${tokenError.message}`);

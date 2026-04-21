@@ -15,7 +15,8 @@
  */
 export const PlgOnboardingDto = {
   /**
-   * Converts a PlgOnboarding model into a JSON object.
+   * Converts a PlgOnboarding model into a public-safe JSON object.
+   * PII fields (updatedBy, reviews.reviewedBy) are excluded — safe to return to customers.
    * @param {Readonly<PlgOnboarding>} onboarding - PlgOnboarding model instance.
    * @returns {object}
    */
@@ -31,9 +32,25 @@ export const PlgOnboardingDto = {
     error: onboarding.getError(),
     botBlocker: onboarding.getBotBlocker(),
     waitlistReason: onboarding.getWaitlistReason(),
-    reviews: onboarding.getReviews(),
+    reviews: (onboarding.getReviews() || []).map(
+      // eslint-disable-next-line no-unused-vars
+      ({ reviewedBy: _reviewedBy, ...rest }) => rest,
+    ),
     completedAt: onboarding.getCompletedAt(),
     createdAt: onboarding.getCreatedAt(),
     updatedAt: onboarding.getUpdatedAt(),
+    // updatedBy intentionally omitted — PII, visible to admins only via toAdminJSON
+  }),
+
+  /**
+   * Converts a PlgOnboarding model into an admin JSON object.
+   * Includes PII fields (updatedBy, reviews.reviewedBy) — only use on admin-restricted endpoints.
+   * @param {Readonly<PlgOnboarding>} onboarding - PlgOnboarding model instance.
+   * @returns {object}
+   */
+  toAdminJSON: (onboarding) => ({
+    ...PlgOnboardingDto.toJSON(onboarding),
+    reviews: onboarding.getReviews() || [],
+    updatedBy: onboarding.getUpdatedBy(),
   }),
 };
