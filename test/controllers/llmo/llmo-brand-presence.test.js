@@ -846,6 +846,7 @@ describe('llmo-brand-presence', () => {
       expect(promptTextForDetailEnvelope([
         { prompt: null, execution_date: '2026-03-08' },
         { prompt: '', execution_date: '2026-03-01' },
+        { prompt: undefined, execution_date: '2026-03-02' },
       ])).to.equal('');
     });
   });

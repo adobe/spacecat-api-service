@@ -517,7 +517,7 @@ export function promptTextForDetailEnvelope(rows) {
   }
   const sorted = sortDetailRowsByExecutionDateDesc(rows);
   const row = sorted.find((r) => hasText(r.prompt != null ? String(r.prompt) : ''));
-  return row && row.prompt != null ? String(row.prompt) : '';
+  return row ? String(row.prompt) : '';
 }
 
 export function parseFilterDimensionsParams(context) {
