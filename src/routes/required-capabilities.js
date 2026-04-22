@@ -484,6 +484,9 @@ const routeRequiredCapabilities = {
 
   // Tokens
   'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
+
+  // Brand Presence (ClickHouse)
+  'POST /sites/:siteId/brand-presence/metrics': 'brandPresence:write',
 };
 
 export default routeRequiredCapabilities;

@@ -94,6 +94,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
+ * @param {Object} brandPresenceController - The brand presence controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -145,6 +146,7 @@ export default function getRouteHandlers(
   featureFlagsController,
   pageRelationshipsController,
   ephemeralRunController,
+  brandPresenceController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -543,6 +545,9 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/contact-sales-leads': contactSalesLeadsController.getByOrganizationId,
     'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead': contactSalesLeadsController.checkBySite,
     'PATCH /contact-sales-leads/:contactSalesLeadId': contactSalesLeadsController.update,
+
+    // Brand Presence (ClickHouse) endpoints
+    'POST /sites/:siteId/brand-presence/metrics': brandPresenceController.ingestMetrics,
   };
 
   // Initialization of static and dynamic routes
