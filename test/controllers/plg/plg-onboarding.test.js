@@ -2930,26 +2930,6 @@ describe('PlgOnboardingController', () => {
       expect(sibling2.remove).to.have.been.called;
     });
 
-    it('syncs PlgOnboarding records for revoked sites to INACTIVE', async () => {
-      const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);
-
-      const priorRecord = createMockOnboarding({
-        id: 'prior-onb',
-        domain: 'other.example.com',
-        status: 'ONBOARDED',
-        siteId: 'prev-site-1',
-      });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([priorRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      await controller.onboard(context);
-
-      expect(sibling.remove).to.have.been.called;
-      expect(priorRecord.setStatus).to.have.been.calledWith('INACTIVE');
-      expect(priorRecord.save).to.have.been.called;
-    });
-
     it('aborts when entitlement.organizationId disagrees with resolved customer org', async () => {
       const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);

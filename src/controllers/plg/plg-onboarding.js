@@ -359,10 +359,6 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
  *      imsOrgId. If they disagree, entitlement resolution drifted — abort loudly, don't delete.
  *   2. The target customer org MUST NOT be internal/demo. Caller-level mistake guard.
  *
- * PlgOnboarding records for revoked sites are also transitioned to INACTIVE so the
- * "one domain per IMS org" guard elsewhere in this controller doesn't keep seeing stale
- * ONBOARDED records.
- *
  * @param {object} newSite - The newly onboarded site (kept active).
  * @param {object} organization - The customer organization resolved from imsOrgId (ground truth).
  * @param {object} entitlement - The ASO entitlement returned by ensureAsoEntitlement.
@@ -370,7 +366,7 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
  */
 async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitlement, context) {
   const { dataAccess, log, env } = context;
-  const { SiteEnrollment, PlgOnboarding } = dataAccess;
+  const { SiteEnrollment } = dataAccess;
 
   const expectedOrgId = organization.getId();
 
@@ -400,44 +396,15 @@ async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitle
     log.warn(`Found ${toRevoke.length} other ASO enrollments under entitlement ${entitlement.getId()} for org ${expectedOrgId}; revoking all. Investigate if unexpected.`);
   }
 
-  const revokedSiteIds = [];
   await Promise.all(toRevoke.map(async (e) => {
     const prevSiteId = e.getSiteId();
     try {
       log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${prevSiteId} (org ${expectedOrgId})`);
       await e.remove();
-      revokedSiteIds.push(prevSiteId);
     } catch (err) {
       log.warn(`Failed to revoke ASO enrollment ${e.getId()} for site ${prevSiteId}: ${err.message}`);
     }
   }));
-
-  // Sync PlgOnboarding records of revoked sites to INACTIVE so the "one domain per IMS org"
-  // guard and other state readers don't see a revoked site as still ONBOARDED.
-  if (revokedSiteIds.length === 0) {
-    return;
-  }
-  try {
-    const imsOrgId = organization.getImsOrgId?.();
-    if (!imsOrgId) {
-      return;
-    }
-    const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
-    const revokedSet = new Set(revokedSiteIds);
-    const toMark = records.filter(
-      (r) => revokedSet.has(r.getSiteId()) && r.getStatus() === STATUSES.ONBOARDED,
-    );
-    await Promise.all(toMark.map(async (r) => {
-      try {
-        r.setStatus(STATUSES.INACTIVE);
-        await r.save();
-      } catch (err) {
-        log.warn(`Failed to mark PlgOnboarding ${r.getId()} as INACTIVE: ${err.message}`);
-      }
-    }));
-  } catch (err) {
-    log.warn(`Failed to sync PlgOnboarding records to INACTIVE after revocation: ${err.message}`);
-  }
 }
 
 /**
