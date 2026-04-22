@@ -116,6 +116,42 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.orgMembers).to.equal('keep@example.com');
     });
 
+    it('falls back from getStatus/getEmailId to status/emailId fields', async () => {
+      mockContext.dataAccess.TrialUser.allByOrganizationId.resolves([
+        {
+          getStatus: () => '',
+          status: 'USER',
+          getEmailId: () => '',
+          emailId: 'fallback@example.com',
+        },
+      ]);
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('fallback@example.com');
+    });
+
+    it('skips org members with non-string email values', async () => {
+      mockContext.dataAccess.TrialUser.allByOrganizationId.resolves([
+        { getStatus: () => 'USER', getEmailId: () => 12345 },
+      ]);
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('');
+    });
+
+    it('skips null/empty org member entries safely', async () => {
+      mockContext.dataAccess.TrialUser.allByOrganizationId.resolves([null, {}]);
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('');
+    });
+
     it('keeps sending when org members fetch fails', async () => {
       mockContext.dataAccess.TrialUser.allByOrganizationId.rejects(new Error('db unavailable'));
 
@@ -228,6 +264,17 @@ describe('cdn-opt-in-notification', () => {
       expect(result.sent).to.be.false;
       expect(mockContext.log.warn).to.have.been.calledWith(
         sinon.match(/Email not delivered/),
+      );
+    });
+
+    it('logs status code when sendEmail fails without error message', async () => {
+      sendEmailStub.resolves({ success: false, statusCode: 503 });
+
+      const result = await notifyOptInIfNeeded(mockContext, baseParams);
+
+      expect(result.sent).to.be.false;
+      expect(mockContext.log.warn).to.have.been.calledWith(
+        sinon.match(/status 503/),
       );
     });
 
