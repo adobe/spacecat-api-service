@@ -2989,6 +2989,191 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Previous PLG enrollment displacement (one active PLG trial per org) ---
+
+  describe('onboard - previous PLG enrollment displacement', () => {
+    let controller;
+    const PREV_SITE_ID = 'prev-site-uuid';
+    const PREV_ONBOARDING_ID = 'prev-onboarding-uuid';
+
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    function buildPrevOnboarding(overrides = {}) {
+      return createMockOnboarding({
+        id: PREV_ONBOARDING_ID,
+        domain: TEST_DOMAIN, // same domain → bypasses the "one domain per IMS org" waitlist
+        status: 'ONBOARDED',
+        siteId: PREV_SITE_ID,
+        ...overrides,
+      });
+    }
+
+    function buildPrevSiteWithAsoEnrollment(enrollmentId = 'prev-enroll-1') {
+      const removeStub = sandbox.stub().resolves();
+      const prevEnrollment = {
+        getId: sandbox.stub().returns(enrollmentId),
+        getEntitlement: sandbox.stub().resolves({
+          getProductCode: sandbox.stub().returns('aso_optimizer'),
+        }),
+        remove: removeStub,
+      };
+      const prevSite = {
+        getId: sandbox.stub().returns(PREV_SITE_ID),
+        getSiteEnrollments: sandbox.stub().resolves([prevEnrollment]),
+      };
+      return { prevSite, prevEnrollment, removeStub };
+    }
+
+    it('displaces a previous ONBOARDED PLG trial for the same IMS org', async () => {
+      const prevOnboarding = buildPrevOnboarding();
+      const { prevSite, removeStub } = buildPrevSiteWithAsoEnrollment();
+
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([prevOnboarding]);
+      mockDataAccess.Site.findById.withArgs(PREV_SITE_ID).resolves(prevSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(removeStub).to.have.been.calledOnce;
+      expect(prevOnboarding.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(prevOnboarding.save).to.have.been.called;
+    });
+
+    it('does not displace itself when the prior record is for the same site', async () => {
+      const sameSiteRecord = buildPrevOnboarding({ siteId: TEST_SITE_ID });
+      const { removeStub } = buildPrevSiteWithAsoEnrollment();
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([sameSiteRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(removeStub).to.not.have.been.called;
+      expect(sameSiteRecord.setStatus).to.not.have.been.calledWith('INACTIVE');
+    });
+
+    it('skips records without a linked siteId', async () => {
+      const noSiteRecord = buildPrevOnboarding({ siteId: null });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([noSiteRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(noSiteRecord.setStatus).to.not.have.been.calledWith('INACTIVE');
+    });
+
+    it('skips records that are not ONBOARDED', async () => {
+      const waitlistedRecord = buildPrevOnboarding({ status: 'WAITLISTED' });
+      const { removeStub } = buildPrevSiteWithAsoEnrollment();
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(removeStub).to.not.have.been.called;
+      expect(waitlistedRecord.setStatus).to.not.have.been.calledWith('INACTIVE');
+    });
+
+    it('refuses displacement when the target organization is internal/demo', async () => {
+      mockOrganization.getId.returns(DEMO_ORG_ID);
+      const prevOnboarding = buildPrevOnboarding();
+      const { prevSite, removeStub } = buildPrevSiteWithAsoEnrollment();
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([prevOnboarding]);
+      mockDataAccess.Site.findById.withArgs(PREV_SITE_ID).resolves(prevSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(removeStub).to.not.have.been.called;
+      expect(prevOnboarding.setStatus).to.not.have.been.calledWith('INACTIVE');
+      expect(mockLog.error).to.have.been.calledWithMatch(/Refusing to displace.*internal\/demo/);
+    });
+
+    it('displaces multiple previous records and continues past individual failures', async () => {
+      const prev1 = buildPrevOnboarding({ id: 'prev-1', siteId: 'prev-site-1' });
+      const prev2 = buildPrevOnboarding({ id: 'prev-2', siteId: 'prev-site-2' });
+      const prev3 = buildPrevOnboarding({ id: 'prev-3', siteId: 'prev-site-3' });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([prev1, prev2, prev3]);
+
+      const mk = (id) => {
+        const removeStub = sandbox.stub().resolves();
+        const enroll = {
+          getId: sandbox.stub().returns(`enroll-${id}`),
+          getEntitlement: sandbox.stub().resolves({
+            getProductCode: sandbox.stub().returns('aso_optimizer'),
+          }),
+          remove: removeStub,
+        };
+        const site = {
+          getId: sandbox.stub().returns(id),
+          getSiteEnrollments: sandbox.stub().resolves([enroll]),
+        };
+        return { site, removeStub };
+      };
+      const s1 = mk('prev-site-1');
+      const s2 = mk('prev-site-2');
+      const s3 = mk('prev-site-3');
+      // Middle one fails to revoke — others should still proceed.
+      s2.removeStub.rejects(new Error('transient failure'));
+
+      mockDataAccess.Site.findById.withArgs('prev-site-1').resolves(s1.site);
+      mockDataAccess.Site.findById.withArgs('prev-site-2').resolves(s2.site);
+      mockDataAccess.Site.findById.withArgs('prev-site-3').resolves(s3.site);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(s1.removeStub).to.have.been.called;
+      expect(s3.removeStub).to.have.been.called;
+      expect(prev1.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(prev3.setStatus).to.have.been.calledWith('INACTIVE');
+    });
+
+    it('no-op when no previous ONBOARDED records exist', async () => {
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('warns when more than 3 previous records are found', async () => {
+      const many = Array.from({ length: 4 }, (_, i) => buildPrevOnboarding({
+        id: `prev-${i}`,
+        siteId: `prev-site-${i}`,
+      }));
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves(many);
+      many.forEach((_, i) => {
+        const { site } = (() => {
+          const enroll = {
+            getId: sandbox.stub().returns(`e-${i}`),
+            getEntitlement: sandbox.stub().resolves({
+              getProductCode: sandbox.stub().returns('aso_optimizer'),
+            }),
+            remove: sandbox.stub().resolves(),
+          };
+          return {
+            site: {
+              getId: sandbox.stub().returns(`prev-site-${i}`),
+              getSiteEnrollments: sandbox.stub().resolves([enroll]),
+            },
+          };
+        })();
+        mockDataAccess.Site.findById.withArgs(`prev-site-${i}`).resolves(site);
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Found 4 prior ONBOARDED/);
+    });
+  });
+
   // --- Delivery config writer (CDN + optional redirect params) ---
 
   describe('onboard - delivery config writer', () => {

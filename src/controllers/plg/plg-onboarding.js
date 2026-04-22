@@ -348,6 +348,70 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
 }
 
 /**
+ * Enforces the "one active PLG enrollment per org" business rule by displacing any prior
+ * ONBOARDED PlgOnboarding records for the same IMS org once a new site enrolls.
+ *
+ * Source of truth is PlgOnboarding records scoped by imsOrgId — NOT entitlement siblings.
+ * The previous implementation walked SiteEnrollment.allByEntitlementId(entitlement.getId()),
+ * which mass-deleted unrelated sites when entitlement resolution drifted to the internal/demo
+ * org (2026-04-21 incident). Scoping by imsOrgId makes cross-org wipes architecturally
+ * impossible regardless of entitlement-resolution drift.
+ *
+ * Safety:
+ * - Hard-stops if the target organization is internal/demo.
+ * - Each per-site revocation is isolated: one failure does not abort the others.
+ * - Operates on PLG-origin enrollments only (revokeAsoSiteEnrollments filters by ASO product).
+ *
+ * @param {object} newSite - The newly onboarded site (kept active).
+ * @param {object} organization - The target customer organization.
+ * @param {object} context - Request context.
+ */
+async function displacePreviousPlgEnrollments(newSite, organization, context) {
+  const { dataAccess, log, env } = context;
+  const { PlgOnboarding } = dataAccess;
+
+  if (isInternalOrg(organization.getId(), env)) {
+    log.error(`Refusing to displace previous PLG enrollments: target organization ${organization.getId()} is internal/demo. Site ${newSite.getId()} would mass-displace shared-org trials.`);
+    return;
+  }
+
+  const imsOrgId = organization.getImsOrgId?.();
+  if (!imsOrgId) {
+    log.warn(`Cannot displace previous PLG enrollments: no IMS org ID for organization ${organization.getId()}`);
+    return;
+  }
+
+  const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
+  const previous = records.filter(
+    (r) => r.getStatus() === STATUSES.ONBOARDED
+      && r.getSiteId()
+      && r.getSiteId() !== newSite.getId(),
+  );
+
+  if (previous.length === 0) {
+    return;
+  }
+
+  if (previous.length > 3) {
+    log.warn(`Found ${previous.length} prior ONBOARDED PLG records for IMS org ${imsOrgId}; displacing all. Investigate if unexpected.`);
+  }
+
+  for (const record of previous) {
+    const prevSiteId = record.getSiteId();
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await revokeAsoSiteEnrollments(record, context);
+      record.setStatus(STATUSES.INACTIVE);
+      // eslint-disable-next-line no-await-in-loop
+      await record.save();
+      log.info(`Displaced previous PLG trial: site ${prevSiteId}, onboarding ${record.getId()} → INACTIVE`);
+    } catch (err) {
+      log.warn(`Failed to displace previous PLG enrollment for site ${prevSiteId}: ${err.message}`);
+    }
+  }
+}
+
+/**
  * Upserts a single LaunchDarkly flag's variation 0 to include the org + site.
  * Variation 0 value is a JSON object: { [imsOrgId]: [siteIds] }.
  *
@@ -718,6 +782,7 @@ async function performAsoPlgOnboarding({
       }
 
       await ensureAsoEntitlement(site, organization, context);
+      await displacePreviousPlgEnrollments(site, organization, context);
       await updateLaunchDarklyFlags(site, organization, context);
 
       const steps = {
@@ -1114,10 +1179,11 @@ async function performAsoPlgOnboarding({
       steps.siteOrgReassigned = true;
     }
 
-    // Step 10: Add ASO entitlement and update FF.
-    // Keep any existing ASO enrollments for other sites untouched here; PLG onboarding should
-    // never mass-revoke unrelated site enrollments for the org.
+    // Step 10: Add ASO entitlement, displace previous PLG trial for this org, update FF.
+    // Displacement is scoped to PlgOnboarding records by imsOrgId (not entitlement siblings),
+    // so cross-org mass-revokes are architecturally impossible on entitlement-resolution drift.
     await ensureAsoEntitlement(site, organization, context);
+    await displacePreviousPlgEnrollments(site, organization, context);
     await updateLaunchDarklyFlags(site, organization, context);
 
     steps.entitlementCreated = true;
