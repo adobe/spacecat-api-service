@@ -58,6 +58,7 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
@@ -1273,6 +1274,14 @@ function LlmoController(ctx) {
           // Log error but don't fail the request
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
+
+        // Fire-and-forget internal email — does not block the opt-in response.
+        notifyOptInIfNeeded(context, {
+          siteId,
+          siteBaseURL: baseURL,
+          cdnLogSource: existingEdgeConfig.cdnLogSource,
+          optedBy: lastModifiedBy,
+        }).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
       }
 
       return ok({
