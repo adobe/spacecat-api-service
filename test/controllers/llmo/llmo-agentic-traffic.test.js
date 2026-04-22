@@ -25,6 +25,7 @@ import {
   createAgenticTrafficByUrlHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
+  createAgenticTrafficUrlBrandPresenceHandler,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
@@ -75,19 +76,30 @@ function makeContext(overrides = {}) {
       },
       ...overrides.dataAccess,
     },
-    log: { error: sinon.stub() },
+    log: { error: sinon.stub(), info: sinon.stub() },
     ...overrides.context,
   };
 }
 
-const stubbedValidateAccess = sinon.stub().resolves();
+// Resolves with the same shape as the real getSiteAndValidateAccess so that
+// withAgenticTrafficAuth forwards { site, organization } to handlerFn as siteContext.
+const stubbedValidateAccess = sinon.stub().resolves({
+  site: { getOrganizationId: () => 'org-1' },
+  organization: { getId: () => 'org-1' },
+});
 
 describe('llmo-agentic-traffic', () => {
   const sandbox = sinon.createSandbox();
 
   afterEach(() => {
     sandbox.restore();
+    // reset() clears call history AND any per-test behaviour overrides;
+    // then re-apply the default so subsequent tests get the site context.
     stubbedValidateAccess.reset();
+    stubbedValidateAccess.resolves({
+      site: { getOrganizationId: () => 'org-1' },
+      organization: { getId: () => 'org-1' },
+    });
   });
 
   // ── Shared: PostgREST availability ──────────────────────────────────────────
@@ -128,6 +140,36 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficKpisHandler(denyAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
+    });
+  });
+
+  // ── Platform code translation ──────────────────────────────────────────────
+
+  describe('platform code to DB value translation', () => {
+    const cases = [
+      ['openai', 'ChatGPT'],
+      ['chatgpt', 'ChatGPT'],
+      ['anthropic', 'Anthropic'],
+      ['mistral', 'MistralAI'],
+      ['perplexity', 'Perplexity'],
+      ['gemini', 'Gemini'],
+      ['google', 'Google'],
+      ['amazon', 'Amazon'],
+      ['all', null],
+      [undefined, null],
+      ['unknown-code', null],
+    ];
+
+    cases.forEach(([input, expected]) => {
+      it(`translates platform='${input}' → p_platform=${JSON.stringify(expected)}`, async () => {
+        const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+        const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: input } });
+        const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+        await handler(ctx);
+        expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
+          p_platform: expected,
+        });
+      });
     });
   });
 
@@ -193,6 +235,56 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
+    });
+
+    it('accepts snake_case query parameter aliases', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        context: {
+          data: {
+            start_date: '2026-01-01',
+            end_date: '2026-01-28',
+            category_name: 'Products',
+            agent_type: 'Chatbots',
+            user_agent: 'GPTBot',
+            content_type: 'html',
+            success_rate: 'high',
+          },
+        },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
+        p_start_date: '2026-01-01',
+        p_end_date: '2026-01-28',
+        p_category_name: 'Products',
+        p_agent_type: 'Chatbots',
+        p_user_agent: 'GPTBot',
+        p_content_type: 'html',
+        p_success_rate: 'high',
+      });
+    });
+
+    it('uses the default date range when dates are omitted', async () => {
+      sandbox.useFakeTimers(new Date('2026-02-01T12:00:00.000Z'));
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        context: {
+          data: undefined,
+        },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
+        p_start_date: '2026-01-04',
+        p_end_date: '2026-02-01',
+      });
     });
   });
 
@@ -519,6 +611,16 @@ describe('llmo-agentic-traffic', () => {
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
     });
 
+    it('falls back to total_hits for an invalid sortBy value', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_by_user_agent: { data: [], error: null },
+      });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', sortBy: 'DROP TABLE' } });
+      const handler = createAgenticTrafficByUserAgentHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_sort_by).to.equal('total_hits');
+    });
+
     it('returns 500 when RPC returns an error', async () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: { data: null, error: { message: 'db error' } },
@@ -539,6 +641,7 @@ describe('llmo-agentic-traffic', () => {
           data: [{
             host: 'example.com',
             url_path: '/page',
+            total_count: 1,
             total_hits: 150,
             unique_agents: 3,
             top_agent: 'ChatGPT-User',
@@ -557,29 +660,38 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].host).to.equal('example.com');
-      expect(body[0].urlPath).to.equal('/page');
-      expect(body[0].topAgent).to.equal('ChatGPT-User');
-      expect(body[0].topAgentType).to.equal('Chatbots');
-      expect(body[0].responseCodes).to.deep.equal([200, 301]);
-      expect(body[0].deployedAtEdge).to.equal(true);
+      expect(body.totalCount).to.equal(1);
+      expect(body.rows[0].host).to.equal('example.com');
+      expect(body.rows[0].urlPath).to.equal('/page');
+      expect(body.rows[0].topAgent).to.equal('ChatGPT-User');
+      expect(body.rows[0].topAgentType).to.equal('Chatbots');
+      expect(body.rows[0].responseCodes).to.deep.equal([200, 301]);
+      expect(body.rows[0].deployedAtEdge).to.equal(true);
     });
 
-    it('caps limit at 2000', async () => {
+    it('caps limit at 500 via legacy "limit" param', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', limit: 99999 } });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       const rpcCallArgs = client.rpc.firstCall.args[1];
-      expect(rpcCallArgs.p_limit).to.equal(2000);
+      expect(rpcCallArgs.p_page_limit).to.equal(500);
     });
 
-    it('uses default limit of 2000 when not specified', async () => {
+    it('accepts "pageSize" as the documented parameter name', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', pageSize: 25 } });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_page_limit).to.equal(25);
+    });
+
+    it('uses default limit of 50 when not specified', async () => {
       const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
       const ctx = makeContext({ client });
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
-      expect(client.rpc.firstCall.args[1].p_limit).to.equal(2000);
+      expect(client.rpc.firstCall.args[1].p_page_limit).to.equal(50);
     });
 
     it('falls back to desc for an invalid sort order', async () => {
@@ -588,6 +700,91 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       await handler(ctx);
       expect(client.rpc.firstCall.args[1].p_sort_order).to.equal('desc');
+    });
+
+    it('falls back to total_hits for an invalid sortBy value', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', sortBy: 'DROP TABLE' } });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.firstCall.args[1].p_sort_by).to.equal('total_hits');
+    });
+
+    it('forwards pagination and path search params to the new RPC signature', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          limit: 75,
+          pageOffset: 10,
+          urlPathSearch: 'pricing',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_page_limit: 75,
+        p_page_offset: 10,
+        p_url_path_search: 'pricing',
+      });
+    });
+
+    it('forwards successRate filter as p_success_rate to the RPC', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', successRate: 'low' },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_success_rate: 'low',
+      });
+    });
+
+    it('accepts snake_case success_rate alias', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', success_rate: 'medium' },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_success_rate: 'medium',
+      });
+    });
+
+    it('normalizes unknown successRate values to null instead of forwarding to the RPC', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', successRate: 'invalid-bucket' },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_success_rate: null,
+      });
+    });
+
+    it('normalizes invalid page offsets to 0', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_by_url: { data: [], error: null } });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          pageOffset: 'not-a-number',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_page_offset: 0,
+      });
     });
 
     it('handles null optional fields in URL rows', async () => {
@@ -614,13 +811,13 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].host).to.equal('');
-      expect(body[0].urlPath).to.equal('');
-      expect(body[0].topAgent).to.equal('');
-      expect(body[0].responseCodes).to.deep.equal([]);
-      expect(body[0].successRate).to.be.null;
-      expect(body[0].avgTtfbMs).to.be.null;
-      expect(body[0].avgCitabilityScore).to.be.null;
+      expect(body.rows[0].host).to.equal('');
+      expect(body.rows[0].urlPath).to.equal('');
+      expect(body.rows[0].topAgent).to.equal('');
+      expect(body.rows[0].responseCodes).to.deep.equal([]);
+      expect(body.rows[0].successRate).to.be.null;
+      expect(body.rows[0].avgTtfbMs).to.be.null;
+      expect(body.rows[0].avgCitabilityScore).to.be.null;
     });
 
     it('returns null for fields that are undefined in the response', async () => {
@@ -646,10 +843,10 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       const body = await res.json();
-      expect(body[0].successRate).to.be.null;
-      expect(body[0].avgTtfbMs).to.be.null;
-      expect(body[0].avgCitabilityScore).to.be.null;
-      expect(body[0].deployedAtEdge).to.equal(false);
+      expect(body.rows[0].successRate).to.be.null;
+      expect(body.rows[0].avgTtfbMs).to.be.null;
+      expect(body.rows[0].avgCitabilityScore).to.be.null;
+      expect(body.rows[0].deployedAtEdge).to.equal(false);
     });
 
     it('returns 500 when RPC returns an error', async () => {
@@ -906,6 +1103,96 @@ describe('llmo-agentic-traffic', () => {
       const client = { rpc: sinon.stub(), from: sinon.stub().callsFake(() => makeChain()) };
       const ctx = makeContext({ client });
       const handler = createAgenticTrafficWeeksHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── URL Brand Presence ──────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficUrlBrandPresenceHandler', () => {
+    const RPC = 'rpc_brand_presence_url_detail';
+
+    it('returns brand presence data for the URL on success', async () => {
+      const rpcPayload = {
+        totalCitations: 42,
+        totalMentions: 30,
+        uniquePrompts: 10,
+        weeklyTrends: [
+          { weekStr: '2026-W01', citationCount: 5, mentionCount: 3 },
+        ],
+        prompts: [
+          {
+            prompt: 'What is Adobe Express?',
+            topic: 'Product Features',
+            topicId: 'topic-uuid-1',
+            regionCode: 'US',
+            citations: 8,
+            mentions: 6,
+            avgSentiment: 0.75,
+            avgVisibilityScore: 85.0,
+            executionCount: 10,
+          },
+        ],
+      };
+      const client = createMockClient({
+        [RPC]: { data: rpcPayload, error: null }, // RETURNS JSONB → object directly, not array
+      });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://www.adobe.com/express' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.totalCitations).to.equal(42);
+      expect(body.uniquePrompts).to.equal(10);
+      expect(body.weeklyTrends).to.have.length(1);
+      expect(body.prompts).to.have.length(1);
+      expect(body.prompts[0].prompt).to.equal('What is Adobe Express?');
+    });
+
+    it('returns 400 when url param is missing', async () => {
+      const client = createMockClient({ [RPC]: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
+      expect(client.rpc).not.to.have.been.called;
+    });
+
+    it('passes organizationId from site to the RPC', async () => {
+      const client = createMockClient({
+        [RPC]: {
+          data: {
+            totalCitations: 0, totalMentions: 0, uniquePrompts: 0, weeklyTrends: [], prompts: [],
+          },
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com/page' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_organization_id).to.equal('org-1');
+      expect(rpcArgs.p_url).to.equal('https://example.com/page');
+      expect(rpcArgs.p_site_id).to.equal(SITE_ID);
+    });
+
+    it('returns empty arrays when RPC returns no data', async () => {
+      const client = createMockClient({ [RPC]: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.totalCitations).to.equal(0);
+      expect(body.weeklyTrends).to.deep.equal([]);
+      expect(body.prompts).to.deep.equal([]);
+    });
+
+    it('returns 500 when RPC errors', async () => {
+      const client = createMockClient({ [RPC]: { data: null, error: { message: 'db error' } } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com' } });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
     });

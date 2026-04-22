@@ -210,7 +210,7 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(204);
     expect(resp.headers.plain()).to.eql({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
       'content-type': 'application/json; charset=utf-8',
@@ -251,6 +251,20 @@ describe('Index Tests', () => {
     context.pathInfo.suffix = '/plg/records/not-a-uuid';
 
     request = new Request(`${baseUrl}/plg/records/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles onboardingId not correctly formatted for PLG admin review', async () => {
+    context.pathInfo.suffix = '/plg/onboard/not-a-uuid';
+
+    request = new Request(`${baseUrl}/plg/onboard/not-a-uuid`, {
       method: 'PATCH',
       headers: { 'x-api-key': apiKey },
     });
@@ -305,6 +319,20 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Brand Id is invalid. Please provide a valid UUID or "all".');
+  });
+
+  it('handles executionId not correctly formatted for execution-sources', async () => {
+    context.pathInfo.suffix = '/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/all/brand-presence/executions/not-a-uuid/sources';
+
+    request = new Request(`${baseUrl}/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/all/brand-presence/executions/not-a-uuid/sources`, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
   });
 
   it('handles dynamic route errors', async () => {

@@ -75,8 +75,6 @@ tags:
     description: Site URL tracking and management operations
   - name: sentiment
     description: Brand sentiment analysis topics and guidelines management
-  - name: plg
-    description: PLG (Product-Led Growth) ASO onboarding operations
 
 paths:
   /audits/latest/{auditType}:
@@ -123,6 +121,10 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/categories:
+    $ref: './categories-v2-api.yaml#/v2-categories-for-org'
+  /v2/orgs/{spaceCatId}/categories/{categoryId}:
+    $ref: './categories-v2-api.yaml#/v2-category-for-org'
   /v2/orgs/{spaceCatId}/topics:
     $ref: './topics-v2-api.yaml#/v2-topics-for-org'
   /v2/orgs/{spaceCatId}/topics/{topicId}:
@@ -432,6 +434,8 @@ paths:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
+  /monitoring/drs-bp-pg-audit:
+    $ref: './monitoring-api.yaml#/drs-bp-pg-audit'
   /tools/api-keys:
     $ref: './tools-api.yaml#/api-keys'
   /tools/api-keys/{apiKeyId}:
@@ -462,6 +466,30 @@ paths:
     $ref: './llmo-api.yaml#/llmo-global-sheet-data'
   /llmo/agentic-traffic/global:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-global'
+  /sites/{siteId}/agentic-traffic/kpis:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-kpis'
+  /sites/{siteId}/agentic-traffic/kpis-trend:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-kpis-trend'
+  /sites/{siteId}/agentic-traffic/by-region:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-region'
+  /sites/{siteId}/agentic-traffic/by-category:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-category'
+  /sites/{siteId}/agentic-traffic/by-page-type:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-page-type'
+  /sites/{siteId}/agentic-traffic/by-status:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-status'
+  /sites/{siteId}/agentic-traffic/by-user-agent:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-user-agent'
+  /sites/{siteId}/agentic-traffic/by-url:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-by-url'
+  /sites/{siteId}/agentic-traffic/filter-dimensions:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-filter-dimensions'
+  /sites/{siteId}/agentic-traffic/weeks:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
+  /sites/{siteId}/agentic-traffic/movers:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /sites/{siteId}/agentic-traffic/url-brand-presence:
+    $ref: './llmo-api.yaml#/llmo-agentic-traffic-url-brand-presence'
   /sites/{siteId}/llmo/config:
     $ref: './llmo-api.yaml#/llmo-config'
   /sites/{siteId}/llmo/questions:
@@ -522,14 +550,6 @@ paths:
     $ref: './guidelines-api.yaml#/sentiment-config'
   /sites/{siteId}/tokens/by-type/{tokenType}:
     $ref: './tokens-api.yaml#/site-token-by-type'
-  /plg/onboard:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard'
-  /plg/sites:
-    $ref: './plg-onboarding-api.yaml#/plg-sites'
-  /plg/onboard/{onboardingId}:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard-update'
-  /plg/onboard/status/{imsOrgId}:
-    $ref: './plg-onboarding-api.yaml#/plg-onboard-status'
 
 components:
   securitySchemes:

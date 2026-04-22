@@ -88,13 +88,14 @@ function isStaticRoute(routePattern) {
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} tokensController - The tokens controller.
- * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} imsOrgAccessController - The IMS org access controller.
  * @param {Object} contactSalesLeadsController - The contact sales leads controller.
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} plgOnboardingController - The PLG onboarding controller.
+ * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -140,13 +141,14 @@ export default function getRouteHandlers(
   sentimentController,
   consumersController,
   tokensController,
-  plgOnboardingController,
   imsOrgAccessController,
   contactSalesLeadsController,
   featureFlagsController,
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  plgOnboardingController,
+  drsBpPgAuditController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -176,6 +178,7 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'GET /v2/regions': llmoMysticatController.getRegions,
     'GET /v2/orgs/:spaceCatId/brands': brandsController.listBrandsForOrg,
     'GET /v2/orgs/:spaceCatId/brands/:brandId': brandsController.getBrandForOrg,
     'GET /v2/orgs/:spaceCatId/categories': brandsController.listCategoriesForOrg,
@@ -352,6 +355,7 @@ export default function getRouteHandlers(
     'POST /tools/api-keys': apiKeyController.createApiKey,
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
+    'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'DELETE /tools/import/jobs/:jobId': importController.deleteImportJob,
@@ -440,6 +444,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/filter-dimensions': llmoMysticatController.getAgenticTrafficFilterDimensions,
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
+    'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
@@ -463,6 +468,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
+    'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,
     'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,

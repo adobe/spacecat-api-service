@@ -19,9 +19,11 @@ import {
   createSearchHandler,
   createTopicDetailHandler,
   createPromptDetailHandler,
+  createExecutionSourcesHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
+  createRegionsHandler,
 } from './llmo-brand-presence.js';
 import {
   createAgenticTrafficGlobalGetHandler,
@@ -39,6 +41,7 @@ import {
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
+  createAgenticTrafficUrlBrandPresenceHandler,
 } from './llmo-agentic-traffic.js';
 
 /**
@@ -104,9 +107,11 @@ function LlmoMysticatController(ctx) {
   const getSearch = createSearchHandler(getOrgAndValidateAccess);
   const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
   const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getExecutionSources = createExecutionSourcesHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getRegions = createRegionsHandler();
   const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
     validateGlobalAgenticTrafficReadAccess,
   );
@@ -150,6 +155,9 @@ function LlmoMysticatController(ctx) {
   );
   const getAgenticTrafficWeeks = createAgenticTrafficWeeksHandler(getSiteAndValidateAccess);
   const getAgenticTrafficMovers = createAgenticTrafficMoversHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
+    getSiteAndValidateAccess,
+  );
 
   return {
     getFilterDimensions,
@@ -162,9 +170,11 @@ function LlmoMysticatController(ctx) {
     getSearch,
     getTopicDetail,
     getPromptDetail,
+    getExecutionSources,
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
+    getRegions,
     getAgenticTrafficGlobal,
     postAgenticTrafficGlobal,
     getAgenticTrafficKpis,
@@ -178,6 +188,7 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficFilterDimensions,
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
+    getAgenticTrafficUrlBrandPresence,
   };
 }
 

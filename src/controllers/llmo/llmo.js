@@ -47,7 +47,7 @@ import {
   detectCdnForDomain,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
-import { getImsTokenFromCookie, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
+import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
 import {
   applyFilters,
   applyInclusions,
@@ -590,7 +590,7 @@ function LlmoController(ctx) {
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
       log.error(`User ${userId} error updating llmo config for siteId: ${siteId}, error: ${msg}`);
-      return badRequest(msg);
+      return badRequest(cleanupHeaderValue(msg));
     }
   }
 
@@ -1030,6 +1030,7 @@ function LlmoController(ctx) {
         dataFolder: result.dataFolder,
         organizationId: result.organizationId,
         siteId: result.siteId,
+        detectedCdn: result.detectedCdn,
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
@@ -1292,11 +1293,13 @@ function LlmoController(ctx) {
 
       let cdnTypeNormalized = null;
       if (hasText(cdnType)) {
+        log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
+          + ` cdnType: ${cdnType}, enabled: ${enabled}`);
         const cdnTypeTrimmed = cdnType.toLowerCase().trim();
         cdnTypeNormalized = SUPPORTED_EDGE_ROUTING_CDN_TYPES.includes(cdnTypeTrimmed)
           ? cdnTypeTrimmed : null;
         if (!cdnTypeNormalized) {
-          log.info(`[edge-optimize-routing-failed] cdnType: ${cdnType} not eligible for automated routing`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} cdnType: ${cdnType} not eligible for automated routing`);
         } else {
           // Verify the requested CDN type matches the domain's actual CDN via DNS
           try {
@@ -1306,11 +1309,11 @@ function LlmoController(ctx) {
             const hostname = calculateForwardedHost(effectiveBaseUrl, log);
             const detectedCdn = await detectCdnForDomain(hostname, log);
             if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
-              log.error(`[edge-optimize-routing-failed] Requested cdnType: '${cdnTypeNormalized}', detected CDN: '${detectedCdn}'`);
+              log.error(`[edge-optimize-routing-failed] ${baseURL} Requested cdnType: '${cdnTypeNormalized}', detected CDN: '${detectedCdn}'`);
               return badRequest(`Requested CDN type '${cdnTypeNormalized}' does not match the detected CDN for this domain`);
             }
           } catch (detectError) {
-            log.info(`[edge-optimize-config] CDN auto-detection failed for site ${siteId}: ${detectError.message}`);
+            log.error(`[edge-optimize-routing-failed] ${baseURL} CDN auto-detection failed: ${detectError.message}`);
           }
         }
       }
@@ -1319,10 +1322,10 @@ function LlmoController(ctx) {
         // Exchange promise token from cookie for an IMS user token
         let imsUserToken;
         try {
-          imsUserToken = await getImsTokenFromCookie(context);
+          imsUserToken = await getImsTokenFromPromiseToken(context);
           log.info(`[edge-optimize-routing] IMS user token obtained for site ${siteId}`);
         } catch (tokenError) {
-          log.error(`[edge-optimize-routing-failed] Failed to get IMS user token for site ${siteId}: ${tokenError.message}`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to get IMS user token: ${tokenError.message}`);
           return createResponse({ message: tokenError.message }, tokenError.status ?? 401);
         }
 
@@ -1341,13 +1344,13 @@ function LlmoController(ctx) {
             log,
           );
         } catch (authErr) {
-          log.error(`[edge-optimize-routing-failed] Failed to authorize CDN routing for site ${siteId}: ${authErr.message}`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to authorize CDN routing: ${authErr.message}`);
           return createResponse({ message: authErr.message }, authErr.status ?? 403);
         }
 
         // Restrict to production environment
         if (env?.ENV && env.ENV !== 'prod') {
-          log.error(`[edge-optimize-routing-failed] CDN routing is not available in ${env.ENV} environment`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN routing is not available in ${env.ENV} environment`);
           return createResponse({ message: `CDN routing is not available in ${env.ENV} environment` }, 400);
         }
 
@@ -1356,10 +1359,10 @@ function LlmoController(ctx) {
           cdnConfig = parseEdgeRoutingConfig(env?.EDGE_OPTIMIZE_ROUTING_CONFIG, cdnTypeNormalized);
         } catch (parseError) {
           if (parseError instanceof SyntaxError) {
-            log.error(`[edge-optimize-routing-failed] EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
+            log.error(`[edge-optimize-routing-failed] ${baseURL} EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
             return internalServerError('Failed to parse routing config.');
           }
-          log.error(`[edge-optimize-routing-failed] ${parseError.message}`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} ${parseError.message}`);
           return createResponse({ message: 'API is missing mandatory environment variable' }, 503);
         }
 
@@ -1375,7 +1378,7 @@ function LlmoController(ctx) {
         try {
           domain = await probeSiteAndResolveDomain(probeUrl, log);
         } catch (probeError) {
-          log.error(`[edge-optimize-routing-failed] CDN routing update failed for site ${siteId}: ${probeError.message}`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN routing probe failed: ${probeError.message}`);
           return badRequest(probeError.message);
         }
 
@@ -1392,19 +1395,20 @@ function LlmoController(ctx) {
           spToken = spTokenData.access_token;
           log.info(`[edge-optimize-routing] Service Principal token obtained for site ${siteId}`);
         } catch (tokenError) {
-          log.warn(`[edge-optimize-routing-failed] Failed to obtain SP token for site ${siteId}: ${tokenError.message}`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to obtain SP token: ${tokenError.message}`);
           return unauthorized('Authentication failed with upstream IMS service');
         }
 
         // Call CDN API with the SP token
+        const cdnApiStart = Date.now();
         try {
           await callCdnRoutingApi(strategy, cdnConfig, domain, spToken, routingEnabled, log);
         } catch (cdnError) {
-          log.error(`[edge-optimize-routing-failed] CDN routing update failed for site ${siteId}: ${cdnError.message}`);
+          log.error(`[edge-optimize-routing-failed] ${baseURL} CDN API call failed in ${Date.now() - cdnApiStart}ms: ${cdnError.message}`);
           return internalServerError('Failed to update CDN routing');
         }
 
-        log.info(`[edge-optimize-routing] CDN routing updated for site ${siteId}, domain ${domain}`);
+        log.info(`[edge-optimize-routing] CDN routing updated for site ${siteId}, domain ${domain} in ${Date.now() - cdnApiStart}ms`);
 
         if (routingEnabled) {
           // Trigger the import worker job to detect when edge-optimize goes live and stamp
@@ -1419,7 +1423,7 @@ function LlmoController(ctx) {
             log.info('[edge-optimize-routing] Queued edge-optimize enabled marking for site'
                + ` ${siteId} (delay: ${EDGE_OPTIMIZE_MARKING_DELAY_SECONDS}s)`);
           } catch (sqsError) {
-            log.warn(`[edge-optimize-routing-failed] Failed to queue edge-optimize enabled marking for site ${siteId}: ${sqsError.message}`);
+            log.warn(`[edge-optimize-routing-failed] ${baseURL} Failed to queue edge-optimize enabled marking: ${sqsError.message}`);
           }
         } else {
           // Routing disabled — record the disabled state immediately in site config.
@@ -1431,6 +1435,7 @@ function LlmoController(ctx) {
           await saveSiteConfig(site, currentConfig, log, 'marking edge optimize disabled');
           log.info(`[edge-optimize-routing] Marked edge optimize as disabled for site ${siteId}`);
         }
+        log.info(`[edge-optimize-routing] ${baseURL} CDN routing ${routingEnabled ? 'enabled' : 'disabled'} successfully`);
       }
 
       return ok({

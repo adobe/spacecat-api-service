@@ -77,7 +77,7 @@ export function buildEnv(publicKeyB64) {
 
     // PostgreSQL data service
     DATA_SERVICE_PROVIDER: 'postgres',
-    POSTGREST_URL: 'http://localhost:3300',
+    POSTGREST_URL: `http://localhost:${process.env.IT_POSTGREST_PORT || '3300'}`,
     POSTGREST_SCHEMA: 'public',
     POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
   };
