@@ -6863,8 +6863,28 @@ V2BrandUrl:
   properties:
     value:
       type: string
-      description: Full URL (base URL + optional path)
+      description: Full URL (base URL + optional path) as submitted by the user
       example: 'https://www.example.com/products'
+    type:
+      type:
+        - string
+        - 'null'
+      description: Optional URL type (e.g. 'base' for the root URL entry)
+    onboarded:
+      type: boolean
+      description: >-
+        Response-only. True when the URL's base resolves to a site in the
+        brand's organization. Onboarded URLs feed the CDN / Search Console
+        configuration; non-onboarded URLs are stored but excluded. Ignored on
+        input.
+    siteId:
+      type:
+        - string
+        - 'null'
+      format: uuid
+      description: >-
+        Response-only. Set to the matching site's UUID when onboarded is true.
+        Ignored on input.
   required:
     - value
 
