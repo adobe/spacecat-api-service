@@ -487,6 +487,7 @@ const routeRequiredCapabilities = {
 
   // Brand Presence (ClickHouse)
   'POST /sites/:siteId/brand-presence/metrics': 'brandPresence:write',
+  'GET /sites/:siteId/brand-presence/data': 'brandPresence:read',
 };
 
 export default routeRequiredCapabilities;

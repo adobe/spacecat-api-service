@@ -13,6 +13,7 @@
 import {
   badRequest,
   notFound,
+  ok,
   createResponse,
   internalServerError,
   unauthorized,
@@ -90,7 +91,23 @@ function BrandPresenceController(context) {
     }
   };
 
-  return { ingestMetrics };
+  const queryData = async (requestContext) => {
+    const { siteId } = requestContext.params;
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
+      }
+
+      return ok({ data: [] });
+    } catch (err) {
+      log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data: ${err.message}`, err);
+      return internalServerError('Internal server error');
+    }
+  };
+
+  return { ingestMetrics, queryData };
 }
 
 export default BrandPresenceController;

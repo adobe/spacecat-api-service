@@ -548,6 +548,7 @@ export default function getRouteHandlers(
 
     // Brand Presence (ClickHouse) endpoints
     'POST /sites/:siteId/brand-presence/metrics': brandPresenceController.ingestMetrics,
+    'GET /sites/:siteId/brand-presence/data': brandPresenceController.queryData,
   };
 
   // Initialization of static and dynamic routes
