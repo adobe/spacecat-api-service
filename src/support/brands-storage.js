@@ -249,7 +249,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
  * match the form brand_sites uses and the response union in
  * mapDbBrandToV2 can match bases exactly.
  */
-async function syncBrandUrls(brandId, organizationId, urls, postgrestClient, updatedBy) {
+async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, updatedBy) {
   const seen = new Set();
   const rows = (urls || [])
     .map((u) => {
@@ -501,7 +501,7 @@ export async function upsertBrand({
   if (brand.urls !== undefined) {
     await Promise.all([
       syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
-      syncBrandUrls(brandId, organizationId, brand.urls, postgrestClient, updatedBy),
+      syncBrandUrls(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
     ]);
   }
 
@@ -621,7 +621,7 @@ export async function updateBrand({
   if (updates.urls !== undefined) {
     await Promise.all([
       syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
-      syncBrandUrls(brandId, organizationId, updates.urls, postgrestClient, updatedBy),
+      syncBrandUrls(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
     ]);
   }
 
