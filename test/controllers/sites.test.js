@@ -4927,7 +4927,7 @@ describe('Sites Controller', () => {
       expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via siteId path', async () => {
+    it('should return 404 with aso_pre_onboard errorCause for PRE_ONBOARD-tier site via siteId path', async () => {
       const validSiteId = SITE_IDS[1];
 
       context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
@@ -4953,6 +4953,59 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.errorCause).to.equal('aso_pre_onboard');
+      expect(body.details).to.deep.include({ productCode: 'ASO', tier: 'PRE_ONBOARD' });
+      expect(response.headers.get('x-error-cause')).to.equal('aso_pre_onboard');
+    });
+
+    it('should return 404 with no_entitlement_for_product errorCause when product has no entitlement', async () => {
+      const validSiteId = SITE_IDS[1];
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: null,
+        enrollments: [],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.errorCause).to.equal('no_entitlement_for_product');
+      expect(body.details).to.deep.include({ productCode: 'ASO' });
+      expect(response.headers.get('x-error-cause')).to.equal('no_entitlement_for_product');
+    });
+
+    it('should return 404 with site_not_enrolled errorCause when entitlement is visible but site has no enrollment', async () => {
+      const validSiteId = SITE_IDS[1];
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-visible',
+          getProductCode: () => 'ASO',
+          getTier: () => 'FREE_TRIAL',
+        },
+        enrollments: [],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.errorCause).to.equal('site_not_enrolled');
+      expect(body.details).to.deep.include({ productCode: 'ASO' });
+      expect(response.headers.get('x-error-cause')).to.equal('site_not_enrolled');
     });
 
     it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
