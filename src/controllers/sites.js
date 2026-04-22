@@ -640,6 +640,12 @@ function SitesController(ctx, log, env) {
         ? Config.toDynamoItem(siteConfig) || {}
         : {};
       const merged = { ...existingConfig, ...requestBody.config };
+      if (requestBody.config?.auditTargetURLs && existingConfig?.auditTargetURLs) {
+        merged.auditTargetURLs = {
+          ...existingConfig.auditTargetURLs,
+          ...requestBody.config.auditTargetURLs,
+        };
+      }
       const auditTargetURLsResult = auditTargetURLsPatchGuard(
         merged,
         site.getBaseURL(),
@@ -649,6 +655,9 @@ function SitesController(ctx, log, env) {
       if (auditTargetURLsResult?.error) {
         return auditTargetURLsResult.error;
       }
+      // When the guard returns no `normalized` (patch had `auditTargetURLs` but no known
+      // sources), `merged.auditTargetURLs` already holds the correct deep-merged value
+      // from the block above and intentionally needs no further update.
       if (auditTargetURLsResult?.normalized !== undefined) {
         merged.auditTargetURLs = auditTargetURLsResult.normalized;
       }

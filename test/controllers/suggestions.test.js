@@ -176,6 +176,7 @@ describe('Suggestions Controller', () => {
     'patchSuggestion',
     'patchSuggestionsStatus',
     'removeSuggestion',
+    'revokeGrant',
   ];
 
   let mockSuggestionDataAccess;
@@ -478,6 +479,7 @@ describe('Suggestions Controller', () => {
         return Promise.resolve({ grantedIds: ids, notGrantedIds: [], grantIds: ids.map((id) => `grant-${id}`) });
       }),
       isSuggestionGranted: sandbox.stub().resolves(true),
+      revokeSuggestionGrant: sandbox.stub().resolves({ success: true, revokedCount: 1 }),
     };
 
     mockSuggestionDataAccess = {
@@ -740,6 +742,112 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(200);
     expect(grantStub).to.not.have.been.called;
+  });
+
+  it('filters suggestions by grant status when x-view-as-trial header is present', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: [],
+      grantIds: [`grant-${grantedId}`],
+    });
+    const ControllerWithTrial = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+    });
+    const controllerWithTrial = ControllerWithTrial({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithTrial.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+  });
+
+  it('calls grantSuggestionsForOpportunity when x-view-as-trial is true', async () => {
+    const grantStub = sandbox.stub().resolves();
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(grantStub).to.have.been.calledOnce;
+    expect(grantStub).to.have.been.calledWith(mockSuggestionDataAccess, site, sinon.match.object);
+  });
+
+  it('grants and filters suggestions for view-as-trial request end-to-end', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: SUGGESTION_IDS.slice(1),
+      grantIds: [`grant-${grantedId}`],
+    });
+    const grantStub = sandbox.stub().resolves();
+    const ControllerWithGrant = await esmock('../../src/controllers/suggestions.js', {
+      '../../src/support/utils.js': {
+        getIsSummitPlgEnabled: async () => true,
+      },
+      '../../src/support/grant-suggestions-handler.js': {
+        grantSuggestionsForOpportunity: grantStub,
+      },
+    });
+    const controllerWithGrant = ControllerWithGrant({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await controllerWithGrant.getAllForOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    // grants are written first so filtering can find them
+    expect(grantStub).to.have.been.calledOnce;
+    // response is filtered to only granted suggestions
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(result[0].id).to.equal(grantedId);
+  });
+
+  it('filters suggestions by grant status for getByStatus when x-view-as-trial header is present', async () => {
+    const grantedId = SUGGESTION_IDS[0];
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+      grantedIds: [grantedId],
+      notGrantedIds: [],
+      grantIds: [`grant-${grantedId}`],
+    });
+    const response = await suggestionsController.getByStatus({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
+      pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.be.an('array').with.lengthOf(1);
+    expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
   });
 
   it('does not call grantSuggestionsForOpportunity when no suggestions exist', async () => {
@@ -3725,6 +3833,30 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.include('not granted');
       expect(body.message).to.include(SUGGESTION_IDS[2]);
       expect(body.message).to.not.include(SUGGESTION_IDS[0]);
+      expect(body.message).to.not.include('trial simulation');
+    });
+
+    it('includes trial simulation hint in 403 message when x-view-as-trial header is present', async () => {
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0]],
+        notGrantedIds: [SUGGESTION_IDS[2]],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`],
+      });
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.include('not granted');
+      expect(body.message).to.include('trial simulation');
+      expect(body.message).to.include('View as Trial');
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
@@ -9741,7 +9873,7 @@ describe('Suggestions Controller', () => {
       expect(fetchStub).to.have.been.calledOnce;
       const fetchArgs = fetchStub.getCall(0).args;
       expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
-      expect(fetchArgs[1].headers['User-Agent']).to.equal('Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0');
     });
 
     it('should handle fetch failure with 404', async () => {
@@ -10088,6 +10220,26 @@ describe('Suggestions Controller', () => {
           default: {
             createFrom: sandbox.stub().returns(tokowakaClientStub),
           },
+          getEffectiveBaseURL: (siteOrBaseUrl) => {
+            if (typeof siteOrBaseUrl === 'string') {
+              return siteOrBaseUrl.startsWith('http') ? siteOrBaseUrl : `https://${siteOrBaseUrl}`;
+            }
+            const overrideBaseURL = siteOrBaseUrl.getConfig?.()?.getFetchConfig?.()?.overrideBaseURL;
+            if (overrideBaseURL && /^https?:\/\//.test(overrideBaseURL)) {
+              return overrideBaseURL;
+            }
+            return siteOrBaseUrl.getBaseURL();
+          },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
         },
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: {
@@ -10113,6 +10265,93 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(log.info.calledWithMatch('tokowaka-edge-optimize-config')).to.be.true;
+    });
+  });
+
+  describe('revokeGrant', () => {
+    const GRANT_ID = 'b1c2d3e4-0000-4000-a000-000000000001';
+
+    it('returns 400 if site ID is missing', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns 400 if grant ID is missing', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Grant ID required');
+    });
+
+    it('returns 400 if grant ID is not a valid UUID', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: 'not-a-uuid' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Grant ID required');
+    });
+
+    it('returns 404 if site is not found', async () => {
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID_NOT_FOUND, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Site not found');
+    });
+
+    it('returns 403 if user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'User does not belong to the organization');
+    });
+
+    it('returns 204 when grant is successfully revoked', async () => {
+      mockSuggestionGrant.revokeSuggestionGrant.resolves({ success: true, revokedCount: 1 });
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(204);
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnceWith(GRANT_ID);
+    });
+
+    it('returns 404 when grant is not found', async () => {
+      mockSuggestionGrant.revokeSuggestionGrant.resolves({ success: false, reason: 'rpc_no_result' });
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Grant not found');
+    });
+
+    it('returns 500 when the revoke RPC throws', async () => {
+      mockSuggestionGrant.revokeSuggestionGrant.rejects(new Error('RPC failure'));
+      const response = await suggestionsController.revokeGrant({
+        params: { siteId: SITE_ID, grantId: GRANT_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Error revoking grant');
     });
   });
 });
