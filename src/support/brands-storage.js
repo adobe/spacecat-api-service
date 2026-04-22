@@ -128,10 +128,68 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
 }
 
 /**
- * Fully replaces brand_sites for a brand. Groups submitted URLs by normalized base URL
- * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
+ * Groups submitted URLs by normalized base URL (via composeBaseURL) and resolves each
+ * base against the sites table in the brand's organization.
+ *
+ * Throws a 400 BRAND_URLS_UNRESOLVED error if any submitted base URL has no matching
+ * `sites` row. Callers invoke this BEFORE any destructive brand writes so invalid
+ * requests leave the brand untouched. See LLMO-4435.
+ *
+ * Returns the matched `sites` rows plus the `pathsByBase`/`typeByBase` maps so
+ * `syncBrandSites` can upsert without re-querying.
  */
-async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
+async function resolveBrandSiteUrls(organizationId, urls, postgrestClient) {
+  const pathsByBase = new Map();
+  const typeByBase = new Map();
+  (urls || []).forEach((u) => {
+    const value = typeof u === 'string' ? u : u?.value;
+    if (!hasText(value)) {
+      return;
+    }
+    const { base, path } = parseUrlParts(value);
+    const normalizedBase = composeBaseURL(base);
+    if (!pathsByBase.has(normalizedBase)) {
+      pathsByBase.set(normalizedBase, []);
+    }
+    pathsByBase.get(normalizedBase).push(path || '/');
+    // First URL with a type wins for a given base URL — prevents silent overwrite
+    // when multiple paths under the same domain carry different types.
+    if (typeof u === 'object' && hasText(u?.type) && !typeByBase.has(normalizedBase)) {
+      typeByBase.set(normalizedBase, u.type);
+    }
+  });
+
+  if (pathsByBase.size === 0) {
+    return { sites: [], pathsByBase, typeByBase };
+  }
+
+  const { data: sites, error } = await postgrestClient
+    .from('sites')
+    .select('id, base_url')
+    .eq('organization_id', organizationId)
+    .in('base_url', [...pathsByBase.keys()]);
+  if (error) {
+    throw new Error(`Failed to resolve brand sites: ${error.message}`);
+  }
+
+  const resolvedBases = new Set(sites.map((s) => s.base_url));
+  const unresolved = [...pathsByBase.keys()].filter((base) => !resolvedBases.has(base));
+  if (unresolved.length > 0) {
+    const err = new Error(
+      `The following URL(s) could not be saved because no matching site exists in this organization: ${unresolved.join(', ')}`,
+    );
+    err.status = 400;
+    err.code = 'BRAND_URLS_UNRESOLVED';
+    throw err;
+  }
+
+  return { sites, pathsByBase, typeByBase };
+}
+
+/**
+ * Fully replaces brand_sites for a brand using the output of `resolveBrandSiteUrls`.
+ */
+async function syncBrandSites(organizationId, brandId, resolved, postgrestClient, updatedBy) {
   const { error: deleteError } = await postgrestClient
     .from('brand_sites')
     .delete()
@@ -140,43 +198,8 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
   }
 
-  if (!urls || urls.length === 0) {
-    return;
-  }
-
-  // Group paths by base URL and track type
-  const pathsByBase = new Map();
-  const typeByBase = new Map();
-  urls
-    .forEach((u) => {
-      const value = typeof u === 'string' ? u : u?.value;
-      if (!hasText(value)) {
-        return;
-      }
-      const { base, path } = parseUrlParts(value);
-      const normalizedBase = composeBaseURL(base);
-      if (!pathsByBase.has(normalizedBase)) {
-        pathsByBase.set(normalizedBase, []);
-      }
-      pathsByBase.get(normalizedBase).push(path || '/');
-      // First URL with a type wins for a given base URL — prevents silent overwrite
-      // when multiple paths under the same domain carry different types.
-      if (typeof u === 'object' && hasText(u?.type) && !typeByBase.has(normalizedBase)) {
-        typeByBase.set(normalizedBase, u.type);
-      }
-    });
-
-  if (pathsByBase.size === 0) {
-    return;
-  }
-
-  const { data: sites } = await postgrestClient
-    .from('sites')
-    .select('id, base_url')
-    .eq('organization_id', organizationId)
-    .in('base_url', [...pathsByBase.keys()]);
-
-  if (!sites || sites.length === 0) {
+  const { sites, pathsByBase, typeByBase } = resolved;
+  if (sites.length === 0) {
     return;
   }
 
@@ -184,7 +207,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     organization_id: organizationId,
     brand_id: brandId,
     site_id: s.id,
-    paths: pathsByBase.get(s.base_url) || [],
+    paths: pathsByBase.get(s.base_url),
     type: typeByBase.get(s.base_url) || null,
     updated_by: updatedBy,
   }));
@@ -362,6 +385,11 @@ export async function upsertBrand({
     throw new Error('Brand name is required');
   }
 
+  // Resolve URLs BEFORE any destructive writes so an invalid request leaves the DB untouched.
+  const resolvedUrls = brand.urls !== undefined
+    ? await resolveBrandSiteUrls(organizationId, brand.urls, postgrestClient)
+    : null;
+
   const regions = (brand.region || [])
     .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
 
@@ -425,8 +453,8 @@ export async function upsertBrand({
     syncEarnedSources(brandId, organizationId, brand.earnedContent, postgrestClient, updatedBy),
   ]);
 
-  if (brand.urls !== undefined) {
-    await syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy);
+  if (resolvedUrls !== null) {
+    await syncBrandSites(organizationId, brandId, resolvedUrls, postgrestClient, updatedBy);
   }
 
   return getBrandById(organizationId, brandId, postgrestClient);
@@ -453,6 +481,11 @@ export async function updateBrand({
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
   }
+
+  // Resolve URLs BEFORE any destructive writes so an invalid request leaves the DB untouched.
+  const resolvedUrls = updates.urls !== undefined
+    ? await resolveBrandSiteUrls(organizationId, updates.urls, postgrestClient)
+    : null;
 
   const patch = { updated_by: updatedBy };
 
@@ -542,8 +575,8 @@ export async function updateBrand({
     await Promise.all(childSyncs);
   }
 
-  if (updates.urls !== undefined) {
-    await syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy);
+  if (resolvedUrls !== null) {
+    await syncBrandSites(organizationId, brandId, resolvedUrls, postgrestClient, updatedBy);
   }
 
   return getBrandById(organizationId, brandId, postgrestClient);

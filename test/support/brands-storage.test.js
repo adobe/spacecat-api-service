@@ -750,6 +750,7 @@ describe('brands-storage', () => {
     it('throws when brand_sites delete fails during syncBrandSites', async () => {
       const postgrestClient = createTableMockClient({
         brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        sites: { data: [{ id: 'site-uuid-1', base_url: 'https://test.com' }], error: null },
         brand_sites: { data: null, error: { message: 'delete error' } },
       });
 
@@ -760,9 +761,76 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Failed to sync brand_sites: delete error');
     });
 
+    it('throws BRAND_URLS_UNRESOLVED when a submitted URL has no matching site in the org', async () => {
+      const postgrestClient = createTableMockClient({
+        // brands + brand_sites intentionally omitted — we assert neither is touched.
+        sites: { data: [], error: null },
+      });
+
+      let thrown;
+      try {
+        await upsertBrand({
+          organizationId: ORG_ID,
+          brand: { name: 'Test', urls: [{ value: 'https://yahoo.com' }] },
+          postgrestClient,
+        });
+      } catch (e) {
+        thrown = e;
+      }
+
+      expect(thrown).to.exist;
+      expect(thrown.status).to.equal(400);
+      expect(thrown.code).to.equal('BRAND_URLS_UNRESOLVED');
+      expect(thrown.message).to.include('https://yahoo.com');
+      // No destructive writes happen — 'brands' and 'brand_sites' should never be touched.
+      expect(postgrestClient.from).to.not.have.been.calledWith('brands');
+      expect(postgrestClient.from).to.not.have.been.calledWith('brand_sites');
+    });
+
+    it('lists every unresolved URL in the error message when multiple are missing', async () => {
+      const postgrestClient = createTableMockClient({
+        sites: { data: [{ id: 'site-1', base_url: 'https://valid.com' }], error: null },
+      });
+
+      let thrown;
+      try {
+        await upsertBrand({
+          organizationId: ORG_ID,
+          brand: {
+            name: 'Test',
+            urls: [
+              { value: 'https://valid.com' },
+              { value: 'https://yahoo.com' },
+              { value: 'https://example.com' },
+            ],
+          },
+          postgrestClient,
+        });
+      } catch (e) {
+        thrown = e;
+      }
+
+      expect(thrown.code).to.equal('BRAND_URLS_UNRESOLVED');
+      expect(thrown.message).to.include('https://yahoo.com');
+      expect(thrown.message).to.include('https://example.com');
+      expect(thrown.message).to.not.include('https://valid.com');
+    });
+
+    it('throws when the sites resolution query fails', async () => {
+      const postgrestClient = createTableMockClient({
+        sites: { data: null, error: { message: 'sites lookup error' } },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to resolve brand sites: sites lookup error');
+    });
+
     it('falls back to base URL when URL string is invalid in syncBrandSites', async () => {
       const fullBrandRow = makeBrandRow({
-        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'not-a-valid-url' } }],
+        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'https://not-a-valid-url' } }],
       });
 
       const postgrestClient = createTableMockClient({
@@ -770,7 +838,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: fullBrandRow, error: null },
         ],
-        sites: { data: [{ id: 'site-1', base_url: 'not-a-valid-url' }], error: null },
+        sites: { data: [{ id: 'site-1', base_url: 'https://not-a-valid-url' }], error: null },
         brand_sites: { data: null, error: null },
       });
 
@@ -886,27 +954,6 @@ describe('brands-storage', () => {
         { value: 'https://adobe.com/products' },
         { value: 'https://adobe.com/help' },
       ]);
-    });
-
-    it('skips syncBrandSites when urls resolve to no matching sites', async () => {
-      const fullBrandRow = makeBrandRow();
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        sites: { data: [], error: null },
-        brand_sites: { data: null, error: null },
-      });
-
-      const result = await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
-        postgrestClient,
-      });
-
-      expect(result.siteIds).to.deep.equal([]);
     });
 
     it('upserts brand with socialAccounts and earnedContent to normalized tables', async () => {
@@ -1028,32 +1075,6 @@ describe('brands-storage', () => {
       });
 
       expect(result.competitors).to.deep.equal([{ name: 'StringRival', url: null, regions: [] }]);
-    });
-
-    it('uses empty paths array when site base_url is not in pathsByBase map', async () => {
-      // Sites mock returns a different base_url than what was submitted,
-      // triggering the `pathsByBase.get(s.base_url) || []` fallback branch.
-      const fullBrandRow = makeBrandRow({
-        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'https://other.com' } }],
-      });
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        // sites returns a base_url not present in pathsByBase (which has 'https://a.com')
-        sites: { data: [{ id: 'site-1', base_url: 'https://other.com' }], error: null },
-        brand_sites: { data: null, error: null },
-      });
-
-      const result = await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', urls: [{ value: 'https://a.com/products' }] },
-        postgrestClient,
-      });
-
-      expect(result.siteIds).to.deep.equal(['site-1']);
     });
 
     it('handles empty urls array in syncBrandSites (early return branch)', async () => {
@@ -1440,6 +1461,75 @@ describe('brands-storage', () => {
 
       expect(result.brandAliases).to.deep.equal([]);
       expect(result.competitors).to.deep.equal([]);
+    });
+
+    it('throws BRAND_URLS_UNRESOLVED without touching the brand when a submitted URL has no matching site', async () => {
+      const postgrestClient = createTableMockClient({
+        sites: { data: [], error: null },
+        // 'brands' and 'brand_sites' intentionally omitted — asserting neither is touched.
+      });
+
+      let thrown;
+      try {
+        await updateBrand({
+          organizationId: ORG_ID,
+          brandId: BRAND_ID,
+          updates: { urls: [{ value: 'https://yahoo.com' }] },
+          postgrestClient,
+        });
+      } catch (e) {
+        thrown = e;
+      }
+
+      expect(thrown).to.exist;
+      expect(thrown.status).to.equal(400);
+      expect(thrown.code).to.equal('BRAND_URLS_UNRESOLVED');
+      expect(thrown.message).to.include('https://yahoo.com');
+      expect(postgrestClient.from).to.not.have.been.calledWith('brands');
+      expect(postgrestClient.from).to.not.have.been.calledWith('brand_sites');
+    });
+
+    it('treats null urls the same as an empty array (no validation, brand_sites cleared)', async () => {
+      const fullBrandRow = makeBrandRow();
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { urls: null },
+        postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+      // Null urls skips site resolution entirely.
+      expect(postgrestClient.from).to.not.have.been.calledWith('sites');
+    });
+
+    it('still allows other field updates when updates.urls is not provided', async () => {
+      const fullBrandRow = makeBrandRow({ name: 'Renamed' });
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { name: 'Renamed' },
+        postgrestClient,
+      });
+
+      expect(result.name).to.equal('Renamed');
+      // With no urls in the update payload, no sites lookup runs.
+      expect(postgrestClient.from).to.not.have.been.calledWith('sites');
     });
   });
 
