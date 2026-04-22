@@ -15,7 +15,10 @@ import {
   notFound,
   createResponse,
   internalServerError,
+  unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
+
+const SCOPE_WRITE = 'brand-presence.write';
 
 function BrandPresenceController(context) {
   const { dataAccess, log } = context;
@@ -23,7 +26,13 @@ function BrandPresenceController(context) {
 
   const ingestMetrics = async (requestContext) => {
     const { siteId } = requestContext.params;
-    const { data } = requestContext;
+    const { data, auth } = requestContext;
+
+    try {
+      auth.checkScopes([SCOPE_WRITE]);
+    } catch {
+      return unauthorized('Missing required scope: brand-presence.write');
+    }
 
     try {
       const site = await Site.findById(siteId);
