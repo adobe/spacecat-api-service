@@ -64,6 +64,8 @@ function BrandPresenceController(context) {
       }
 
       const failedIndexes = new Set(failures.map((f) => f.index));
+
+      // Claude Code, Sonnet 4.6, filter out failed rows for competitor data (ln 70)
       const competitorRows = metrics
         .filter((_, index) => !failedIndexes.has(index))
         .flatMap(toBrandPresenceCompetitorData);
@@ -79,11 +81,13 @@ function BrandPresenceController(context) {
         }
       }
 
-      // Claude Code, Sonnet 4.6
+      log.info(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics: ${written}/${total} records written, ${failures.length} failed`);
+
+      // Claude Code, Sonnet 4.6, filter out failed rows, return only successfully written rows
       return createResponse({
         metadata: { total, success: written, failure: failures.length },
         failures,
-        items: metrics.filter((_, index) => !failedIndexes.has(index)), // Claude Code, Sonnet 4.6
+        items: metrics.filter((_, index) => !failedIndexes.has(index)),
       }, 201);
     } catch (err) {
       log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics: ${err.message}`, err);
