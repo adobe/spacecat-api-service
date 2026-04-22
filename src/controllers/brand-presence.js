@@ -104,11 +104,14 @@ function BrandPresenceController(context) {
         return notFound(`Site not found: ${siteId}`);
       }
 
-      const { searchParams } = requestContext.pathInfo;
-      const startWeek = searchParams?.get('start_week') ?? null;
-      const endWeek = searchParams?.get('end_week') ?? null;
-      const limit = parseInt(searchParams?.get('limit') ?? '1000', 10);
-      const offset = parseInt(searchParams?.get('offset') ?? '0', 10);
+      const {
+        start_week: startWeek = null,
+        end_week: endWeek = null,
+        limit: rawLimit = '1000',
+        offset: rawOffset = '0',
+      } = requestContext.data || {};
+      const limit = parseInt(rawLimit, 10);
+      const offset = parseInt(rawOffset, 10);
 
       // regex von claude code generiert, Model Sonnet 4.6
       if (startWeek && !/^\d{4}-W\d{2}$/.test(startWeek)) {
