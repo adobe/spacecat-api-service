@@ -348,66 +348,95 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
 }
 
 /**
- * Enforces the "one active PLG enrollment per org" business rule by displacing any prior
- * ONBOARDED PlgOnboarding records for the same IMS org once a new site enrolls.
+ * Enforces the "one active ASO enrollment per org" business rule by revoking every ASO
+ * enrollment under the target entitlement other than the newly onboarded site's.
  *
- * Source of truth is PlgOnboarding records scoped by imsOrgId — NOT entitlement siblings.
- * The previous implementation walked SiteEnrollment.allByEntitlementId(entitlement.getId()),
- * which mass-deleted unrelated sites when entitlement resolution drifted to the internal/demo
- * org (2026-04-21 incident). Scoping by imsOrgId makes cross-org wipes architecturally
- * impossible regardless of entitlement-resolution drift.
+ * The previous incident (2026-04-21) showed this pattern is dangerous when entitlement
+ * resolution drifts to the wrong org — a single mis-resolution mass-deletes unrelated sites.
+ * Two invariants guard against that here:
  *
- * Safety:
- * - Hard-stops if the target organization is internal/demo.
- * - Each per-site revocation is isolated: one failure does not abort the others.
- * - Operates on PLG-origin enrollments only (revokeAsoSiteEnrollments filters by ASO product).
+ *   1. The entitlement's org MUST equal the customer org we resolved from the request's
+ *      imsOrgId. If they disagree, entitlement resolution drifted — abort loudly, don't delete.
+ *   2. The target customer org MUST NOT be internal/demo. Caller-level mistake guard.
+ *
+ * PlgOnboarding records for revoked sites are also transitioned to INACTIVE so the
+ * "one domain per IMS org" guard elsewhere in this controller doesn't keep seeing stale
+ * ONBOARDED records.
  *
  * @param {object} newSite - The newly onboarded site (kept active).
- * @param {object} organization - The target customer organization.
+ * @param {object} organization - The customer organization resolved from imsOrgId (ground truth).
+ * @param {object} entitlement - The ASO entitlement returned by ensureAsoEntitlement.
  * @param {object} context - Request context.
  */
-async function displacePreviousPlgEnrollments(newSite, organization, context) {
+async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitlement, context) {
   const { dataAccess, log, env } = context;
-  const { PlgOnboarding } = dataAccess;
+  const { SiteEnrollment, PlgOnboarding } = dataAccess;
 
-  if (isInternalOrg(organization.getId(), env)) {
-    log.error(`Refusing to displace previous PLG enrollments: target organization ${organization.getId()} is internal/demo. Site ${newSite.getId()} would mass-displace shared-org trials.`);
+  const expectedOrgId = organization.getId();
+
+  // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  if (isInternalOrg(expectedOrgId, env)) {
+    log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
     return;
   }
 
-  const imsOrgId = organization.getImsOrgId?.();
-  if (!imsOrgId) {
-    log.warn(`Cannot displace previous PLG enrollments: no IMS org ID for organization ${organization.getId()}`);
+  // Guard 2: tight invariant — the entitlement we got back must belong to the expected customer
+  // org. If TierClient ever drifts and hands back an entitlement for a different org, abort.
+  const entitlementOrgId = entitlement.getOrganizationId();
+  if (entitlementOrgId !== expectedOrgId) {
+    log.error(`Refusing to revoke sibling ASO enrollments: entitlement ${entitlement.getId()} belongs to org ${entitlementOrgId} but expected ${expectedOrgId} (resolved from request imsOrgId). Possible entitlement-resolution drift.`);
     return;
   }
 
-  const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
-  const previous = records.filter(
-    (r) => r.getStatus() === STATUSES.ONBOARDED
-      && r.getSiteId()
-      && r.getSiteId() !== newSite.getId(),
-  );
+  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  const newSiteId = newSite.getId();
+  const toRevoke = enrollments.filter((e) => e.getSiteId() !== newSiteId);
 
-  if (previous.length === 0) {
+  if (toRevoke.length === 0) {
     return;
   }
 
-  if (previous.length > 3) {
-    log.warn(`Found ${previous.length} prior ONBOARDED PLG records for IMS org ${imsOrgId}; displacing all. Investigate if unexpected.`);
+  if (toRevoke.length > 3) {
+    log.warn(`Found ${toRevoke.length} other ASO enrollments under entitlement ${entitlement.getId()} for org ${expectedOrgId}; revoking all. Investigate if unexpected.`);
   }
 
-  for (const record of previous) {
-    const prevSiteId = record.getSiteId();
+  const revokedSiteIds = [];
+  await Promise.all(toRevoke.map(async (e) => {
+    const prevSiteId = e.getSiteId();
     try {
-      // eslint-disable-next-line no-await-in-loop
-      await revokeAsoSiteEnrollments(record, context);
-      record.setStatus(STATUSES.INACTIVE);
-      // eslint-disable-next-line no-await-in-loop
-      await record.save();
-      log.info(`Displaced previous PLG trial: site ${prevSiteId}, onboarding ${record.getId()} → INACTIVE`);
+      log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${prevSiteId} (org ${expectedOrgId})`);
+      await e.remove();
+      revokedSiteIds.push(prevSiteId);
     } catch (err) {
-      log.warn(`Failed to displace previous PLG enrollment for site ${prevSiteId}: ${err.message}`);
+      log.warn(`Failed to revoke ASO enrollment ${e.getId()} for site ${prevSiteId}: ${err.message}`);
     }
+  }));
+
+  // Sync PlgOnboarding records of revoked sites to INACTIVE so the "one domain per IMS org"
+  // guard and other state readers don't see a revoked site as still ONBOARDED.
+  if (revokedSiteIds.length === 0) {
+    return;
+  }
+  try {
+    const imsOrgId = organization.getImsOrgId?.();
+    if (!imsOrgId) {
+      return;
+    }
+    const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
+    const revokedSet = new Set(revokedSiteIds);
+    const toMark = records.filter(
+      (r) => revokedSet.has(r.getSiteId()) && r.getStatus() === STATUSES.ONBOARDED,
+    );
+    await Promise.all(toMark.map(async (r) => {
+      try {
+        r.setStatus(STATUSES.INACTIVE);
+        await r.save();
+      } catch (err) {
+        log.warn(`Failed to mark PlgOnboarding ${r.getId()} as INACTIVE: ${err.message}`);
+      }
+    }));
+  } catch (err) {
+    log.warn(`Failed to sync PlgOnboarding records to INACTIVE after revocation: ${err.message}`);
   }
 }
 
@@ -785,8 +814,8 @@ async function performAsoPlgOnboarding({
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 
-      await ensureAsoEntitlement(site, organization, context);
-      await displacePreviousPlgEnrollments(site, organization, context);
+      const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+      await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
       await updateLaunchDarklyFlags(site, organization, context);
 
       const steps = {
@@ -1183,11 +1212,11 @@ async function performAsoPlgOnboarding({
       steps.siteOrgReassigned = true;
     }
 
-    // Step 10: Add ASO entitlement, displace previous PLG trial for this org, update FF.
-    // Displacement is scoped to PlgOnboarding records by imsOrgId (not entitlement siblings),
-    // so cross-org mass-revokes are architecturally impossible on entitlement-resolution drift.
-    await ensureAsoEntitlement(site, organization, context);
-    await displacePreviousPlgEnrollments(site, organization, context);
+    // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.
+    // Revocation is guarded by entitlement.organizationId === organization.getId() and an
+    // internal-org check, so cross-org mass-revokes are blocked on any resolution drift.
+    const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+    await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
     await updateLaunchDarklyFlags(site, organization, context);
 
     steps.entitlementCreated = true;

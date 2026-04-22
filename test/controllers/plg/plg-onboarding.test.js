@@ -207,15 +207,16 @@ describe('PlgOnboardingController', () => {
       updateVariationValue: ldUpdateVariationValueStub,
     });
 
-    // TierClient
+    // TierClient — entitlement.organizationId matches the resolved customer org so the
+    // revocation guard in revokePreviousAsoEnrollmentsForOrg sees a consistent state.
     tierClientCreateEntitlementStub = sandbox.stub().resolves({
-      entitlement: { getId: () => 'ent-1', getOrganizationId: () => 'org-1' },
+      entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
       siteEnrollment: { getId: () => 'enroll-1' },
     });
     tierClientCreateForSiteStub = sandbox.stub().resolves({
       createEntitlement: tierClientCreateEntitlementStub,
       checkValidEntitlement: sandbox.stub().resolves({
-        entitlement: { getId: () => 'ent-1', getOrganizationId: () => 'org-1' },
+        entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
         siteEnrollment: { getId: () => 'enroll-1' },
       }),
     });
@@ -2787,99 +2788,6 @@ describe('PlgOnboardingController', () => {
     });
   });
 
-  // --- ASO enrollment preservation during onboarding ---
-
-  describe('onboard - ASO enrollment preservation', () => {
-    let controller;
-    beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
-    });
-
-    it('does not revoke unrelated enrollments when another site exists under the same entitlement', async () => {
-      const OTHER_SITE_ID = 'other-site-uuid';
-      const mockEnrollment = {
-        getId: sandbox.stub().returns('enroll-old'),
-        getSiteId: sandbox.stub().returns(OTHER_SITE_ID),
-        remove: sandbox.stub().resolves(),
-      };
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockEnrollment.remove).to.not.have.been.called;
-    });
-
-    it('does not revoke any other enrollments when multiple exist under same entitlement', async () => {
-      const mockEnrollment1 = {
-        getId: sandbox.stub().returns('enroll-old-1'),
-        getSiteId: sandbox.stub().returns('other-site-1'),
-        remove: sandbox.stub().resolves(),
-      };
-      const mockEnrollment2 = {
-        getId: sandbox.stub().returns('enroll-old-2'),
-        getSiteId: sandbox.stub().returns('other-site-2'),
-        remove: sandbox.stub().resolves(),
-      };
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment1, mockEnrollment2]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockEnrollment1.remove).to.not.have.been.called;
-      expect(mockEnrollment2.remove).to.not.have.been.called;
-    });
-
-    it('still succeeds when no other enrollment exists', async () => {
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-    });
-
-    it('does not touch unrelated enrollments even if they would fail to remove', async () => {
-      const mockEnrollment = {
-        getId: sandbox.stub().returns('enroll-old'),
-        getSiteId: sandbox.stub().returns('other-site-uuid'),
-        remove: sandbox.stub().rejects(new Error('DB remove failed')),
-      };
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([mockEnrollment]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockEnrollment.remove).to.not.have.been.called;
-    });
-
-    it('does not revoke when entitlement belongs to an internal/demo org', async () => {
-      const INTERNAL_ORG_ID = 'internal-demo-org';
-      tierClientCreateEntitlementStub.resolves({
-        entitlement: { getId: () => 'ent-1', getOrganizationId: () => INTERNAL_ORG_ID },
-        siteEnrollment: { getId: () => 'enroll-1' },
-      });
-
-      const otherEnrollment = {
-        getId: sandbox.stub().returns('enroll-other'),
-        getSiteId: sandbox.stub().returns('other-site-uuid'),
-        remove: sandbox.stub().resolves(),
-      };
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([otherEnrollment]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      context.env.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(otherEnrollment.remove).to.not.have.been.called;
-      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
-    });
-  });
-
   // --- LaunchDarkly feature flag update ---
 
   describe('onboard - LaunchDarkly flag update', () => {
@@ -2989,188 +2897,133 @@ describe('PlgOnboardingController', () => {
     });
   });
 
-  // --- Previous PLG enrollment displacement (one active PLG trial per org) ---
+  // --- Previous ASO enrollment revocation (one active enrollment per org) ---
 
-  describe('onboard - previous PLG enrollment displacement', () => {
+  describe('onboard - previous ASO enrollment revocation for org', () => {
     let controller;
-    const PREV_SITE_ID = 'prev-site-uuid';
-    const PREV_ONBOARDING_ID = 'prev-onboarding-uuid';
 
     beforeEach(() => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    function buildPrevOnboarding(overrides = {}) {
-      return createMockOnboarding({
-        id: PREV_ONBOARDING_ID,
-        domain: TEST_DOMAIN, // same domain → bypasses the "one domain per IMS org" waitlist
+    function buildSiblingEnrollment(id, siteId) {
+      return {
+        getId: sandbox.stub().returns(id),
+        getSiteId: sandbox.stub().returns(siteId),
+        remove: sandbox.stub().resolves(),
+      };
+    }
+
+    it('revokes every ASO enrollment under the entitlement except the new site\'s', async () => {
+      const newSiteEnrollment = buildSiblingEnrollment('enroll-new', TEST_SITE_ID);
+      const sibling1 = buildSiblingEnrollment('enroll-sib-1', 'prev-site-1');
+      const sibling2 = buildSiblingEnrollment('enroll-sib-2', 'prev-site-2');
+      mockDataAccess.SiteEnrollment.allByEntitlementId
+        .resolves([newSiteEnrollment, sibling1, sibling2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(newSiteEnrollment.remove).to.not.have.been.called;
+      expect(sibling1.remove).to.have.been.called;
+      expect(sibling2.remove).to.have.been.called;
+    });
+
+    it('syncs PlgOnboarding records for revoked sites to INACTIVE', async () => {
+      const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);
+
+      const priorRecord = createMockOnboarding({
+        id: 'prior-onb',
+        domain: 'other.example.com',
         status: 'ONBOARDED',
-        siteId: PREV_SITE_ID,
-        ...overrides,
+        siteId: 'prev-site-1',
       });
-    }
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([priorRecord]);
 
-    function buildPrevSiteWithAsoEnrollment(enrollmentId = 'prev-enroll-1') {
-      const removeStub = sandbox.stub().resolves();
-      const prevEnrollment = {
-        getId: sandbox.stub().returns(enrollmentId),
-        getEntitlement: sandbox.stub().resolves({
-          getProductCode: sandbox.stub().returns('aso_optimizer'),
-        }),
-        remove: removeStub,
-      };
-      const prevSite = {
-        getId: sandbox.stub().returns(PREV_SITE_ID),
-        getSiteEnrollments: sandbox.stub().resolves([prevEnrollment]),
-      };
-      return { prevSite, prevEnrollment, removeStub };
-    }
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
 
-    it('displaces a previous ONBOARDED PLG trial for the same IMS org', async () => {
-      const prevOnboarding = buildPrevOnboarding();
-      const { prevSite, removeStub } = buildPrevSiteWithAsoEnrollment();
+      expect(sibling.remove).to.have.been.called;
+      expect(priorRecord.setStatus).to.have.been.calledWith('INACTIVE');
+      expect(priorRecord.save).to.have.been.called;
+    });
 
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([prevOnboarding]);
-      mockDataAccess.Site.findById.withArgs(PREV_SITE_ID).resolves(prevSite);
+    it('aborts when entitlement.organizationId disagrees with resolved customer org', async () => {
+      const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);
+
+      // Drift: entitlement belongs to a different org than the one resolved from imsOrgId.
+      tierClientCreateEntitlementStub.resolves({
+        entitlement: { getId: () => 'ent-drift', getOrganizationId: () => 'drifted-org' },
+        siteEnrollment: { getId: () => 'enroll-1' },
+      });
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(removeStub).to.have.been.calledOnce;
-      expect(prevOnboarding.setStatus).to.have.been.calledWith('INACTIVE');
-      expect(prevOnboarding.save).to.have.been.called;
+      expect(sibling.remove).to.not.have.been.called;
+      expect(mockLog.error).to.have.been.calledWithMatch(
+        /Refusing to revoke sibling ASO enrollments.*Possible entitlement-resolution drift/,
+      );
     });
 
-    it('does not displace itself when the prior record is for the same site', async () => {
-      const sameSiteRecord = buildPrevOnboarding({ siteId: TEST_SITE_ID });
-      const { removeStub } = buildPrevSiteWithAsoEnrollment();
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([sameSiteRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      await controller.onboard(context);
-
-      expect(removeStub).to.not.have.been.called;
-      expect(sameSiteRecord.setStatus).to.not.have.been.calledWith('INACTIVE');
-    });
-
-    it('skips records without a linked siteId', async () => {
-      const noSiteRecord = buildPrevOnboarding({ siteId: null });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([noSiteRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      await controller.onboard(context);
-
-      expect(noSiteRecord.setStatus).to.not.have.been.calledWith('INACTIVE');
-    });
-
-    it('skips records that are not ONBOARDED', async () => {
-      const waitlistedRecord = buildPrevOnboarding({ status: 'WAITLISTED' });
-      const { removeStub } = buildPrevSiteWithAsoEnrollment();
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      await controller.onboard(context);
-
-      expect(removeStub).to.not.have.been.called;
-      expect(waitlistedRecord.setStatus).to.not.have.been.calledWith('INACTIVE');
-    });
-
-    it('refuses displacement when the target organization is internal/demo', async () => {
+    it('refuses revocation when the resolved customer org is internal/demo', async () => {
       mockOrganization.getId.returns(DEMO_ORG_ID);
-      const prevOnboarding = buildPrevOnboarding();
-      const { prevSite, removeStub } = buildPrevSiteWithAsoEnrollment();
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([prevOnboarding]);
-      mockDataAccess.Site.findById.withArgs(PREV_SITE_ID).resolves(prevSite);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      await controller.onboard(context);
-
-      expect(removeStub).to.not.have.been.called;
-      expect(prevOnboarding.setStatus).to.not.have.been.calledWith('INACTIVE');
-      expect(mockLog.error).to.have.been.calledWithMatch(/Refusing to displace.*internal\/demo/);
-    });
-
-    it('displaces multiple previous records and continues past individual failures', async () => {
-      const prev1 = buildPrevOnboarding({ id: 'prev-1', siteId: 'prev-site-1' });
-      const prev2 = buildPrevOnboarding({ id: 'prev-2', siteId: 'prev-site-2' });
-      const prev3 = buildPrevOnboarding({ id: 'prev-3', siteId: 'prev-site-3' });
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([prev1, prev2, prev3]);
-
-      const mk = (id) => {
-        const removeStub = sandbox.stub().resolves();
-        const enroll = {
-          getId: sandbox.stub().returns(`enroll-${id}`),
-          getEntitlement: sandbox.stub().resolves({
-            getProductCode: sandbox.stub().returns('aso_optimizer'),
-          }),
-          remove: removeStub,
-        };
-        const site = {
-          getId: sandbox.stub().returns(id),
-          getSiteEnrollments: sandbox.stub().resolves([enroll]),
-        };
-        return { site, removeStub };
-      };
-      const s1 = mk('prev-site-1');
-      const s2 = mk('prev-site-2');
-      const s3 = mk('prev-site-3');
-      // Middle one fails to revoke — others should still proceed.
-      s2.removeStub.rejects(new Error('transient failure'));
-
-      mockDataAccess.Site.findById.withArgs('prev-site-1').resolves(s1.site);
-      mockDataAccess.Site.findById.withArgs('prev-site-2').resolves(s2.site);
-      mockDataAccess.Site.findById.withArgs('prev-site-3').resolves(s3.site);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(s1.removeStub).to.have.been.called;
-      expect(s3.removeStub).to.have.been.called;
-      expect(prev1.setStatus).to.have.been.calledWith('INACTIVE');
-      expect(prev3.setStatus).to.have.been.calledWith('INACTIVE');
-    });
-
-    it('no-op when no previous ONBOARDED records exist', async () => {
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('warns when more than 3 previous records are found', async () => {
-      const many = Array.from({ length: 4 }, (_, i) => buildPrevOnboarding({
-        id: `prev-${i}`,
-        siteId: `prev-site-${i}`,
-      }));
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves(many);
-      many.forEach((_, i) => {
-        const { site } = (() => {
-          const enroll = {
-            getId: sandbox.stub().returns(`e-${i}`),
-            getEntitlement: sandbox.stub().resolves({
-              getProductCode: sandbox.stub().returns('aso_optimizer'),
-            }),
-            remove: sandbox.stub().resolves(),
-          };
-          return {
-            site: {
-              getId: sandbox.stub().returns(`prev-site-${i}`),
-              getSiteEnrollments: sandbox.stub().resolves([enroll]),
-            },
-          };
-        })();
-        mockDataAccess.Site.findById.withArgs(`prev-site-${i}`).resolves(site);
+      // Keep the guard-2 invariant intact so only the internal-org guard is the blocker.
+      tierClientCreateEntitlementStub.resolves({
+        entitlement: { getId: () => 'ent-1', getOrganizationId: () => DEMO_ORG_ID },
+        siteEnrollment: { getId: () => 'enroll-1' },
       });
+      const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);
 
       const context = buildContext({ domain: TEST_DOMAIN });
       await controller.onboard(context);
 
-      expect(mockLog.warn).to.have.been.calledWithMatch(/Found 4 prior ONBOARDED/);
+      expect(sibling.remove).to.not.have.been.called;
+      expect(mockLog.error).to.have.been.calledWithMatch(
+        /Refusing to revoke sibling ASO enrollments.*internal\/demo/,
+      );
+    });
+
+    it('continues past individual remove failures', async () => {
+      const sibling1 = buildSiblingEnrollment('enroll-sib-1', 'prev-site-1');
+      const sibling2 = buildSiblingEnrollment('enroll-sib-2', 'prev-site-2');
+      sibling1.remove.rejects(new Error('transient failure'));
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling1, sibling2]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(sibling2.remove).to.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to revoke ASO enrollment/);
+    });
+
+    it('no-op when the entitlement has no sibling enrollments', async () => {
+      const onlyNew = buildSiblingEnrollment('enroll-new', TEST_SITE_ID);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([onlyNew]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(onlyNew.remove).to.not.have.been.called;
+    });
+
+    it('warns when more than 3 sibling enrollments are revoked', async () => {
+      const siblings = Array.from({ length: 4 }, (_, i) => (
+        buildSiblingEnrollment(`enroll-sib-${i}`, `prev-site-${i}`)
+      ));
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(siblings);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Found 4 other ASO enrollments/);
     });
   });
 
@@ -3390,8 +3243,8 @@ describe('PlgOnboardingController', () => {
           entitlementCreated: true,
         }),
       );
-      // Fast path must preserve unrelated enrollments while still updating LD flags.
-      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
+      // Fast path walks entitlement siblings to enforce one-enrollment-per-org.
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
       expect(ldGetFeatureFlagStub).to.have.been.called;
       // Organization must be resolved in fast path now
       expect(createOrFindOrganizationStub).to.have.been.called;
