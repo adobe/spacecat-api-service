@@ -736,6 +736,11 @@ async function performAsoPlgOnboarding({
       // Resolve customer's organization from imsOrgId
       const organization = await createOrFindOrganization(imsOrgId, context);
       const customerOrgId = organization.getId();
+      // Anchor the onboarding record to the resolved customer org up-front, regardless of
+      // whether the site itself needs to be reassigned. Preonboarding records created earlier
+      // may carry a stale organizationId (e.g. the internal/demo org used during preonboard),
+      // and downstream consumers (notifications, displacement scoping) read it directly.
+      onboarding.setOrganizationId(customerOrgId);
 
       // Check if site needs to be moved from internal org to customer org
       const currentSiteOrgId = site.getOrganizationId();
@@ -772,12 +777,11 @@ async function performAsoPlgOnboarding({
         }
       }
 
-      // Reassign site org if needed BEFORE entitlement operations
-      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement
+      // Reassign site org if needed BEFORE entitlement operations.
+      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
+      // The onboarding record's organizationId was already anchored above.
       if (needsOrgReassignment) {
         await reassignSiteOrganization(site, customerOrgId, log);
-        // Update PlgOnboarding's organizationId to match the site's new org
-        onboarding.setOrganizationId(customerOrgId);
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 

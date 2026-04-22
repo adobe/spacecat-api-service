@@ -3395,8 +3395,8 @@ describe('PlgOnboardingController', () => {
       expect(ldGetFeatureFlagStub).to.have.been.called;
       // Organization must be resolved in fast path now
       expect(createOrFindOrganizationStub).to.have.been.called;
-      // PlgOnboarding's organizationId should NOT be updated (site already in correct org)
-      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding's organizationId is anchored to the resolved customer org up-front.
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT run other full onboarding steps
       expect(detectBotBlockerStub).to.not.have.been.called;
     });
@@ -3501,8 +3501,9 @@ describe('PlgOnboardingController', () => {
       expect(createOrFindOrganizationStub).to.have.been.called;
       // Site org should NOT be changed (already in customer org)
       expect(siteInCustomerOrg.setOrganizationId).to.not.have.been.called;
-      // PlgOnboarding org should NOT be updated (site org didn't change)
-      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org is anchored to the resolved customer org regardless of
+      // whether the site itself needed reassignment.
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
@@ -3530,8 +3531,8 @@ describe('PlgOnboardingController', () => {
       expect(response.status).to.equal(200);
       // Demo site should NOT be reassigned (stays in internal org)
       expect(demoSite.setOrganizationId).to.not.have.been.called;
-      // PlgOnboarding org should NOT be updated (site org didn't change)
-      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org is still anchored to the resolved customer org.
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
     });
 
     it('waitlists when preonboarded site is in different customer org', async () => {
@@ -3562,8 +3563,9 @@ describe('PlgOnboardingController', () => {
       );
       // Site should NOT be changed
       expect(siteInOtherOrg.setOrganizationId).to.not.have.been.called;
-      // PlgOnboarding org should NOT be updated
-      expect(preonboardedOnboarding.setOrganizationId).to.not.have.been.called;
+      // PlgOnboarding org is anchored to the requesting customer's resolved org up-front,
+      // even when we then waitlist — the record is the trace of the request attempt.
+      expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT create entitlement
       expect(tierClientCreateForSiteStub).to.not.have.been.called;
     });
