@@ -62,7 +62,7 @@ export async function listTopics({
 
   const { data, error } = await query;
   if (error) {
-    throw new Error(`Failed to list topics: ${error.message}`);
+    throw new Error(`Failed to list topics: ${error.message}`, { cause: error });
   }
 
   return (data || []).map(mapDbTopicToV2);
@@ -73,13 +73,14 @@ export async function listTopics({
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
- * @param {object} params.topic - Topic data { name, description?, brandId? }
+ * @param {object} params.topic - Topic data { name, description?, brandId?, categoryId? }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
+ * @param {object} [params.log] - Logger instance for warnings
  * @returns {Promise<object>} Created topic
  */
 export async function createTopic({
-  organizationId, topic, postgrestClient, updatedBy = 'system',
+  organizationId, topic, postgrestClient, updatedBy = 'system', log,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -107,8 +108,45 @@ export async function createTopic({
     .single();
 
   if (error) {
-    throw new Error(`Failed to create topic: ${error.message}`);
+    // Any unique-constraint violation that escapes the `organization_id,
+    // topic_id` upsert target is surfaced as a typed 409 so callers can
+    // handle it without mining 500 bodies. The message echoes the actual
+    // constraint name rather than hard-coding a field (the colliding
+    // column may not be `name`). LLMO-4370.
+    if (error.code === '23505') {
+      const match = /unique constraint "([^"]+)"/.exec(error.message || '');
+      const constraint = match ? match[1] : 'unique constraint';
+      // Chain the original PostgREST error as `cause` so operators reading
+      // WARN-level conflict logs can still reach the raw DB error during
+      // triage — symmetric with categories-storage. LLMO-4370 #14.
+      const conflict = new Error(
+        `Topic conflicts with ${constraint} for this organization`,
+        { cause: error },
+      );
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw new Error(`Failed to create topic: ${error.message}`, { cause: error });
   }
+
+  // Link topic to category via the topic_categories junction table.
+  // categoryId is a UUID FK to categories.id — resolve it from the payload.
+  const categoryId = topic.categoryId || null;
+  if (categoryId && data?.id) {
+    const { error: junctionError } = await postgrestClient
+      .from('topic_categories')
+      .upsert(
+        { topic_id: data.id, category_id: categoryId },
+        { onConflict: 'topic_id,category_id' },
+      );
+    // Upsert errors are intentionally not thrown — the topic was already
+    // created successfully.  A missing or invalid categoryId should not
+    // fail the entire operation.
+    if (junctionError) {
+      log?.warn(`Failed to link topic ${data.id} to category ${categoryId}: ${junctionError.message}`);
+    }
+  }
+
   return mapDbTopicToV2(data);
 }
 
@@ -153,7 +191,7 @@ export async function updateTopic({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to update topic: ${error.message}`);
+    throw new Error(`Failed to update topic: ${error.message}`, { cause: error });
   }
   if (!data) {
     return null;
@@ -187,7 +225,7 @@ export async function deleteTopic({
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to delete topic: ${error.message}`);
+    throw new Error(`Failed to delete topic: ${error.message}`, { cause: error });
   }
   return !!data;
 }

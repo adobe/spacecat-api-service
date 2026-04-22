@@ -12,8 +12,16 @@
 
 /**
  * Routes that are intentionally excluded from S2S consumer access.
- * Deny-by-default blocks these for S2S consumers. Every omission is a conscious decision
- * documented below. These must never be added to routeRequiredCapabilities.
+ *
+ * Enforcement note: deny-by-default for S2S JWT callers is driven by *absence* of a route
+ * from `routeRequiredCapabilities` (see `s2sAuthWrapper` in `@adobe/spacecat-shared-http-utils`).
+ * This list is documentation + a coverage-test assertion — it records the deliberate decision
+ * to leave a route out of `routeRequiredCapabilities` so the decision is visible, greppable,
+ * and reviewable. Admin `x-api-key` callers bypass the S2S path entirely and are unaffected
+ * by either list.
+ *
+ * Every omission is a conscious decision documented below. A route must never appear in both
+ * this list and `routeRequiredCapabilities` — the disjointness invariant is enforced by test.
  *
  * @type {string[]}
  */
@@ -64,6 +72,20 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/opportunities',
   'GET /org/:spaceCatId/brands/:brandId/opportunities',
 
+  // Agentic traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/agentic-traffic/url-brand-presence',
+  'GET /sites/:siteId/agentic-traffic/kpis',
+  'GET /sites/:siteId/agentic-traffic/kpis-trend',
+  'GET /sites/:siteId/agentic-traffic/by-region',
+  'GET /sites/:siteId/agentic-traffic/by-category',
+  'GET /sites/:siteId/agentic-traffic/by-page-type',
+  'GET /sites/:siteId/agentic-traffic/by-status',
+  'GET /sites/:siteId/agentic-traffic/by-user-agent',
+  'GET /sites/:siteId/agentic-traffic/by-url',
+  'GET /sites/:siteId/agentic-traffic/filter-dimensions',
+  'GET /sites/:siteId/agentic-traffic/weeks',
+  'GET /sites/:siteId/agentic-traffic/movers',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
@@ -73,7 +95,6 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
-  'POST /sites/:siteId/llmo/edge-optimize-routing',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
@@ -128,6 +149,19 @@ export const INTERNAL_ROUTES = [
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
+
+  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
+  'GET /v2/regions',
+
+  // Monitoring - DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
+  // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
+  // registration). Kept internal because reusing `audit:read` would silently broaden that
+  // site-scoped capability to cover platform/infra monitoring data. Revisit when a concrete
+  // S2S consumer exists and introduce a dedicated capability scoped to the exposed resource
+  // (e.g. `drsBrandPresenceAudit:read`) rather than bundling into `audit:read` or a domain
+  // bucket like `monitoring:read` that would re-create the same problem for the next
+  // monitoring endpoint.
+  'GET /monitoring/drs-bp-pg-audit',
 ];
 
 /**
@@ -135,6 +169,12 @@ export const INTERNAL_ROUTES = [
  * Format: 'entity:action' where action is 'read' for GET, 'write' for all other methods.
  * Entity names use camelCase consistently (e.g. apiKey, botBlocker, importJob) to avoid
  * silent auth failures when granting capabilities — consumers must use exact entity names.
+ *
+ * Authoritative entity list: entity names must match those registered in
+ * `@adobe/spacecat-shared-data-access` at `src/models/base/entity.registry.js` (plus the
+ * S3-backed `configuration` entity). Capability strings referencing unregistered entities are
+ * schema-valid but can never be granted to an S2S consumer — `Consumer.validateCapabilities`
+ * in the data-access layer rejects them. Do not invent entity names here.
  *
  * Routes not listed here (and not in INTERNAL_ROUTES) are denied for S2S consumers.
  * Only routes explicitly defined with a capability in this mapping can be called by S2S consumers.
@@ -209,6 +249,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
@@ -485,6 +527,10 @@ const routeRequiredCapabilities = {
 
   // Tokens
   'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
+  'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
+
+  // Suggestion grants
+  'DELETE /sites/:siteId/suggestions/grants/:grantId': 'suggestion:write',
 };
 
 export default routeRequiredCapabilities;

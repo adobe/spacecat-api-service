@@ -16,7 +16,7 @@ import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
-import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import SeoClient from '@adobe/mysticat-shared-seo-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
@@ -33,6 +33,7 @@ import {
   LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
+import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
 
 // LLMO Constants
@@ -133,58 +134,8 @@ export async function triggerBrandalfOnboardingJob({
   return drsJob;
 }
 
-function buildPromptGenerationMetadata({
-  siteId,
-  imsOrgId,
-  baseUrl,
-  brandName,
-  region,
-  onboardingMode,
-}) {
-  return buildOnboardingMetadata({
-    siteId,
-    imsOrgId,
-    brandName,
-    onboardingMode,
-    extra: {
-      base_url: baseUrl,
-      region,
-    },
-  });
-}
-
-export async function submitOnboardingPromptGenerationJob({
-  drsClient,
-  baseUrl,
-  brandName,
-  audience,
-  region = 'US',
-  numPrompts = 50,
-  siteId,
-  imsOrgId,
-  onboardingMode,
-}) {
-  return drsClient.submitJob({
-    provider_id: 'prompt_generation_base_url',
-    source: 'onboarding',
-    parameters: {
-      base_url: baseUrl,
-      brand: brandName,
-      audience,
-      region,
-      num_prompts: numPrompts,
-      model: 'gpt-5-nano',
-      metadata: buildPromptGenerationMetadata({
-        siteId,
-        imsOrgId,
-        baseUrl,
-        brandName,
-        region,
-        onboardingMode,
-      }),
-    },
-  });
-}
+// submitOnboardingPromptGenerationJob removed — prompt generation is now
+// triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
 export function buildInitialCustomerConfigV2({
   brandName,
@@ -215,7 +166,7 @@ export function buildInitialCustomerConfigV2({
   brand.baseUrl = primaryUrl;
   brand.updatedAt = timestamp;
   brand.updatedBy = updatedBy;
-  brand.urls = [{ value: primaryUrl, type: 'url' }];
+  brand.urls = [{ value: primaryUrl, type: 'base' }];
   brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
 
   config.customer.customerName = brandName;
@@ -275,7 +226,7 @@ export async function ensureInitialCustomerConfigV2({
       regions: ['gl'],
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
-      urls: [{ value: primaryUrl, type: 'url' }],
+      urls: [{ value: primaryUrl, type: 'base' }],
       brandAliases: [{ name: trimmedName, regions: ['gl'] }],
     });
 
@@ -927,20 +878,20 @@ function toggleWWW(url) {
 }
 
 /**
- * Tests a URL against the Ahrefs top pages endpoint to see if it returns data.
+ * Tests a URL against the SEO top pages endpoint to see if it returns data.
  * @param {string} url - The URL to test
- * @param {object} ahrefsClient - The Ahrefs API client
+ * @param {object} seoClient - The SEO API client
  * @param {object} log - Logger instance
  * @returns {Promise<boolean>} - True if the URL returns top pages data, false otherwise
  */
-async function testAhrefsTopPages(url, ahrefsClient, log) {
+async function testSeoTopPages(url, seoClient, log) {
   try {
-    const { result } = await ahrefsClient.getTopPages(url, 1);
+    const { result } = await seoClient.getTopPages(url, { limit: 1 });
     const hasData = isNonEmptyArray(result?.pages);
-    log.debug(`Ahrefs top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
+    log.debug(`SEO top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
     return hasData;
   } catch (error) {
-    log.debug(`Ahrefs top pages test for ${url}: FAILED - ${error.message}`);
+    log.debug(`SEO top pages test for ${url}: FAILED - ${error.message}`);
     return false;
   }
 }
@@ -959,7 +910,7 @@ export async function determineOverrideBaseURL(baseURL, context) {
 
   try {
     log.info(`Determining overrideBaseURL for ${baseURL}`);
-    const ahrefsClient = AhrefsAPIClient.createFrom(context);
+    const seoClient = SeoClient.createFrom(context);
     const alternateURL = toggleWWW(baseURL);
 
     // If toggleWWW returns the same URL, it means the URL has a subdomain
@@ -972,8 +923,8 @@ export async function determineOverrideBaseURL(baseURL, context) {
     log.debug(`Testing base URL: ${baseURL} and alternate: ${alternateURL}`);
 
     const [baseURLSuccess, alternateURLSuccess] = await Promise.all([
-      testAhrefsTopPages(baseURL, ahrefsClient, log),
-      testAhrefsTopPages(alternateURL, ahrefsClient, log),
+      testSeoTopPages(baseURL, seoClient, log),
+      testSeoTopPages(alternateURL, seoClient, log),
     ]);
 
     if (!baseURLSuccess && alternateURLSuccess) {
@@ -986,7 +937,7 @@ export async function determineOverrideBaseURL(baseURL, context) {
     } else if (baseURLSuccess && !alternateURLSuccess) {
       log.debug('Base URL succeeded, no overrideBaseURL needed');
     } else {
-      log.warn('Both URLs failed Ahrefs test, no overrideBaseURL set');
+      log.warn('Both URLs failed SEO top pages test, no overrideBaseURL set');
     }
 
     return null;
@@ -1013,6 +964,12 @@ export async function createOrFindSite(baseURL, organizationId, context, deliver
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
       site.setOrganizationId(organizationId);
+      // Persist the re-parent immediately. resolveLlmoOnboardingMode (called
+      // right after this in performLlmoOnboarding) reads sites by org_id, so
+      // the move must be visible to that query — otherwise a legacy site
+      // re-parented into a brand-new org would be classified as v2 and create
+      // an instant mixed v1/v2 state. (LLMO-4176)
+      await site.save();
     }
 
     return site;
@@ -1254,15 +1211,22 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
   const dataFolder = generateDataFolder(baseURL, env.ENV);
 
   let site;
+  let detectedCdn = null;
   try {
     log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}, brand ${brandName}`);
 
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
-    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
-    // Create site
+    // Create site BEFORE resolving the onboarding mode. createOrFindSite may
+    // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
+    // reads Site.allByOrganizationId, so the re-parent has to be persisted first
+    // (createOrFindSite saves the site in that branch). Otherwise a legacy
+    // pre-cutoff site moved into a brand-new org would be misclassified as v2
+    // and instantly create the mixed state LLMO-4176 was filed to prevent.
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
+
+    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
     log.info(`Created site ${site.getId()} for ${baseURL} using LLMO onboarding mode ${onboardingMode}`);
 
@@ -1323,6 +1287,19 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
     }
 
+    try {
+      detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname, log);
+      if (detectedCdn) {
+        siteConfig.updateLlmoDetectedCdn?.(detectedCdn);
+        log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
+        say(`:mag: Detected CDN: ${detectedCdn}`);
+      } else {
+        log.info(`CDN detection inconclusive for site ${site.getId()}`);
+      }
+    } catch (cdnError) {
+      log.warn(`CDN detection failed for site ${site.getId()}: ${cdnError.message}`);
+    }
+
     // update the site config object
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
@@ -1362,7 +1339,8 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           brand: {
             name: brandName.trim(),
             status: 'active',
-            urls: [{ value: baseURL, type: 'url' }],
+            baseSiteId: site.getId(),
+            urls: [{ value: baseURL, type: 'base' }],
             brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
           },
           postgrestClient,
@@ -1405,35 +1383,10 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
     await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
 
-    // Submit DRS prompt generation job (non-blocking)
-    try {
-      const drsClient = DrsClient.createFrom(context);
-      if (drsClient.isConfigured()) {
-        // Try to get audience from brand profile, fall back to default
-        const brandProfile = siteConfig.getBrandProfile?.();
-        const audience = brandProfile?.main_profile?.target_audience
-          || `General consumers interested in ${brandName} products and services`;
-
-        const drsJob = await submitOnboardingPromptGenerationJob({
-          drsClient,
-          baseUrl: baseURL,
-          brandName: brandName.trim(),
-          audience,
-          region: 'US',
-          numPrompts: 50,
-          siteId: site.getId(),
-          imsOrgId,
-          onboardingMode,
-        });
-        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
-        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
-      } else {
-        log.debug('DRS client not configured, skipping prompt generation');
-      }
-    } catch (drsError) {
-      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
-    }
+    // Prompt generation is deferred to DRS: when the Brandalf job completes
+    // and syncs brands (with correct regions) to SpaceCat, DRS automatically
+    // submits a prompt_generation_base_url job with the brand's region.
+    // This ensures prompts are generated in the correct language (LLMO-4258).
 
     return {
       site,
@@ -1441,6 +1394,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       organizationId: organization.getId(),
       baseURL,
       dataFolder,
+      detectedCdn,
       message: 'LLMO onboarding completed successfully',
     };
   } catch (error) {
