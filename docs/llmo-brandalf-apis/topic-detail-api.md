@@ -80,7 +80,6 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
       "region": "US",
       "executionDate": "2026-03-08",
       "week": "2026-W10",
-      "answer": "Based on current reviews, the top PDF editors for Mac include...",
       "mentions": true,
       "citations": true,
       "visibilityScore": 85,
@@ -142,7 +141,7 @@ Pre-aggregated weekly statistics for the detail dialog mini-charts. Sorted chron
 
 ### `executions[]` Array
 
-All execution rows for the topic within the date range. Sorted newest-first by `execution_date`. Not deduplicated — includes every execution for weekly history tracking.
+All execution rows for the topic within the date range. Sorted newest-first by `execution_date`. Not deduplicated — includes every execution for weekly history tracking. The AI answer text is **not** included (use the prompt detail or execution-sources APIs if answer text is required).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -150,7 +149,6 @@ All execution rows for the topic within the date range. Sorted newest-first by `
 | `region` | string | Region code (e.g. US, DE) |
 | `executionDate` | string | Execution date (YYYY-MM-DD) |
 | `week` | string | ISO week string derived from `executionDate` |
-| `answer` | string | The AI answer text |
 | `mentions` | boolean | Whether the brand was mentioned |
 | `citations` | boolean | Whether the brand was cited |
 | `visibilityScore` | number | Visibility score (0–100) |
@@ -179,7 +177,7 @@ Aggregated citation sources across all executions in the topic. Deduplicated by 
 
 ## Aggregation Logic
 
-1. Query all `brand_presence_executions` rows matching the topic and filters (using the `DETAIL_SELECT` columns which include `answer`)
+1. Query all `brand_presence_executions` rows matching the topic and filters (using `TOPIC_DETAIL_SELECT`: same as prompt-detail columns except `answer` is omitted)
 2. Compute overall topic stats via `aggregateTopicData` (same logic as the `/topics` endpoint)
 3. Compute weekly stats via `aggregateWeeklyDetailStats`:
    - Group rows by ISO week (derived from `execution_date`)

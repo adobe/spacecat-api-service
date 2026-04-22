@@ -6450,8 +6450,26 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[0].detectedBrandMentions).to.equal('Our Brand, Other');
       expect(body.executions[1].businessCompetitors).to.equal('');
       expect(body.executions[1].detectedBrandMentions).to.equal('');
+      expect(body.executions[0]).to.not.have.property('answer');
+      expect(body.executions[1]).to.not.have.property('answer');
       expect(body.topicId).to.equal(topicRowId);
       expect(body.weeklyStats.length).to.be.greaterThan(0);
+    });
+
+    it('loads executions without the answer column for topic detail', async () => {
+      const client = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        brand_presence_sources: { data: [], error: null },
+      });
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicDetailHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.select).to.have.been.calledWith(sinon.match(
+        (s) => typeof s === 'string' && s.includes('execution_date') && !s.includes('answer'),
+      ));
     });
 
     it('aggregates sources from fetchSourcesForExecutions', async () => {
@@ -6622,6 +6640,7 @@ describe('llmo-brand-presence', () => {
       expect(body.executions[0].executionDate).to.equal('');
       expect(body.executions[0].businessCompetitors).to.equal('');
       expect(body.executions[0].detectedBrandMentions).to.equal('');
+      expect(body.executions[0]).to.not.have.property('answer');
     });
   });
 

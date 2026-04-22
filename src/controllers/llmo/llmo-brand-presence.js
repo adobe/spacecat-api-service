@@ -1905,6 +1905,13 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // eslint-disable-next-line max-len
 const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
+/**
+ * Same as DETAIL_SELECT but omits `answer` (topic detail API does not load or return
+ * answer text).
+ */
+// eslint-disable-next-line max-len
+const TOPIC_DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, business_competitors, detected_brand_mentions';
+
 /** Minimal columns for execution-sources execution row (summary + execution_date partition key). */
 const EXECUTION_SOURCES_EXEC_SELECT = 'id, execution_date, brand_id, site_id, model';
 
@@ -1920,8 +1927,41 @@ function weekFromExecDate(execDate) {
 }
 
 /**
- * Maps a `brand_presence_executions` detail row (`DETAIL_SELECT`) to one `executions[]` entry.
- * Shared by topic-detail and prompt-detail handlers.
+ * Maps a `brand_presence_executions` detail row (`TOPIC_DETAIL_SELECT`) to one
+ * topic-detail `executions[]` entry. Omits `answer` (not selected from PostgREST;
+ * not present in the JSON response).
+ * @param {Object} r - Raw PostgREST row
+ * @returns {Object}
+ */
+function mapBrandPresenceTopicDetailExecutionRow(r) {
+  const mentioned = r.mentions === true || r.mentions === 'true';
+  const cited = r.citations === true || r.citations === 'true';
+  const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+  return {
+    prompt: r.prompt || '',
+    promptId: r.prompt_id != null ? String(r.prompt_id) : '',
+    executionId: r.id != null ? String(r.id) : '',
+    region: r.region_code || '',
+    executionDate: r.execution_date || '',
+    week: weekFromExecDate(r.execution_date),
+    mentions: mentioned,
+    citations: cited,
+    visibilityScore: Number.isNaN(vs) ? 0 : vs,
+    position: r.position ? String(r.position) : '',
+    sentiment: r.sentiment || '',
+    volume: r.volume != null ? String(r.volume) : '',
+    origin: r.origin || '',
+    category: r.category_name || '',
+    sources: r.url || '',
+    errorCode: r.error_code || '',
+    businessCompetitors: r.business_competitors || '',
+    detectedBrandMentions: r.detected_brand_mentions || '',
+  };
+}
+
+/**
+ * Maps a `brand_presence_executions` detail row (`DETAIL_SELECT`) to one
+ * prompt-detail `executions[]` entry.
  * @param {Object} r - Raw PostgREST row
  * @returns {Object}
  */
@@ -2081,15 +2121,24 @@ export function aggregateDetailSources(sourceRows) {
 /**
  * Shared query builder for topic/prompt detail endpoints.
  * Returns the base PostgREST query on brand_presence_executions.
+ * @param {string} [selectColumns=DETAIL_SELECT] - PostgREST select list
+ *   (`TOPIC_DETAIL_SELECT` omits answer)
  */
-function buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId) {
+function buildDetailExecQuery(
+  client,
+  organizationId,
+  params,
+  defaults,
+  filterByBrandId,
+  selectColumns = DETAIL_SELECT,
+) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const model = resolveModelFromRequest(params.model);
 
   let q = client
     .from('brand_presence_executions')
-    .select(DETAIL_SELECT)
+    .select(selectColumns)
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
@@ -2299,7 +2348,14 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      let q = buildDetailExecQuery(
+        client,
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
+        TOPIC_DETAIL_SELECT,
+      );
       q = applyTopicPathFilter(q, topicName);
 
       const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
@@ -2339,10 +2395,10 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       // Weekly stats for mini-charts
       const weeklyStats = aggregateWeeklyDetailStats(rows);
 
-      // Build execution entries (all rows, newest first)
+      // Build execution entries (all rows, newest first; no answer field)
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map(mapBrandPresenceDetailExecutionRow);
+        .map(mapBrandPresenceTopicDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));
