@@ -26,6 +26,7 @@
 import { sendEmail } from '../../support/email-service.js';
 
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
+const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
 
 const CDN_CONFIG = {
   'byocdn-fastly': {
@@ -64,12 +65,56 @@ function parseRecipients(raw) {
   return raw.split(',').map((s) => s.trim()).filter((e) => /^[^@]+@adobe\.com$/.test(e));
 }
 
+function formatOrgMembersCsv(trialUsers) {
+  if (!Array.isArray(trialUsers) || trialUsers.length === 0) {
+    return '';
+  }
+
+  const uniqueEmails = new Set();
+  trialUsers.forEach((user) => {
+    const status = (user?.getStatus?.() || user?.status || '').toUpperCase();
+    if (EXCLUDED_MEMBER_STATUSES.has(status)) {
+      return;
+    }
+
+    const rawEmail = user?.getEmailId?.() || user?.emailId || '';
+    const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    if (email) {
+      uniqueEmails.add(email);
+    }
+  });
+
+  return [...uniqueEmails].sort().join(', ');
+}
+
+async function getOrgMembersCsv(context, orgId) {
+  if (!orgId) {
+    return '';
+  }
+
+  const trialUserModel = context?.dataAccess?.TrialUser;
+  if (!trialUserModel?.allByOrganizationId) {
+    return '';
+  }
+
+  try {
+    const trialUsers = await trialUserModel.allByOrganizationId(orgId);
+    return formatOrgMembersCsv(trialUsers);
+  } catch (error) {
+    context?.log?.warn?.(
+      `[cdn-opt-in-notification] Failed to fetch org members for org=${orgId}: ${error.message}`,
+    );
+    return '';
+  }
+}
+
 /**
  * @param {Object} context - Request context with env, log, dataAccess.
  * @param {Object} params
  * @param {string} params.siteId
  * @param {string} params.siteBaseURL
  * @param {string} [params.cdnLogSource] - CDN type stored during provisioning.
+ * @param {string} [params.orgId] - Organization ID used to load members email list.
  * @param {string} [params.optedBy] - Email of the customer user who triggered the opt-in.
  * @returns {Promise<{sent: boolean, reason?: string}>}
  */
@@ -79,6 +124,7 @@ export async function notifyOptInIfNeeded(context, params) {
     siteId,
     siteBaseURL,
     cdnLogSource,
+    orgId,
     optedBy,
   } = params || {};
 
@@ -92,6 +138,7 @@ export async function notifyOptInIfNeeded(context, params) {
     const cdnDisplayName = CDN_CONFIG[cdnLogSource]?.displayName || cdnLogSource || 'Unknown CDN';
     const docLink = CDN_CONFIG[cdnLogSource]?.docLink || '';
     const cdnNote = CDN_CONFIG[cdnLogSource]?.note || '';
+    const orgMembers = await getOrgMembersCsv(context, orgId);
 
     const templateData = {
       siteBaseURL: siteBaseURL || '',
@@ -99,6 +146,7 @@ export async function notifyOptInIfNeeded(context, params) {
       docLink,
       cdnNote,
       optedBy: optedBy || '',
+      orgMembers,
     };
 
     log.info(`[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} cdnLogSource=${cdnLogSource}`);

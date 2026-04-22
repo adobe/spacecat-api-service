@@ -51,6 +51,11 @@ describe('cdn-opt-in-notification', () => {
         warn: sinon.stub(),
         error: sinon.stub(),
       },
+      dataAccess: {
+        TrialUser: {
+          allByOrganizationId: sinon.stub().resolves([]),
+        },
+      },
     };
   });
 
@@ -63,6 +68,7 @@ describe('cdn-opt-in-notification', () => {
       siteId: 'site-uuid-123',
       siteBaseURL: 'https://www.example.com',
       cdnLogSource: 'byocdn-akamai',
+      orgId: 'org-uuid-456',
       optedBy: 'user@adobe.com',
     };
 
@@ -80,6 +86,69 @@ describe('cdn-opt-in-notification', () => {
       expect(opts.templateData.optedBy).to.equal('user@adobe.com');
       expect(opts.templateData.docLink).to.be.a('string');
       expect(opts.templateData.cdnNote).to.be.a('string');
+      expect(opts.templateData.orgMembers).to.equal('');
+    });
+
+    it('adds organization members as comma-separated emails', async () => {
+      mockContext.dataAccess.TrialUser.allByOrganizationId.resolves([
+        { getEmailId: () => 'b@example.com', getStatus: () => 'USER' },
+        { getEmailId: () => 'a@example.com', getStatus: () => 'INVITED' },
+      ]);
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('a@example.com, b@example.com');
+      expect(mockContext.dataAccess.TrialUser.allByOrganizationId).to.have.been.calledWith('org-uuid-456');
+    });
+
+    it('filters blocked/deleted org members and deduplicates emails', async () => {
+      mockContext.dataAccess.TrialUser.allByOrganizationId.resolves([
+        { getEmailId: () => 'keep@example.com', getStatus: () => 'USER' },
+        { getEmailId: () => 'KEEP@example.com', getStatus: () => 'INVITED' },
+        { getEmailId: () => 'blocked@example.com', getStatus: () => 'BLOCKED' },
+        { getEmailId: () => 'deleted@example.com', getStatus: () => 'DELETED' },
+      ]);
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('keep@example.com');
+    });
+
+    it('keeps sending when org members fetch fails', async () => {
+      mockContext.dataAccess.TrialUser.allByOrganizationId.rejects(new Error('db unavailable'));
+
+      const result = await notifyOptInIfNeeded(mockContext, baseParams);
+
+      expect(result.sent).to.be.true;
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('');
+      expect(mockContext.log.warn).to.have.been.calledWith(
+        sinon.match(/Failed to fetch org members/),
+      );
+    });
+
+    it('keeps sending with empty org members when TrialUser model is unavailable', async () => {
+      mockContext.dataAccess = {};
+
+      const result = await notifyOptInIfNeeded(mockContext, baseParams);
+
+      expect(result.sent).to.be.true;
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('');
+    });
+
+    it('formats org members when trial users expose plain status/emailId fields', async () => {
+      mockContext.dataAccess.TrialUser.allByOrganizationId.resolves([
+        { emailId: 'plain1@example.com', status: 'USER' },
+        { emailId: 'plain2@example.com', status: 'INVITED' },
+      ]);
+
+      await notifyOptInIfNeeded(mockContext, baseParams);
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.orgMembers).to.equal('plain1@example.com, plain2@example.com');
     });
 
     it('passes docLink and cdnNote as separate variables for CDNs with extra config', async () => {
@@ -188,6 +257,7 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.cdnDisplayName).to.equal('Unknown CDN');
       expect(templateData.docLink).to.equal('');
       expect(templateData.cdnNote).to.equal('');
+      expect(templateData.orgMembers).to.equal('');
     });
 
     it('handles null params object without throwing', async () => {
@@ -196,8 +266,8 @@ describe('cdn-opt-in-notification', () => {
       // Recipients still come from env, so email is sent even with null params
       expect(result.sent).to.be.true;
       const { templateData } = sendEmailStub.firstCall.args[1];
-      expect(templateData.siteId).to.equal('');
       expect(templateData.siteBaseURL).to.equal('');
+      expect(templateData.orgMembers).to.equal('');
     });
   });
 });

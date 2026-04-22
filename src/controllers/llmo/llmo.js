@@ -1280,6 +1280,7 @@ function LlmoController(ctx) {
           siteId,
           siteBaseURL: baseURL,
           cdnLogSource: existingEdgeConfig.cdnLogSource,
+          orgId: site.getOrganizationId?.(),
           optedBy: lastModifiedBy,
         }).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
       }
