@@ -263,8 +263,19 @@ async function ensureAsoEntitlement(site, context) {
  * @param {object} context - Request context.
  */
 async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
-  const { dataAccess, log } = context;
+  const { dataAccess, log, env } = context;
   const { SiteEnrollment } = dataAccess;
+
+  // SAFETY: never mass-revoke enrollments under an internal/demo org's entitlement.
+  // These orgs are shared and accumulate hundreds of pre-onboarded site enrollments; a wrong
+  // entitlement lookup here would wipe them all. If we end up with an internal-org entitlement,
+  // it means the upstream site→org reassignment did not take effect before TierClient resolved
+  // the org. Fail loud instead of deleting.
+  const entitlementOrgId = entitlement.getOrganizationId();
+  if (isInternalOrg(entitlementOrgId, env)) {
+    log.error(`Refusing to revoke enrollments: entitlement ${entitlement.getId()} belongs to internal/demo org ${entitlementOrgId}. Site ${site.getId()} is in org ${site.getOrganizationId()}. Skipping revocation to prevent cross-org data loss.`);
+    return;
+  }
 
   const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
   const toRevoke = enrollments.filter((e) => e.getSiteId() !== site.getId());

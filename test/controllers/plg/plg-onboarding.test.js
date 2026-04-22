@@ -209,13 +209,13 @@ describe('PlgOnboardingController', () => {
 
     // TierClient
     tierClientCreateEntitlementStub = sandbox.stub().resolves({
-      entitlement: { getId: () => 'ent-1' },
+      entitlement: { getId: () => 'ent-1', getOrganizationId: () => 'org-1' },
       siteEnrollment: { getId: () => 'enroll-1' },
     });
     tierClientCreateForSiteStub = sandbox.stub().resolves({
       createEntitlement: tierClientCreateEntitlementStub,
       checkValidEntitlement: sandbox.stub().resolves({
-        entitlement: { getId: () => 'ent-1' },
+        entitlement: { getId: () => 'ent-1', getOrganizationId: () => 'org-1' },
         siteEnrollment: { getId: () => 'enroll-1' },
       }),
     });
@@ -2854,6 +2854,30 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(500);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
+    });
+
+    it('refuses to revoke when entitlement belongs to an internal/demo org', async () => {
+      const INTERNAL_ORG_ID = 'internal-demo-org';
+      tierClientCreateEntitlementStub.resolves({
+        entitlement: { getId: () => 'ent-1', getOrganizationId: () => INTERNAL_ORG_ID },
+        siteEnrollment: { getId: () => 'enroll-1' },
+      });
+
+      const otherEnrollment = {
+        getId: sandbox.stub().returns('enroll-other'),
+        getSiteId: sandbox.stub().returns('other-site-uuid'),
+        remove: sandbox.stub().resolves(),
+      };
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([otherEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(otherEnrollment.remove).to.not.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
+      expect(mockLog.error).to.have.been.calledWithMatch(/Refusing to revoke/);
     });
   });
 
