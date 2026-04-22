@@ -158,6 +158,8 @@ function BrandPresenceController(context) {
         await ch.close();
       }
 
+      log.info(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data: ${rows.length}/${total} records returned (start_week: ${startWeek ?? 'none'}, end_week: ${endWeek ?? 'none'})`);
+
       return ok({ metadata: { total, limit, offset }, data: rows });
     } catch (err) {
       log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data: ${err.message}`, err);
