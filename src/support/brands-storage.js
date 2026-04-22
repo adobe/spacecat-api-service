@@ -23,7 +23,7 @@ const BRAND_SELECT = [
   'brand_earned_sources(name, url, regions)',
   'competitors(name, url, regions)',
   'brand_sites(site_id, paths, type, sites(base_url))',
-  'brand_urls(url, type)',
+  'brand_urls(url)',
 ].join(', ');
 
 /**
@@ -101,12 +101,11 @@ function mapDbBrandToV2(row) {
     if (siteInfo) {
       entry.siteId = siteInfo.siteId;
     }
-    // Prefer the type stored directly on brand_urls; fall back to the matching
-    // brand_sites type when absent so legacy type-only-on-join rows still
-    // surface through the union.
-    const type = hasText(bu.type) ? bu.type : siteInfo?.type;
-    if (hasText(type)) {
-      entry.type = type;
+    // Propagate brand_sites.type for onboarded URLs so legacy readers that
+    // relied on type in the V2 response still see it. brand_urls itself
+    // carries no type column.
+    if (hasText(siteInfo?.type)) {
+      entry.type = siteInfo.type;
     }
     return entry;
   });
@@ -255,20 +254,17 @@ async function syncBrandUrls(brandId, organizationId, urls, postgrestClient, upd
   const rows = (urls || [])
     .map((u) => {
       const value = typeof u === 'string' ? u : u?.value;
-      const type = (typeof u === 'object' && hasText(u?.type)) ? u.type : null;
       if (!hasText(value)) {
         return null;
       }
       const { base, path } = parseUrlParts(value);
-      const normalizedUrl = `${composeBaseURL(base)}${path}`;
-      return { url: normalizedUrl, type };
+      return { url: `${composeBaseURL(base)}${path}` };
     })
     .filter((u) => u && !seen.has(u.url) && seen.add(u.url))
     .map((u) => ({
       organization_id: organizationId,
       brand_id: brandId,
       url: u.url,
-      type: u.type,
       updated_by: updatedBy,
     }));
   await replaceChildRows('brand_urls', brandId, rows, 'brand_id,url', postgrestClient);

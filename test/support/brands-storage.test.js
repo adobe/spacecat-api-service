@@ -909,7 +909,7 @@ describe('brands-storage', () => {
       // to brand_urls; the response should reflect onboarded=false with no siteId.
       const fullBrandRow = makeBrandRow({
         brand_sites: [],
-        brand_urls: [{ url: 'https://yahoo.com', type: null }],
+        brand_urls: [{ url: 'https://yahoo.com' }],
       });
 
       const postgrestClient = createTableMockClient({
@@ -936,8 +936,8 @@ describe('brands-storage', () => {
       const fullBrandRow = makeBrandRow({
         brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'https://adobe.com' } }],
         brand_urls: [
-          { url: 'https://adobe.com', type: null },
-          { url: 'https://yahoo.com', type: null },
+          { url: 'https://adobe.com' },
+          { url: 'https://yahoo.com' },
         ],
       });
 
@@ -966,43 +966,15 @@ describe('brands-storage', () => {
       ]);
     });
 
-    it('propagates type from brand_urls row on the response', async () => {
+    it('propagates brand_sites.type onto the matching brand_urls entry', async () => {
+      // A brand_sites row carries a pipeline-written type; the brand_urls
+      // entry whose base matches inherits it on the response (legacy
+      // read-side compatibility — brand_urls itself has no type column).
       const fullBrandRow = makeBrandRow({
         brand_sites: [{
-          site_id: 'site-1', paths: ['/'], type: null, sites: { base_url: 'https://adobe.com' },
+          site_id: 'site-1', paths: ['/'], type: 'base', sites: { base_url: 'https://adobe.com' },
         }],
-        brand_urls: [{ url: 'https://adobe.com', type: 'base' }],
-      });
-
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        sites: { data: [{ id: 'site-1', base_url: 'https://adobe.com' }], error: null },
-        brand_sites: { data: null, error: null },
-        brand_urls: { data: null, error: null },
-      });
-
-      const result = await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', urls: [{ value: 'https://adobe.com', type: 'base' }] },
-        postgrestClient,
-      });
-
-      expect(result.urls).to.deep.equal([
-        {
-          value: 'https://adobe.com', onboarded: true, siteId: 'site-1', type: 'base',
-        },
-      ]);
-    });
-
-    it('falls back to brand_sites type when brand_urls row has no type', async () => {
-      const fullBrandRow = makeBrandRow({
-        brand_sites: [{
-          site_id: 'site-1', paths: ['/'], type: 'legacy-base', sites: { base_url: 'https://adobe.com' },
-        }],
-        brand_urls: [{ url: 'https://adobe.com', type: null }],
+        brand_urls: [{ url: 'https://adobe.com' }],
       });
 
       const postgrestClient = createTableMockClient({
@@ -1023,7 +995,7 @@ describe('brands-storage', () => {
 
       expect(result.urls).to.deep.equal([
         {
-          value: 'https://adobe.com', onboarded: true, siteId: 'site-1', type: 'legacy-base',
+          value: 'https://adobe.com', onboarded: true, siteId: 'site-1', type: 'base',
         },
       ]);
     });

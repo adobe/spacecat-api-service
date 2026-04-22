@@ -6865,11 +6865,6 @@ V2BrandUrl:
       type: string
       description: Full URL (base URL + optional path) as submitted by the user
       example: 'https://www.example.com/products'
-    type:
-      type:
-        - string
-        - 'null'
-      description: Optional URL type (e.g. 'base' for the root URL entry)
     onboarded:
       type: boolean
       description: >-
