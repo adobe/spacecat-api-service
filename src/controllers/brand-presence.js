@@ -17,7 +17,9 @@ import {
   internalServerError,
   unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
+import ClickhouseClient from '@adobe/spacecat-shared-clickhouse-client';
 
+const BRAND_PRESENCE_TABLE = 'brand_presence_executions';
 const SCOPE_WRITE = 'brand-presence.write';
 
 function BrandPresenceController(context) {
@@ -44,7 +46,28 @@ function BrandPresenceController(context) {
         return badRequest('Request body must contain a "metrics" array');
       }
 
-      return createResponse({ message: 'ok' }, 201);
+      const { metrics } = data;
+      const total = metrics.length;
+      const ch = new ClickhouseClient({}, log);
+
+      let written;
+      let failures;
+
+      try {
+        ({ written, failures } = await ch.writeBatch(BRAND_PRESENCE_TABLE, metrics));
+      } catch (err) {
+        log.error(`[brand-presence-controller] ClickHouse write failed: ${err.message}`);
+        return internalServerError('Database write failed');
+      } finally {
+        await ch.close();
+      }
+
+      const failedIndexes = new Set(failures.map((f) => f.index)); // Claude Code, Sonnet 4.6
+      return createResponse({
+        metadata: { total, success: written, failure: failures.length },
+        failures,
+        items: metrics.filter((_, index) => !failedIndexes.has(index)), // Claude Code, Sonnet 4.6
+      }, 201);
     } catch (err) {
       log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics: ${err.message}`, err);
       return internalServerError('Internal server error');
