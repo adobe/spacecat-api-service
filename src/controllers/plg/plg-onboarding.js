@@ -239,8 +239,17 @@ function getReviewerIdentity(context) {
   return hasText(profile?.email) ? profile.email : 'admin';
 }
 
-async function ensureAsoEntitlement(site, context) {
+async function ensureAsoEntitlement(site, organization, context) {
   const { log } = context;
+  // Ground truth for the entitlement is the customer org resolved from the request's imsOrgId,
+  // not whatever the site currently reports. If the two disagree, realign the in-memory site
+  // so TierClient.createForSite resolves to the correct (customer) org. Guards against the
+  // case where an earlier site.save() reassignment did not surface to the next read.
+  const expectedOrgId = organization.getId();
+  if (site.getOrganizationId() !== expectedOrgId) {
+    log.warn(`Site ${site.getId()} org drift before ASO entitlement: in-memory ${site.getOrganizationId()}, expected ${expectedOrgId}. Realigning.`);
+    site.setOrganizationId(expectedOrgId);
+  }
   const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
   try {
     const result = await tierClient.createEntitlement(ASO_TIER);
@@ -719,7 +728,7 @@ async function performAsoPlgOnboarding({
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 
-      const { entitlement } = await ensureAsoEntitlement(site, context);
+      const { entitlement } = await ensureAsoEntitlement(site, organization, context);
       await revokePreOnboardedSiteEnrollment(site, entitlement, context);
       await updateLaunchDarklyFlags(site, context);
 
@@ -1119,7 +1128,7 @@ async function performAsoPlgOnboarding({
     }
 
     // Step 10: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
-    const { entitlement } = await ensureAsoEntitlement(site, context);
+    const { entitlement } = await ensureAsoEntitlement(site, organization, context);
     await revokePreOnboardedSiteEnrollment(site, entitlement, context);
     await updateLaunchDarklyFlags(site, context);
 
