@@ -239,6 +239,24 @@ function getReviewerIdentity(context) {
   return hasText(profile?.email) ? profile.email : 'admin';
 }
 
+/**
+ * Assigns a site to the given organization and persists. After save, if the in-memory getter
+ * does not reflect the new value (observed drift where save() reassignment did not surface to
+ * the next read), logs a loud warning and re-applies on the in-memory instance so downstream
+ * reads on the same request see the intended value.
+ * @param {object} site - The site to reassign.
+ * @param {string} organizationId - Target org id.
+ * @param {object} log - Logger.
+ */
+async function reassignSiteOrganization(site, organizationId, log) {
+  site.setOrganizationId(organizationId);
+  await site.save();
+  if (site.getOrganizationId() !== organizationId) {
+    log.warn(`Site ${site.getId()} org drift after save: in-memory ${site.getOrganizationId()}, expected ${organizationId}. Re-applying on instance.`);
+    site.setOrganizationId(organizationId);
+  }
+}
+
 async function ensureAsoEntitlement(site, organization, context) {
   const { log } = context;
   // Ground truth for the entitlement is the customer org resolved from the request's imsOrgId,
@@ -263,38 +281,6 @@ async function ensureAsoEntitlement(site, organization, context) {
     throw error;
   }
 }
-
-/**
- * Revokes the ASO site enrollment for any other site under the same entitlement.
- * Used to enforce one active PLG enrollment per org when upgrading from PRE_ONBOARD.
- * @param {object} site - The newly enrolled site.
- * @param {object} entitlement - The ASO entitlement for the org.
- * @param {object} context - Request context.
- */
-async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
-  const { dataAccess, log, env } = context;
-  const { SiteEnrollment } = dataAccess;
-
-  // SAFETY: never mass-revoke enrollments under an internal/demo org's entitlement.
-  // These orgs are shared and accumulate hundreds of pre-onboarded site enrollments; a wrong
-  // entitlement lookup here would wipe them all. If we end up with an internal-org entitlement,
-  // it means the upstream site→org reassignment did not take effect before TierClient resolved
-  // the org. Fail loud instead of deleting.
-  const entitlementOrgId = entitlement.getOrganizationId();
-  if (isInternalOrg(entitlementOrgId, env)) {
-    log.error(`Refusing to revoke enrollments: entitlement ${entitlement.getId()} belongs to internal/demo org ${entitlementOrgId}. Site ${site.getId()} is in org ${site.getOrganizationId()}. Skipping revocation to prevent cross-org data loss.`);
-    return;
-  }
-
-  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
-  const toRevoke = enrollments.filter((e) => e.getSiteId() !== site.getId());
-
-  await Promise.all(toRevoke.map((e) => {
-    log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${e.getSiteId()}`);
-    return e.remove();
-  }));
-}
-
 /**
  * Disables the summit-plg config handler for a given site. Non-fatal.
  * @param {object} site - The site to disable the handler for.
@@ -417,10 +403,16 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
  * Enables all PLG auto-fix LaunchDarkly feature flags for the given site's org.
  * Uses the experience-success-studio project token (LD_EXPERIENCE_SUCCESS_API_TOKEN).
  * Each flag update is non-fatal — onboarding continues even if one fails.
+ *
+ * Takes the target organization explicitly (resolved upstream from the request's imsOrgId)
+ * rather than re-deriving it from site.getOrganizationId(). An earlier production incident
+ * flipped flags under the wrong IMS org id because the in-memory site still reported its
+ * pre-reassignment (internal) org after save.
  * @param {object} site - The onboarded site.
+ * @param {object} organization - The target customer organization.
  * @param {object} context - Request context.
  */
-async function updateLaunchDarklyFlags(site, context) {
+async function updateLaunchDarklyFlags(site, organization, context) {
   const { log, env } = context;
 
   const apiToken = env[LD_API_TOKEN_ENV_VAR];
@@ -431,9 +423,7 @@ async function updateLaunchDarklyFlags(site, context) {
 
   const ldClient = new LaunchDarklyClient({ apiToken }, log);
 
-  const imsOrgId = (await context.dataAccess.Organization.findById(
-    site.getOrganizationId(),
-  ))?.getImsOrgId();
+  const imsOrgId = organization?.getImsOrgId?.();
 
   if (!imsOrgId) {
     log.warn(`Cannot update LaunchDarkly flags: no IMS org ID for site ${site.getId()}`);
@@ -721,16 +711,14 @@ async function performAsoPlgOnboarding({
       // Reassign site org if needed BEFORE entitlement operations
       // This ensures ensureAsoEntitlement gets the correct customer org's entitlement
       if (needsOrgReassignment) {
-        site.setOrganizationId(customerOrgId);
-        await site.save();
+        await reassignSiteOrganization(site, customerOrgId, log);
         // Update PlgOnboarding's organizationId to match the site's new org
         onboarding.setOrganizationId(customerOrgId);
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 
-      const { entitlement } = await ensureAsoEntitlement(site, organization, context);
-      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-      await updateLaunchDarklyFlags(site, context);
+      await ensureAsoEntitlement(site, organization, context);
+      await updateLaunchDarklyFlags(site, organization, context);
 
       const steps = {
         ...(onboarding.getSteps() || {}),
@@ -1120,17 +1108,17 @@ async function performAsoPlgOnboarding({
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      site.setOrganizationId(organizationId);
-      await site.save();
+      await reassignSiteOrganization(site, organizationId, log);
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
     }
 
-    // Step 10: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
-    const { entitlement } = await ensureAsoEntitlement(site, organization, context);
-    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-    await updateLaunchDarklyFlags(site, context);
+    // Step 10: Add ASO entitlement and update FF.
+    // Keep any existing ASO enrollments for other sites untouched here; PLG onboarding should
+    // never mass-revoke unrelated site enrollments for the org.
+    await ensureAsoEntitlement(site, organization, context);
+    await updateLaunchDarklyFlags(site, organization, context);
 
     steps.entitlementCreated = true;
 
@@ -1655,13 +1643,12 @@ function PlgOnboardingController(ctx) {
               return badRequest('Onboarding record has no associated organization');
             }
             const currentImsOrgId = onboarding.getImsOrgId();
-            site.setOrganizationId(currentOrgId);
             /* c8 ignore next */
             const existingDeliveryConfig = site.getDeliveryConfig() || {};
             if (existingDeliveryConfig.imsOrgId) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
-            await site.save();
+            await reassignSiteOrganization(site, currentOrgId, log);
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
             await onboarding.save();

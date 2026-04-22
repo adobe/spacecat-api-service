@@ -2787,15 +2787,15 @@ describe('PlgOnboardingController', () => {
     });
   });
 
-  // --- ASO enrollment revocation ---
+  // --- ASO enrollment preservation during onboarding ---
 
-  describe('onboard - ASO enrollment revocation', () => {
+  describe('onboard - ASO enrollment preservation', () => {
     let controller;
     beforeEach(() => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('revokes pre-onboarded site enrollment when another site exists under same entitlement', async () => {
+    it('does not revoke unrelated enrollments when another site exists under the same entitlement', async () => {
       const OTHER_SITE_ID = 'other-site-uuid';
       const mockEnrollment = {
         getId: sandbox.stub().returns('enroll-old'),
@@ -2808,10 +2808,10 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockEnrollment.remove).to.have.been.calledOnce;
+      expect(mockEnrollment.remove).to.not.have.been.called;
     });
 
-    it('revokes all other enrollments when multiple exist under same entitlement', async () => {
+    it('does not revoke any other enrollments when multiple exist under same entitlement', async () => {
       const mockEnrollment1 = {
         getId: sandbox.stub().returns('enroll-old-1'),
         getSiteId: sandbox.stub().returns('other-site-1'),
@@ -2828,11 +2828,11 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockEnrollment1.remove).to.have.been.calledOnce;
-      expect(mockEnrollment2.remove).to.have.been.calledOnce;
+      expect(mockEnrollment1.remove).to.not.have.been.called;
+      expect(mockEnrollment2.remove).to.not.have.been.called;
     });
 
-    it('does not revoke when no other enrollment exists', async () => {
+    it('still succeeds when no other enrollment exists', async () => {
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
 
       const context = buildContext({ domain: TEST_DOMAIN });
@@ -2841,7 +2841,7 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
     });
 
-    it('returns error status when enrollment removal fails', async () => {
+    it('does not touch unrelated enrollments even if they would fail to remove', async () => {
       const mockEnrollment = {
         getId: sandbox.stub().returns('enroll-old'),
         getSiteId: sandbox.stub().returns('other-site-uuid'),
@@ -2852,11 +2852,11 @@ describe('PlgOnboardingController', () => {
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
 
-      expect(res.status).to.equal(500);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
+      expect(res.status).to.equal(200);
+      expect(mockEnrollment.remove).to.not.have.been.called;
     });
 
-    it('refuses to revoke when entitlement belongs to an internal/demo org', async () => {
+    it('does not revoke when entitlement belongs to an internal/demo org', async () => {
       const INTERNAL_ORG_ID = 'internal-demo-org';
       tierClientCreateEntitlementStub.resolves({
         entitlement: { getId: () => 'ent-1', getOrganizationId: () => INTERNAL_ORG_ID },
@@ -2877,7 +2877,6 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(otherEnrollment.remove).to.not.have.been.called;
       expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
-      expect(mockLog.error).to.have.been.calledWithMatch(/Refusing to revoke/);
     });
   });
 
@@ -2941,7 +2940,7 @@ describe('PlgOnboardingController', () => {
     });
 
     it('skips LD update when org has no IMS org ID', async () => {
-      mockDataAccess.Organization.findById.resolves(null);
+      mockOrganization.getImsOrgId.returns(null);
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
@@ -3206,8 +3205,8 @@ describe('PlgOnboardingController', () => {
           entitlementCreated: true,
         }),
       );
-      // Revocation and LD flag steps must run in the fast path
-      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.have.been.called;
+      // Fast path must preserve unrelated enrollments while still updating LD flags.
+      expect(mockDataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
       expect(ldGetFeatureFlagStub).to.have.been.called;
       // Organization must be resolved in fast path now
       expect(createOrFindOrganizationStub).to.have.been.called;
