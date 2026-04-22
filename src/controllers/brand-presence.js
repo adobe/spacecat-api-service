@@ -100,6 +100,29 @@ function BrandPresenceController(context) {
         return notFound(`Site not found: ${siteId}`);
       }
 
+      const { searchParams } = requestContext.pathInfo;
+      const startWeek = searchParams?.get('start_week') ?? null;
+      const endWeek = searchParams?.get('end_week') ?? null;
+      const limit = parseInt(searchParams?.get('limit') ?? '1000', 10);
+      const offset = parseInt(searchParams?.get('offset') ?? '0', 10);
+
+      // regex von claude code generiert, Model Sonnet 4.6
+      if (startWeek && !/^\d{4}-W\d{2}$/.test(startWeek)) {
+        return badRequest('Invalid start_week format. Use YYYY-Www (e.g. 2025-W01)');
+      }
+      if (endWeek && !/^\d{4}-W\d{2}$/.test(endWeek)) {
+        return badRequest('Invalid end_week format. Use YYYY-Www (e.g. 2025-W52)');
+      }
+      if (startWeek && endWeek && startWeek > endWeek) {
+        return badRequest('start_week must be before or equal to end_week');
+      }
+      if (Number.isNaN(limit) || limit < 1) {
+        return badRequest('limit must be a positive integer');
+      }
+      if (Number.isNaN(offset) || offset < 0) {
+        return badRequest('offset must be a non-negative integer');
+      }
+
       return ok({ data: [] });
     } catch (err) {
       log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data: ${err.message}`, err);

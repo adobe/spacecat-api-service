@@ -74,7 +74,7 @@
     "@adobe/helix-universal-logger": "3.0.28",
     "@adobe/spacecat-helix-content-sdk": "1.4.33",
     "@adobe/spacecat-shared-clickhouse-client": "file:../spacecat-shared/packages/spacecat-shared-clickhouse-client",
-    "@adobe/spacecat-shared-data-access": "3.48.0",
+    "@adobe/spacecat-shared-data-access": "file:../spacecat-shared/packages/spacecat-shared-data-access",
     "@adobe/spacecat-shared-ahrefs-client": "1.10.9",
     "@adobe/spacecat-shared-athena-client": "1.9.11",
     "@adobe/spacecat-shared-brand-client": "1.1.40",
