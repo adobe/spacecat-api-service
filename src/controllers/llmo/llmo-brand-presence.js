@@ -1905,12 +1905,11 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // eslint-disable-next-line max-len
 const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
-/**
- * Same as DETAIL_SELECT but omits `answer` (topic detail API does not load or return
- * answer text).
- */
-// eslint-disable-next-line max-len
-const TOPIC_DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, business_competitors, detected_brand_mentions';
+/** PostgREST select for topic detail: `DETAIL_SELECT` without `answer`. */
+const TOPIC_DETAIL_SELECT = DETAIL_SELECT
+  .split(', ')
+  .filter((col) => col !== 'answer')
+  .join(', ');
 
 /** Minimal columns for execution-sources execution row (summary + execution_date partition key). */
 const EXECUTION_SOURCES_EXEC_SELECT = 'id, execution_date, brand_id, site_id, model';
@@ -1927,13 +1926,14 @@ function weekFromExecDate(execDate) {
 }
 
 /**
- * Maps a `brand_presence_executions` detail row (`TOPIC_DETAIL_SELECT`) to one
- * topic-detail `executions[]` entry. Omits `answer` (not selected from PostgREST;
- * not present in the JSON response).
+ * Maps a `brand_presence_executions` detail row to one `executions[]` entry.
+ * Used for prompt detail (`DETAIL_SELECT`) and topic detail (`TOPIC_DETAIL_SELECT`).
  * @param {Object} r - Raw PostgREST row
+ * @param {{ includeAnswer?: boolean }} [options]
+ * @param {boolean} [options.includeAnswer=true] - When false, `answer` is omitted (topic detail).
  * @returns {Object}
  */
-function mapBrandPresenceTopicDetailExecutionRow(r) {
+function mapBrandPresenceDetailExecutionRow(r, { includeAnswer = true } = {}) {
   const mentioned = r.mentions === true || r.mentions === 'true';
   const cited = r.citations === true || r.citations === 'true';
   const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
@@ -1944,6 +1944,7 @@ function mapBrandPresenceTopicDetailExecutionRow(r) {
     region: r.region_code || '',
     executionDate: r.execution_date || '',
     week: weekFromExecDate(r.execution_date),
+    ...(includeAnswer ? { answer: r.answer || '' } : {}),
     mentions: mentioned,
     citations: cited,
     visibilityScore: Number.isNaN(vs) ? 0 : vs,
@@ -1960,36 +1961,11 @@ function mapBrandPresenceTopicDetailExecutionRow(r) {
 }
 
 /**
- * Maps a `brand_presence_executions` detail row (`DETAIL_SELECT`) to one
- * prompt-detail `executions[]` entry.
- * @param {Object} r - Raw PostgREST row
+ * @param {Object} r - Raw PostgREST row (`TOPIC_DETAIL_SELECT`)
  * @returns {Object}
  */
-function mapBrandPresenceDetailExecutionRow(r) {
-  const mentioned = r.mentions === true || r.mentions === 'true';
-  const cited = r.citations === true || r.citations === 'true';
-  const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-  return {
-    prompt: r.prompt || '',
-    promptId: r.prompt_id != null ? String(r.prompt_id) : '',
-    executionId: r.id != null ? String(r.id) : '',
-    region: r.region_code || '',
-    executionDate: r.execution_date || '',
-    week: weekFromExecDate(r.execution_date),
-    answer: r.answer || '',
-    mentions: mentioned,
-    citations: cited,
-    visibilityScore: Number.isNaN(vs) ? 0 : vs,
-    position: r.position ? String(r.position) : '',
-    sentiment: r.sentiment || '',
-    volume: r.volume != null ? String(r.volume) : '',
-    origin: r.origin || '',
-    category: r.category_name || '',
-    sources: r.url || '',
-    errorCode: r.error_code || '',
-    businessCompetitors: r.business_competitors || '',
-    detectedBrandMentions: r.detected_brand_mentions || '',
-  };
+function mapBrandPresenceTopicDetailExecutionRow(r) {
+  return mapBrandPresenceDetailExecutionRow(r, { includeAnswer: false });
 }
 
 /**
