@@ -123,7 +123,42 @@ function BrandPresenceController(context) {
         return badRequest('offset must be a non-negative integer');
       }
 
-      return ok({ data: [] });
+      const whereClause = ['site_id = {siteId:String}'];
+      const queryParams = { siteId, limit, offset };
+
+      if (startWeek) {
+        whereClause.push('week >= {startWeek:String}');
+        queryParams.startWeek = startWeek;
+      }
+      if (endWeek) {
+        whereClause.push('week <= {endWeek:String}');
+        queryParams.endWeek = endWeek;
+      }
+
+      const where = whereClause.join(' AND ');
+      const ch = new ClickhouseClient({}, log);
+
+      let total;
+      let rows;
+      try {
+        const countResult = await ch.query(
+          `SELECT count() AS total FROM ${BRAND_PRESENCE_TABLE} WHERE ${where}`,
+          queryParams,
+        );
+        total = parseInt(countResult[0]?.total ?? '0', 10);
+
+        rows = await ch.query(
+          `SELECT * FROM ${BRAND_PRESENCE_TABLE} WHERE ${where} ORDER BY (site_id, platform, execution_date, category, topic, prompt) LIMIT {limit:UInt32} OFFSET {offset:UInt32}`,
+          queryParams,
+        );
+      } catch (err) {
+        log.error(`[brand-presence-controller] ClickHouse query failed: ${err.message}`);
+        return internalServerError('Database query failed');
+      } finally {
+        await ch.close();
+      }
+
+      return ok({ metadata: { total, limit, offset }, data: rows });
     } catch (err) {
       log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data: ${err.message}`, err);
       return internalServerError('Internal server error');
