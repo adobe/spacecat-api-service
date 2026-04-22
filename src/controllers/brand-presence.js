@@ -17,7 +17,7 @@ import {
   internalServerError,
   unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
-import ClickhouseClient from '@adobe/spacecat-shared-clickhouse-client';
+import ClickhouseClient, { toBrandPresenceCompetitorData } from '@adobe/spacecat-shared-clickhouse-client';
 
 const BRAND_PRESENCE_TABLE = 'brand_presence_executions';
 const SCOPE_WRITE = 'brand-presence.write';
@@ -62,7 +62,23 @@ function BrandPresenceController(context) {
         await ch.close();
       }
 
-      const failedIndexes = new Set(failures.map((f) => f.index)); // Claude Code, Sonnet 4.6
+      const failedIndexes = new Set(failures.map((f) => f.index));
+      const competitorRows = metrics
+        .filter((_, index) => !failedIndexes.has(index))
+        .flatMap(toBrandPresenceCompetitorData);
+
+      if (competitorRows.length > 0) {
+        const chComp = new ClickhouseClient({}, log);
+        try {
+          await chComp.writeBatch('brand_presence_competitor_data', competitorRows);
+        } catch (err) {
+          log.error(`[brand-presence-controller] ClickHouse competitor write failed: ${err.message}`);
+        } finally {
+          await chComp.close();
+        }
+      }
+
+      // Claude Code, Sonnet 4.6
       return createResponse({
         metadata: { total, success: written, failure: failures.length },
         failures,
