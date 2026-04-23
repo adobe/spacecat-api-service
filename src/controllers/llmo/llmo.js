@@ -590,7 +590,7 @@ function LlmoController(ctx) {
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
       log.error(`User ${userId} error updating llmo config for siteId: ${siteId}, error: ${msg}`);
-      return badRequest(msg);
+      return badRequest(cleanupHeaderValue(msg));
     }
   }
 
