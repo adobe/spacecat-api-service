@@ -269,7 +269,9 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           }
           chunk += `${line}\n`;
         }
-        if (chunk.trim()) await say(chunk.trim());
+        if (chunk.trim()) {
+          await say(chunk.trim());
+        }
       }
     } catch (error) {
       log.error('Error in check-agentic-traffic-db-status:', error);
