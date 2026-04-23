@@ -14,17 +14,14 @@ import { expect } from 'chai';
 import {
   ASYNC_JOB_2_ID,
   NON_EXISTENT_JOB_ID,
-  SITE_1_BASE_URL,
 } from '../seed-ids.js';
-
-// site1.example.com resolves to SITE_1 (delivery_type: aem_edge) via composeBaseURL
-const EXISTING_AEM_EDGE_DOMAIN = new URL(SITE_1_BASE_URL).hostname;
 
 /**
  * Shared Site Detection endpoint tests.
  *
- * POST /sites/detect — validation and 409 conflict tests only.
- *   (202 happy path requires a live SQS queue.)
+ * POST /sites/detect/jobs — validation only.
+ *   (202 happy path requires a live SQS queue; duplicate detection is owned
+ *   by the worker, so the API no longer returns 409.)
  * GET /sites/detect/jobs/:jobId — validation + lookup.
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
@@ -34,36 +31,36 @@ export default function siteDetectionTests(getHttpClient, resetData) {
   describe('Site Detection', () => {
     before(() => resetData());
 
-    // ── POST /sites/detect — validation ──
+    // ── POST /sites/detect/jobs — validation ──
 
-    describe('POST /sites/detect', () => {
+    describe('POST /sites/detect/jobs', () => {
       it('returns 400 when body is missing', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post('/sites/detect');
+        const res = await http.admin.post('/sites/detect/jobs');
         expect(res.status).to.equal(400);
       });
 
       it('returns 400 when domain is missing', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post('/sites/detect', { hlxVersion: 5 });
+        const res = await http.admin.post('/sites/detect/jobs', { hlxVersion: 5 });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 when domain contains a scheme', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites/detect/jobs', {
+          domain: 'https://foo.example.com',
+        });
         expect(res.status).to.equal(400);
       });
 
       it('returns 400 when hlxVersion is not an integer', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post('/sites/detect', {
+        const res = await http.admin.post('/sites/detect/jobs', {
           domain: 'foo.example.com',
           hlxVersion: 'five',
         });
         expect(res.status).to.equal(400);
-      });
-
-      it('returns 409 when the domain is already a known AEM_EDGE site', async () => {
-        const http = getHttpClient();
-        const res = await http.admin.post('/sites/detect', {
-          domain: EXISTING_AEM_EDGE_DOMAIN,
-        });
-        expect(res.status).to.equal(409);
       });
     });
 

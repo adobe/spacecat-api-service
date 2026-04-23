@@ -229,7 +229,7 @@ const routeRequiredCapabilities = {
   // Sites
   'GET /sites': 'site:read',
   'POST /sites': 'site:write',
-  'POST /sites/detect': 'site:write',
+  'POST /sites/detect/jobs': 'site:write',
   'GET /sites/detect/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',

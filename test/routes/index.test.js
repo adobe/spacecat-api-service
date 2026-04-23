@@ -491,7 +491,7 @@ describe('getRouteHandlers', () => {
       'POST /projects',
       'POST /preflight/jobs',
       'POST /preflight/beta/jobs',
-      'POST /sites/detect',
+      'POST /sites/detect/jobs',
       'GET /sites',
       'POST /sites',
       'GET /sites.csv',

@@ -8,11 +8,11 @@ site-detection-jobs:
     summary: Submit a new site detection async job
     description: |
       Triggers an async site detection job for the given domain.
-      The job validates the domain, verifies it serves an AEM Edge Delivery (Helix) site,
-      creates a SiteCandidate record, and sends a Slack notification.
-      Returns 409 if the domain is already a known Site (AEM_EDGE delivery type) or
-      an existing SiteCandidate.
-      The returned jobId can be polled via GET /sites/detect/jobs/{jobId}.
+      The job validates the domain, checks for existing Site/SiteCandidate records,
+      verifies the domain serves an AEM Edge Delivery (Helix) site, creates a
+      SiteCandidate record, and sends a Slack notification.
+      The terminal outcome (created / duplicate / rejected) is surfaced on the
+      job record and must be retrieved via GET /sites/detect/jobs/{jobId}.
     operationId: createSiteDetectionJob
     requestBody:
       required: true
@@ -39,7 +39,7 @@ site-detection-jobs:
             schema:
               $ref: './schemas.yaml#/CreateSiteDetectionJobResponse'
       '400':
-        description: Invalid request (missing domain or invalid hlxVersion)
+        description: Invalid request (missing/invalid domain or invalid hlxVersion)
         content:
           application/json:
             schema:
@@ -49,15 +49,6 @@ site-detection-jobs:
                   type: string
       '401':
         $ref: './responses.yaml#/401'
-      '409':
-        description: Domain is already a known site or site candidate
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                message:
-                  type: string
       '500':
         $ref: './responses.yaml#/500'
 

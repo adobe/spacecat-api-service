@@ -13,7 +13,7 @@
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { AsyncJob } from '@adobe/spacecat-shared-data-access';
 
 import SiteDetectionController from '../../src/controllers/site-detection.js';
 
@@ -38,7 +38,7 @@ describe('SiteDetectionController', () => {
 
   const mockJob = {
     getId: sandbox.stub().returns(JOB_ID),
-    getStatus: sandbox.stub().returns('IN_PROGRESS'),
+    getStatus: sandbox.stub().returns(AsyncJob.Status.IN_PROGRESS),
     getCreatedAt: sandbox.stub().returns('2025-01-01T00:00:00Z'),
     getUpdatedAt: sandbox.stub().returns('2025-01-01T00:00:01Z'),
     getResult: sandbox.stub().returns(null),
@@ -49,13 +49,7 @@ describe('SiteDetectionController', () => {
     save: sandbox.stub().resolves(),
   };
 
-  const mockSite = {
-    getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
-  };
-
   const mockDataAccess = {
-    Site: { findByBaseURL: sandbox.stub() },
-    SiteCandidate: { findByBaseURL: sandbox.stub() },
     AsyncJob: { create: sandbox.stub(), findById: sandbox.stub() },
   };
 
@@ -72,8 +66,6 @@ describe('SiteDetectionController', () => {
 
   beforeEach(() => {
     sandbox.resetHistory();
-    mockDataAccess.Site.findByBaseURL.resolves(null);
-    mockDataAccess.SiteCandidate.findByBaseURL.resolves(null);
     mockDataAccess.AsyncJob.create.resolves(mockJob);
     mockDataAccess.AsyncJob.findById.resolves(mockJob);
     mockJob.getResult.returns(null);
@@ -147,40 +139,39 @@ describe('SiteDetectionController', () => {
       expect(resp.status).to.equal(400);
     });
 
+    it('returns 400 when domain contains a scheme', async () => {
+      const resp = await controller.createSiteDetectionJob({
+        data: { domain: 'https://foo.example.com' },
+      });
+      expect(resp.status).to.equal(400);
+    });
+
+    it('returns 400 when domain contains a path', async () => {
+      const resp = await controller.createSiteDetectionJob({
+        data: { domain: 'foo.example.com/path' },
+      });
+      expect(resp.status).to.equal(400);
+    });
+
+    it('returns 400 when domain contains whitespace', async () => {
+      const resp = await controller.createSiteDetectionJob({
+        data: { domain: 'foo example.com' },
+      });
+      expect(resp.status).to.equal(400);
+    });
+
+    it('returns 400 when domain exceeds 253 characters', async () => {
+      const resp = await controller.createSiteDetectionJob({
+        data: { domain: `${'a'.repeat(250)}.com` },
+      });
+      expect(resp.status).to.equal(400);
+    });
+
     it('returns 400 when hlxVersion is not an integer', async () => {
       const resp = await controller.createSiteDetectionJob({
         data: { domain: 'foo.example.com', hlxVersion: 'five' },
       });
       expect(resp.status).to.equal(400);
-    });
-
-    it('returns 409 when the domain is already a known AEM_EDGE site', async () => {
-      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
-
-      const resp = await controller.createSiteDetectionJob({
-        data: { domain: 'foo.example.com' },
-      });
-      expect(resp.status).to.equal(409);
-    });
-
-    it('does not conflict when existing site is not AEM_EDGE delivery type', async () => {
-      mockSite.getDeliveryType.returns('other');
-      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
-
-      const resp = await controller.createSiteDetectionJob({
-        data: { domain: 'foo.example.com' },
-      });
-      expect(resp.status).to.equal(202);
-      mockSite.getDeliveryType.returns(SiteModel.DELIVERY_TYPES.AEM_EDGE);
-    });
-
-    it('returns 409 when a site candidate already exists', async () => {
-      mockDataAccess.SiteCandidate.findByBaseURL.resolves({ getBaseURL: () => 'https://foo.example.com' });
-
-      const resp = await controller.createSiteDetectionJob({
-        data: { domain: 'foo.example.com' },
-      });
-      expect(resp.status).to.equal(409);
     });
 
     it('returns 202 with jobId and pollUrl for a valid domain', async () => {
@@ -191,9 +182,9 @@ describe('SiteDetectionController', () => {
 
       const body = await resp.json();
       expect(body.jobId).to.equal(JOB_ID);
-      expect(body.status).to.equal('IN_PROGRESS');
+      expect(body.status).to.equal(AsyncJob.Status.IN_PROGRESS);
       expect(body.pollUrl).to.include(JOB_ID);
-      expect(body.pollUrl).to.include('/v1/');
+      expect(body.pollUrl).to.include('/v1/sites/detect/jobs/');
     });
 
     it('uses ci in pollUrl when AWS_ENV is dev', async () => {
@@ -207,16 +198,16 @@ describe('SiteDetectionController', () => {
         data: { domain: 'foo.example.com' },
       });
       const body = await resp.json();
-      expect(body.pollUrl).to.include('/ci/');
+      expect(body.pollUrl).to.include('/ci/sites/detect/jobs/');
     });
 
-    it('creates the AsyncJob with correct payload', async () => {
+    it('creates the AsyncJob with correct payload and enum status', async () => {
       await controller.createSiteDetectionJob({
         data: { domain: 'foo.example.com', hlxVersion: 4 },
       });
 
       expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
-        status: 'IN_PROGRESS',
+        status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
           payload: { domain: 'foo.example.com', hlxVersion: 4 },
           jobType: 'site-detection',
@@ -228,7 +219,7 @@ describe('SiteDetectionController', () => {
     it('sets hlxVersion to null when not provided', async () => {
       await controller.createSiteDetectionJob({ data: { domain: 'foo.example.com' } });
 
-      const createArg = mockDataAccess.AsyncJob.create.firstCall.args[0];
+      const createArg = mockDataAccess.AsyncJob.create.lastCall.args[0];
       expect(createArg.metadata.payload.hlxVersion).to.be.null;
     });
 
@@ -255,18 +246,21 @@ describe('SiteDetectionController', () => {
 
       const resp = await controller.createSiteDetectionJob({ data: { domain: 'foo.example.com' } });
       expect(resp.status).to.equal(500);
-      expect(mockJob.setStatus).to.have.been.calledWith('FAILED');
+      expect(mockJob.setStatus).to.have.been.calledWith(AsyncJob.Status.FAILED);
       expect(mockJob.setError).to.have.been.calledWith(sinon.match({ code: 'SQS_FAILURE' }));
       expect(mockJob.save).to.have.been.calledOnce;
     });
 
-    it('returns 500 and silently swallows the save error when SQS, remove, and save all fail', async () => {
+    it('logs the save failure when SQS, remove, and save all fail', async () => {
       mockSqs.sendMessage.rejects(new Error('SQS unavailable'));
       mockJob.remove.rejects(new Error('DB unavailable'));
       mockJob.save.rejects(new Error('Save also unavailable'));
 
       const resp = await controller.createSiteDetectionJob({ data: { domain: 'foo.example.com' } });
       expect(resp.status).to.equal(500);
+      expect(log.error).to.have.been.calledWith(
+        sinon.match(/Failed to mark orphan job .* as FAILED/),
+      );
     });
 
     it('returns 500 when AsyncJob.create throws', async () => {
@@ -298,7 +292,7 @@ describe('SiteDetectionController', () => {
 
       const body = await resp.json();
       expect(body.jobId).to.equal(JOB_ID);
-      expect(body.status).to.equal('IN_PROGRESS');
+      expect(body.status).to.equal(AsyncJob.Status.IN_PROGRESS);
       expect(body.result).to.be.null;
       expect(body.error).to.be.null;
     });

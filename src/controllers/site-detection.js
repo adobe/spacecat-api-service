@@ -11,20 +11,36 @@
  */
 
 import {
-  composeBaseURL,
   hasText,
   isInteger,
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import {
-  accepted, badRequest, createResponse, internalServerError, notFound, ok,
+  accepted, badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { AsyncJob } from '@adobe/spacecat-shared-data-access';
 
-// TODO: replace with imported `conflict` once @adobe/spacecat-shared-http-utils exports it
-function conflict(message) {
-  return createResponse({ message }, 409);
+// RFC 1035 caps a fully-qualified domain name at 253 octets.
+const MAX_DOMAIN_LENGTH = 253;
+
+/**
+ * Hostname sanity check at the HTTP boundary.
+ * The worker owns strict validation (IP check, ignored tokens, Helix DOM check);
+ * this only guards against obviously non-hostname payloads (whitespace,
+ * scheme, path) and oversized strings that would hit the DB as-is.
+ */
+function isValidDomain(domain) {
+  if (!hasText(domain)) {
+    return false;
+  }
+  if (domain.length > MAX_DOMAIN_LENGTH) {
+    return false;
+  }
+  if (/\s/.test(domain) || domain.includes('://') || domain.includes('/')) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -57,7 +73,9 @@ function SiteDetectionController(ctx, log, env) {
 
   /**
    * Creates a new async site detection job.
-   * Returns 409 if the domain is already known (existing Site or SiteCandidate).
+   * The worker owns duplicate detection — callers always get 202 + jobId and
+   * must poll the GET endpoint for the terminal outcome (created / duplicate /
+   * rejected).
    *
    * @param {Object} context - The request context
    * @param {Object} context.data - The request body
@@ -79,35 +97,19 @@ function SiteDetectionController(ctx, log, env) {
 
     const { domain, hlxVersion } = data;
 
-    if (!hasText(domain)) {
-      return badRequest('Invalid request: domain is required');
+    if (!isValidDomain(domain)) {
+      return badRequest('Invalid request: domain must be a non-empty hostname without scheme, path, or whitespace, and at most 253 characters');
     }
 
     if (hlxVersion !== undefined && !isInteger(hlxVersion)) {
       return badRequest('Invalid request: hlxVersion must be an integer');
     }
 
-    const baseURL = composeBaseURL(domain);
+    const isDev = env.AWS_ENV === 'dev';
 
     try {
-      // Early exit: already a known site
-      const existingSite = await dataAccess.Site.findByBaseURL(baseURL);
-      if (existingSite && existingSite.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
-        log.info(`Site detection skipped: site already exists for ${baseURL}`);
-        return conflict(`Site already exists for domain: ${domain}`);
-      }
-
-      // Early exit: already evaluated as a candidate
-      const existingCandidate = await dataAccess.SiteCandidate.findByBaseURL(baseURL);
-      if (existingCandidate !== null) {
-        log.info(`Site detection skipped: site candidate already exists for ${baseURL}`);
-        return conflict(`Site candidate already exists for domain: ${domain}`);
-      }
-
-      const isDev = env.AWS_ENV === 'dev';
-
       const job = await dataAccess.AsyncJob.create({
-        status: 'IN_PROGRESS',
+        status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
           payload: {
             domain,
@@ -123,19 +125,21 @@ function SiteDetectionController(ctx, log, env) {
           jobId: job.getId(),
           type: 'site-detection',
         });
-      } catch (error) {
-        log.error(`Failed to send message to SQS: ${error.message}`);
+      } catch (sqsError) {
+        log.error(`Failed to send message to SQS for job ${job.getId()}: ${sqsError.message}`);
         try {
           await job.remove();
         } catch (removeErr) {
           log.error(`Failed to remove orphaned job ${job.getId()}: ${removeErr.message}`);
           try {
-            job.setStatus('FAILED');
-            job.setError({ code: 'SQS_FAILURE', message: error.message });
+            job.setStatus(AsyncJob.Status.FAILED);
+            job.setError({ code: 'SQS_FAILURE', message: sqsError.message });
             await job.save();
-          } catch (_) { /* best-effort: ignore save failure */ }
+          } catch (saveErr) {
+            log.error(`Failed to mark orphan job ${job.getId()} as FAILED: ${saveErr.message}`);
+          }
         }
-        throw new Error(`Failed to send message to SQS: ${error.message}`);
+        throw new Error('Failed to send message to SQS', { cause: sqsError });
       }
 
       return accepted({
@@ -146,7 +150,7 @@ function SiteDetectionController(ctx, log, env) {
       });
     } catch (error) {
       log.error(`Failed to create site detection job: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('Failed to create site detection job');
     }
   };
 
@@ -191,7 +195,7 @@ function SiteDetectionController(ctx, log, env) {
       });
     } catch (error) {
       log.error(`Failed to get site detection job status: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('Failed to get site detection job status');
     }
   };
 

@@ -213,7 +213,7 @@ export default function getRouteHandlers(
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
     'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
-    'POST /sites/detect': siteDetectionController.createSiteDetectionJob,
+    'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
     'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,

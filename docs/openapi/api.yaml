@@ -172,7 +172,7 @@ paths:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
-  /sites/detect:
+  /sites/detect/jobs:
     $ref: './site-detection-api.yaml#/site-detection-jobs'
   /sites/detect/jobs/{jobId}:
     $ref: './site-detection-api.yaml#/site-detection-job-status'
