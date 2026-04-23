@@ -5361,6 +5361,23 @@ describe('llmo-brand-presence', () => {
       ]);
     });
 
+    it('passes topic_ids (snake_case) when topicIds is omitted', async () => {
+      const client = createTopicsRpcMock({ data: [], error: null });
+      mockContext.data = {
+        topic_ids: '0178a3f0-1234-7000-8000-000000000010,0178a3f0-1234-7000-8000-000000000011',
+      };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const [, params] = client.rpc.firstCall.args;
+      expect(params.p_topic_ids).to.deep.equal([
+        '0178a3f0-1234-7000-8000-000000000010',
+        '0178a3f0-1234-7000-8000-000000000011',
+      ]);
+    });
+
     it('uses default sort and pagination when context.data is null', async () => {
       const client = createTopicsRpcMock({
         data: [{ ...sampleRpcRow, topic: 'T', total_count: 1 }],

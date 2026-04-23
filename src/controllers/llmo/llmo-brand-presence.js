@@ -147,12 +147,12 @@ export function toFilterOption(id, label) {
 
 /**
  * Normalizes topicIds param to an array of valid UUIDs.
- * Accepts topicIds as: array, comma-separated string, or single UUID.
+ * Accepts topicIds or topic_ids as: array, comma-separated string, or single UUID.
  * Non-UUID values are filtered out.
  * @returns {string[]} Array of valid topic_id UUIDs, empty if none
  */
 function parseTopicIds(q) {
-  const raw = q.topicIds;
+  const raw = q.topicIds || q.topic_ids;
   if (raw == null) {
     return [];
   }
