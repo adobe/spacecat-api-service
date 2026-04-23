@@ -691,9 +691,10 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
-      const configuration = await Configuration.findLatest();
       await ack();
       modalAcked = true;
+
+      const configuration = await Configuration.findLatest();
 
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
@@ -734,11 +735,10 @@ export function onboardSiteModal(lambdaContext) {
         thread_ts: responseThreadTs,
       });
 
-      log.info(`[onboard] detecting bot blocker for ${siteUrl}`);
       let botProtectionResult = { crawlable: true, type: 'unknown', confidence: 0 };
       try {
         botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
-        log.info(`[onboard] bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable} type=${botProtectionResult.type}`);
+        log.info(`[onboard] bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable}, type=${botProtectionResult.type}`);
       } catch (e) {
         log.warn(`[onboard] bot blocker detection failed for ${siteUrl}: ${e.message}, proceeding with onboarding`);
       }
