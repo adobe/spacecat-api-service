@@ -2144,6 +2144,136 @@ describe('PlgOnboardingController', () => {
       expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(wwwDomain);
     });
 
+    it('proxy passed to resolveWwwUrl when no site record exists has getConfig so sharedWwwUrlResolver does not throw', async () => {
+      // sharedWwwUrlResolver calls site.getConfig() (not site.getConfig?.()) so the proxy
+      // must expose getConfig, otherwise resolveWwwUrl throws and rumVerified is wrongly false
+      resolveWwwUrlStub.callsFake((siteArg) => {
+        // Simulate the real implementation accessing site.getConfig()
+        siteArg.getConfig();
+        return Promise.resolve(TEST_DOMAIN);
+      });
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+      mockDataAccess.Site.findByBaseURL.resolves(null); // no existing site record
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('proxy getBaseURL returns the correct baseURL when no site record exists', async () => {
+      resolveWwwUrlStub.callsFake((siteArg) => Promise.resolve(siteArg.getBaseURL()));
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      // resolveWwwUrl should have been called with a proxy whose getBaseURL returns TEST_BASE_URL
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg.getBaseURL()).to.equal(TEST_BASE_URL);
+    });
+
+    it('passes the real site object (not proxy) to resolveWwwUrl when a site record exists', async () => {
+      const existingSite = createMockSite({ orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg).to.equal(existingSite);
+    });
+
+    it('sets rumVerified=false and falls through to delivery type when resolveWwwUrl itself throws', async () => {
+      resolveWwwUrlStub.rejects(new Error('RUM client network error'));
+      findDeliveryTypeStub.resolves('aem_edge');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(rumRetrieveDomainkeyStub).to.not.have.been.called;
+      expect(findDeliveryTypeStub).to.have.been.called;
+    });
+
+    it('sets rumVerified=false when resolveWwwUrl resolves but outer retrieveDomainkey rejects', async () => {
+      resolveWwwUrlStub.resolves(`www.${TEST_DOMAIN}`);
+      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
+      findDeliveryTypeStub.resolves('aem_edge');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(`www.${TEST_DOMAIN}`);
+      expect(findDeliveryTypeStub).to.have.been.called;
+    });
+
+    it('uses overrideBaseURL from site fetchConfig — real site passed so resolveWwwUrl short-circuits without a RUM call', async () => {
+      // Real-world: ingrammicro.com site has overrideBaseURL = https://www.ingrammicro.com
+      // sharedWwwUrlResolver reads overrideBaseURL and returns www.ingrammicro.com immediately
+      // (no internal RUM calls — the only RUM call is the outer retrieveDomainkey)
+      const siteWithOverride = createMockSite({ orgId: TEST_ORG_ID });
+      const fetchConfigWithOverride = { overrideBaseURL: `https://www.${TEST_DOMAIN}` };
+      siteWithOverride.getConfig.returns({
+        getFetchConfig: () => fetchConfigWithOverride,
+        updateFetchConfig: sandbox.stub(),
+        getImports: () => [],
+        enableImport: sandbox.stub(),
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(siteWithOverride);
+      // Simulate resolveWwwUrl returning www domain via overrideBaseURL (no internal RUM call)
+      resolveWwwUrlStub.callsFake((siteArg) => {
+        const override = siteArg.getConfig()?.getFetchConfig()?.overrideBaseURL;
+        const wwwDomain = override ? override.replace(/^https?:\/\//, '') : `www.${TEST_DOMAIN}`;
+        return Promise.resolve(wwwDomain);
+      });
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // Real site was passed (not proxy) so overrideBaseURL was accessible
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg).to.equal(siteWithOverride);
+      expect(siteArg.getConfig().getFetchConfig().overrideBaseURL).to.equal(`https://www.${TEST_DOMAIN}`);
+      // Outer retrieveDomainkey was called with the www domain from overrideBaseURL
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(`www.${TEST_DOMAIN}`);
+    });
+
+    it('resolves www variant via proxy when no site record exists — proxy getConfig returns null skipping overrideBaseURL', async () => {
+      // Real-world: ingrammicro.com with no existing site record
+      // Proxy getConfig() returns null → sharedWwwUrlResolver skips overrideBaseURL,
+      // falls through to www-toggle RUM check, returns www.ingrammicro.com
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      resolveWwwUrlStub.callsFake((siteArg) => {
+        // Simulate real sharedWwwUrlResolver: getConfig() returns null → no overrideBaseURL
+        const override = siteArg.getConfig()?.getFetchConfig()?.overrideBaseURL;
+        expect(override).to.be.undefined; // proxy never sets overrideBaseURL
+        return Promise.resolve(`www.${TEST_DOMAIN}`);
+      });
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // Proxy was passed, not the real site
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg.getConfig()).to.be.null; // proxy returns null, not throw
+      expect(siteArg.getBaseURL()).to.equal(TEST_BASE_URL);
+      // Outer retrieveDomainkey used the www-resolved domain
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(`www.${TEST_DOMAIN}`);
+    });
+
     it('waitlists domain when RUM check fails and delivery type is OTHER', async () => {
       rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
       findDeliveryTypeStub.resolves('other');

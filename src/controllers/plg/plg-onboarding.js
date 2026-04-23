@@ -756,7 +756,7 @@ async function performAsoPlgOnboarding({
     const rumApiClient = RUMAPIClient.createFrom(context);
     let cachedDeliveryType = null;
     try {
-      const siteProxy = site ?? { getBaseURL: () => baseURL };
+      const siteProxy = site ?? { getBaseURL: () => baseURL, getConfig: () => null };
       const rumDomain = await resolveWwwUrl(siteProxy, context);
       await rumApiClient.retrieveDomainkey(rumDomain);
       steps.rumVerified = true;
