@@ -94,6 +94,7 @@ export const INTERNAL_ROUTES = [
   'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
+  'DELETE /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 

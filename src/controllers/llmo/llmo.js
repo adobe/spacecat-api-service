@@ -1492,6 +1492,149 @@ function LlmoController(ctx) {
   };
 
   /**
+   * DELETE /sites/{siteId}/llmo/edge-optimize-config
+   * Deletes Tokowaka edge optimization configuration for a site.
+   * - Clears edgeOptimizeConfig from the site's DynamoDB config
+   * - Disables tokowaka in the S3 metaconfig (best-effort, does not fail the request)
+   * - If CDN routing was active and cdnType is provided, rolls back routing via the CDN API
+   *   (LLMO-4229: rollback routing if user deletes CDN config from the UI)
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} 200 on success
+   */
+  const deleteEdgeConfig = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+    const { Site } = dataAccess;
+    const { cdnType } = context.data || {};
+
+    try {
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can delete the edge optimize config');
+      }
+
+      if (!await accessControlUtil.isOwnerOfSite(site)) {
+        return forbidden('User does not own this site');
+      }
+
+      const baseURL = site.getBaseURL();
+      const currentConfig = site.getConfig();
+      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      const wasRoutingEnabled = existingEdgeConfig.enabled === true;
+      const lastModifiedBy = profile?.email || 'tokowaka-edge-optimize-config';
+
+      log.info(`[edge-optimize-config] Deleting edge optimize config for site ${siteId} by ${lastModifiedBy}`);
+
+      // Step 1: Disable tokowaka in S3 metaconfig (best-effort — don't fail the whole request)
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+        if (metaconfig && Array.isArray(metaconfig.apiKeys) && metaconfig.apiKeys.length > 0) {
+          await tokowakaClient.updateMetaconfig(
+            baseURL,
+            site.getId(),
+            { tokowakaEnabled: false },
+            { lastModifiedBy },
+          );
+          log.info(`[edge-optimize-config] Disabled tokowaka metaconfig for site ${siteId}`);
+        } else {
+          log.info(`[edge-optimize-config] No metaconfig found for site ${siteId}, skipping S3 disable`);
+        }
+      } catch (metaconfigError) {
+        log.warn(`[edge-optimize-config] Failed to disable tokowaka metaconfig for site ${siteId}: ${metaconfigError.message}`);
+      }
+
+      // Step 2: Roll back CDN routing if it was active and cdnType was supplied (LLMO-4229)
+      if (wasRoutingEnabled && hasText(cdnType)) {
+        const cdnTypeTrimmed = cdnType.toLowerCase().trim();
+        const cdnTypeNormalized = SUPPORTED_EDGE_ROUTING_CDN_TYPES.includes(cdnTypeTrimmed)
+          ? cdnTypeTrimmed : null;
+
+        if (!cdnTypeNormalized) {
+          log.warn(`[edge-optimize-routing] ${baseURL} cdnType '${cdnType}' not eligible for CDN rollback, skipping`);
+        } else if (env?.ENV && env.ENV !== 'prod') {
+          log.warn(`[edge-optimize-routing] CDN rollback skipped: not prod environment (${env.ENV})`);
+        } else {
+          try {
+            const imsUserToken = await getImsTokenFromPromiseToken(context);
+
+            const org = await site.getOrganization();
+            const imsOrgId = org.getImsOrgId();
+            await authorizeEdgeCdnRouting(context, {
+              org, imsOrgId, imsUserToken, siteId,
+            }, log);
+
+            let cdnConfig;
+            try {
+              const routingConfigJson = env?.EDGE_OPTIMIZE_ROUTING_CONFIG;
+              cdnConfig = parseEdgeRoutingConfig(routingConfigJson, cdnTypeNormalized);
+            } catch (parseError) {
+              log.error(`[edge-optimize-routing-failed] ${baseURL} Failed to parse routing config for rollback: ${parseError.message}`);
+              // Don't block the delete — proceed to clear site config
+            }
+
+            if (cdnConfig) {
+              const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
+              const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+              const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
+              const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+              let domain;
+              try {
+                domain = await probeSiteAndResolveDomain(probeUrl, log);
+              } catch (probeError) {
+                log.warn(`[edge-optimize-routing] ${baseURL} Probe failed during rollback: ${probeError.message}, using calculated host`);
+                domain = baseURL;
+              }
+
+              const imsEdgeClient = new ImsClient({
+                imsHost: env.IMS_HOST,
+                clientId: env.IMS_EDGE_CLIENT_ID,
+                clientSecret: env.IMS_EDGE_CLIENT_SECRET,
+                scope: env.IMS_EDGE_SCOPE,
+              }, log);
+              const spTokenData = await imsEdgeClient.getServicePrincipalAccessToken(imsOrgId);
+              const spToken = spTokenData.access_token;
+
+              try {
+                await callCdnRoutingApi(strategy, cdnConfig, domain, spToken, false, log);
+                log.info(`[edge-optimize-routing] CDN routing disabled for site ${siteId} domain ${domain}`);
+              } catch (cdnError) {
+                log.error(`[edge-optimize-routing-failed] ${baseURL} CDN rollback API call failed: ${cdnError.message}`);
+                // Don't block the delete — proceed to clear site config
+              }
+            }
+          } catch (rollbackError) {
+            // Auth/token failures should not block the config cleanup
+            log.error(`[edge-optimize-routing-failed] ${baseURL} CDN routing rollback failed: ${rollbackError.message}`);
+          }
+        }
+      } else if (wasRoutingEnabled && !hasText(cdnType)) {
+        log.warn(`[edge-optimize-config] Site ${siteId} had active CDN routing but no cdnType provided — routing not rolled back`);
+      }
+
+      // Step 3: Clear edgeOptimizeConfig from site DynamoDB config
+      currentConfig.updateEdgeOptimizeConfig(undefined);
+      await saveSiteConfig(site, currentConfig, log, 'deleting edge optimize config');
+      log.info(`[edge-optimize-config] Cleared edgeOptimizeConfig for site ${siteId}`);
+
+      return ok({ message: 'Edge optimize config deleted successfully', siteId });
+    } catch (error) {
+      log.error(`Failed to delete edge config for site ${siteId}:`, error);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  /**
    * GET /sites/{siteId}/llmo/strategy
    * Retrieves LLMO strategy data from S3
    * @param {object} context - Request context
@@ -1883,6 +2026,7 @@ function LlmoController(ctx) {
     getDemoRecommendations,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
+    deleteEdgeConfig,
     createOrUpdateStageEdgeConfig,
     getStrategy,
     saveStrategy,

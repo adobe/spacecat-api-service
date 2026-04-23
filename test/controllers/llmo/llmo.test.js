@@ -6108,6 +6108,267 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('deleteEdgeConfig', () => {
+    let deleteEdgeConfigContext;
+
+    beforeEach(() => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub()
+        .returns({ opted: Date.now(), enabled: false });
+      mockConfig.updateEdgeOptimizeConfig = sinon.stub();
+      mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
+
+      deleteEdgeConfigContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {},
+        attributes: {
+          authInfo: {
+            profile: { email: 'test@example.com' },
+            getProfile: () => ({ email: 'test@example.com', sub: 'test-user-id' }),
+          },
+        },
+        env: {
+          ...mockContext.env,
+          ENV: 'prod',
+          EDGE_OPTIMIZE_ROUTING_CONFIG: JSON.stringify({
+            'aem-cs-fastly': { cdnRoutingUrl: 'https://cdn-api.example.com/routing' },
+          }),
+          IMS_HOST: 'https://ims.adobe.io',
+          IMS_EDGE_CLIENT_ID: 'test-client',
+          IMS_EDGE_CLIENT_SECRET: 'test-secret',
+          IMS_EDGE_SCOPE: 'test-scope',
+        },
+      };
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.deleteEdgeConfig(deleteEdgeConfigContext);
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.include('Site not found');
+    });
+
+    it('should return 403 when user has no access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.deleteEdgeConfig(deleteEdgeConfigContext);
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.include('User does not have access to this site');
+    });
+
+    it('should return 403 when user is not an LLMO administrator', async () => {
+      const LlmoControllerNonAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true, true, false),
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const nonAdminController = LlmoControllerNonAdmin(mockContext);
+      const result = await nonAdminController.deleteEdgeConfig(deleteEdgeConfigContext);
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only LLMO administrators can delete the edge optimize config');
+    });
+
+    it('should return 403 when user does not own the site', async () => {
+      const LlmoControllerNotOwner = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: async () => true,
+              isLLMOAdministrator: () => true,
+              isOwnerOfSite: async () => false,
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const notOwnerController = LlmoControllerNotOwner(mockContext);
+      const result = await notOwnerController.deleteEdgeConfig(deleteEdgeConfigContext);
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.include('User does not own this site');
+    });
+
+    it('should clear edgeOptimizeConfig and disable metaconfig when metaconfig exists', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves({
+        siteId: TEST_SITE_ID,
+        apiKeys: ['existing-key'],
+        tokowakaEnabled: true,
+      });
+      mockTokowakaClient.updateMetaconfig.resolves({ tokowakaEnabled: false });
+
+      const result = await controller.deleteEdgeConfig(deleteEdgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.message).to.include('deleted successfully');
+      expect(body.siteId).to.equal(TEST_SITE_ID);
+
+      expect(mockTokowakaClient.updateMetaconfig).to.have.been.calledWith(
+        'https://www.example.com',
+        TEST_SITE_ID,
+        sinon.match({ tokowakaEnabled: false }),
+        sinon.match({ lastModifiedBy: 'test@example.com' }),
+      );
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(undefined);
+      expect(mockSite.save).to.have.been.called;
+    });
+
+    it('should skip S3 disable when no metaconfig exists', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+
+      const result = await controller.deleteEdgeConfig(deleteEdgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.updateMetaconfig).to.not.have.been.called;
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(undefined);
+    });
+
+    it('should proceed with config deletion even when S3 metaconfig update fails', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['key'], tokowakaEnabled: true });
+      mockTokowakaClient.updateMetaconfig.rejects(new Error('S3 write failed'));
+
+      const result = await controller.deleteEdgeConfig(deleteEdgeConfigContext);
+
+      // Should still succeed — S3 disable is best-effort
+      expect(result.status).to.equal(200);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(undefined);
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Failed to disable tokowaka metaconfig/));
+    });
+
+    it('should roll back CDN routing when routing was active and cdnType is provided', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now(), enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['key'], tokowakaEnabled: true });
+      mockTokowakaClient.updateMetaconfig.resolves({ tokowakaEnabled: false });
+      getImsTokenFromPromiseTokenStub.resolves('test-ims-user-token');
+      getServicePrincipalTokenStub.resolves({ access_token: 'sp-token' });
+      probeSiteAndResolveDomainStub.resolves('www.example.com');
+      callCdnRoutingApiStub.resolves();
+      authorizeEdgeCdnRoutingStub.resolves();
+
+      const result = await controller.deleteEdgeConfig({
+        ...deleteEdgeConfigContext,
+        data: { cdnType: 'aem-cs-fastly' },
+        pathInfo: {
+          ...deleteEdgeConfigContext.pathInfo,
+          headers: { cookie: 'promiseToken=test-token' },
+        },
+      });
+
+      expect(result.status).to.equal(200);
+      expect(callCdnRoutingApiStub).to.have.been.calledWith(
+        sinon.match.object,
+        sinon.match.object,
+        'www.example.com',
+        'sp-token',
+        false,
+        sinon.match.object,
+      );
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(undefined);
+    });
+
+    it('should skip CDN rollback when routing was not enabled', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub()
+        .returns({ opted: Date.now(), enabled: false });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      callCdnRoutingApiStub.resolves();
+
+      const result = await controller.deleteEdgeConfig({
+        ...deleteEdgeConfigContext,
+        data: { cdnType: 'aem-cs-fastly' },
+      });
+
+      expect(result.status).to.equal(200);
+      expect(callCdnRoutingApiStub).to.not.have.been.called;
+    });
+
+    it('should skip CDN rollback when routing was active but cdnType is not provided', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now(), enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      callCdnRoutingApiStub.resolves();
+
+      const result = await controller.deleteEdgeConfig(deleteEdgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(callCdnRoutingApiStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/had active CDN routing but no cdnType provided/),
+      );
+    });
+
+    it('should skip CDN rollback in non-prod environment even when routing was active', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now(), enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      callCdnRoutingApiStub.resolves();
+
+      const result = await controller.deleteEdgeConfig({
+        ...deleteEdgeConfigContext,
+        data: { cdnType: 'aem-cs-fastly' },
+        env: { ...deleteEdgeConfigContext.env, ENV: 'dev' },
+      });
+
+      expect(result.status).to.equal(200);
+      expect(callCdnRoutingApiStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/CDN rollback skipped: not prod environment/),
+      );
+    });
+
+    it('should warn but not fail when CDN rollback API call fails', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now(), enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      getImsTokenFromPromiseTokenStub.resolves('test-ims-user-token');
+      getServicePrincipalTokenStub.resolves({ access_token: 'sp-token' });
+      probeSiteAndResolveDomainStub.resolves('www.example.com');
+      callCdnRoutingApiStub.rejects(new Error('CDN API timeout'));
+      authorizeEdgeCdnRoutingStub.resolves();
+
+      const result = await controller.deleteEdgeConfig({
+        ...deleteEdgeConfigContext,
+        data: { cdnType: 'aem-cs-fastly' },
+        pathInfo: {
+          ...deleteEdgeConfigContext.pathInfo,
+          headers: { cookie: 'promiseToken=test-token' },
+        },
+      });
+
+      // CDN rollback failure should not block config deletion
+      expect(result.status).to.equal(200);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(undefined);
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/CDN rollback API call failed/),
+      );
+    });
+
+    it('should use fallback lastModifiedBy when profile email is absent', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'], tokowakaEnabled: true });
+      mockTokowakaClient.updateMetaconfig.resolves({ tokowakaEnabled: false });
+
+      const result = await controller.deleteEdgeConfig({
+        ...deleteEdgeConfigContext,
+        attributes: { authInfo: {} },
+      });
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.updateMetaconfig).to.have.been.calledWith(
+        sinon.match.any,
+        sinon.match.any,
+        sinon.match.any,
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+      );
+    });
+  });
+
   describe('getStrategy', () => {
     const mockStrategyData = {
       opportunities: [
