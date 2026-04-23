@@ -109,7 +109,7 @@ If Spacecat ever fires an internal event when a customer configures RUM post-onb
 2. **PR 2** (spacecat-api-service): wire PLG onboarding to call `updateRumConfig` + tests.
 3. **PR 3** (spacecat-api-service): backfill script + dry-run + docs.
 4. Backfill run (stage → prod).
-5. **PR 4** (experience-success-studio-ui): consume the flag — dialog + banner + CWV card state.
+5. **PR 4** (experience-success-studio-ui): consume the flag — dialog + banner.
 
 PRs 1–3 are independent of the UI work and can land first. UI work (PR 4) is gated on backfill completion in prod.
 
