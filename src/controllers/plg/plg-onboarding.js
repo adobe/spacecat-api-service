@@ -681,7 +681,13 @@ async function performAsoPlgOnboarding({
           /* c8 ignore next */
           const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
           const customerOrgName = organization.getName();
-          const waitlistReason = `Preonboarded site is assigned to different organization (org: ${existingOrgName}, id: ${existingImsOrgId}). Cannot be moved to '${customerOrgName}'.`;
+          let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
+          const siteEnrollments = await site.getSiteEnrollments();
+          if (!siteEnrollments || siteEnrollments.length === 0) {
+            waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${customerOrgName}'.`;
+          } else {
+            waitlistReason += ` This domain cannot be moved to '${customerOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+          }
 
           log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
 
@@ -835,7 +841,16 @@ async function performAsoPlgOnboarding({
         userAgent: botBlockerResult.userAgent,
       };
 
+      let waitlistReason = `Domain ${domain} is blocked by a bot blocker of type '${botBlockerInfo.type}'.`;
+      if (botBlockerInfo.ipsToAllowlist?.length) {
+        waitlistReason += ` The following IPs must be allowlisted: ${botBlockerInfo.ipsToAllowlist.join(', ')}.`;
+      }
+      if (botBlockerInfo.userAgent) {
+        waitlistReason += ` User-agent used: ${botBlockerInfo.userAgent}.`;
+      }
+
       onboarding.setStatus(STATUSES.WAITING_FOR_IP_ALLOWLISTING);
+      onboarding.setWaitlistReason(waitlistReason);
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
