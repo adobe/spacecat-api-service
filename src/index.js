@@ -29,6 +29,7 @@ import {
   s2sAuthWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
   elevatedSlackClientWrapper,
@@ -77,7 +78,6 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
-import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -95,9 +95,11 @@ import TokensController from './controllers/tokens.js';
 import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
+import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
+import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -127,13 +129,48 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
 
     return response;
   };
+}
+/* c8 ignore stop */
+
+/* c8 ignore start */
+/**
+ * Auth handler that bypasses authentication when SKIP_AUTH=true.
+ * For local development only — injects a mock admin identity.
+ */
+class SkipAuthHandler extends AbstractHandler {
+  constructor(log) {
+    super('skipAuth', log);
+  }
+
+  // eslint-disable-next-line no-unused-vars,class-methods-use-this
+  async checkAuth(request, context) {
+    if (context.env?.SKIP_AUTH !== 'true') {
+      return null;
+    }
+    // Defense-in-depth: refuse to skip auth in a deployed Lambda environment
+    if (context.func?.name || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      this.log('SKIP_AUTH is true but running in Lambda - ignoring', 'warn');
+      return null;
+    }
+    this.log('SKIP_AUTH is true - injecting mock admin identity', 'info');
+    return new AuthInfo()
+      .withAuthenticated(true)
+      .withProfile({
+        user_id: 'local-dev-admin',
+        email: 'admin@localhost',
+        is_admin: true,
+        tenants: [],
+      })
+      .withType('api_key')
+      .withScopes([{ name: 'admin' }]);
+  }
 }
 /* c8 ignore stop */
 
@@ -144,29 +181,8 @@ function localCORSWrapper(fn) {
  * @returns {Response} a response
  */
 async function run(request, context) {
-  const { log, pathInfo, env } = context;
+  const { log, pathInfo } = context;
   const { route, suffix, method } = pathInfo;
-
-  // Add mock authInfo when authentication is skipped
-  /* c8 ignore start */
-  if (env.SKIP_AUTH === 'true' && !context.attributes?.authInfo) {
-    if (!context.attributes) {
-      context.attributes = {};
-    }
-    // Create a mock admin authInfo
-    context.attributes.authInfo = new AuthInfo()
-      .withAuthenticated(true)
-      .withProfile({
-        user_id: 'local-dev-admin',
-        email: 'admin@localhost',
-        is_admin: true,
-        // Empty tenants means hasOrganization will return false, but is_admin bypasses that
-        tenants: [],
-      })
-      .withType('api_key')
-      .withScopes([{ name: 'admin' }]);
-  }
-  /* c8 ignore stop */
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
@@ -176,7 +192,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -229,12 +245,13 @@ async function run(request, context) {
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
     const tokensController = TokensController(context);
-    const plgOnboardingController = PlgOnboardingController(context);
     const imsOrgAccessController = ImsOrgAccessController(context);
     const contactSalesLeadsController = ContactSalesLeadsController(context);
     const featureFlagsController = FeatureFlagsController(context);
     const autofixChecksController = AutofixChecksController(context);
     const pageRelationshipsController = PageRelationshipsController(context);
+    const plgOnboardingController = PlgOnboardingController(context);
+    const drsBpPgAuditController = DrsBpPgAuditController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -279,7 +296,6 @@ async function run(request, context) {
       sentimentController,
       consumersController,
       tokensController,
-      plgOnboardingController,
       imsOrgAccessController,
       contactSalesLeadsController,
       featureFlagsController,
@@ -287,6 +303,8 @@ async function run(request, context) {
       ephemeralRunController,
       autofixChecksController,
       siteDetectionController,
+      plgOnboardingController,
+      drsBpPgAuditController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -297,9 +315,6 @@ async function run(request, context) {
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
-      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
-        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
-      }
       if (params.organizationId
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
@@ -309,6 +324,15 @@ async function run(request, context) {
       }
       if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
+      }
+      if (params.plgOnboardingId && !isValidUUIDV4(params.plgOnboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.onboardingId && !isValidUUIDV4(params.onboardingId)) {
+        return badRequest('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.executionId && !isValidUUID(params.executionId)) {
+        return badRequest('Execution Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;
@@ -332,7 +356,9 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
 const wrappedMain = wrap(run)
   .with(authWrapper, {
-    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+    authHandlers: [
+      SkipAuthHandler, JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler,
+    ],
   })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 

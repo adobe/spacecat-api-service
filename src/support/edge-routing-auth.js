@@ -22,19 +22,24 @@ export const LLMO_IMS_SERVICE_CODES = ['dx_llmo'];
 export const LLMO_ADMIN_GROUP_NAME = 'LLMO Admin';
 
 /**
- * Reads the promiseToken cookie from the request and exchanges it for an IMS user access token.
+ * Reads the promise token from the request (cookie first, then x-promise-token header)
+ * and exchanges it for an IMS user access token.
  *
  * @param {object} context - The request context.
  * @returns {Promise<string>} The IMS user access token.
  * @throws {Error} With a `status` property (400 or 401) on failure.
  */
-export async function getImsTokenFromCookie(context) {
-  const rawPromiseToken = getCookieValue(context, 'promiseToken');
+export async function getImsTokenFromPromiseToken(context) {
+  const rawCookieToken = getCookieValue(context, 'promiseToken');
+  const rawHeaderToken = context.pathInfo?.headers?.['x-promise-token'];
+  const rawPromiseToken = rawCookieToken || rawHeaderToken;
+
   if (!hasText(rawPromiseToken)) {
-    const err = new Error('promiseToken cookie is required for CDN routing');
+    const err = new Error('Authentication failed: mandatory token missing');
     err.status = 400;
     throw err;
   }
+  context.log?.info?.(`Promise token found in ${rawHeaderToken ? 'header' : 'cookie'}`);
 
   const promiseToken = decodeURIComponent(rawPromiseToken);
 
@@ -55,12 +60,12 @@ export async function getImsTokenFromCookie(context) {
  * @returns {boolean}
  */
 export function hasPaidLlmoProductContext(imsUserProfile) {
-  const productContexts = imsUserProfile?.productContexts;
+  const productContexts = imsUserProfile?.projectedProductContext;
   if (!Array.isArray(productContexts) || productContexts.length === 0) {
     return false;
   }
   return productContexts.some(
-    (ctx) => LLMO_IMS_SERVICE_CODES.includes(ctx?.serviceCode),
+    (ctx) => LLMO_IMS_SERVICE_CODES.includes(ctx?.prodCtx?.serviceCode),
   );
 }
 
@@ -117,7 +122,7 @@ export async function authorizeEdgeCdnRouting(context, {
 
     if (!hasPaidLlmoProductContext(imsUserProfile)) {
       log.warn(`[edge-routing-auth] Paid user lacks LLMO product context for site ${siteId}`);
-      const err = new Error('User does not have LLMO product access');
+      const err = new Error('User does not have \'Adobe LLM Optimizer Users\' IMS Product Profile access');
       err.status = 403;
       throw err;
     }
@@ -147,7 +152,7 @@ export async function authorizeEdgeCdnRouting(context, {
     }
 
     if (!isGroupMember) {
-      const err = new Error(`Only ${LLMO_ADMIN_GROUP_NAME} group members can configure CDN routing`);
+      const err = new Error(`Only '${LLMO_ADMIN_GROUP_NAME}' IMS Group members can configure CDN routing`);
       err.status = 403;
       throw err;
     }

@@ -6795,142 +6795,6 @@ StageConfigsResponse:
   description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
   items:
     $ref: '#/StageConfigItem'
-PlgOnboarding:
-  type: object
-  description: A PLG ASO onboarding record tracking the lifecycle of a domain onboarding.
-  properties:
-    id:
-      $ref: '#/Id'
-    imsOrgId:
-      $ref: '#/ImsOrganizationId'
-    domain:
-      type: string
-      description: The domain being onboarded
-      example: "example.com"
-    baseURL:
-      type: string
-      format: uri
-      description: The composed base URL for the domain
-      example: "https://www.example.com"
-    status:
-      type: string
-      description: Current onboarding status
-      enum:
-        - PRE_ONBOARDING
-        - IN_PROGRESS
-        - ONBOARDED
-        - ERROR
-        - WAITING_FOR_IP_ALLOWLISTING
-        - WAITLISTED
-        - INACTIVE
-      example: "ONBOARDED"
-    siteId:
-      $ref: '#/Id'
-    organizationId:
-      $ref: '#/Id'
-    steps:
-      type: object
-      description: Progress tracking for individual onboarding steps
-      properties:
-        orgResolved:
-          type: boolean
-          description: Whether the organization was resolved or created
-        rumVerified:
-          type: boolean
-          description: Whether RUM domain key was verified
-        siteCreated:
-          type: boolean
-          description: Whether a new site was created
-        siteResolved:
-          type: boolean
-          description: Whether the site was resolved (created or found)
-        configUpdated:
-          type: boolean
-          description: Whether site configuration was updated
-        auditsEnabled:
-          type: boolean
-          description: Whether audits were enabled for the site
-        entitlementCreated:
-          type: boolean
-          description: Whether the ASO entitlement was provisioned
-      additionalProperties: false
-      example:
-        orgResolved: true
-        rumVerified: true
-        siteCreated: true
-        siteResolved: true
-        configUpdated: true
-        auditsEnabled: true
-        entitlementCreated: true
-    error:
-      type:
-        - object
-        - 'null'
-      description: Error details if status is ERROR
-      properties:
-        message:
-          type: string
-          description: Error message
-      example: null
-    botBlocker:
-      type:
-        - object
-        - 'null'
-      description: Bot blocker details if the site blocks crawling
-      properties:
-        type:
-          type: string
-          description: Type of bot blocker detected
-        ipsToAllowlist:
-          type: array
-          items:
-            type: string
-          description: IPs that need to be allowlisted
-        userAgent:
-          type: string
-          description: User agent string to allowlist
-      example: null
-    waitlistReason:
-      type:
-        - string
-        - 'null'
-      description: Reason for waitlisting, if applicable
-      example: null
-    reviews:
-      type:
-        - array
-        - 'null'
-      description: Array of ESE review decisions for waitlisted onboardings
-      items:
-        type: object
-        properties:
-          reason:
-            type: string
-            description: The waitlist reason at the time of review
-          decision:
-            type: string
-            enum:
-              - BYPASSED
-              - UPHELD
-            description: "BYPASSED: skip check and resume. UPHELD: block stands."
-          reviewedBy:
-            type: string
-            description: Email of the ESE who made the decision
-          reviewedAt:
-            type: string
-            format: date-time
-            description: Timestamp of the review
-          justification:
-            type: string
-            description: ESE's reason for the decision
-      example: null
-    completedAt:
-      $ref: '#/DateTime'
-    createdAt:
-      $ref: '#/DateTime'
-    updatedAt:
-      $ref: '#/DateTime'
-
 Token:
   type: object
   description: A token allocation for a site within a billing cycle
@@ -7280,6 +7144,112 @@ V2BrandListResponse:
       items:
         $ref: '#/V2Brand'
 
+V2Category:
+  type: object
+  description: A category in the normalized categories table
+  required:
+    - id
+    - uuid
+    - name
+    - status
+    - origin
+  properties:
+    id:
+      type: string
+      description: Category business key (category_id slug). Stable once assigned.
+      example: 'baseurl-discovery-research'
+    uuid:
+      type: string
+      format: uuid
+      description: UUID primary key (categories.id)
+    name:
+      type: string
+      description: |
+        Human-readable category name. Stored canonicalized (trim +
+        whitespace-collapse + NFC). Matching on POST is case-insensitive.
+      example: 'Discovery & Research'
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+      description: Category status
+      example: 'active'
+    origin:
+      type: string
+      enum: [human, ai]
+      description: |
+        Provenance of this category. `human` is sticky — idempotent reposts
+        with `origin: ai` do NOT downgrade a human-curated category.
+      example: 'human'
+    createdAt:
+      type: string
+      format: date-time
+      description: Creation timestamp
+    createdBy:
+      type: string
+      description: User or system that created the category
+    updatedAt:
+      type: string
+      format: date-time
+      description: Last update timestamp
+    updatedBy:
+      type: string
+      description: User or system that last updated the category
+
+V2CategoryInput:
+  type: object
+  description: |
+    Request body for creating a category. POST is idempotent by name — see
+    `categories-v2-api.yaml` for the 200/201 semantics and the provenance
+    guard on `origin`.
+  required:
+    - name
+  properties:
+    id:
+      type: string
+      description: |
+        Client-supplied slug. Used only when inserting a brand-new row; for
+        existing rows the stored `id` is preserved (FK stability).
+      example: 'discovery-research'
+    name:
+      type: string
+      description: Human-readable category name. Canonicalized on write.
+      example: 'Discovery & Research'
+    origin:
+      type: string
+      enum: [human, ai]
+      default: 'human'
+      description: |
+        Provenance. Subject to the human→ai downgrade guard on existing rows.
+    status:
+      type: string
+      enum: [active, pending, ignored]
+      default: 'active'
+
+V2CategoryUpdateInput:
+  type: object
+  description: Request body for updating a category (partial update).
+  properties:
+    name:
+      type: string
+      description: Human-readable category name. Canonicalized on write.
+    origin:
+      type: string
+      enum: [human, ai]
+    status:
+      type: string
+      enum: [active, pending, deleted, ignored]
+
+V2CategoryListResponse:
+  type: object
+  description: Response envelope for listing categories
+  required:
+    - categories
+  properties:
+    categories:
+      type: array
+      items:
+        $ref: '#/V2Category'
+
 V2Topic:
   type: object
   description: A topic in the normalized topics table
@@ -7582,3 +7552,562 @@ SiteDetectionJobResponse:
         message:
           type: string
           description: Human-readable error message.
+
+BrandPresenceLlmModel:
+  type: string
+  description: |
+    LLM model key for brand presence executions (`llm_model` in mysticat-data-service).
+    The HTTP API also accepts query aliases and legacy names via `resolveModelFromRequest`.
+  enum:
+    - chatgpt-paid
+    - chatgpt-free
+    - google-ai-overview
+    - perplexity
+    - google-ai-mode
+    - copilot
+    - gemini
+    - google
+    - microsoft
+    - mistral
+    - anthropic
+    - amazon
+
+BrandPresenceExecutionSourceItem:
+  type: object
+  description: One cited source row for a brand presence execution (slim shape).
+  required:
+    - urlId
+    - contentType
+    - isOwned
+    - url
+    - hostname
+  properties:
+    urlId:
+      type: string
+      description: FK to `source_urls.id` (stringified UUID or empty when unknown)
+    contentType:
+      type: string
+    isOwned:
+      type: boolean
+    url:
+      type: string
+      description: Resolved URL from embedded `source_urls`
+    hostname:
+      type: string
+      description: Resolved hostname from embedded `source_urls`
+
+BrandPresenceExecutionSummary:
+  type: object
+  description: Minimal execution metadata returned with execution-sources.
+  required:
+    - executionId
+    - executionDate
+    - brandId
+    - siteId
+    - model
+  properties:
+    executionId:
+      type: string
+    executionDate:
+      type: string
+      format: date
+      description: Partition key date for `brand_presence_sources`
+    brandId:
+      type: string
+    siteId:
+      type: string
+    model:
+      type: string
+      description: Model key on the execution row
+
+BrandPresenceExecutionSourcesResponse:
+  type: object
+  required:
+    - execution
+    - sources
+  properties:
+    execution:
+      $ref: '#/BrandPresenceExecutionSummary'
+    sources:
+      type: array
+      items:
+        $ref: '#/BrandPresenceExecutionSourceItem'
+
+AgenticTrafficUrlBrandPresencePrompt:
+  type: object
+  description: A prompt that cited the URL as a source in a brand presence LLM execution
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      example: 'best poster maker with templates'
+    topic:
+      oneOf:
+        - type: string
+        - type: 'null'
+      description: Topic the prompt belongs to
+      example: 'Poster Maker'
+    topicId:
+      oneOf:
+        - type: string
+        - type: 'null'
+      description: UUID of the topic
+      example: '019ce794-f3ab-7d3c-8f0a-46a0f08484d0'
+    regionCode:
+      oneOf:
+        - type: string
+        - type: 'null'
+      description: Region/market code
+      example: 'GB'
+    citations:
+      type: integer
+      description: Number of executions where the URL was cited
+      example: 13
+    mentions:
+      type: integer
+      description: Number of executions where the brand was mentioned
+      example: 13
+    avgSentiment:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Average sentiment score (-1 negative, 0 neutral, 1 positive)
+      example: 0.77
+    avgVisibilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Average visibility score (0-100)
+      example: 100.0
+    executionCount:
+      type: integer
+      description: Total number of LLM executions in this group
+      example: 13
+    categories:
+      type: array
+      items:
+        type: string
+      description: Distinct category names from the executions
+      example: ['Express']
+  required:
+    - prompt
+    - citations
+    - mentions
+    - executionCount
+    - categories
+
+AgenticTrafficUrlBrandPresenceWeeklyTrend:
+  type: object
+  description: Weekly citation counts for a URL
+  properties:
+    weekStr:
+      type: string
+      description: ISO week label (YYYY-WNN)
+      example: '2026-W06'
+    citationCount:
+      type: integer
+      description: Number of executions where the URL was cited that week
+      example: 314
+    mentionCount:
+      type: integer
+      description: Number of executions where the brand was mentioned that week
+      example: 295
+  required:
+    - weekStr
+    - citationCount
+    - mentionCount
+
+AgenticTrafficUrlBrandPresence:
+  type: object
+  description: Brand presence citation detail for a specific URL
+  properties:
+    totalCitations:
+      type: integer
+      description: Total number of LLM executions where this URL was cited
+      example: 314
+    totalMentions:
+      type: integer
+      description: Total number of LLM executions where the brand was mentioned
+      example: 295
+    uniquePrompts:
+      type: integer
+      description: Number of distinct prompts that cited this URL
+      example: 47
+    weeklyTrends:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficUrlBrandPresenceWeeklyTrend'
+      description: Weekly citation trend, ordered oldest to newest
+    prompts:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficUrlBrandPresencePrompt'
+      description: Top 50 prompts by execution count that cited this URL
+  required:
+    - totalCitations
+    - totalMentions
+    - uniquePrompts
+    - weeklyTrends
+    - prompts
+
+# ── Agentic Traffic PG (site-scoped) ─────────────────────────────────────────
+
+AgenticTrafficKpis:
+  type: object
+  description: Aggregated KPI metrics for a site's agentic traffic
+  properties:
+    totalHits:
+      type: integer
+      example: 4200
+    successRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Percentage of 2xx–3xx responses (0–100)
+      example: 94.5
+    avgTtfbMs:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Weighted average Time To First Byte in milliseconds
+      example: 182.3
+    avgCitabilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Average citability score (0–100); null when no data
+      example: 76.0
+  required:
+    - totalHits
+
+AgenticTrafficKpisTrendRow:
+  type: object
+  description: KPI metrics for a single time period
+  properties:
+    periodStart:
+      type: string
+      format: date
+      description: Start date of the period (ISO 8601)
+      example: '2026-03-02'
+    totalHits:
+      type: integer
+      example: 600
+    successRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 92.0
+    avgTtfbMs:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 175.0
+    avgCitabilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 75.0
+  required:
+    - periodStart
+    - totalHits
+
+AgenticTrafficKpisTrend:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficKpisTrendRow'
+  description: KPI time series ordered by period ascending
+
+AgenticTrafficByRegionRow:
+  type: object
+  properties:
+    region:
+      type: string
+      example: 'US'
+    totalHits:
+      type: integer
+      example: 800
+  required:
+    - region
+    - totalHits
+
+AgenticTrafficByRegion:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByRegionRow'
+  description: Traffic grouped by region, ordered by total hits descending
+
+AgenticTrafficByCategoryRow:
+  type: object
+  properties:
+    categoryName:
+      type: string
+      example: 'Poster Maker'
+    totalHits:
+      type: integer
+      example: 400
+  required:
+    - categoryName
+    - totalHits
+
+AgenticTrafficByCategory:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByCategoryRow'
+  description: Traffic grouped by category, ordered by total hits descending
+
+AgenticTrafficByPageTypeRow:
+  type: object
+  properties:
+    pageType:
+      type: string
+      example: 'article'
+    totalHits:
+      type: integer
+      example: 300
+  required:
+    - pageType
+    - totalHits
+
+AgenticTrafficByPageType:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByPageTypeRow'
+  description: Traffic grouped by page type, ordered by total hits descending
+
+AgenticTrafficByStatusRow:
+  type: object
+  properties:
+    httpStatus:
+      type: integer
+      example: 200
+    totalHits:
+      type: integer
+      example: 3900
+  required:
+    - httpStatus
+    - totalHits
+
+AgenticTrafficByStatus:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByStatusRow'
+  description: Traffic grouped by HTTP status code, ordered by total hits descending
+
+AgenticTrafficByUserAgentRow:
+  type: object
+  properties:
+    pageType:
+      type: string
+      example: 'article'
+    agentType:
+      type: string
+      example: 'Chatbots'
+    uniqueAgents:
+      type: integer
+      example: 5
+    totalHits:
+      type: integer
+      example: 200
+  required:
+    - pageType
+    - agentType
+    - uniqueAgents
+    - totalHits
+
+AgenticTrafficByUserAgent:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficByUserAgentRow'
+  description: Traffic grouped by page type and agent type
+
+AgenticTrafficByUrlRow:
+  type: object
+  properties:
+    host:
+      type: string
+      example: 'www.adobe.com'
+    urlPath:
+      type: string
+      example: '/express/create/poster'
+    totalHits:
+      type: integer
+      example: 150
+    uniqueAgents:
+      type: integer
+      example: 3
+    topAgent:
+      type: string
+      example: 'ChatGPT-User'
+    topAgentType:
+      type: string
+      example: 'Chatbots'
+    responseCodes:
+      type: array
+      items:
+        type: integer
+      example: [200, 301]
+    successRate:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 98.5
+    avgTtfbMs:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 120.5
+    categoryName:
+      type: string
+      example: 'Poster Maker'
+    avgCitabilityScore:
+      oneOf:
+        - type: number
+        - type: 'null'
+      example: 65.0
+    deployedAtEdge:
+      type: boolean
+      example: true
+  required:
+    - host
+    - urlPath
+    - totalHits
+    - uniqueAgents
+    - topAgent
+    - topAgentType
+    - responseCodes
+    - deployedAtEdge
+
+AgenticTrafficByUrl:
+  type: object
+  description: Paginated per-URL performance analysis
+  properties:
+    totalCount:
+      type: integer
+      description: Total number of URLs matching the filters (across all pages)
+      example: 1240
+    rows:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficByUrlRow'
+      description: URLs for the requested page
+  required:
+    - totalCount
+    - rows
+
+AgenticTrafficFilterDimensions:
+  type: object
+  description: Distinct filter values available for the selected site and date range
+  properties:
+    categories:
+      type: array
+      items:
+        type: string
+      example: ['Poster Maker', 'Electronics']
+    agentTypes:
+      type: array
+      items:
+        type: string
+      example: ['Chatbots', 'Research']
+    platforms:
+      type: array
+      items:
+        type: string
+      example: ['ChatGPT', 'Perplexity']
+    contentTypes:
+      type: array
+      items:
+        type: string
+      example: ['html', 'pdf']
+    userAgents:
+      type: array
+      items:
+        type: string
+      example: ['ChatGPT-User', 'GPTBot']
+  required:
+    - categories
+    - agentTypes
+    - platforms
+    - contentTypes
+    - userAgents
+
+AgenticTrafficWeekEntry:
+  type: object
+  description: An ISO week for which the site has agentic traffic data
+  properties:
+    week:
+      type: string
+      description: ISO week label (YYYY-WNN)
+      example: '2026-W10'
+    startDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-02'
+    endDate:
+      oneOf:
+        - type: string
+          format: date
+        - type: 'null'
+      example: '2026-03-08'
+  required:
+    - week
+
+AgenticTrafficWeeks:
+  type: object
+  description: Available ISO weeks for the site's agentic traffic data
+  properties:
+    weeks:
+      type: array
+      items:
+        $ref: '#/AgenticTrafficWeekEntry'
+  required:
+    - weeks
+
+AgenticTrafficMoverRow:
+  type: object
+  description: A URL with significant traffic change between the oldest and newest date in range
+  properties:
+    host:
+      type: string
+      example: 'www.adobe.com'
+    urlPath:
+      type: string
+      example: '/express/create/poster'
+    previousHits:
+      type: integer
+      description: Hits on the oldest date in the range
+      example: 100
+    currentHits:
+      type: integer
+      description: Hits on the newest date in the range
+      example: 200
+    hitsChange:
+      type: integer
+      description: Absolute change (positive = top mover, negative = bottom mover)
+      example: 100
+    changePercent:
+      oneOf:
+        - type: number
+        - type: 'null'
+      description: Percentage change; null when previousHits is zero
+      example: 100.0
+    direction:
+      type: string
+      enum: ['up', 'down']
+      example: 'up'
+  required:
+    - host
+    - urlPath
+    - previousHits
+    - currentHits
+    - hitsChange
+    - direction
+
+AgenticTrafficMovers:
+  type: array
+  items:
+    $ref: '#/AgenticTrafficMoverRow'
+  description: |
+    Top and bottom URL movers ordered by `direction DESC, abs(hitsChange) DESC`.
+    Returns up to `limit` rows each for direction=up and direction=down.

@@ -1,0 +1,133 @@
+drs-bp-pg-audit:
+  get:
+    tags:
+      - monitoring
+    summary: Query projection_audit rows for DRS monitoring
+    description: |
+      Proxy endpoint used by DRS monitoring workers to query the `projection_audit` table in
+      PostgREST (which lives at `http://data-svc.internal`, a private Route53 hostname inside
+      the Mysticat VPC). DRS Lambda functions run in a separate AWS account and cannot reach
+      that hostname directly; this endpoint bridges the network gap.
+
+      Server-side filters applied to every request (not reflected as query params):
+      - `skipped = false` — only non-skipped projection rows are returned
+      - Results are ordered by `projected_at DESC`
+
+      Performance note: the underlying PostgREST query filters on
+      `(scope_prefix, handler_name, projected_at, skipped)`. A composite index on these
+      columns is required for acceptable query performance on large tables.
+
+      Auth note: this endpoint is admin `x-api-key` only — S2S JWT consumers are denied at the
+      gate because the route is absent from `routeRequiredCapabilities` (and listed in
+      `INTERNAL_ROUTES` for visibility). DRS workers run in a separate AWS account without an
+      S2S consumer registration. If a future S2S consumer needs access, introduce a dedicated
+      resource-scoped capability (e.g. `drsBrandPresenceAudit:read`) rather than reusing the
+      site-scoped `audit:read` or a domain-bucket capability like `monitoring:read`.
+
+      Results are paginated. Inspect `hasMore` in the response to determine whether additional
+      pages exist. Increment `offset` by `limit` (default 500) and repeat while `hasMore` is
+      `true`.
+
+      Validation constraints:
+      - Dates must be semantically valid (not just format-valid) — e.g. `2025-02-30` is rejected
+      - Date range must not exceed 90 days
+      - `handlerName` must match `^[a-z][a-z0-9_]{0,99}$`
+    operationId: getDrsBpPgAudit
+    security:
+      - admin_key: [ ]
+    parameters:
+      - in: query
+        name: siteId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Site UUID — maps to `scope_prefix` in `projection_audit`.
+        example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+      - in: query
+        name: dateStart
+        required: true
+        schema:
+          type: string
+          format: date
+        description: |
+          Start date (inclusive) in YYYY-MM-DD format. Must be a valid calendar date.
+          Rows with `projected_at >= dateStartT00:00:00Z` are returned.
+        example: '2026-04-14'
+      - in: query
+        name: dateEnd
+        required: true
+        schema:
+          type: string
+          format: date
+        description: |
+          End date (exclusive) in YYYY-MM-DD format. Must be after `dateStart`.
+          Date range (dateEnd − dateStart) must not exceed 90 days.
+          Rows with `projected_at < dateEndT00:00:00Z` are returned.
+        example: '2026-04-15'
+      - in: query
+        name: handlerName
+        required: false
+        schema:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{0,99}$'
+          default: wrpc_import_brand_presence
+        description: Filter by handler name. Must be lowercase alphanumeric with underscores.
+        example: wrpc_import_brand_presence
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 500
+        description: Maximum number of rows to return per page. Capped at 500, floored at 1.
+      - in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+        description: |
+          Row offset for pagination. Increment by `limit` to fetch subsequent pages.
+          Ignored when `hasMore` is `false` in the previous response.
+    responses:
+      '200':
+        description: Paginated projection_audit rows matching the query.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - rows
+                - hasMore
+              properties:
+                rows:
+                  type: array
+                  description: Projection audit rows for this page, ordered by `projected_at DESC`.
+                  items:
+                    type: object
+                    properties:
+                      correlationId:
+                        type: string
+                      siteId:
+                        type: string
+                        format: uuid
+                      outputCount:
+                        type: integer
+                      projectedAt:
+                        type: string
+                        format: date-time
+                hasMore:
+                  type: boolean
+                  description: |
+                    `true` when more rows exist beyond the current page. `false` when the
+                    final page has been reached.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'

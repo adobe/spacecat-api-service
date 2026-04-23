@@ -20,7 +20,10 @@ import { ORG_1_ID, BRAND_1_ID } from '../seed-ids.js';
  * 1. Fallback path: category exists with unprefixed slug, prompt references prefixed slug
  *    — the fallback strips the DRS prefix and resolves to the existing category
  * 2. Fix verification: POST categories with explicit id preserves name, no duplicates
- * 3. Idempotency: duplicate category creation upserts (201), not conflicts (409)
+ * 3. Idempotency: duplicate category creation returns 200 (idempotent update),
+ *    not 201 (insert). See LLMO-4370 — the status-code contract flipped from
+ *    `201|409` (old upsert) to `200|201` (idempotent-by-name), so callers can
+ *    discriminate a fresh row from a re-post without parsing the body.
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
@@ -117,10 +120,10 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
 
     // ── Idempotency ──
 
-    describe('Category creation with id is idempotent (upsert)', () => {
+    describe('Category creation is idempotent by name (200 on re-post)', () => {
       before(() => resetData());
 
-      it('second POST with same id upserts without error', async () => {
+      it('second POST with the same name returns 200 (idempotent update)', async () => {
         const http = getHttpClient();
 
         const payload = { id: 'baseurl-test', name: 'Test', origin: 'ai' };
@@ -128,11 +131,14 @@ export default function categoriesPromptsTests(getHttpClient, resetData) {
         const res1 = await http.admin.post(`/v2/orgs/${ORG_1_ID}/categories`, payload);
         expect(res1.status).to.equal(201);
 
-        // Second call — the API uses upsert, so same id should succeed
+        // Second call — idempotent by name: the existing row is matched,
+        // no-op short-circuits (identical fields), response is 200. This
+        // lets DRS-class clients discriminate "created new" from "ensured
+        // existing" without parsing the body. LLMO-4370.
         const res2 = await http.admin.post(`/v2/orgs/${ORG_1_ID}/categories`, payload);
-        expect(res2.status).to.equal(201);
+        expect(res2.status).to.equal(200);
 
-        // Verify only one category exists with that id
+        // Only one category exists — no duplicate.
         const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/categories`);
         expect(listRes.status).to.equal(200);
 
