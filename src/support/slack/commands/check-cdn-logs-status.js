@@ -58,7 +58,9 @@ async function listPresentHours(s3Client, bucket, prefix) {
     for (const cp of response.CommonPrefixes || []) {
       // CommonPrefix format: aggregated/{siteId}/{year}/{month}/{day}/{hour}/
       const hour = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
-      if (hour) hours.add(hour);
+      if (hour) {
+        hours.add(hour);
+      }
     }
 
     continuationToken = response.NextContinuationToken;
@@ -249,7 +251,9 @@ function CheckCdnLogsStatusCommand(context) {
           }
           chunk += `${line}\n`;
         }
-        if (chunk.trim()) await say(chunk.trim());
+        if (chunk.trim()) {
+          await say(chunk.trim());
+        }
       }
     } catch (error) {
       log.error('Error in check-cdn-logs-status:', error);
