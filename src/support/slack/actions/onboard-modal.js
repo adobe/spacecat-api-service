@@ -735,8 +735,13 @@ export function onboardSiteModal(lambdaContext) {
       });
 
       log.info(`[onboard] detecting bot blocker for ${siteUrl}`);
-      const botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
-      log.info(`[onboard] bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable} type=${botProtectionResult.type}`);
+      let botProtectionResult = { crawlable: true, type: 'unknown', confidence: 0 };
+      try {
+        botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
+        log.info(`[onboard] bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable} type=${botProtectionResult.type}`);
+      } catch (e) {
+        log.warn(`[onboard] bot blocker detection failed for ${siteUrl}: ${e.message}, proceeding with onboarding`);
+      }
 
       // Send warning if bot protection is detected
       if (!botProtectionResult.crawlable) {
