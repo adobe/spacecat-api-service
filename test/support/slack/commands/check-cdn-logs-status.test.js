@@ -29,9 +29,9 @@ describe('CheckCdnLogsStatusCommand', () => {
     getBaseURL: () => url,
   });
 
-  const makeS3ListResponse = (hours) => ({
+  const makeS3ListResponse = (hours, nextToken) => ({
     CommonPrefixes: hours.map((h) => ({ Prefix: `aggregated/site-1/2026/04/21/${h}/` })),
-    NextContinuationToken: undefined,
+    NextContinuationToken: nextToken,
   });
 
   beforeEach(async () => {
@@ -85,6 +85,26 @@ describe('CheckCdnLogsStatusCommand', () => {
     );
   });
 
+  it('warns when date passes regex but is not a real date (NaN)', async () => {
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-99-99'], slackContext);
+    expect(slackContext.say).to.have.been.calledWith(
+      sinon.match(':warning: Invalid date format. Use YYYY-MM-DD.'),
+    );
+  });
+
+  it('uses yesterday as the target date when no argument is provided', async () => {
+    context.dataAccess.Site.all.resolves([]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(false),
+    });
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution([], slackContext);
+    // Reaches the hourglass message, confirming the else-branch (yesterday) was taken
+    const firstArg = slackContext.say.getCall(0).args[0];
+    expect(firstArg).to.include(':hourglass_flowing_sand:');
+  });
+
   it('reports when S3 client is not available', async () => {
     context.s3 = null;
     const cmd = CheckCdnLogsStatusCommand(context);
@@ -127,6 +147,58 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(summaryCall[0]).to.include('Incomplete: *0*');
   });
 
+  it('handles S3 response without CommonPrefixes (uses empty fallback)', async () => {
+    const site = makeSite('site-ncp', 'https://no-cp.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+    // Response has no CommonPrefixes key → undefined || [] fallback
+    s3SendStub.resolves({});
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    // All 24 hours missing → site is incomplete
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Incomplete: *1*');
+  });
+
+  it('paginates S3 listing when NextContinuationToken is present', async () => {
+    const site = makeSite('site-pg', 'https://paginated.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+
+    // First page: hours 00-11, with a continuation token
+    const firstHalf = Array.from({ length: 12 }, (_, i) => String(i).padStart(2, '0'));
+    // Second page: hours 12-23, no continuation token
+    const secondHalf = Array.from({ length: 12 }, (_, i) => String(i + 12).padStart(2, '0'));
+
+    s3SendStub
+      .onFirstCall().resolves({
+        CommonPrefixes: firstHalf.map((h) => ({ Prefix: `aggregated/site-pg/2026/04/21/${h}/` })),
+        NextContinuationToken: 'page2-token',
+      })
+      .onSecondCall().resolves({
+        CommonPrefixes: secondHalf.map((h) => ({ Prefix: `aggregated/site-pg/2026/04/21/${h}/` })),
+        NextContinuationToken: undefined,
+      });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    // Two pages → all 24 hours collected → site is complete
+    expect(s3SendStub.callCount).to.equal(2);
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Complete: *1*');
+  });
+
   it('reports missing hours for hourly provider when some hours absent', async () => {
     const site = makeSite('site-1', 'https://fastly-site.com');
     context.dataAccess.Site.all.resolves([site]);
@@ -136,7 +208,7 @@ describe('CheckCdnLogsStatusCommand', () => {
 
     readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
 
-    // Only hours 00-10 present
+    // Only hours 00-10 present → 13 missing (> 6, triggers truncation)
     const presentHours = Array.from({ length: 11 }, (_, i) => String(i).padStart(2, '0'));
     s3SendStub.resolves(makeS3ListResponse(presentHours));
 
@@ -146,6 +218,33 @@ describe('CheckCdnLogsStatusCommand', () => {
     const summaryCall = slackContext.say.args.find((a) => a[0].includes('Incomplete: *1*'));
     expect(summaryCall).to.exist;
     expect(summaryCall[0]).to.include('fastly-site.com');
+  });
+
+  it('shows all missing hours when <= 6 are absent (no truncation)', async () => {
+    // Use a fastly site with only the last 3 hours missing (21-23 missing → 3 missing, <= 6)
+    const site = makeSite('site-few', 'https://few-missing.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'akamai' } } });
+
+    // Hours 00-20 present (21 hours), 21-23 missing (3 hours)
+    const presentHours = Array.from({ length: 21 }, (_, i) => String(i).padStart(2, '0'));
+    s3SendStub.resolves({
+      CommonPrefixes: presentHours.map((h) => ({
+        Prefix: `aggregated/site-few/2026/04/21/${h}/`,
+      })),
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Incomplete: *1*');
+    // All missing hours shown inline, not truncated
+    expect(output).to.include('21, 22, 23');
   });
 
   it('shows complete for cloudflare (daily-only) site when hour 23 is present', async () => {
@@ -167,6 +266,28 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(summaryCall).to.exist;
   });
 
+  it('reports incomplete daily-only site with [daily-only] tag when hour 23 is absent', async () => {
+    // imperva site missing hour 23 → 1 missing hour (≤ 6, shows all inline)
+    // also exercises the isDailyOnly [daily-only] provider tag
+    const site = makeSite('site-imp', 'https://imperva-site.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'imperva' } } });
+    // No hour 23 → missing = ['23']
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Incomplete: *1*');
+    expect(output).to.include('[daily-only]');
+    expect(output).to.include('imperva');
+  });
+
   it('treats unknown provider as hourly (all 24 hours expected)', async () => {
     const site = makeSite('site-u', 'https://unknown-cdn.com');
     context.dataAccess.Site.all.resolves([site]);
@@ -185,7 +306,85 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(summaryCall).to.exist;
   });
 
-  it('handles unexpected errors gracefully', async () => {
+  it('falls back to unknown provider when config has no cdnProvider field', async () => {
+    // readConfig succeeds but cdnBucketConfig.cdnProvider is absent → raw is falsy → 'unknown'
+    const site = makeSite('site-noraw', 'https://noraw.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: {} } });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    // unknown (fallback) → all 24 hours expected → incomplete
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Incomplete: *1*');
+  });
+
+  it('uses default region and environment when env vars are absent', async () => {
+    context.env = {}; // no AWS_REGION, no AWS_ENV → triggers || fallbacks
+    context.dataAccess.Site.all.resolves([]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(false),
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    // Bucket name in hourglass message uses 'prod' and 'us-east-1' defaults
+    const firstArg = slackContext.say.getCall(0).args[0];
+    expect(firstArg).to.include('spacecat-prod-cdn-logs-aggregates-us-east-1');
+  });
+
+  it('reports per-site S3 error in the errors section', async () => {
+    const site = makeSite('site-err', 'https://s3error.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+    // S3 listing throws → triggers per-site catch block
+    s3SendStub.rejects(new Error('AccessDenied'));
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    expect(context.log.warn).to.have.been.calledWith(
+      sinon.match('CDN logs status check failed for site site-err'),
+    );
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Sites with errors');
+    expect(output).to.include('AccessDenied');
+  });
+
+  it('chunks output when report exceeds the Slack message limit', async () => {
+    // 30 sites, all incomplete with many missing hours → long report
+    const sites = Array.from({ length: 30 }, (_, i) => makeSite(
+      `site-${i}`,
+      `https://very-long-site-url-that-pads-output-number-${i}.example.com`,
+    ));
+    context.dataAccess.Site.all.resolves(sites);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+    // Return only 2 hours → 22 missing → each site produces a long line
+    s3SendStub.resolves(makeS3ListResponse(['00', '01']));
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    // Multiple say() calls due to chunking
+    expect(slackContext.say.callCount).to.be.greaterThan(2);
+  });
+
+  it('handles unexpected top-level errors gracefully', async () => {
     context.dataAccess.Site.all.rejects(new Error('DB connection failed'));
 
     const cmd = CheckCdnLogsStatusCommand(context);
