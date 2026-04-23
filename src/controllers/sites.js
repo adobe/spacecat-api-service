@@ -1180,7 +1180,7 @@ function SitesController(ctx, log, env) {
     }
 
     const resolveFailure = (message, errorCause, details) => createResponse(
-      { message, errorCause, ...(details ? { details } : {}) },
+      { message, errorCause, details },
       404,
       { 'x-error': message, 'x-error-cause': errorCause },
     );
