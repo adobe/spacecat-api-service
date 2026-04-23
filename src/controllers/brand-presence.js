@@ -107,6 +107,7 @@ function BrandPresenceController(context) {
       const {
         start_week: startWeek = null,
         end_week: endWeek = null,
+        platform = null,
         limit: rawLimit = '1000',
         offset: rawOffset = '0',
       } = requestContext.data || {};
@@ -140,6 +141,10 @@ function BrandPresenceController(context) {
       if (endWeek) {
         whereClause.push('week <= {endWeek:String}');
         queryParams.endWeek = endWeek;
+      }
+      if (platform && platform !== 'all') {
+        whereClause.push('platform = {platform:String}');
+        queryParams.platform = platform;
       }
 
       const where = whereClause.join(' AND ');
