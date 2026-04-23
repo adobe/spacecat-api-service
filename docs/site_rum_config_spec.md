@@ -1,7 +1,7 @@
 # Design Spec: Surface RUM availability on the Site object
 
 **Owner:** Sugandh Goyal
-**Reviewers:** @kanishka, @hchung, @oorobei
+**Reviewers:** @kanishka, @absarasw, @sandsinh
 **Status:** Proposal
 **Related:** Non-blocking "No RUM" dialog + banner (ASO UI), post-Summit delivery
 
@@ -96,21 +96,14 @@ If Spacecat ever fires an internal event when a customer configures RUM post-onb
 3. Run in dev → stage → prod, with manual review between environments.
 4. Idempotent: safe to re-run.
 
-## 5. Scope check — is it only CWV that depends on RUM?
-
-Kanishka flagged uncertainty here post-ahref removal. As part of this ticket, confirm the audits list:
-
-- Current RUM-dependent audits per `spacecat-shared/packages/spacecat-shared-data-access/src/models/site/config.js` (`sources` field): CWV, HIGH_ORGANIC_LOW_CTR, ALT_TEXT, INVALID_OR_MISSING_METADATA, BROKEN_INTERNAL_LINKS, AD_INTENT_MISMATCH list `'rum'` in their `sources`.
-- Action: confirm with audit-worker owner whether these all still meaningfully require RUM, or if some now have fallbacks. Capture the answer in this spec before UI starts filtering.
-
-## 6. Testing
+## 5. Testing
 
 - **Unit**: `Config.updateRumConfig` sets/updates the three fields correctly; `hasRumDomainKey()` returns expected boolean; Joi validation accepts/rejects bad shapes.
 - **Integration (PLG)**: onboarding a new site writes `rumConfig` when RUM check succeeds AND when it fails.
 - **Backfill script**: dry-run mode that reports counts without writing; wet-run idempotency.
 - **API contract**: `GET /sites/{id}` response includes `config.rumConfig` after update.
 
-## 7. Rollout
+## 6. Rollout
 
 1. **PR 1** (spacecat-shared): add Joi schema + `Config` accessors + unit tests.
 2. **PR 2** (spacecat-api-service): wire PLG onboarding to call `updateRumConfig` + tests.
@@ -120,8 +113,7 @@ Kanishka flagged uncertainty here post-ahref removal. As part of this ticket, co
 
 PRs 1–3 are independent of the UI work and can land first. UI work (PR 4) is gated on backfill completion in prod.
 
-## 8. Open questions
+## 7. Open questions
 
-- [ ] Confirm full list of RUM-dependent audits post-ahref removal (owner: audit-worker team).
 - [ ] Should `rumConfig` be editable via an admin API for manual overrides? (default: no, v1)
 - [ ] Do we want a periodic refresh cron in v1, or defer? (recommended: defer)
