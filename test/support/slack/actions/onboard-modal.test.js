@@ -1374,6 +1374,34 @@ describe('onboard-modal', () => {
         const successMessage = calls.find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
         expect(successMessage).to.exist;
       });
+
+      it('should continue onboarding when detectBotBlocker throws', async () => {
+        const onboardStub = sinon.stub().resolves({ siteId: 'site123', errors: [] });
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({ audits: ['scrape-top-pages'], imports: ['organic-traffic'] }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: onboardStub,
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '@adobe/spacecat-shared-utils': {
+            isValidUrl: () => true,
+            detectBotBlocker: sinon.stub().rejects(new Error('connection timeout')),
+          },
+        });
+
+        const modalAction = testModule.onboardSiteModal(context);
+
+        await modalAction({ ack: ackMock, body, client: clientMock });
+
+        expect(onboardStub.calledOnce).to.be.true;
+        const successMessage = clientMock.chat.postMessage.getCalls()
+          .find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
+        expect(successMessage).to.exist;
+      });
     });
   });
 });
