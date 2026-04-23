@@ -310,6 +310,30 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('2026-04-22 08:30');
   });
 
+  it('treats null projRows with no error the same as an empty result (|| [] fallback)', async () => {
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-null-rows',
+        rowCount: 60,
+        classificationCount: 10,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-nr', 'https://nullrows.com', audit)]);
+
+    // PostgREST returns {data: null, error: null} — exercises the `projRows || []` fallback
+    const chain = makePostgrestChain({ data: null, error: null });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    // projectionMap stays empty → site is pending
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Pending');
+  });
+
   it('handles projection_audit query error gracefully and treats site as pending', async () => {
     const audit = makeAudit({
       dailyAgenticExport: {
