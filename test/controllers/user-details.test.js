@@ -471,4 +471,74 @@ describe('User Details Controller', () => {
       expect(mockLog.error).to.have.been.called;
     });
   });
+
+  describe('resolveUser', () => {
+    it('should return forbidden when requestor is not admin', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+      context.request = { url: 'https://spacecat.adobe.com/admin/resolve-user?userId=user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(403);
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('should return bad request when userId is missing', async () => {
+      context.request = { url: 'https://spacecat.adobe.com/admin/resolve-user' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(400);
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('should return bad request when request url is absent', async () => {
+      context.request = null;
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(400);
+      expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+    });
+
+    it('should return resolved user profile for a valid userId', async () => {
+      context.request = { url: 'https://spacecat.adobe.com/admin/resolve-user?userId=user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({
+        firstName: 'IMS',
+        lastName: 'User',
+        email: 'imsuser@example.com',
+      });
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledWith('user@AdobeOrg');
+    });
+
+    it('should use fallback values when IMS returns incomplete profile', async () => {
+      mockImsClient.getImsAdminProfile.resolves({
+        first_name: null,
+        last_name: undefined,
+        email: null,
+      });
+      context.request = { url: 'https://spacecat.adobe.com/admin/resolve-user?userId=user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({ firstName: '-', lastName: '-', email: '' });
+    });
+
+    it('should return internal server error when IMS call fails', async () => {
+      mockImsClient.getImsAdminProfile.rejects(new Error('IMS unavailable'));
+      context.request = { url: 'https://spacecat.adobe.com/admin/resolve-user?userId=user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(500);
+      expect(mockLog.error).to.have.been.called;
+    });
+  });
 });
