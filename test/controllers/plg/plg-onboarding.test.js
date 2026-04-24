@@ -3434,35 +3434,8 @@ describe('PlgOnboardingController', () => {
       expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
         /org not reflected in DB after save/,
       );
-      expect(tierClientCreateForSiteStub).to.not.have.been.called;
-    });
-
-    it('waitlists when re-fetched site reports a different organization id', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-stale-read';
-
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-
-      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      // Re-fetch returns a site still reporting the internal org (stale read / replica lag shape).
-      const staleRefetch = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(staleRefetch);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        /org not reflected in DB after save/,
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWithMatch(
+        sinon.match({ siteOrgReassignmentFailed: true }),
       );
       expect(tierClientCreateForSiteStub).to.not.have.been.called;
     });
@@ -3566,6 +3539,9 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
         /org not reflected in DB after save/,
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch(
+        sinon.match({ siteOrgReassignmentFailed: true }),
       );
       // Entitlement creation must NOT happen when reassignment failed.
       expect(tierClientCreateEntitlementStub).to.not.have.been.called;

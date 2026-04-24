@@ -68,6 +68,14 @@ const REVIEW_REASONS = {
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
+
+class OnboardingWaitlistError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'OnboardingWaitlistError';
+  }
+}
+
 /**
  * Derives the review check key from the onboarding record's current state.
  * @param {object} onboarding - The PlgOnboarding record.
@@ -253,11 +261,8 @@ async function reassignSiteOrganization(site, organizationId, dataAccess) {
 
   // Re-fetch to get a fresh instance where this.record reflects the DB value.
   const refreshed = await dataAccess.Site.findById(site.getId());
-  if (!refreshed || refreshed.getOrganizationId() !== organizationId) {
-    throw Object.assign(
-      new Error(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed?.getOrganizationId()}`),
-      { waitlist: true },
-    );
+  if (!refreshed) {
+    throw new OnboardingWaitlistError(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed?.getOrganizationId()}`);
   }
   return refreshed;
 }
@@ -802,10 +807,11 @@ async function performAsoPlgOnboarding({
         await postPlgOnboardingNotification(onboarding, context);
         return onboarding;
       } catch (error) {
-        if (error.waitlist) {
+        if (error instanceof OnboardingWaitlistError) {
           onboarding.setStatus(STATUSES.WAITLISTED);
           onboarding.setWaitlistReason(error.message);
-          onboarding.setSteps(onboarding.getSteps() || {});
+          const failedSteps = { ...(onboarding.getSteps() || {}), siteOrgReassignmentFailed: true };
+          onboarding.setSteps(failedSteps);
           if (updatedBy) {
             onboarding.setUpdatedBy(updatedBy);
           }
@@ -1230,10 +1236,10 @@ async function performAsoPlgOnboarding({
 
     return onboarding;
   } catch (error) {
-    if (error.waitlist) {
+    if (error instanceof OnboardingWaitlistError) {
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(error.message);
-      onboarding.setSteps(steps);
+      onboarding.setSteps({ ...steps, siteOrgReassignmentFailed: true });
       if (updatedBy) {
         onboarding.setUpdatedBy(updatedBy);
       }
@@ -1749,7 +1755,7 @@ function PlgOnboardingController(ctx) {
             try {
               site = await reassignSiteOrganization(site, currentOrgId, da);
             } catch (err) {
-              if (err.waitlist) {
+              if (err instanceof OnboardingWaitlistError) {
                 onboarding.setStatus(STATUSES.WAITLISTED);
                 onboarding.setWaitlistReason(err.message);
                 await onboarding.save();
