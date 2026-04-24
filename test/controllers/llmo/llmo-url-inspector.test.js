@@ -1639,6 +1639,32 @@ describe('URL Inspector Handlers', () => {
       expect(meta).to.include({ route: 'url-inspector-filter-dimensions', siteId: SITE_ID });
     });
 
+    it('falls back to String(e) when a non-Error value is thrown', async () => {
+      // LLMO-4525 CI fix (branch coverage): the catch block uses
+      // `e?.message || e` so that both Error instances AND bare thrown
+      // values (strings, null, numbers — what some AWS SDK transports do
+      // under the hood) produce a useful log line. The happy-path throw
+      // test above only exercises the `.message` branch. This test pins
+      // the fallback branch so coverage does not regress to < 100 %.
+      // Matches the pattern used at the top of this file for
+      // `createUrlInspectorStatsHandler` (bare-string-reject test) which
+      // scopes the `prefer-promise-reject-errors` disable to a single
+      // line — intentional non-Error rejection to exercise the fallback.
+      const { context, rpcStub } = createContext({}, {});
+      /* eslint-disable prefer-promise-reject-errors */
+      rpcStub.callsFake(() => Promise.reject('bare-string-rejection'));
+      /* eslint-enable prefer-promise-reject-errors */
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+
+      expect(context.log.error).to.have.been.calledOnce;
+      const [message, meta] = context.log.error.firstCall.args;
+      expect(message).to.contain('bare-string-rejection');
+      expect(meta).to.include({ route: 'url-inspector-filter-dimensions', siteId: SITE_ID });
+    });
+
     it('returns 400 for invalid platform value', async () => {
       const { context } = createContext({}, { platform: 'not-a-real-model' });
 
