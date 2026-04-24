@@ -262,7 +262,7 @@ async function reassignSiteOrganization(site, organizationId, dataAccess) {
   return refreshed;
 }
 
-async function ensureAsoEntitlement(site, organization, context) {
+async function ensureAsoEntitlement(site, context) {
   const { log } = context;
   const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
   try {
@@ -388,6 +388,7 @@ async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitle
     return;
   }
 
+  // Normally at most 1 sibling (previous PRE_ONBOARD site); more than 3 suggests drift or a bug.
   if (toRevoke.length > 3) {
     log.warn(`Found ${toRevoke.length} other ASO enrollments under entitlement ${entitlement.getId()} for org ${expectedOrgId}; revoking all. Investigate if unexpected.`);
   }
@@ -778,7 +779,7 @@ async function performAsoPlgOnboarding({
           log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
         }
 
-        const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+        const { entitlement } = await ensureAsoEntitlement(site, context);
         await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
         await updateLaunchDarklyFlags(site, organization, context);
 
@@ -1197,7 +1198,7 @@ async function performAsoPlgOnboarding({
     // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.
     // Revocation is guarded by entitlement.organizationId === organization.getId() and an
     // internal-org check, so cross-org mass-revokes are blocked on any resolution drift.
-    const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+    const { entitlement } = await ensureAsoEntitlement(site, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
     await updateLaunchDarklyFlags(site, organization, context);
 
@@ -1745,7 +1746,18 @@ function PlgOnboardingController(ctx) {
             if (existingDeliveryConfig.imsOrgId) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
-            site = await reassignSiteOrganization(site, currentOrgId, da);
+            try {
+              site = await reassignSiteOrganization(site, currentOrgId, da);
+            } catch (err) {
+              if (err.waitlist) {
+                onboarding.setStatus(STATUSES.WAITLISTED);
+                onboarding.setWaitlistReason(err.message);
+                await onboarding.save();
+                await postPlgOnboardingNotification(onboarding, context);
+                return ok(PlgOnboardingDto.toAdminJSON(onboarding));
+              }
+              throw err;
+            }
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
             await onboarding.save();
