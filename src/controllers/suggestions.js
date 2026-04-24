@@ -26,6 +26,7 @@ import {
   isInteger,
   isValidUUID,
   isValidUrl,
+  DELIVERY_TYPES,
 } from '@adobe/spacecat-shared-utils';
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
@@ -969,7 +970,21 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    // Tier-based autofix enforcement, moved here from login.js so it can be site-aware.
+    // login.js previously auto-granted auto_fix to FREE_TRIAL/PLG users at login regardless
+    // of site type. That blanket grant has been removed: EDS autofix executes server-side
+    // with no user-level token check at apply time, so free-tier users must be explicitly
+    // restricted at the API layer. Non-EDS (AEM CS) free-tier users retain their existing
+    // access via org membership — AEM CS has its own apply-time auth, so the scope gate
+    // there is only enforced for paid users as before.
+    const isEdsSite = site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE;
+    const siteOrg = await site.getOrganization();
+    const orgIdent = siteOrg.getImsOrgId().split('@')[0];
+    const callerTenant = context.attributes?.authInfo?.getProfile?.()?.tenants
+      ?.find((t) => t.id === orgIdent);
+    const isFreeTierCaller = ['FREE_TRIAL', 'PLG'].includes(callerTenant?.entitlement?.tier);
+    const subService = (isEdsSite || !isFreeTierCaller) ? 'auto_fix' : '';
+    if (!await accessControlUtil.hasAccess(site, subService)) {
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 
@@ -1147,6 +1162,13 @@ function SuggestionsController(ctx, sqs, env) {
     const autofixOptions = (urlParam) => ({
       url: urlParam,
       ...(precheckOnly === true && { precheckOnly: true }),
+    });
+    context.log?.info('[autofix-triggered]', {
+      siteId,
+      opportunityId,
+      action: action || 'apply',
+      suggestionCount: succeededSuggestions.length,
+      triggeredBy: context.attributes?.authInfo?.getProfile?.()?.email || 'unknown',
     });
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
