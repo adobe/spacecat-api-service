@@ -187,28 +187,68 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.orgMembers).to.equal('plain1@example.com, plain2@example.com');
     });
 
-    it('passes docLink and cdnNote as separate variables for CDNs with extra config', async () => {
+    it('passes docLink for CDNs with setup guide and empty note for CDNs without one', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'byocdn-cloudflare' });
 
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.docLink).to.include('cloudflare');
-      expect(templateData.cdnNote).to.include('AdobeEdgeOptimize/1.0');
+      expect(templateData.cdnNote).to.equal('');
       expect(templateData.cdnDisplayName).to.equal('Cloudflare (BYOCDN)');
+    });
+
+    it('passes docLink and cdnNote for CloudFront which has Lambda@Edge specific note', async () => {
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'byocdn-cloudfront' });
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.docLink).to.include('cloudfront');
+      expect(templateData.cdnNote).to.include('Lambda@Edge');
+      expect(templateData.cdnDisplayName).to.equal('CloudFront (BYOCDN)');
     });
 
     it('passes empty docLink and cdnNote for CDNs without extra config', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'byocdn-imperva' });
 
-      const { templateData } = sendEmailStub.firstCall.args[1];
+      const { templateData, templateName } = sendEmailStub.firstCall.args[1];
       expect(templateData.docLink).to.equal('');
       expect(templateData.cdnNote).to.equal('');
       expect(templateData.cdnDisplayName).to.equal('Imperva (BYOCDN)');
+      expect(templateName).to.equal('llmo_cdn_opt_in_notification');
     });
 
-    it('handles unknown CDN type gracefully', async () => {
+    it('uses adobe managed template for ams-cloudfront', async () => {
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'ams-cloudfront' });
+
+      const { templateName, templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
+      expect(templateData.cdnDisplayName).to.equal('AMS CloudFront');
+    });
+
+    it('uses adobe managed template for ams-frontdoor', async () => {
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'ams-frontdoor' });
+
+      const { templateName } = sendEmailStub.firstCall.args[1];
+      expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
+    });
+
+    it('uses adobe managed template for aem-cs-fastly', async () => {
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'aem-cs-fastly' });
+
+      const { templateName } = sendEmailStub.firstCall.args[1];
+      expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
+    });
+
+    it('uses adobe managed template for commerce-fastly', async () => {
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'commerce-fastly' });
+
+      const { templateName } = sendEmailStub.firstCall.args[1];
+      expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
+    });
+
+    it('uses byocdn template for a CDN type and handles gracefully', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'some-unknown-cdn' });
 
-      const { templateData } = sendEmailStub.firstCall.args[1];
+      const { templateName, templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateName).to.equal('llmo_cdn_opt_in_notification');
       expect(templateData.cdnDisplayName).to.equal('some-unknown-cdn');
       expect(templateData.docLink).to.equal('');
       expect(templateData.cdnNote).to.equal('');
@@ -301,7 +341,7 @@ describe('cdn-opt-in-notification', () => {
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.siteBaseURL).to.equal('https://www.example.com');
       expect(templateData.optedBy).to.equal('');
-      expect(templateData.cdnDisplayName).to.equal('Unknown CDN');
+      expect(templateData.cdnDisplayName).to.equal('A CDN');
       expect(templateData.docLink).to.equal('');
       expect(templateData.cdnNote).to.equal('');
       expect(templateData.orgMembers).to.equal('');

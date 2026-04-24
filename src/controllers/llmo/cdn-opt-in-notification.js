@@ -16,45 +16,66 @@
  *
  * Design decisions:
  * - Triggered only on the first opt-in (isNewlyOpted=true) — not on subsequent config updates.
- * - CDN type (cdnLogSource) is stored in edgeOptimizeConfig by provision.js so it is available
- *   here without an extra service call.
+ * - CDN type is read from llmo.cdnBucketConfig.cdnProvider (populated by llmo-config-wrapper
+ *   in auth-service during provisioning).
  * - Email failures never block the opt-in response — notification is fire-and-forget.
  * - Recipients must be set via OPT_IN_NOTIFICATION_RECIPIENTS in Vault (comma-separated
  *   @adobe.com addresses). If missing, notification is skipped with an error log.
+ * - BYOCDN sites use llmo_cdn_opt_in_notification template (IT/CDN team action required).
+ * - Adobe-managed CDN sites use llmo_cdn_opt_in_notification_adobe_managed template
+ *   (no customer action required).
  */
 
 import { sendEmail } from '../../support/email-service.js';
 
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
+const OPT_IN_NOTIFICATION_TEMPLATE_ADOBE_MANAGED = 'llmo_cdn_opt_in_notification_adobe_managed';
 const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
 
 const CDN_CONFIG = {
   'byocdn-fastly': {
     displayName: 'Fastly (BYOCDN)',
+    adobeManaged: false,
   },
   'byocdn-akamai': {
     displayName: 'Akamai (BYOCDN)',
+    adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/akamai-byocdn',
-    note: 'WAF or Bot Manager blocking the AdobeEdgeOptimize/1.0 user agent is the most common onboarding issue — check WAF connectivity if the customer reports problems.',
   },
   'byocdn-cloudflare': {
     displayName: 'Cloudflare (BYOCDN)',
+    adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/cloudflare-byocdn',
-    note: 'Ensure the AdobeEdgeOptimize/1.0 user agent is allowlisted in any WAF or Bot Manager rules.',
   },
   'byocdn-cloudfront': {
     displayName: 'CloudFront (BYOCDN)',
+    adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/cloudfront-byocdn',
     note: 'This involves Lambda@Edge and cache policy setup — follow the step-by-step guide closely.',
   },
   'byocdn-imperva': {
     displayName: 'Imperva (BYOCDN)',
+    adobeManaged: false,
   },
   'byocdn-other': {
     displayName: 'Custom BYOCDN',
+    adobeManaged: false,
   },
   'ams-cloudfront': {
     displayName: 'AMS CloudFront',
+    adobeManaged: true,
+  },
+  'ams-frontdoor': {
+    displayName: 'AMS Front Door',
+    adobeManaged: true,
+  },
+  'aem-cs-fastly': {
+    displayName: 'AEM Cloud Service Managed CDN (Fastly)',
+    adobeManaged: true,
+  },
+  'commerce-fastly': {
+    displayName: 'Adobe Commerce Cloud - PaaS (Fastly)',
+    adobeManaged: true,
   },
 };
 
@@ -135,10 +156,16 @@ export async function notifyOptInIfNeeded(context, params) {
       return { sent: false, reason: 'no-recipients' };
     }
 
-    const cdnDisplayName = CDN_CONFIG[cdnLogSource]?.displayName || cdnLogSource || 'Unknown CDN';
-    const docLink = CDN_CONFIG[cdnLogSource]?.docLink || '';
-    const cdnNote = CDN_CONFIG[cdnLogSource]?.note || '';
+    const cdnEntry = CDN_CONFIG[cdnLogSource];
+    const cdnDisplayName = cdnEntry?.displayName || cdnLogSource || 'A CDN';
+    const docLink = cdnEntry?.docLink || '';
+    const cdnNote = cdnEntry?.note || '';
+    const isAdobeManaged = cdnEntry?.adobeManaged === true;
     const orgMembers = await getOrgMembersCsv(context, orgId);
+
+    const templateName = isAdobeManaged
+      ? OPT_IN_NOTIFICATION_TEMPLATE_ADOBE_MANAGED
+      : OPT_IN_NOTIFICATION_TEMPLATE;
 
     const templateData = {
       siteBaseURL: siteBaseURL || '',
@@ -149,11 +176,11 @@ export async function notifyOptInIfNeeded(context, params) {
       orgMembers,
     };
 
-    log.info(`[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} cdnLogSource=${cdnLogSource}`);
+    log.info(`[cdn-opt-in-notification] Sending ${templateName} for site=${siteId} cdnLogSource=${cdnLogSource}`);
 
     const result = await sendEmail(context, {
       recipients,
-      templateName: OPT_IN_NOTIFICATION_TEMPLATE,
+      templateName,
       templateData,
     });
 
