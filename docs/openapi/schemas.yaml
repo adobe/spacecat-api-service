@@ -8321,11 +8321,17 @@ UrlInspectorFilterDimensions:
   type: object
   description: |
     Distinct filter options for the URL Inspector PG dashboard, sourced from
-    url_inspector_domain_stats. Each dimension is an array of id/label pairs.
+    `url_inspector_domain_stats`. Each dimension is an array of id/label pairs.
+
+    LLMO-4525 review note: `categories` and `regions` are open-ended strings
+    (data is tenant-supplied), so we intentionally do NOT pin an enum on
+    them — consumers must treat any string as valid. `content_types.id`
+    however mirrors the Postgres `source_content_type` enum and IS pinned so
+    breaking enum additions surface in the OpenAPI contract.
   properties:
     categories:
       type: array
-      description: Distinct category names
+      description: Distinct category names present in the site's data for the date range.
       items:
         type: object
         properties:
@@ -8334,7 +8340,7 @@ UrlInspectorFilterDimensions:
         required: [id, label]
     regions:
       type: array
-      description: Distinct region codes
+      description: Distinct region codes present in the site's data for the date range.
       items:
         type: object
         properties:
@@ -8343,11 +8349,16 @@ UrlInspectorFilterDimensions:
         required: [id, label]
     content_types:
       type: array
-      description: Distinct source content types (owned, earned, social, competitor)
+      description: |
+        Distinct source content types present in the site's data. `id` mirrors
+        the Postgres `source_content_type` enum.
       items:
         type: object
         properties:
-          id: { type: string }
+          id:
+            type: string
+            enum: [owned, earned, social, competitor]
+            description: Postgres `source_content_type` enum value
           label: { type: string }
         required: [id, label]
   required: [categories, regions, content_types]
