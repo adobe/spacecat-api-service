@@ -1182,7 +1182,7 @@ function SitesController(ctx, log, env) {
     const resolveFailure = (message, errorCause, details) => createResponse(
       { message, errorCause, details },
       404,
-      { 'x-error': message, 'x-error-cause': errorCause },
+      { 'x-error': message },
     );
 
     let organization;

@@ -4955,7 +4955,6 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
       expect(body.errorCause).to.equal('aso_pre_onboard');
       expect(body.details).to.deep.include({ productCode: 'ASO', tier: 'PRE_ONBOARD' });
-      expect(response.headers.get('x-error-cause')).to.equal('aso_pre_onboard');
     });
 
     it('should return 404 with no_entitlement_for_product errorCause when product has no entitlement', async () => {
@@ -4978,7 +4977,6 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.errorCause).to.equal('no_entitlement_for_product');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
-      expect(response.headers.get('x-error-cause')).to.equal('no_entitlement_for_product');
     });
 
     it('should return 404 with site_not_enrolled errorCause when entitlement is visible but site has no enrollment', async () => {
@@ -5005,7 +5003,6 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.errorCause).to.equal('site_not_enrolled');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
-      expect(response.headers.get('x-error-cause')).to.equal('site_not_enrolled');
     });
 
     it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
