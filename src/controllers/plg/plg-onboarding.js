@@ -254,10 +254,13 @@ async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
 
   // Re-fetch to get a fresh instance where this.record reflects the DB value.
   const refreshed = await dataAccess.Site.findById(site.getId());
-  if (!refreshed || refreshed.getOrganizationId() !== organizationId) {
-    log.warn(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed?.getOrganizationId()}.`);
+  if (!refreshed) {
+    throw new Error(`Site ${site.getId()} not found after org reassignment save`);
   }
-  return refreshed ?? site;
+  if (refreshed.getOrganizationId() !== organizationId) {
+    log.warn(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed.getOrganizationId()}.`);
+  }
+  return refreshed;
 }
 
 async function ensureAsoEntitlement(site, organization, context) {
