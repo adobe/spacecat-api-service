@@ -385,6 +385,8 @@ describe('llmo-brand-presence', () => {
       expect(resolveModelFromRequest('ALL')).to.equal('chatgpt-paid');
       expect(resolveModelFromRequest('chatgpt')).to.equal('chatgpt-free');
       expect(resolveModelFromRequest('ChatGPT')).to.equal('chatgpt-free');
+      expect(resolveModelFromRequest('openai')).to.equal('chatgpt-paid');
+      expect(resolveModelFromRequest('OpenAI')).to.equal('chatgpt-paid');
     });
 
     it('passes through canonical enum values and trims whitespace', () => {

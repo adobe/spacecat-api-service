@@ -566,3 +566,57 @@ export function createUrlInspectorUrlPromptsHandler(
     },
   );
 }
+
+/**
+ * Creates the getUrlInspectorFilterDimensions handler.
+ * Returns the distinct set of categories, regions, and content types present in
+ * url_inspector_domain_stats for the given site and date range. Used to hydrate
+ * the top-of-page Category, Region, and Channel filter dropdowns on the URL
+ * Inspector PG dashboard.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'url-inspector-filter-dimensions',
+    async (ctx, client) => {
+      const { spaceCatId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+
+      if (!shouldApplyFilter(params.siteId)) {
+        return badRequest('siteId is required for URL Inspector endpoints');
+      }
+
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(
+        client,
+        spaceCatId,
+        params.siteId,
+      );
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+
+      const { model, error: modelError } = resolveUrlInspectorPlatform(params);
+      if (modelError) {
+        return badRequest(modelError);
+      }
+
+      const { data, error } = await client.rpc('rpc_url_inspector_filter_dimensions', {
+        p_site_id: params.siteId,
+        p_start_date: params.startDate || defaults.startDate,
+        p_end_date: params.endDate || defaults.endDate,
+        p_platform: model,
+        p_brand_id: shouldApplyFilter(params.brandId) ? params.brandId : null,
+      });
+
+      if (error) {
+        ctx.log.error(`URL Inspector filter dimensions RPC error: ${error.message}`);
+        return internalServerError('Internal error processing URL Inspector filter dimensions');
+      }
+
+      return ok(data);
+    },
+  );
+}

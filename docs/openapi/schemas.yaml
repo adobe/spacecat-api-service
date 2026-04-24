@@ -8316,3 +8316,38 @@ UrlInspectorUrlPrompts:
       items:
         $ref: '#/UrlInspectorUrlPromptRow'
   required: [prompts]
+
+UrlInspectorFilterDimensions:
+  type: object
+  description: |
+    Distinct filter options for the URL Inspector PG dashboard, sourced from
+    url_inspector_domain_stats. Each dimension is an array of id/label pairs.
+  properties:
+    categories:
+      type: array
+      description: Distinct category names
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          label: { type: string }
+        required: [id, label]
+    regions:
+      type: array
+      description: Distinct region codes
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          label: { type: string }
+        required: [id, label]
+    content_types:
+      type: array
+      description: Distinct source content types (owned, earned, social, competitor)
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          label: { type: string }
+        required: [id, label]
+  required: [categories, regions, content_types]

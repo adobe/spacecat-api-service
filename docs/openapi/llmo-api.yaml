@@ -2958,6 +2958,49 @@ url-inspector-url-prompts:
       - api_key: []
       - ims_key: []
 
+url-inspector-filter-dimensions:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Filter dimensions for the URL Inspector PG dashboard
+    description: |
+      Returns the distinct categories, regions, and content types present in
+      url_inspector_domain_stats for the given site and date range. Used to
+      populate the top-of-page Category, Region, and Channel filter dropdowns.
+    operationId: getUrlInspectorFilterDimensions
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        schema: { type: string }
+    responses:
+      '200':
+        description: Filter dimensions for the URL Inspector page
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorFilterDimensions'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
 llmo-agentic-traffic-movers:
   parameters:
     - $ref: './parameters.yaml#/siteId'

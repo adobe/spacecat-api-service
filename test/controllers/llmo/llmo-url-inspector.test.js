@@ -21,6 +21,7 @@ import {
   createUrlInspectorCitedDomainsHandler,
   createUrlInspectorDomainUrlsHandler,
   createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
 } from '../../../src/controllers/llmo/llmo-url-inspector.js';
 
 use(sinonChai);
@@ -1385,6 +1386,91 @@ describe('URL Inspector Handlers', () => {
       const handler = createUrlInspectorStatsHandler(
         getOrgAndValidateAccess(),
       );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+  });
+
+  describe('createUrlInspectorFilterDimensionsHandler', () => {
+    const DIMENSIONS_DATA = {
+      categories: [{ id: 'Reader', label: 'Reader' }],
+      regions: [{ id: 'US', label: 'US' }],
+      content_types: [{ id: 'owned', label: 'owned' }],
+    };
+
+    it('returns filter dimensions on success', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.categories).to.deep.equal(DIMENSIONS_DATA.categories);
+      expect(body.regions).to.deep.equal(DIMENSIONS_DATA.regions);
+      expect(body.content_types).to.deep.equal(DIMENSIONS_DATA.content_types);
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_site_id: SITE_ID,
+      }));
+    });
+
+    it('returns 400 when siteId is missing', async () => {
+      const { context } = createContext({}, { siteId: undefined });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 403 when site does not belong to org', async () => {
+      const { context } = createContext({}, {});
+      context.dataAccess.Site.postgrestService.from = sinon.stub().returns({
+        select: sinon.stub().returns({
+          eq: sinon.stub().returns({
+            eq: sinon.stub().returns({
+              limit: sinon.stub().resolves({ data: [], error: null }),
+            }),
+          }),
+        }),
+      });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when RPC returns an error', async () => {
+      const { context } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: null, error: { message: 'db error' } },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('returns 400 for invalid platform value', async () => {
+      const { context } = createContext({}, { platform: 'not-a-real-model' });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
       expect(response.status).to.equal(400);

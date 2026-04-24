@@ -645,6 +645,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions',
       'GET /org/:spaceCatId/opportunities/count',
       'GET /org/:spaceCatId/brands/all/opportunities',
       'GET /org/:spaceCatId/brands/:brandId/opportunities',
