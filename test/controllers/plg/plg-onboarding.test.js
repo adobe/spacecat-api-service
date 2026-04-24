@@ -1977,7 +1977,7 @@ describe('PlgOnboardingController', () => {
     it('continues onboarding when site belongs to ASO_DEMO_ORG with no enrollments', async () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-      mockDataAccess.Site.findById.resolves(existingSite);
+      mockDataAccess.Site.findById.resolves(createMockSite({ orgId: TEST_ORG_ID }));
 
       const context = buildContext({ domain: TEST_DOMAIN });
 
@@ -1994,7 +1994,7 @@ describe('PlgOnboardingController', () => {
         siteEnrollments: [{ getId: () => 'enroll-1' }],
       });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-      mockDataAccess.Site.findById.resolves(existingSite);
+      mockDataAccess.Site.findById.resolves(createMockSite({ orgId: TEST_ORG_ID }));
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
@@ -3299,7 +3299,10 @@ describe('PlgOnboardingController', () => {
         .resolves(preonboardedOnboarding);
 
       const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findById.resolves(siteInInternalOrg);
+      const refreshedSite = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      // first call: initial fetch for fast-track; second call: re-fetch after reassignment
+      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
+        .onSecondCall().resolves(refreshedSite);
 
       mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
       mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
@@ -3414,7 +3417,8 @@ describe('PlgOnboardingController', () => {
       // Existing site in internal org
       const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-      mockDataAccess.Site.findById.resolves(existingSite);
+      const refreshedSiteFullPath = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(refreshedSiteFullPath);
 
       mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
       mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
@@ -5758,7 +5762,7 @@ describe('PlgOnboardingController', () => {
 
         mockDataAccess.PlgOnboarding.findById.resolves(record);
         mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-        mockDataAccess.Site.findById.resolves(existingSite);
+        mockDataAccess.Site.findById.resolves(createMockSite({ orgId: TEST_ORG_ID }));
         mockDataAccess.Organization.findById.resolves(existingOrg);
         mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
         mockDataAccess.Site.create.resolves(mockSite);
@@ -5800,7 +5804,7 @@ describe('PlgOnboardingController', () => {
 
         mockDataAccess.PlgOnboarding.findById.resolves(record);
         mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-        mockDataAccess.Site.findById.resolves(existingSite);
+        mockDataAccess.Site.findById.resolves(createMockSite({ orgId: TEST_ORG_ID }));
         mockDataAccess.Organization.findById.resolves(existingOrg);
         mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(record);
         mockDataAccess.Site.create.resolves(mockSite);

@@ -245,23 +245,19 @@ function getReviewerIdentity(context) {
  * @param {object} site - The site to reassign.
  * @param {string} organizationId - Target org id.
  * @param {object} dataAccess - Data access layer.
- * @param {object} log - Logger.
  * @returns {Promise<object>} Fresh site instance from DB.
  */
-async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
+async function reassignSiteOrganization(site, organizationId, dataAccess) {
   site.setOrganizationId(organizationId);
   await site.save();
 
   // Re-fetch to get a fresh instance where this.record reflects the DB value.
   const refreshed = await dataAccess.Site.findById(site.getId());
-  if (!refreshed) {
+  if (!refreshed || refreshed.getOrganizationId() !== organizationId) {
     throw Object.assign(
-      new Error(`Site ${site.getId()} could not be fetched after org reassignment to ${organizationId}`),
+      new Error(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed?.getOrganizationId()}`),
       { waitlist: true },
     );
-  }
-  if (refreshed.getOrganizationId() !== organizationId) {
-    log.warn(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed.getOrganizationId()}.`);
   }
   return refreshed;
 }
@@ -777,7 +773,7 @@ async function performAsoPlgOnboarding({
       // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
       // The onboarding record's organizationId was already anchored above.
       if (needsOrgReassignment) {
-        site = await reassignSiteOrganization(site, customerOrgId, dataAccess, log);
+        site = await reassignSiteOrganization(site, customerOrgId, dataAccess);
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 
