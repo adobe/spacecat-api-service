@@ -240,21 +240,27 @@ function getReviewerIdentity(context) {
 }
 
 /**
- * Assigns a site to the given organization and persists. After save, if the in-memory getter
- * does not reflect the new value (observed drift where save() reassignment did not surface to
- * the next read), logs a loud warning and re-applies on the in-memory instance so downstream
- * reads on the same request see the intended value.
+ * Assigns a site to the given organization, persists, then re-fetches from DB so that
+ * this.record reflects the saved value. setOrganizationId() only patches the patcher —
+ * it never updates this.record — so getOrganizationId() returns stale data until a
+ * fresh fetch. TierClient.createForSite reads via getOrganizationId() directly, bypassing
+ * any in-memory realignment, which is why a re-fetch is required.
  * @param {object} site - The site to reassign.
  * @param {string} organizationId - Target org id.
+ * @param {object} dataAccess - Data access layer (for re-fetch).
  * @param {object} log - Logger.
+ * @returns {Promise<object>} Fresh site instance from DB.
  */
-async function reassignSiteOrganization(site, organizationId, log) {
+async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
   site.setOrganizationId(organizationId);
   await site.save();
-  if (site.getOrganizationId() !== organizationId) {
-    log.warn(`Site ${site.getId()} org drift after save: in-memory ${site.getOrganizationId()}, expected ${organizationId}. Re-applying on instance.`);
-    site.setOrganizationId(organizationId);
+
+  // Re-fetch to get a fresh instance where this.record reflects the DB value.
+  const refreshed = await dataAccess.Site.findById(site.getId());
+  if (!refreshed || refreshed.getOrganizationId() !== organizationId) {
+    log.warn(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed?.getOrganizationId()}.`);
   }
+  return refreshed ?? site;
 }
 
 async function ensureAsoEntitlement(site, organization, context) {
@@ -727,7 +733,7 @@ async function performAsoPlgOnboarding({
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
-    const site = await Site.findById(onboarding.getSiteId());
+    let site = await Site.findById(onboarding.getSiteId());
     if (site) {
       // Resolve customer's organization from imsOrgId
       const organization = await createOrFindOrganization(imsOrgId, context);
@@ -777,7 +783,7 @@ async function performAsoPlgOnboarding({
       // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
       // The onboarding record's organizationId was already anchored above.
       if (needsOrgReassignment) {
-        await reassignSiteOrganization(site, customerOrgId, log);
+        site = await reassignSiteOrganization(site, customerOrgId, dataAccess, log);
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 
@@ -1173,7 +1179,7 @@ async function performAsoPlgOnboarding({
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      await reassignSiteOrganization(site, organizationId, log);
+      site = await reassignSiteOrganization(site, organizationId, dataAccess, log);
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
@@ -1667,7 +1673,7 @@ function PlgOnboardingController(ctx) {
         case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED: {
           const domain = onboarding.getDomain();
           const baseURL = onboarding.getBaseURL();
-          const site = await Site.findByBaseURL(baseURL);
+          let site = await Site.findByBaseURL(baseURL);
 
           if (!site) {
             return badRequest('Site no longer exists for this domain');
@@ -1714,7 +1720,7 @@ function PlgOnboardingController(ctx) {
             if (existingDeliveryConfig.imsOrgId) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
-            await reassignSiteOrganization(site, currentOrgId, log);
+            site = await reassignSiteOrganization(site, currentOrgId, da, log);
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
             await onboarding.save();
