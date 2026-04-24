@@ -157,13 +157,13 @@ async function postPlgOnboardingNotification(onboarding, context) {
 
   let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
     + `• *Domain:* \`${domain}\`\n`
-    + `• *IMS Org:* \`${imsOrgId}\``;
+    + `• *Onboarding requested on IMS Org:* \`${imsOrgId}\``;
 
   if (orgName) {
-    message += `\n• *Org Name:* ${orgName}`;
+    message += `\n• *IMS Org Name:* ${orgName}`;
   }
   if (organizationId) {
-    message += `\n• *Org ID:* \`${organizationId}\``;
+    message += `\n• *SpaceCat Org ID (derived from IMS Org):* \`${organizationId}\``;
   }
   if (siteId) {
     message += `\n• *Site ID:* \`${siteId}\``;

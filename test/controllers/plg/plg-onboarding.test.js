@@ -1629,8 +1629,8 @@ describe('PlgOnboardingController', () => {
       expect(message).to.include('akamai');
       expect(message).to.not.include('IPs to allowlist');
       // organizationId is null on this onboarding, so org name/ID should not appear
-      expect(message).to.not.include('Org Name');
-      expect(message).to.not.include('Org ID');
+      expect(message).to.not.include('IMS Org Name');
+      expect(message).to.not.include('SpaceCat Org ID (derived from IMS Org)');
       expect(message).to.not.include('Site ID');
     });
 
@@ -1708,7 +1708,7 @@ describe('PlgOnboardingController', () => {
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Waitlisted');
-      expect(message).to.not.include('Org Name');
+      expect(message).to.not.include('IMS Org Name');
       expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Failed to look up org name for onboarding notification/),
       );
@@ -1735,7 +1735,7 @@ describe('PlgOnboardingController', () => {
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Onboarded');
-      expect(message).to.not.include('Org Name');
+      expect(message).to.not.include('IMS Org Name');
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
     });
