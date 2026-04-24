@@ -255,7 +255,10 @@ async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
   // Re-fetch to get a fresh instance where this.record reflects the DB value.
   const refreshed = await dataAccess.Site.findById(site.getId());
   if (!refreshed) {
-    throw new Error(`Site ${site.getId()} not found after org reassignment save`);
+    throw Object.assign(
+      new Error(`Site ${site.getId()} could not be fetched after org reassignment to ${organizationId}`),
+      { waitlist: true },
+    );
   }
   if (refreshed.getOrganizationId() !== organizationId) {
     log.warn(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed.getOrganizationId()}.`);
@@ -1211,6 +1214,22 @@ async function performAsoPlgOnboarding({
 
     return onboarding;
   } catch (error) {
+    if (error.waitlist) {
+      onboarding.setStatus(STATUSES.WAITLISTED);
+      onboarding.setWaitlistReason(error.message);
+      onboarding.setSteps(steps);
+      if (updatedBy) {
+        onboarding.setUpdatedBy(updatedBy);
+      }
+      try {
+        await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
+      } catch (saveError) {
+        log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+      }
+      return onboarding;
+    }
+
     // Persist the error in the onboarding record
     onboarding.setStatus(STATUSES.ERROR);
     onboarding.setSteps(steps);
