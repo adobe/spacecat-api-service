@@ -1,3 +1,10 @@
+# [1.453.0](https://github.com/adobe/spacecat-api-service/compare/v1.452.0...v1.453.0) (2026-04-24)
+
+
+### Features
+
+* SITES-43069 - pass enabled preflight audits from Configuration to Mysticat ([#2210](https://github.com/adobe/spacecat-api-service/issues/2210)) ([6e8bd4e](https://github.com/adobe/spacecat-api-service/commit/6e8bd4e71a08b30c226146b9260c0593cc58d907))
+
 # [1.452.0](https://github.com/adobe/spacecat-api-service/compare/v1.451.0...v1.452.0) (2026-04-24)
 
 
