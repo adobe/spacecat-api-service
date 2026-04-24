@@ -108,13 +108,17 @@ function parsePayload(data) {
  * @returns {Object} An object containing the handleEvent function.
  */
 function SlackController(SlackApp) {
-  // Acknowledge function for Slack events (no operation in current architecture)
-  // Note: For view submissions, Slack requires HTTP response within 3 seconds.
-  // Long-running handlers will cause modal timeout errors but processing continues.
-  const ack = () => {};
-
   /**
    * Handles incoming events from Slack.
+   *
+   * Slack requires an HTTP response within 3 seconds for view submissions.
+   * Long-running handlers (onboarding, bot detection, etc.) exceed this window,
+   * causing the "We had some trouble connecting" modal error.
+   *
+   * Strategy: fire processEvent without awaiting, then return the HTTP response
+   * as soon as the handler calls ack() — which happens before any slow async work.
+   * The handler continues running in the background; Lambda stays alive until its
+   * event loop empties (all pending promises settle).
    *
    * @param {Object} context - Context object containing information about the incoming request.
    * @returns {Response} HTTP response object.
@@ -135,15 +139,44 @@ function SlackController(SlackApp) {
       return new Response('', { headers: { 'x-error': 'ignored-event' } });
     }
 
-    // Process the incoming Slack event
+    let slackBot;
     try {
-      const slackBot = initSlackBot(context, SlackApp);
-
-      await slackBot.processEvent({ body: payload, ack });
+      slackBot = initSlackBot(context, SlackApp);
     } catch (error) {
       const errorMessage = cleanupHeaderValue(error.message);
       log.error(`Error processing event: ${errorMessage}`);
       return internalServerError(errorMessage);
+    }
+
+    // Capture the ack payload set by the handler, and resolve as soon as it is
+    // available so the HTTP response can be sent before slow async work starts.
+    let ackPayload;
+    let resolveAck;
+    const ackReady = new Promise((resolve) => {
+      resolveAck = resolve;
+    });
+
+    const ack = (p) => {
+      ackPayload = p;
+      resolveAck();
+    };
+
+    // Fire without awaiting — handler runs in the background.
+    // Resolve ackReady when processEvent settles so handleEvent never hangs.
+    Promise.resolve(slackBot.processEvent({ body: payload, ack }))
+      .then(resolveAck)
+      .catch((error) => {
+        log.error(`Error processing event: ${cleanupHeaderValue(error.message)}`);
+        resolveAck();
+      });
+
+    // Return as soon as the handler calls ack() (or processEvent finishes).
+    await ackReady;
+
+    if (ackPayload && typeof ackPayload === 'object' && Object.keys(ackPayload).length > 0) {
+      return new Response(JSON.stringify(ackPayload), {
+        headers: { 'content-type': 'application/json' },
+      });
     }
 
     return new Response('');
