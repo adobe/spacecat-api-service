@@ -690,7 +690,23 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
-      await ack();
+      await ack({
+        response_action: 'update',
+        view: {
+          type: 'modal',
+          title: { type: 'plain_text', text: 'Request Submitted' },
+          close: { type: 'plain_text', text: 'Close' },
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: ':gear: *Onboarding request submitted!*\n\nYour request is being processed. Check the Slack thread for progress updates.\n\nYou can safely close this window.',
+              },
+            },
+          ],
+        },
+      });
 
       const configuration = await Configuration.findLatest();
 
