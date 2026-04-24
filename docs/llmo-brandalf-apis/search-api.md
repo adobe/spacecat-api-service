@@ -79,6 +79,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/search?q
 }
 ```
 
+Unlike the [Topics list](topics-api.md#1-topics-endpoint), search `topicDetails` items do **not** include `topicId` today (search aggregates raw execution rows in the API layer).
+
 ### Topic Object Fields
 
 | Field | Type | Description |

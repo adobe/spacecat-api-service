@@ -4585,6 +4585,7 @@ describe('llmo-brand-presence', () => {
   describe('createTopicsHandler', () => {
     const sampleRpcRow = {
       topic: 'PDF',
+      topic_id: '0178a3f0-1234-7000-8000-0000000000aa',
       prompt_count: 5,
       brand_mentions: 12,
       brand_citations: 8,
@@ -4655,6 +4656,7 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topicDetails).to.have.lengthOf(1);
       expect(body.topicDetails[0].topic).to.equal('PDF');
+      expect(body.topicDetails[0].topicId).to.equal('0178a3f0-1234-7000-8000-0000000000aa');
       expect(body.topicDetails[0].promptCount).to.equal(5);
       expect(body.topicDetails[0].brandMentions).to.equal(12);
       expect(body.topicDetails[0].brandCitations).to.equal(8);
@@ -4835,6 +4837,7 @@ describe('llmo-brand-presence', () => {
       expect(td.averagePosition).to.equal(0);
       expect(td.averageSentiment).to.equal(-1);
       expect(td.popularityVolume).to.equal('N/A');
+      expect(td.topicId).to.be.null;
     });
 
     it('handles null total_count in RPC row', async () => {

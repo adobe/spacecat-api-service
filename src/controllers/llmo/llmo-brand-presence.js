@@ -1555,6 +1555,19 @@ export function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
   };
 }
 
+/**
+ * Trims a PostgREST / RPC UUID string for JSON; null when missing or blank.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function normalizeRpcUuid(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return null;
+  }
+  const s = String(value).trim();
+  return s || null;
+}
+
 function sortTopicDetails(topicDetails, sortBy, sortOrder) {
   const field = SORT_FIELD_MAP[sortBy] || 'topic';
   const dir = sortOrder === 'desc' ? -1 : 1;
@@ -1636,6 +1649,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
 
       const topicDetails = rows.map((row) => ({
         topic: row.topic,
+        topicId: normalizeRpcUuid(row.topic_id),
         promptCount: Number(row.prompt_count ?? 0),
         brandMentions: Number(row.brand_mentions ?? 0),
         brandCitations: Number(row.brand_citations ?? 0),
