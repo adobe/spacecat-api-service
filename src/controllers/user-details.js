@@ -205,9 +205,41 @@ function UserDetailsController(ctx) {
     }
   };
 
+  /**
+   * Resolves a user's profile by IMS user ID (admin-only).
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Resolved user profile.
+   */
+  const resolveUser = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can resolve user profiles');
+    }
+
+    const userId = context.request?.url
+      ? new URL(context.request.url).searchParams.get('userId')
+      : null;
+
+    if (!hasText(userId)) {
+      return badRequest('userId query parameter is required');
+    }
+
+    try {
+      const imsProfile = await imsClient.getImsAdminProfile(userId);
+      return ok({
+        firstName: imsProfile.first_name || '-',
+        lastName: imsProfile.last_name || '-',
+        email: imsProfile.email || '',
+      });
+    } catch (e) {
+      log.error(`Failed to resolve user profile for ${userId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getUserDetailsByExternalUserId,
     getUserDetailsInBulk,
+    resolveUser,
   };
 }
 

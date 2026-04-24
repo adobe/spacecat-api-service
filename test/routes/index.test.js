@@ -345,6 +345,7 @@ describe('getRouteHandlers', () => {
   const mockUserDetailsController = {
     getUserDetailsByExternalUserId: () => null,
     getUserDetailsInBulk: () => null,
+    resolveUser: () => null,
   };
 
   const mockEntitlementController = {
@@ -528,6 +529,7 @@ describe('getRouteHandlers', () => {
       'POST /llmo/onboard/update-query-index',
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
+      'GET /admin/resolve-user',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -567,6 +569,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
+    expect(staticRoutes['GET /admin/resolve-user']).to.equal(mockUserDetailsController.resolveUser);
 
     const expectedDynamicRouteKeys = [
       'GET /audits/latest/:auditType',

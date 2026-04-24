@@ -124,6 +124,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/user-activities',
   'POST /sites/:siteId/user-activities',
   'GET /organizations/:organizationId/trial-users',
+  'GET /admin/resolve-user',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
   'POST /organizations/:organizationId/trial-user-invite',
