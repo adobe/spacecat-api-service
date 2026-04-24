@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Request } from '@adobe/fetch';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
@@ -24,11 +22,41 @@ use(sinonChai);
 
 const s2sAuthWrapperStub = (fn) => fn;
 
-const { main } = await esmock('../src/index.js', {
-  '@adobe/spacecat-shared-http-utils': {
-    s2sAuthWrapper: s2sAuthWrapperStub,
+const tokowakaTestShim = {
+  default: class TokowakaClientStub {
+    static createFrom() {
+      return {};
+    }
   },
-});
+  calculateForwardedHost: (url) => {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+    const h = u.hostname;
+    const dots = (h.match(/\./g) || []).length;
+    return dots === 1 ? `www.${h}` : h;
+  },
+  getEffectiveBaseURL: (siteOrBaseUrl) => {
+    if (typeof siteOrBaseUrl === 'string') {
+      return siteOrBaseUrl.startsWith('http') ? siteOrBaseUrl : `https://${siteOrBaseUrl}`;
+    }
+    const overrideBaseURL = siteOrBaseUrl.getConfig?.()?.getFetchConfig?.()?.overrideBaseURL;
+    if (overrideBaseURL && /^https?:\/\//.test(overrideBaseURL)) {
+      return overrideBaseURL;
+    }
+    return siteOrBaseUrl.getBaseURL?.() ?? '';
+  },
+};
+
+const { main } = await esmock(
+  '../src/index.js',
+  {
+    '@adobe/spacecat-shared-http-utils': {
+      s2sAuthWrapper: s2sAuthWrapperStub,
+    },
+  },
+  {
+    '@adobe/spacecat-shared-tokowaka-client': tokowakaTestShim,
+  },
+);
 
 const baseUrl = 'https://base.spacecat';
 
@@ -182,7 +210,7 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(204);
     expect(resp.headers.plain()).to.eql({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
       'content-type': 'application/json; charset=utf-8',
@@ -219,6 +247,34 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
   });
 
+  it('handles plgOnboardingId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/plg/records/not-a-uuid';
+
+    request = new Request(`${baseUrl}/plg/records/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles onboardingId not correctly formatted for PLG admin review', async () => {
+    context.pathInfo.suffix = '/plg/onboard/not-a-uuid';
+
+    request = new Request(`${baseUrl}/plg/onboard/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('PLG Onboarding Id is invalid. Please provide a valid UUID.');
+  });
+
   it('handles organizationId not correctly formated error', async () => {
     context.pathInfo.suffix = '/organizations/1234';
 
@@ -230,13 +286,20 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
   });
 
-  it('handles spaceCatId not correctly formatted error for filter-dimensions', async () => {
-    context.pathInfo.suffix = '/org/1234/brands/all/brand-presence/filter-dimensions';
+  it('handles spaceCatId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/v2/orgs/not-a-uuid/brands/brand-1/prompts';
+    context.dataAccess.services = {
+      postgrestClient: {
+        from: () => ({
+          // eslint-disable-next-line max-len
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+        }),
+      },
+    };
 
-    request = new Request(`${baseUrl}/org/1234/brands/all/brand-presence/filter-dimensions`, {
-      method: 'GET',
-      headers: { 'x-api-key': apiKey },
-    });
+    // eslint-disable-next-line max-len
+    const url = `${baseUrl}/v2/orgs/not-a-uuid/brands/brand-1/prompts`;
+    request = new Request(url, { headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 
@@ -256,6 +319,20 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Brand Id is invalid. Please provide a valid UUID or "all".');
+  });
+
+  it('handles executionId not correctly formatted for execution-sources', async () => {
+    context.pathInfo.suffix = '/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/all/brand-presence/executions/not-a-uuid/sources';
+
+    request = new Request(`${baseUrl}/org/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/brands/all/brand-presence/executions/not-a-uuid/sources`, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Execution Id is invalid. Please provide a valid UUID.');
   });
 
   it('handles dynamic route errors', async () => {

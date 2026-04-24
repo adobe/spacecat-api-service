@@ -10,81 +10,135 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import { PlgOnboardingDto } from '../../src/dto/plg-onboarding.js';
 
 describe('PlgOnboardingDto', () => {
-  it('converts a PlgOnboarding entity to JSON', () => {
-    const onboarding = {
-      getId: () => 'onboarding-123',
-      getImsOrgId: () => 'ABC123@AdobeOrg',
-      getDomain: () => 'example.com',
-      getBaseURL: () => 'https://www.example.com',
-      getStatus: () => 'ONBOARDED',
-      getSiteId: () => 'site-456',
-      getOrganizationId: () => 'org-789',
-      getSteps: () => ({ orgResolved: true, siteCreated: true }),
-      getError: () => null,
-      getBotBlocker: () => null,
-      getWaitlistReason: () => null,
-      getCompletedAt: () => '2026-03-09T15:00:00.000Z',
-      getCreatedAt: () => '2026-03-09T12:00:00.000Z',
-      getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
-    };
+  const baseOnboarding = {
+    getId: () => 'onboarding-123',
+    getImsOrgId: () => 'ABC123@AdobeOrg',
+    getDomain: () => 'example.com',
+    getBaseURL: () => 'https://www.example.com',
+    getStatus: () => 'ONBOARDED',
+    getSiteId: () => 'site-456',
+    getOrganizationId: () => 'org-789',
+    getSteps: () => ({ orgResolved: true, siteCreated: true }),
+    getError: () => null,
+    getBotBlocker: () => null,
+    getWaitlistReason: () => null,
+    getReviews: () => [
+      {
+        reason: 'AEM_SITE_CHECK',
+        decision: 'BYPASSED',
+        reviewedBy: 'reviewer@adobe.com',
+        reviewedAt: '2026-03-09T14:00:00.000Z',
+        justification: 'Verified manually',
+      },
+    ],
+    getCompletedAt: () => '2026-03-09T15:00:00.000Z',
+    getCreatedAt: () => '2026-03-09T12:00:00.000Z',
+    getUpdatedAt: () => '2026-03-09T15:00:00.000Z',
+    getUpdatedBy: () => 'user@example.com',
+  };
 
-    const result = PlgOnboardingDto.toJSON(onboarding);
+  describe('toJSON (public)', () => {
+    it('excludes updatedBy and reviewedBy from reviews', () => {
+      const result = PlgOnboardingDto.toJSON(baseOnboarding);
 
-    expect(result).to.deep.equal({
-      id: 'onboarding-123',
-      imsOrgId: 'ABC123@AdobeOrg',
-      domain: 'example.com',
-      baseURL: 'https://www.example.com',
-      status: 'ONBOARDED',
-      siteId: 'site-456',
-      organizationId: 'org-789',
-      steps: { orgResolved: true, siteCreated: true },
-      error: null,
-      botBlocker: null,
-      waitlistReason: null,
-      completedAt: '2026-03-09T15:00:00.000Z',
-      createdAt: '2026-03-09T12:00:00.000Z',
-      updatedAt: '2026-03-09T15:00:00.000Z',
+      expect(result).to.deep.equal({
+        id: 'onboarding-123',
+        imsOrgId: 'ABC123@AdobeOrg',
+        domain: 'example.com',
+        baseURL: 'https://www.example.com',
+        status: 'ONBOARDED',
+        siteId: 'site-456',
+        organizationId: 'org-789',
+        steps: { orgResolved: true, siteCreated: true },
+        error: null,
+        botBlocker: null,
+        waitlistReason: null,
+        reviews: [
+          {
+            reason: 'AEM_SITE_CHECK',
+            decision: 'BYPASSED',
+            reviewedAt: '2026-03-09T14:00:00.000Z',
+            justification: 'Verified manually',
+          },
+        ],
+        completedAt: '2026-03-09T15:00:00.000Z',
+        createdAt: '2026-03-09T12:00:00.000Z',
+        updatedAt: '2026-03-09T15:00:00.000Z',
+      });
+
+      expect(result).to.not.have.property('updatedBy');
+      expect(result.reviews[0]).to.not.have.property('reviewedBy');
     });
-  });
 
-  it('includes error and botBlocker when set', () => {
-    const onboarding = {
-      getId: () => 'onboarding-456',
-      getImsOrgId: () => 'XYZ789@AdobeOrg',
-      getDomain: () => 'blocked.com',
-      getBaseURL: () => 'https://www.blocked.com',
-      getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING',
-      getSiteId: () => null,
-      getOrganizationId: () => 'org-111',
-      getSteps: () => ({ orgResolved: true }),
-      getError: () => null,
-      getBotBlocker: () => ({
+    it('returns empty array for reviews when null', () => {
+      const onboarding = { ...baseOnboarding, getReviews: () => null };
+      const result = PlgOnboardingDto.toJSON(onboarding);
+      expect(result.reviews).to.deep.equal([]);
+    });
+
+    it('includes error and botBlocker when set', () => {
+      const onboarding = {
+        ...baseOnboarding,
+        getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING',
+        getSiteId: () => null,
+        getBotBlocker: () => ({
+          type: 'cloudflare',
+          ipsToAllowlist: ['1.2.3.4'],
+          userAgent: 'SpaceCat/1.0',
+        }),
+        getReviews: () => null,
+        getCompletedAt: () => null,
+      };
+
+      const result = PlgOnboardingDto.toJSON(onboarding);
+
+      expect(result.status).to.equal('WAITING_FOR_IP_ALLOWLISTING');
+      expect(result.botBlocker).to.deep.equal({
         type: 'cloudflare',
         ipsToAllowlist: ['1.2.3.4'],
         userAgent: 'SpaceCat/1.0',
-      }),
-      getWaitlistReason: () => null,
-      getCompletedAt: () => null,
-      getCreatedAt: () => '2026-03-09T12:00:00.000Z',
-      getUpdatedAt: () => '2026-03-09T12:05:00.000Z',
-    };
-
-    const result = PlgOnboardingDto.toJSON(onboarding);
-
-    expect(result.status).to.equal('WAITING_FOR_IP_ALLOWLISTING');
-    expect(result.botBlocker).to.deep.equal({
-      type: 'cloudflare',
-      ipsToAllowlist: ['1.2.3.4'],
-      userAgent: 'SpaceCat/1.0',
+      });
+      expect(result.siteId).to.be.null;
+      expect(result.completedAt).to.be.null;
     });
-    expect(result.siteId).to.be.null;
-    expect(result.completedAt).to.be.null;
+  });
+
+  describe('toAdminJSON (admin)', () => {
+    it('includes updatedBy and full reviews with reviewedBy', () => {
+      const result = PlgOnboardingDto.toAdminJSON(baseOnboarding);
+
+      expect(result.updatedBy).to.equal('user@example.com');
+      expect(result.reviews).to.deep.equal([
+        {
+          reason: 'AEM_SITE_CHECK',
+          decision: 'BYPASSED',
+          reviewedBy: 'reviewer@adobe.com',
+          reviewedAt: '2026-03-09T14:00:00.000Z',
+          justification: 'Verified manually',
+        },
+      ]);
+    });
+
+    it('includes all public fields in addition to admin fields', () => {
+      const result = PlgOnboardingDto.toAdminJSON(baseOnboarding);
+
+      expect(result).to.include({
+        id: 'onboarding-123',
+        imsOrgId: 'ABC123@AdobeOrg',
+        domain: 'example.com',
+        status: 'ONBOARDED',
+        updatedBy: 'user@example.com',
+      });
+    });
+
+    it('returns empty array for reviews when null', () => {
+      const onboarding = { ...baseOnboarding, getReviews: () => null };
+      const result = PlgOnboardingDto.toAdminJSON(onboarding);
+      expect(result.reviews).to.deep.equal([]);
+    });
   });
 });

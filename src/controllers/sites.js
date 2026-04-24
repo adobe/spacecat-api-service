@@ -41,8 +41,11 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled } from '../support/utils.js';
+import {
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
+} from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
@@ -52,7 +55,7 @@ import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
  * @constructor
  */
 
-const AHREFS = 'ahrefs';
+const SEO = 'seo';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
@@ -185,10 +188,10 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   const { SiteTopPage } = dataAccess;
 
   // Fetch Ahrefs pages
-  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'ahrefs', geo);
+  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'seo', geo);
 
   if (!topPages || topPages.length === 0) {
-    log.warn(`No Ahrefs top pages found for site ${siteId}, returning empty result`);
+    log.warn(`No SEO top pages found for site ${siteId}, returning empty result`);
     return [];
   }
 
@@ -198,7 +201,7 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
 
     // If no pages match the base URL after filtering, return empty result
     if (topPages.length === 0) {
-      log.warn(`No Ahrefs top pages match base URL for site ${siteId}, returning empty result`);
+      log.warn(`No SEO top pages match base URL for site ${siteId}, returning empty result`);
       return [];
     }
   }
@@ -331,7 +334,7 @@ function SitesController(ctx, log, env) {
     const all = await Site.all({}, { fetchAllPages: true });
     const sites = all
       .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
-      .map((site) => SiteDto.toJSON(site));
+      .map((site) => SiteDto.toListJSON(site));
     return ok(sites);
   };
 
@@ -632,7 +635,33 @@ function SitesController(ctx, log, env) {
     }
 
     if (isObject(requestBody.config)) {
-      site.setConfig(requestBody.config);
+      const siteConfig = site.getConfig();
+      const existingConfig = isNonEmptyObject(siteConfig)
+        ? Config.toDynamoItem(siteConfig) || {}
+        : {};
+      const merged = { ...existingConfig, ...requestBody.config };
+      if (requestBody.config?.auditTargetURLs && existingConfig?.auditTargetURLs) {
+        merged.auditTargetURLs = {
+          ...existingConfig.auditTargetURLs,
+          ...requestBody.config.auditTargetURLs,
+        };
+      }
+      const auditTargetURLsResult = auditTargetURLsPatchGuard(
+        merged,
+        site.getBaseURL(),
+        requestBody.config,
+        badRequest,
+      );
+      if (auditTargetURLsResult?.error) {
+        return auditTargetURLsResult.error;
+      }
+      // When the guard returns no `normalized` (patch had `auditTargetURLs` but no known
+      // sources), `merged.auditTargetURLs` already holds the correct deep-merged value
+      // from the block above and intentionally needs no further update.
+      if (auditTargetURLsResult?.normalized !== undefined) {
+        merged.auditTargetURLs = auditTargetURLsResult.normalized;
+      }
+      site.setConfig(merged);
       updates = true;
     }
 
@@ -821,7 +850,7 @@ function SitesController(ctx, log, env) {
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
+      log.debug(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
     // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
@@ -867,7 +896,7 @@ function SitesController(ctx, log, env) {
       const [domain, organicTraffic] = await Promise.all([
         resolveWwwUrl(site, context),
         getStoredMetrics(
-          { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+          { siteId, metric: ORGANIC_TRAFFIC, source: SEO },
           context,
         ),
       ]);
@@ -1018,6 +1047,80 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const CITABILITY_GROUP_BY_FIELDS = new Set(['updatedBy', 'url', 'updatedAt']);
+  const CITABILITY_PERIODS = new Set(['7d', '30d', '90d', '1y', 'all']);
+  const CITABILITY_PERIOD_MS = {
+    '7d': 7, '30d': 30, '90d': 90, '1y': 365,
+  };
+
+  const getPageCitabilityCounts = async (context) => {
+    const { siteId } = context.params;
+    const groupBy = context.data?.groupBy ?? 'updatedBy';
+    const period = context.data?.period;
+    const from = context.data?.from;
+    const to = context.data?.to;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!CITABILITY_GROUP_BY_FIELDS.has(groupBy)) {
+      return badRequest(`Invalid groupBy field. Allowed values: ${[...CITABILITY_GROUP_BY_FIELDS].join(', ')}`);
+    }
+
+    if (period && (from || to)) {
+      return badRequest('period and from/to are mutually exclusive');
+    }
+
+    if (period && !CITABILITY_PERIODS.has(period)) {
+      return badRequest(`Invalid period. Allowed values: ${[...CITABILITY_PERIODS].join(', ')}`);
+    }
+
+    let fromDate = null;
+    let toDate = null;
+
+    if (from || to) {
+      if (from) {
+        fromDate = new Date(from);
+        if (Number.isNaN(fromDate.getTime())) {
+          return badRequest('Invalid from date');
+        }
+      }
+      if (to) {
+        toDate = new Date(to);
+        if (Number.isNaN(toDate.getTime())) {
+          return badRequest('Invalid to date');
+        }
+      }
+    } else if (period && period !== 'all') {
+      const days = CITABILITY_PERIOD_MS[period];
+      toDate = new Date();
+      fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its page citability records');
+    }
+
+    const { PageCitability } = dataAccess;
+    const queryOptions = (fromDate || toDate)
+      ? { between: { attribute: 'updatedAt', start: (fromDate ?? new Date(0)).toISOString(), end: (toDate ?? new Date()).toISOString() } }
+      : {};
+    const records = await PageCitability.allBySiteId(siteId, queryOptions);
+    const counts = {};
+    for (const record of records) {
+      const getterName = `get${groupBy.charAt(0).toUpperCase()}${groupBy.slice(1)}`;
+      const value = String(record[getterName]?.() ?? record[groupBy] ?? 'unknown');
+      counts[value] = (counts[value] ?? 0) + 1;
+    }
+    return ok(counts);
+  };
+
   const getTopPages = async (context) => {
     const { siteId, source, geo } = context.params;
 
@@ -1059,7 +1162,6 @@ function SitesController(ctx, log, env) {
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
     const productCode = pathInfo.headers[X_PRODUCT_HEADER];
-
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }
@@ -1089,7 +1191,9 @@ function SitesController(ctx, log, env) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
 
-              if (entitlement && enrollments?.length) {
+              const tierVisible = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (tierVisible && enrollments?.length) {
                 const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
                 const data = {
                   organization: OrganizationDto.toJSON(organization),
@@ -1108,9 +1212,11 @@ function SitesController(ctx, log, env) {
         organization = await Organization.findById(organizationId);
         if (organization && await accessControlUtil.hasAccess(organization)) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+          const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
+            .getFirstEnrollment();
 
-          if (enrolledSite) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
@@ -1125,9 +1231,11 @@ function SitesController(ctx, log, env) {
         organization = await Organization.findByImsOrgId(imsOrg);
         if (organization && await accessControlUtil.hasAccess(organization)) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+          const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
+            .getFirstEnrollment();
 
-          if (enrolledSite) {
+          if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
@@ -1217,6 +1325,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getPageCitabilityCounts,
     getTopPages,
     resolveSite,
     getBrandProfile,

@@ -26,6 +26,7 @@ const AUDIT_TYPES = {
   LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
   LLM_ERROR_PAGES: 'llm-error-pages',
 };
+const CDN_LOGS_ANALYSIS_DELAY_SECONDS = 5;
 
 function parseArgs(args) {
   const parsed = {};
@@ -85,7 +86,12 @@ async function triggerBackfill(
             },
           };
           // eslint-disable-next-line no-await-in-loop
-          await sqs.sendMessage(configuration.getQueues().audits, message);
+          await sqs.sendMessage(
+            configuration.getQueues().audits,
+            message,
+            undefined,
+            { delaySeconds: (dayOffset - 1) * CDN_LOGS_ANALYSIS_DELAY_SECONDS },
+          );
         }
       }
       break;
@@ -228,7 +234,9 @@ function BackfillLlmoCommand(context) {
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
           timeValue = parseInt(parsed.weeks, 10);
-          if (Number.isNaN(timeValue)) timeValue = 4;
+          if (Number.isNaN(timeValue)) {
+            timeValue = 4;
+          }
 
           if (timeValue > 4) {
             await say(`:warning: Max 4 weeks for ${AUDIT_TYPES.CDN_LOGS_REPORT}`);
@@ -244,7 +252,9 @@ function BackfillLlmoCommand(context) {
 
         case AUDIT_TYPES.LLM_ERROR_PAGES:
           timeValue = parseInt(parsed.weeks, 10);
-          if (Number.isNaN(timeValue)) timeValue = 4;
+          if (Number.isNaN(timeValue)) {
+            timeValue = 4;
+          }
 
           if (timeValue > 4) {
             await say(`:warning: Max 4 weeks for ${AUDIT_TYPES.LLM_ERROR_PAGES}`);
@@ -260,7 +270,9 @@ function BackfillLlmoCommand(context) {
 
         case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC:
           timeValue = parseInt(parsed.weeks, 10);
-          if (Number.isNaN(timeValue)) timeValue = 1;
+          if (Number.isNaN(timeValue)) {
+            timeValue = 1;
+          }
 
           if (timeValue > 10) {
             await say(`:warning: Max 10 weeks for ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);

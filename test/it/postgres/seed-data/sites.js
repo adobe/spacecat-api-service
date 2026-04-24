@@ -33,7 +33,7 @@ export const sites = [
     config: {
       handlers: { cwv: { groupedURLs: [{ name: 'blog', pattern: '/blog/' }] } },
       imports: [{
-        sources: ['ahrefs'], type: 'organic-traffic', enabled: true, destinations: ['default'],
+        sources: ['seo'], type: 'organic-traffic', enabled: true, destinations: ['default'],
       }],
       slack: { channel: 'C0FAKE0IT01', workspace: 'WORKSPACE_TEST' },
       llmo: { dataFolder: '/test/llmo', brand: 'site1-test-brand' },
@@ -79,5 +79,24 @@ export const sites = [
     delivery_type: 'aem_edge',
     is_live: true,
     name: 'Site Four (Delegate)',
+  },
+  // TEMPORARY: LLMO mode-resolution test sites — remove with resolveLlmoOnboardingMode legacy check
+  {
+    id: 'fd111111-1111-4111-b111-111111111111',
+    base_url: 'https://legacy-llmo.example.com',
+    organization_id: 'fe111111-1111-4111-b111-111111111111',
+    delivery_type: 'aem_edge',
+    is_live: true,
+    name: 'Legacy LLMO Site',
+    created_at: '2026-03-15T00:00:00.000Z', // before Brandalf GA cutoff (2026-04-01)
+  },
+  {
+    id: 'fd222222-2222-4222-a222-222222222222',
+    base_url: 'https://new-llmo.example.com',
+    organization_id: 'fe222222-2222-4222-a222-222222222222',
+    delivery_type: 'aem_edge',
+    is_live: true,
+    name: 'New LLMO Site',
+    created_at: '2026-05-01T00:00:00.000Z', // after Brandalf GA cutoff (2026-04-01)
   },
 ];

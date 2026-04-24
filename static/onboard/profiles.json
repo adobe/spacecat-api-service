@@ -111,6 +111,7 @@
 		"integrations": {}
 	},
 	"paid":  {
+		"protected": true,
 		"audits": {
 			"scrape-top-pages": {},
 			"broken-backlinks": {},

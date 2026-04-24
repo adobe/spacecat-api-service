@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
@@ -147,6 +145,18 @@ describe('BackfillLlmoCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_ANALYSIS} for https://example.com (2 days)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
       expect(sqsStub.sendMessage.callCount).to.equal(2);
+    });
+
+    it('adds a 5-second gap between multi-day cdn-logs-analysis messages for the same site', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=3'], slackContext);
+
+      expect(sqsStub.sendMessage.callCount).to.equal(3);
+      expect(sqsStub.sendMessage.firstCall.args[3]).to.deep.equal({ delaySeconds: 0 });
+      expect(sqsStub.sendMessage.secondCall.args[3]).to.deep.equal({ delaySeconds: 5 });
+      expect(sqsStub.sendMessage.thirdCall.args[3]).to.deep.equal({ delaySeconds: 10 });
     });
 
     it('sends correct SQS message structure for cdn-logs-report', async () => {

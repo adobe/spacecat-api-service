@@ -37,6 +37,10 @@ export const SITE_2_BASE_URL = 'https://site2.example.com';
 export const SITE_3_ID = '55555555-5555-4555-9555-555555555555';
 export const SITE_3_BASE_URL = 'https://site3-denied.example.com';
 
+// ── Brands ──
+
+export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
+
 // ── Audits ──
 
 export const AUDIT_TYPE_CWV = 'cwv';
@@ -131,6 +135,11 @@ export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
 export const PLG_ONBOARDING_1_ID = 'd1111111-1111-4111-b111-111111111111';
 export const PLG_ONBOARDING_1_DOMAIN = 'site1.example.com';
+export const PLG_ONBOARDING_2_ID = 'd2222222-2222-4222-b222-222222222222';
+export const PLG_ONBOARDING_2_DOMAIN = 'waitlisted-site.example.com';
+/** IN_PROGRESS — used to assert PATCH rejects non–WAITLISTED/ONBOARDED records */
+export const PLG_ONBOARDING_3_ID = 'd3333333-3333-4333-b333-333333333333';
+export const PLG_ONBOARDING_3_DOMAIN = 'in-progress-plg-it.example.com';
 
 // ── ORG_3: Delegate Agency Org ──
 
@@ -169,6 +178,25 @@ export const TRIAL_USER_2_EMAIL = 'test-delegate@example.com'; // matches delega
 
 export const NON_EXISTENT_ORG_ID = '99999999-9999-4999-b999-999999999999';
 export const NON_EXISTENT_SITE_ID = '88888888-8888-4888-a888-888888888888';
+
+// ── LLMO onboarding mode resolution — dedicated test org/sites ──
+// TEMPORARY: remove with the legacy-customer check in resolveLlmoOnboardingMode
+
+// Org that owns a site created before the Brandalf GA cutoff (2026-04-01T00:00:00Z)
+export const ORG_LEGACY_LLMO_ID = 'fe111111-1111-4111-b111-111111111111';
+export const ORG_LEGACY_LLMO_IMS_ORG_ID = 'LEGACYLLLMOOOOOOOOOOOOOO@AdobeOrg';
+
+// Org whose only site was created after the cutoff
+export const ORG_NEW_LLMO_ID = 'fe222222-2222-4222-a222-222222222222';
+export const ORG_NEW_LLMO_IMS_ORG_ID = 'NEWWWLLMOOOOOOOOOOOOOOOO@AdobeOrg';
+
+// Site for the legacy org — created_at set explicitly to 2026-03-15T00:00:00Z
+export const SITE_LEGACY_LLMO_ID = 'fd111111-1111-4111-b111-111111111111';
+export const SITE_LEGACY_LLMO_BASE_URL = 'https://legacy-llmo.example.com';
+
+// Site for the new org — created_at set explicitly to 2026-05-01T00:00:00Z
+export const SITE_NEW_LLMO_ID = 'fd222222-2222-4222-a222-222222222222';
+export const SITE_NEW_LLMO_BASE_URL = 'https://new-llmo.example.com';
 export const NON_EXISTENT_IMS_ORG_ID = 'ZZZZZZZZZZZZZZZZZZZZZZZZ@AdobeOrg';
 export const NON_EXISTENT_OPPTY_ID = 'dd999999-9999-4999-b999-999999999999';
 export const NON_EXISTENT_SUGG_ID = 'ee999999-9999-4999-b999-999999999999';

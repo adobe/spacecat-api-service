@@ -10,7 +10,7 @@ Postgres schema for brand presence. V2 customer config brands are synced to `bra
 |-------------------|-----------|----------|--------|
 | id                | uuid      | no       | Default uuid_generate_v7() |
 | organization_id   | uuid      | yes      | FK organizations(id). Unique (organization_id, name). |
-| site_id           | uuid      | no       | Deprecated; nullable. FK sites(id). |
+| site_id           | uuid      | no       | Base site ID (primary URL). FK sites(id). Immutable once set; unique per organization. Brands without a `site_id` are forced to `pending` status on creation. Exposed in the API as `baseSiteId`. |
 | name              | text      | yes      | Unique per organization. |
 | status            | text      | yes      | Default 'active'. CHECK: 'pending' \| 'active' \| 'deleted'. |
 | origin            | category_origin | yes | Default 'human'. Enum: 'human' \| 'ai'. |
@@ -73,7 +73,7 @@ Partitioned by execution_date. organization_id is set from site on insert (trigg
 | id                     | uuid    | no       | Default uuid_generate_v7(). PK is (id, execution_date). |
 | site_id                | uuid    | yes      | FK sites(id). |
 | execution_date         | date    | yes      | Partition key. |
-| model                  | text    | yes      | e.g. chatgpt, gemini, copilot. |
+| model                  | llm_model | yes   | Enum: chatgpt-paid, chatgpt-free, google-ai-overview, perplexity, google-ai-mode, copilot, gemini, google, microsoft, mistral, anthropic, amazon. |
 | brand_id               | uuid    | no       | FK brands(id). |
 | brand_name             | text    | yes      | Denormalized. |
 | category_id            | uuid    | no       | FK categories(id). |

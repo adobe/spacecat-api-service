@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
@@ -134,6 +132,7 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'getPageCitabilityCounts',
     'getTopPages',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
@@ -177,6 +176,9 @@ describe('Sites Controller', () => {
         allBySiteId: sandbox.stub().resolves([]),
         allBySiteIdAndSource: sandbox.stub().resolves([]),
         allBySiteIdAndSourceAndGeo: sandbox.stub().resolves([]),
+      },
+      PageCitability: {
+        allBySiteId: sandbox.stub().resolves([]),
       },
       Organization: {
         findById: sandbox.stub().resolves(null),
@@ -531,7 +533,7 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
   });
 
-  it('gets all sites', async () => {
+  it('gets all sites with slim DTO', async () => {
     mockDataAccess.Site.all.resolves(sites);
 
     const result = await sitesController.getAll();
@@ -543,6 +545,8 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
     expect(resultSites[1]).to.have.property('id', SITE_IDS[1]);
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
+
+    expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
   it('gets all sites for a non-admin user', async () => {
@@ -768,7 +772,7 @@ describe('Sites Controller', () => {
     });
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -1480,17 +1484,17 @@ describe('Sites Controller', () => {
 
   it('get site metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-12T00:00:00Z',
       metric: 'organic-traffic',
       value: 100,
     }, {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -1514,7 +1518,7 @@ describe('Sites Controller', () => {
   });
 
   it('get site metrics by sources returns bad request when siteId is missing', async () => {
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
 
     const result = await sitesController.getSiteMetricsBySource({
@@ -1541,7 +1545,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics by sources returns bad request when metric is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
 
     const result = await sitesController.getSiteMetricsBySource({
       params: { siteId, source },
@@ -1554,7 +1558,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics by source returns not found when site is not found', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     mockDataAccess.Site.findById.resolves(null);
 
@@ -1569,7 +1573,7 @@ describe('Sites Controller', () => {
 
   it('get site metrics for non belonging to the organization', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
@@ -1681,7 +1685,7 @@ describe('Sites Controller', () => {
 
     it('works with different metric types when filterByTop100PageViews=true', async () => {
       const siteId = sites[0].getId();
-      const source = 'ahrefs';
+      const source = 'seo';
       const metric = 'organic-traffic';
 
       const mockMetrics = [
@@ -1902,7 +1906,7 @@ describe('Sites Controller', () => {
 
     it('returns plain array when objectResponseDataKey is not provided (backward compatibility)', async () => {
       const siteId = sites[0].getId();
-      const source = 'ahrefs';
+      const source = 'seo';
       const metric = 'organic-traffic';
 
       const mockMetricsArray = [
@@ -2176,7 +2180,7 @@ describe('Sites Controller', () => {
   });
 
   describe('Metrics filtering by top organic search pages', () => {
-    it('filters metrics by top N organic search pages from Ahrefs', async () => {
+    it('filters metrics by top N organic search pages from SEO data', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2189,7 +2193,7 @@ describe('Sites Controller', () => {
         { url: 'https://example.com/page5', pageviews: 1000, lcp: 1600 },
       ];
 
-      // Mock top pages from Ahrefs
+      // Mock top pages from SEO data
       const mockTopPages = [
         { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
         { getUrl: () => 'https://example.com/page3', getTraffic: () => 8000 },
@@ -2216,11 +2220,11 @@ describe('Sites Controller', () => {
 
       const response = await result.json();
 
-      // Should only include pages that are in top 2 Ahrefs pages (page1, page3)
+      // Should only include pages that are in top 2 SEO pages (page1, page3)
       expect(response).to.have.length(2);
       expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
       expect(response.find((m) => m.url === 'https://example.com/page3')).to.exist;
-      expect(mockSiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(siteId, 'ahrefs', 'global');
+      expect(mockSiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(siteId, 'seo', 'global');
     });
 
     it('handles URL variations with trailing slashes', async () => {
@@ -2523,7 +2527,7 @@ describe('Sites Controller', () => {
       expect(error).to.have.property('message', 'filterByTopOrganicSearchPages must be a positive integer');
     });
 
-    it('returns empty array when no Ahrefs pages found', async () => {
+    it('returns empty array when no SEO pages found', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2552,12 +2556,12 @@ describe('Sites Controller', () => {
 
       const response = await result.json();
 
-      // Should return empty array when user requested filtering but no Ahrefs pages exist
+      // Should return empty array when user requested filtering but no SEO pages exist
       expect(response).to.have.length(0);
       expect(loggerStub.warn).to.have.been.called;
     });
 
-    it('returns internal server error when Ahrefs data fetch fails', async () => {
+    it('returns internal server error when SEO data fetch fails', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2589,7 +2593,7 @@ describe('Sites Controller', () => {
       expect(response.message).to.include('Database error');
     });
 
-    it('returns empty array when no Ahrefs pages match base URL filter', async () => {
+    it('returns empty array when no SEO pages match base URL filter', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -2630,7 +2634,7 @@ describe('Sites Controller', () => {
       // Should return empty array when no pages match base URL
       expect(response).to.have.length(0);
       expect(loggerStub.warn).to.have.been.calledWith(
-        sinon.match(/No Ahrefs top pages match base URL/),
+        sinon.match(/No SEO top pages match base URL/),
       );
     });
 
@@ -2846,7 +2850,7 @@ describe('Sites Controller', () => {
         },
       ];
 
-      // But top 3 Ahrefs pages include page2 which has no RUM data
+      // But top 3 SEO pages include page2 which has no RUM data
       const mockTopPages = [
         { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
         { getUrl: () => 'https://example.com/page2', getTraffic: () => 9000 },
@@ -3074,13 +3078,13 @@ describe('Sites Controller', () => {
 
   it('get page metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
     const storedMetrics = [{
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-12T00:00:00Z',
       metric: 'organic-traffic',
       value: 100,
@@ -3088,7 +3092,7 @@ describe('Sites Controller', () => {
     },
     {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 400,
@@ -3096,7 +3100,7 @@ describe('Sites Controller', () => {
     },
     {
       siteId: '123',
-      source: 'ahrefs',
+      source: 'seo',
       time: '2023-03-13T00:00:00Z',
       metric: 'organic-traffic',
       value: 200,
@@ -3134,7 +3138,7 @@ describe('Sites Controller', () => {
   });
 
   it('get page metrics by sources returns bad request when siteId is missing', async () => {
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
@@ -3163,7 +3167,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by sources returns bad request when metric is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
     const result = await sitesController.getPageMetricsBySource({
@@ -3177,7 +3181,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by sources returns bad request when base64PageUrl is missing', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
 
     const result = await sitesController.getPageMetricsBySource({
@@ -3191,7 +3195,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics by source returns not found when site is not found', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
 
@@ -3213,7 +3217,7 @@ describe('Sites Controller', () => {
 
   it('get page metrics for non belonging to the organization', async () => {
     const siteId = sites[0].getId();
-    const source = 'ahrefs';
+    const source = 'seo';
     const metric = 'organic-traffic';
     const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
@@ -3356,6 +3360,274 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('code');
     expect(updatedSite.code).to.deep.equal(codeConfig);
+  });
+
+  it('sets config when site has no existing config', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    expect(site.setConfig).to.have.been.calledOnce;
+
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
+  });
+
+  it('sets config when toDynamoItem returns null for existing config', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns({ something: true });
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const toDynamoStub = sandbox.stub(Config, 'toDynamoItem').returns(null);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    expect(toDynamoStub).to.have.been.called;
+    expect(site.setConfig).to.have.been.calledOnce;
+
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
+  });
+
+  it('shallow-merges config so partial update preserves existing keys', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      slack: { channel: '#test' },
+      llmo: { dataFolder: '/data', brand: 'Test' },
+      handlers: { 'meta-tags': { excludedURLs: [] } },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#updated' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    expect(site.setConfig).to.have.been.calledOnce;
+
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.slack).to.deep.equal({ channel: '#updated' });
+    expect(mergedConfig.llmo).to.deep.equal({ dataFolder: '/data', brand: 'Test' });
+    expect(mergedConfig.handlers).to.deep.equal({ 'meta-tags': { excludedURLs: [] } });
+  });
+
+  describe('auditTargetURLs validation', () => {
+    it('returns bad request when manual URL hostname does not match site base URL', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({ slack: { channel: '#x' } }));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub();
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://example.com/path1' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const err = await response.json();
+      expect(err.message).to.include('Invalid audit target URL at manual[0] (https://example.com/path1):');
+      expect(err.message).to.include('site domain (site1.com, with or without www.)');
+      expect(site.setConfig).to.have.not.been.called;
+    });
+
+    it('accepts manual URLs on the site hostname', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://site1.com/path1' }, { url: 'https://site1.com/path2' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual).to.deep.equal([
+        { url: 'https://site1.com/path1' },
+        { url: 'https://site1.com/path2' },
+      ]);
+    });
+
+    it('deep-merges auditTargetURLs sub-keys so patching one source preserves others', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      // Stub toDynamoItem so the existing config includes moneyPages regardless of whether
+      // the installed shared package's Joi schema knows about that source yet.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        auditTargetURLs: {
+          manual: [{ url: 'https://site1.com/existing' }],
+          moneyPages: [{ url: 'https://site1.com/money1' }],
+        },
+      });
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: {
+            auditTargetURLs: {
+              manual: [{ url: 'https://site1.com/updated' }],
+            },
+          },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual).to.deep.equal([{ url: 'https://site1.com/updated' }]);
+      expect(merged.auditTargetURLs.moneyPages).to.deep.equal([{ url: 'https://site1.com/money1' }]);
+    });
+
+    it('does not validate auditTargetURLs when key is omitted from config patch', async () => {
+      const site = sites[0];
+      const existingConfig = Config({
+        auditTargetURLs: { manual: [{ url: 'https://wrong.example/' }] },
+      });
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { config: { slack: { channel: '#only' } } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.auditTargetURLs.manual[0].url).to.equal('https://wrong.example/');
+    });
+  });
+
+  describe('enableMoneyPageUrls config flag', () => {
+    it('allows disabling money page URLs via config patch', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: { enableMoneyPageUrls: false },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.enableMoneyPageUrls).to.equal(false);
+    });
+
+    it('allows re-enabling money page URLs via config patch', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({ enableMoneyPageUrls: false }));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: { enableMoneyPageUrls: true },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.enableMoneyPageUrls).to.equal(true);
+    });
+
+    it('preserves enableMoneyPageUrls when patching other config keys', async () => {
+      const site = sites[0];
+      site.getConfig = sandbox.stub().returns(Config({}));
+      // Stub toDynamoItem so the existing config includes enableMoneyPageUrls regardless
+      // of whether the installed shared package's schema knows about the field yet.
+      sandbox.stub(Config, 'toDynamoItem').returns({
+        enableMoneyPageUrls: false,
+        slack: { channel: '#old' },
+      });
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: {
+          config: { slack: { channel: '#updated' } },
+        },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(200);
+      const merged = site.setConfig.firstCall.args[0];
+      expect(merged.enableMoneyPageUrls).to.equal(false);
+      expect(merged.slack).to.deep.equal({ channel: '#updated' });
+    });
+  });
+
+  it('allows removing a config key by explicitly setting it to null', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      slack: { channel: '#test' },
+      llmo: { dataFolder: '/data' },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#updated' }, llmo: null },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.slack).to.deep.equal({ channel: '#updated' });
+    expect(mergedConfig.llmo).to.equal(null);
   });
 
   describe('pageTypes validation', () => {
@@ -3885,6 +4157,288 @@ describe('Sites Controller', () => {
     });
   });
 
+  describe('getPageCitabilityCounts', () => {
+    it('returns bad request when site ID is missing', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: undefined },
+        data: {},
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request for an invalid groupBy field', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'invalidField' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('Invalid groupBy field');
+    });
+
+    it('returns not found when the site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its page citability records');
+    });
+
+    it('returns empty counts when no records exist', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({});
+    });
+
+    it('defaults to groupBy=updatedBy when groupBy is not specified', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+        { getUpdatedBy: () => 'page-citability' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1, 'page-citability': 1 });
+    });
+
+    it('returns counts grouped by updatedBy', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+        { getUpdatedBy: () => 'prerender' },
+        { getUpdatedBy: () => 'page-citability' },
+        { getUpdatedBy: () => 'spacecat' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 2, 'page-citability': 1, spacecat: 1 });
+    });
+
+    it('returns counts grouped by url', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUrl: () => 'https://example.com/a' },
+        { getUrl: () => 'https://example.com/a' },
+        { getUrl: () => 'https://example.com/b' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'url' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ 'https://example.com/a': 2, 'https://example.com/b': 1 });
+    });
+
+    it('returns counts grouped by updatedAt', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedAt: () => '2025-01-01' },
+        { getUpdatedAt: () => '2025-01-01' },
+        { getUpdatedAt: () => '2025-01-02' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedAt' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ '2025-01-01': 2, '2025-01-02': 1 });
+    });
+
+    it('falls back to direct property when getter is absent', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { updatedBy: 'prerender' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('falls back to "unknown" when neither getter nor property is present', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([{}]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ unknown: 1 });
+    });
+
+    it('returns bad request when period and from are both provided', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { period: '7d', from: '2025-01-01' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'period and from/to are mutually exclusive');
+    });
+
+    it('returns bad request for an invalid period value', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { period: '3d' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('Invalid period');
+    });
+
+    it('returns bad request for an invalid from date', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { from: 'not-a-date' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Invalid from date');
+    });
+
+    it('returns bad request for an invalid to date', async () => {
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { to: 'not-a-date' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Invalid to date');
+    });
+
+    it('filters records by period=7d', async () => {
+      // DB handles the between filter — mock returns only what would survive it
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', period: '7d' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('returns all records for period=all', async () => {
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender', getUpdatedAt: () => tenDaysAgo },
+        { getUpdatedBy: () => 'page-citability', getUpdatedAt: () => tenDaysAgo },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', period: 'all' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1, 'page-citability': 1 });
+    });
+
+    it('filters records by explicit from/to date range', async () => {
+      // DB handles the between filter — mock returns only what would survive it
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', from: '2025-02-01', to: '2025-02-28' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('filters records with only from date', async () => {
+      // DB handles the between filter — mock returns only what would survive it
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', from: '2025-02-01' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('filters records with only to date', async () => {
+      // DB handles the between filter — mock returns only what would survive it
+      mockDataAccess.PageCitability.allBySiteId.resolves([
+        { getUpdatedBy: () => 'prerender' },
+      ]);
+      const result = await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', to: '2025-02-01' },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.deep.equal({ prerender: 1 });
+    });
+
+    it('passes between option to allBySiteId when from and to are provided', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([{ getUpdatedBy: () => 'prerender' }]);
+      await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', from: '2025-02-01', to: '2025-02-28' },
+      });
+      const [, options] = mockDataAccess.PageCitability.allBySiteId.firstCall.args;
+      expect(options).to.have.nested.property('between.attribute', 'updatedAt');
+      expect(options).to.have.nested.property('between.start');
+      expect(options).to.have.nested.property('between.end');
+    });
+
+    it('passes between option to allBySiteId when period is set', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([]);
+      await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy', period: '7d' },
+      });
+      const [, options] = mockDataAccess.PageCitability.allBySiteId.firstCall.args;
+      expect(options).to.have.nested.property('between.attribute', 'updatedAt');
+    });
+
+    it('passes no options to allBySiteId when no time filter is set', async () => {
+      mockDataAccess.PageCitability.allBySiteId.resolves([]);
+      await sitesController.getPageCitabilityCounts({
+        params: { siteId: SITE_IDS[0] },
+        data: { groupBy: 'updatedBy' },
+      });
+      const [, options] = mockDataAccess.PageCitability.allBySiteId.firstCall.args;
+      expect(options).to.deep.equal({});
+    });
+  });
+
   describe('getTopPages', () => {
     it('returns bad request when site ID is missing', async () => {
       const result = await sitesController.getTopPages({
@@ -3937,27 +4491,27 @@ describe('Sites Controller', () => {
       const result = await sitesController.getTopPages({
         params: {
           siteId: SITE_IDS[0],
-          source: 'ahrefs',
+          source: 'seo',
         },
       });
       const response = await result.json();
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'ahrefs');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'seo');
     });
 
     it('retrieves top pages by source and geo for a site', async () => {
       const result = await sitesController.getTopPages({
         params: {
           siteId: SITE_IDS[0],
-          source: 'ahrefs',
+          source: 'seo',
           geo: 'US',
         },
       });
       const response = await result.json();
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'seo', 'US');
     });
   });
 
@@ -4061,15 +4615,15 @@ describe('Sites Controller', () => {
 
       mockTierClientStub = {
         checkValidEntitlement: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         }),
         getFirstEnrollment: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
           enrollment: { getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] },
           site: testSites[0],
         }),
         getAllEnrollment: sandbox.stub().resolves({
-          entitlement: { getId: () => 'entitlement-123' },
+          entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
           enrollments: [{ getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] }],
         }),
       };
@@ -4083,7 +4637,7 @@ describe('Sites Controller', () => {
       };
       mockDataAccess.Entitlement = {
         findByOrganizationIdAndProductCode: sandbox.stub().resolves({
-          getTier: () => 'FREE_TRIAL',
+          getTier: () => 'PLG',
         }),
       };
     });
@@ -4122,7 +4676,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Site.findById.resolves(testSites[0]);
 
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4141,7 +4695,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4162,7 +4716,7 @@ describe('Sites Controller', () => {
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
       mockTierClientStub.getFirstEnrollment.resolves({
-        entitlement: { getId: () => 'entitlement-123' },
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
         enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
         site: testSites[0],
       });
@@ -4243,6 +4797,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4280,6 +4835,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4315,6 +4871,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => entitlementId,
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       mockTierClientStub.getAllEnrollment.resolves({
@@ -4345,6 +4902,7 @@ describe('Sites Controller', () => {
       const mockEntitlement = {
         getId: () => 'entitlement-456',
         getProductCode: () => 'ASO',
+        getTier: () => 'FREE_TRIAL',
       };
 
       const mockTierClient = {
@@ -4367,6 +4925,167 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('organization');
       expect(body.data).to.have.property('site');
       expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via siteId path', async () => {
+      const validSiteId = SITE_IDS[1];
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollments: [{
+          getId: () => 'enrollment-pre-onboard',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for PRE_ONBOARD-tier site via imsOrg path for non-admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'entitlement-pre-onboard',
+            getTier: () => 'PRE_ONBOARD',
+          },
+          enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 200 for PRE_ONBOARD-tier site via imsOrg path for admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'entitlement-pre-onboard',
+            getTier: () => 'PRE_ONBOARD',
+          },
+          enrollment: { getId: () => 'enrollment-pre-onboard', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 for admin when organizationId path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: null,
+          enrollment: null,
+          site: null,
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
     });
   });
 
@@ -4433,7 +5152,7 @@ describe('Sites Controller', () => {
     let setHasAccess;
 
     before(async function beforeTriggerBrandProfile() {
-      this.timeout(5000);
+      this.timeout(15000);
       helperStub = sinon.stub().resolves('exec-123');
       let hasAccess = true;
       const moduleMocks = {

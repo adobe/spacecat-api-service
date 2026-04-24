@@ -108,6 +108,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 
 ```json
 {
+  "topic": "PDF Editing",
+  "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "items": [
     {
       "topic": "PDF Editing",
@@ -132,6 +134,8 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 }
 ```
 
+Root **`topic`** and **`topicId`** mirror the [Topic Detail API](topic-detail-api.md) conventions: same resolution from execution rows and the `:topicId` path (UUID path filters by `topic_id` but still returns a display label and stable id when the query returns rows). `topicId` is `null` when the path is a topic name and rows have no `topic_id`.
+
 ### Prompt Object Fields
 
 | Field | Type | Description |
@@ -152,6 +156,12 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 | `sentiment` | string | `"Positive"`, `"Neutral"`, `"Negative"`, or empty |
 | `errorCode` | string | Error code if the execution failed, empty otherwise |
 | `origin` | string | Origin of the prompt (e.g. `"human"`, `"ai"`) |
+
+### Optional Search Filtering
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | — | When provided, filters returned prompts to only those whose `prompt` text contains the query (case-insensitive substring match). Used by the UI to show only matching prompts when a topic was found via prompt-level search. |
 
 ### Deduplication
 
@@ -176,6 +186,8 @@ Prompts are deduplicated by `prompt|region_code` — when multiple executions ex
 
 - [Brand Presence Filter Dimensions API](filter-dimensions-api.md) — Returns available filter options
 - [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks
+- [Brand Presence Sentiment Overview API](sentiment-overview-api.md) — Weekly sentiment distribution for charts
+- [Brand Presence Market Tracking Trends API](market-tracking-trends-api.md) — Weekly mentions, citations, and competitors
 - [Brand Presence Sentiment Movers API](sentiment-movers-api.md) — Top/bottom sentiment movers
 
 ---

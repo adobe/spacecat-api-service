@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -19,6 +17,7 @@ import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import esmock from 'esmock';
 import OpportunitiesController from '../../src/controllers/opportunities.js';
 
 use(chaiAsPromised);
@@ -155,6 +154,9 @@ describe('Opportunities Controller', () => {
     },
     getUpdatedAt() {
       return opptys[0].updatedAt;
+    },
+    getLastAuditedAt() {
+      return opptys[0].lastAuditedAt;
     },
     setCreatedAt(value) {
       opptys[0].createdAt = value;
@@ -421,7 +423,7 @@ describe('Opportunities Controller', () => {
     };
     const mockEntitlement = {
       findByOrganizationIdAndProductCode: sandbox.stub().resolves({
-        getTier: () => 'FREE_TRIAL',
+        getTier: () => 'PLG',
       }),
     };
     const ctxWithToken = {
@@ -474,7 +476,7 @@ describe('Opportunities Controller', () => {
     };
     const mockEntitlement = {
       findByOrganizationIdAndProductCode: sandbox.stub().resolves({
-        getTier: () => 'FREE_TRIAL',
+        getTier: () => 'PLG',
       }),
     };
     const ctxWithToken = {
@@ -1181,6 +1183,189 @@ describe('Opportunities Controller', () => {
         expect(error).to.have.property('message', 'Only users belonging to the organization of the site can remove its opportunities');
         expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
       });
+    });
+  });
+
+  describe('Summit PLG filtering', () => {
+    const createMockOpptyEntity = (type) => ({
+      getId: () => `id-${type}`,
+      getSiteId: () => SITE_ID,
+      getAuditId: () => 'audit001',
+      getRunbook: () => 'http://runbook.url',
+      getType: () => type,
+      getData: () => ({}),
+      getOrigin: () => 'ESS_OPS',
+      getTitle: () => `Title ${type}`,
+      getDescription: () => `Desc ${type}`,
+      getGuidance: () => ({}),
+      getTags: () => [],
+      getStatus: () => 'NEW',
+      getCreatedAt: () => Date.now(),
+      getUpdatedAt: () => Date.now(),
+      getUpdatedBy: () => 'system',
+      getLastAuditedAt: () => Date.now(),
+    });
+
+    const allTypes = ['broken-backlinks', 'cwv', 'alt-text', 'forms', 'consent-banner', 'rss'];
+    const plgAllowedTypes = ['broken-backlinks', 'cwv', 'alt-text'];
+    let mockEntities;
+
+    beforeEach(() => {
+      mockEntities = allTypes.map(createMockOpptyEntity);
+      mockOpportunity.allBySiteId.resolves(mockEntities);
+      mockOpportunity.allBySiteIdAndStatus.resolves(mockEntities);
+    });
+
+    it('filters opportunities to PLG-allowed types when summit PLG is enabled (getAllForSite)', async () => {
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(true),
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getAllForSite({ params: { siteId: SITE_ID } });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(3);
+      const types = opportunities.map((o) => o.type);
+      expect(types).to.have.members(plgAllowedTypes);
+    });
+
+    it('returns all opportunities when summit PLG is not enabled (getAllForSite)', async () => {
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(false),
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getAllForSite({ params: { siteId: SITE_ID } });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(allTypes.length);
+    });
+
+    it('filters opportunities to PLG-allowed types when summit PLG is enabled (getByStatus)', async () => {
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(true),
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getByStatus({ params: { siteId: SITE_ID, status: 'NEW' } });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(3);
+      const types = opportunities.map((o) => o.type);
+      expect(types).to.have.members(plgAllowedTypes);
+    });
+
+    it('returns all opportunities when summit PLG is not enabled (getByStatus)', async () => {
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(false),
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getByStatus({ params: { siteId: SITE_ID, status: 'NEW' } });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(allTypes.length);
+    });
+
+    it('passes request context to getIsSummitPlgEnabled for getAllForSite', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID } };
+      await ctrl.getAllForSite(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+
+    it('passes request context to getIsSummitPlgEnabled for getByStatus', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID, status: 'NEW' } };
+      await ctrl.getByStatus(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+
+    it('calls grantSuggestionsForOpportunity in getByID when summit PLG is enabled', async () => {
+      const grantStub = sinon.stub().resolves();
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(true),
+        },
+        '../../src/support/grant-suggestions-handler.js': {
+          grantSuggestionsForOpportunity: grantStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getByID({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(grantStub).to.have.been.calledOnce;
+    });
+
+    it('does not call grantSuggestionsForOpportunity in getByID when summit PLG is not enabled', async () => {
+      const grantStub = sinon.stub().resolves();
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(false),
+        },
+        '../../src/support/grant-suggestions-handler.js': {
+          grantSuggestionsForOpportunity: grantStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getByID({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(grantStub).not.to.have.been.called;
+    });
+
+    it('passes request context to getIsSummitPlgEnabled for getByID', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID } };
+      await ctrl.getByID(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
     });
   });
 });

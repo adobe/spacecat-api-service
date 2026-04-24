@@ -435,6 +435,32 @@ export function startOnboarding(lambdaContext) {
             },
             {
               type: 'input',
+              block_id: 'force_onboard_input',
+              optional: true,
+              element: {
+                type: 'checkboxes',
+                action_id: 'force_onboard',
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Force re-onboard',
+                    },
+                    description: {
+                      type: 'plain_text',
+                      text: 'Override if the site was last onboarded with the paid profile.',
+                    },
+                    value: 'force',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Force Onboard',
+              },
+            },
+            {
+              type: 'input',
               block_id: 'language_input',
               element: {
                 type: 'plain_text_input',
@@ -595,6 +621,9 @@ export function onboardSiteModal(lambdaContext) {
       const tier = values.tier_input.tier.selected_option?.value
         || EntitlementModel.TIERS.FREE_TRIAL;
       const scheduledRun = values.scheduled_run_input?.scheduled_run?.selected_option?.value;
+      const forceOnboard = values.force_onboard_input?.force_onboard?.selected_options?.some(
+        (opt) => opt.value === 'force',
+      ) ?? false;
       const projectId = values.project_id_input.project_id.value;
       const language = values.language_input.language.value;
       const region = values.region_input.region.value;
@@ -674,6 +703,9 @@ export function onboardSiteModal(lambdaContext) {
 
       if (scheduledRun !== undefined) {
         additionalParams.scheduledRun = scheduledRun === 'true';
+      }
+      if (forceOnboard) {
+        additionalParams.force = true;
       }
       if (projectId) {
         additionalParams.projectId = projectId;

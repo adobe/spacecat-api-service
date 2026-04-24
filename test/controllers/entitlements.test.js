@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -524,6 +522,93 @@ describe('Entitlements Controller', () => {
       expect(body.message).to.equal('Failed to create entitlement');
 
       expect(context.log.error).to.have.been.calledWith(`Error creating entitlement for organization ${organizationId}: ${orgError.message}`);
+    });
+
+    // --- tier from payload ---
+
+    it('should use tier from payload when provided', async () => {
+      mockTierClient.createEntitlement.resolves({ entitlement: mockCreatedEntitlement });
+      const context = {
+        params: { organizationId },
+        data: { productCode: 'LLMO', tier: 'PAID' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(201);
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('PAID');
+    });
+
+    it('should use FREE_TRIAL tier when tier is not in payload (backward compat)', async () => {
+      mockTierClient.createEntitlement.resolves({ entitlement: mockCreatedEntitlement });
+      const context = {
+        params: { organizationId },
+        data: { productCode: 'LLMO' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(201);
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    });
+
+    it('should use FREE_TRIAL tier when data is absent entirely (backward compat)', async () => {
+      mockTierClient.createEntitlement.resolves({ entitlement: mockCreatedEntitlement });
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(201);
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    });
+
+    it('should return bad request for invalid tier value', async () => {
+      const context = {
+        params: { organizationId },
+        data: { productCode: 'LLMO', tier: 'INVALID_TIER' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid tier');
+      expect(body.message).to.include('FREE_TRIAL');
+      expect(body.message).to.include('PAID');
+    });
+
+    it('should return bad request for non-string tier', async () => {
+      const context = {
+        params: { organizationId },
+        data: { productCode: 'LLMO', tier: 123 },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid tier');
+    });
+
+    it('should return bad request for null tier', async () => {
+      const context = {
+        params: { organizationId },
+        data: { productCode: 'LLMO', tier: null },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid tier');
     });
   });
 });

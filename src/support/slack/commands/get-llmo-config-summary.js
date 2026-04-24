@@ -143,7 +143,9 @@ function GetLlmoConfigSummaryCommand(context) {
       const processSite = async (site) => {
         try {
           const config = await getLlmoConfig(site.getId());
-          if (!config) return null;
+          if (!config) {
+            return null;
+          }
 
           const stats = calculateStats(config);
           const organization = await Organization.findById(site.getOrganizationId());

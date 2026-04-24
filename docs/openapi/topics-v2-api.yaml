@@ -1,0 +1,172 @@
+v2-topics-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: status
+      in: query
+      required: false
+      description: Filter by topic status. Default excludes deleted topics.
+      schema:
+        type: string
+        enum: [active, pending, deleted, ignored]
+        example: 'active'
+    - name: brandId
+      in: query
+      required: false
+      description: Filter topics by brand UUID.
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - customer-config
+    summary: List topics for an organization (v2)
+    description: |
+      Returns all topics for the given organization, backed by PostgREST/Aurora.
+      By default, deleted topics are excluded. Use the `status` query parameter
+      to filter by specific status or include deleted topics.
+    operationId: listTopicsForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: Topics retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2TopicListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  post:
+    tags:
+      - customer-config
+    summary: Create or upsert a topic (v2)
+    description: |
+      Creates a new topic for the organization. If a topic with the same ID
+      already exists for this organization, the existing topic is updated
+      (upsert on `organization_id, topic_id` conflict).
+    operationId: createTopicForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2TopicInput'
+    responses:
+      '201':
+        description: Topic created (or updated via upsert)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Topic'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '409':
+        description: |
+          A unique-constraint violation escaped the `organization_id,
+          topic_id` upsert target. The response `message` echoes the actual
+          constraint name that fired (e.g. `uq_topic_per_org`) so callers
+          can discriminate between constraint classes without parsing 500
+          bodies. Treated as an idempotent retry signal by DRS-class
+          clients; logged at WARN (not ERROR) server-side.
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-topic-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: topicId
+      in: path
+      required: true
+      description: Topic business key (topic_id)
+      schema:
+        type: string
+        example: 'baseurl-discovery-research-topic'
+  patch:
+    tags:
+      - customer-config
+    summary: Update a topic (v2)
+    description: |
+      Updates an existing topic. Only provided fields are updated.
+    operationId: updateTopicForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2TopicUpdateInput'
+    responses:
+      '200':
+        description: Topic updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Topic'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or topic not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+  delete:
+    tags:
+      - customer-config
+    summary: Delete a topic (v2)
+    description: |
+      Soft-deletes a topic by setting its status to `deleted`.
+      The topic remains queryable with `?status=deleted`.
+    operationId: deleteTopicForOrgV2
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '204':
+        description: Topic deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or topic not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
