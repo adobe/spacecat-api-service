@@ -1,3 +1,10 @@
+# [1.451.0](https://github.com/adobe/spacecat-api-service/compare/v1.450.0...v1.451.0) (2026-04-24)
+
+
+### Features
+
+* persist all brand URLs and annotate onboarded status | LLMO-4435 ([#2252](https://github.com/adobe/spacecat-api-service/issues/2252)) ([3f9e1cf](https://github.com/adobe/spacecat-api-service/commit/3f9e1cfe85194b419cba6d65c57a23a93777c0cc)), closes [adobe/mysticat-data-service#427](https://github.com/adobe/mysticat-data-service/issues/427)
+
 # [1.450.0](https://github.com/adobe/spacecat-api-service/compare/v1.449.1...v1.450.0) (2026-04-24)
 
 
