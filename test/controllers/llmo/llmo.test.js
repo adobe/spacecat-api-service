@@ -5730,10 +5730,8 @@ describe('LlmoController', () => {
       };
 
       // Trigger isNewlyOpted === true (no 'opted' field in existing config)
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
-        enabled: true,
-        cdnLogSource: 'byocdn-akamai',
-      });
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
+      mockConfig.getLlmoCdnBucketConfig = sinon.stub().returns({ cdnProvider: 'byocdn-akamai' });
       mockSite.getOrganizationId = sinon.stub().returns(TEST_ORG_ID);
       mockTokowakaClient.fetchMetaconfig.resolves(null);
       mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
@@ -5822,7 +5820,7 @@ describe('LlmoController', () => {
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.siteId).to.equal(TEST_SITE_ID);
       expect(params.siteBaseURL).to.equal('https://www.example.com');
-      expect(params.cdnLogSource).to.equal('byocdn-akamai');
+      expect(params.cdnLogSource).to.equal('byocdn-akamai'); // read from llmo.cdnBucketConfig.cdnProvider
       expect(params.orgId).to.equal(TEST_ORG_ID);
     });
 
