@@ -240,14 +240,11 @@ function getReviewerIdentity(context) {
 }
 
 /**
- * Assigns a site to the given organization, persists, then re-fetches from DB so that
- * this.record reflects the saved value. setOrganizationId() only patches the patcher —
- * it never updates this.record — so getOrganizationId() returns stale data until a
- * fresh fetch. TierClient.createForSite reads via getOrganizationId() directly, bypassing
- * any in-memory realignment, which is why a re-fetch is required.
+ * Assigns a site to the given organization, persists, and returns a fresh instance
+ * fetched from DB so downstream consumers (e.g. TierClient) read the updated org.
  * @param {object} site - The site to reassign.
  * @param {string} organizationId - Target org id.
- * @param {object} dataAccess - Data access layer (for re-fetch).
+ * @param {object} dataAccess - Data access layer.
  * @param {object} log - Logger.
  * @returns {Promise<object>} Fresh site instance from DB.
  */
@@ -265,15 +262,6 @@ async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
 
 async function ensureAsoEntitlement(site, organization, context) {
   const { log } = context;
-  // Ground truth for the entitlement is the customer org resolved from the request's imsOrgId,
-  // not whatever the site currently reports. If the two disagree, realign the in-memory site
-  // so TierClient.createForSite resolves to the correct (customer) org. Guards against the
-  // case where an earlier site.save() reassignment did not surface to the next read.
-  const expectedOrgId = organization.getId();
-  if (site.getOrganizationId() !== expectedOrgId) {
-    log.warn(`Site ${site.getId()} org drift before ASO entitlement: in-memory ${site.getOrganizationId()}, expected ${expectedOrgId}. Realigning.`);
-    site.setOrganizationId(expectedOrgId);
-  }
   const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
   try {
     const result = await tierClient.createEntitlement(ASO_TIER);
