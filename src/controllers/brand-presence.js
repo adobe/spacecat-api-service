@@ -34,20 +34,33 @@ function BrandPresenceController(context) {
     try {
       auth.checkScopes([SCOPE_WRITE]);
     } catch {
+      log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 401 Unauthorized: missing scope ${SCOPE_WRITE}`);
       return unauthorized('Missing required scope: brand-presence.write');
     }
 
     try {
       const site = await Site.findById(siteId);
       if (!site) {
+        log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 404 Not Found: site does not exist`);
         return notFound(`Site not found: ${siteId}`);
       }
 
       if (!data || !Array.isArray(data.metrics)) {
+        log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 400 Bad Request: "metrics" array is missing or invalid`);
         return badRequest('Request body must contain a "metrics" array');
       }
 
       const { metrics } = data;
+
+      const invalidMetric = metrics.find(
+        (m) => typeof m.visibility_score === 'number'
+          && (m.visibility_score < 0 || m.visibility_score > 100),
+      );
+      if (invalidMetric) {
+        log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 400 Bad Request: field "visibility_score" must be between 0 and 100, received: ${invalidMetric.visibility_score}`);
+        return badRequest(`Invalid field: visibility_score must be between 0 and 100 (got ${invalidMetric.visibility_score})`);
+      }
+
       const total = metrics.length;
       const ch = new ClickhouseClient({}, log);
 
@@ -57,7 +70,7 @@ function BrandPresenceController(context) {
       try {
         ({ written, failures } = await ch.writeBatch(BRAND_PRESENCE_TABLE, metrics));
       } catch (err) {
-        log.error(`[brand-presence-controller] ClickHouse write failed: ${err.message}`);
+        log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 500 ClickHouse write failed: ${err.constructor.name}: ${err.message}`);
         return internalServerError('Database write failed');
       } finally {
         await ch.close();
@@ -65,7 +78,6 @@ function BrandPresenceController(context) {
 
       const failedIndexes = new Set(failures.map((f) => f.index));
 
-      // Claude Code, Sonnet 4.6, filter out failed rows for competitor data (ln 70)
       const competitorRows = metrics
         .filter((_, index) => !failedIndexes.has(index))
         .flatMap(toBrandPresenceCompetitorData);
@@ -75,22 +87,23 @@ function BrandPresenceController(context) {
         try {
           await chComp.writeBatch('brand_presence_competitor_data', competitorRows);
         } catch (err) {
-          log.error(`[brand-presence-controller] ClickHouse competitor write failed: ${err.message}`);
+          log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — competitor write failed: ${err.constructor.name}: ${err.message}`);
         } finally {
           await chComp.close();
         }
       }
 
-      log.info(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics: ${written}/${total} records written, ${failures.length} failed`);
+      const weeks = [...new Set(metrics.map((m) => m.week))].sort();
+      const weekRange = weeks.length <= 1 ? (weeks[0] ?? 'none') : `${weeks[0]}..${weeks[weeks.length - 1]}`;
+      log.info(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 201 Created: ${written}/${total} records written, ${failures.length} failed, weeks: ${weekRange}`);
 
-      // Claude Code, Sonnet 4.6, filter out failed rows, return only successfully written rows
       return createResponse({
         metadata: { total, success: written, failure: failures.length },
         failures,
         items: metrics.filter((_, index) => !failedIndexes.has(index)),
       }, 201);
     } catch (err) {
-      log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics: ${err.message}`, err);
+      log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 500 Internal Server Error: ${err.constructor.name}: ${err.message}`, err);
       return internalServerError('Internal server error');
     }
   };
@@ -101,6 +114,7 @@ function BrandPresenceController(context) {
     try {
       const site = await Site.findById(siteId);
       if (!site) {
+        log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 404 Not Found: site does not exist`);
         return notFound(`Site not found: ${siteId}`);
       }
 
@@ -114,20 +128,24 @@ function BrandPresenceController(context) {
       const limit = parseInt(rawLimit, 10);
       const offset = parseInt(rawOffset, 10);
 
-      // regex von claude code generiert, Model Sonnet 4.6
       if (startWeek && !/^\d{4}-W\d{2}$/.test(startWeek)) {
+        log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 400 Bad Request: invalid start_week format: ${startWeek}`);
         return badRequest('Invalid start_week format. Use YYYY-Www (e.g. 2025-W01)');
       }
       if (endWeek && !/^\d{4}-W\d{2}$/.test(endWeek)) {
+        log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 400 Bad Request: invalid end_week format: ${endWeek}`);
         return badRequest('Invalid end_week format. Use YYYY-Www (e.g. 2025-W52)');
       }
       if (startWeek && endWeek && startWeek > endWeek) {
+        log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 400 Bad Request: start_week ${startWeek} is after end_week ${endWeek}`);
         return badRequest('start_week must be before or equal to end_week');
       }
       if (Number.isNaN(limit) || limit < 1) {
+        log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 400 Bad Request: invalid limit: ${rawLimit}`);
         return badRequest('limit must be a positive integer');
       }
       if (Number.isNaN(offset) || offset < 0) {
+        log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 400 Bad Request: invalid offset: ${rawOffset}`);
         return badRequest('offset must be a non-negative integer');
       }
 
@@ -164,17 +182,17 @@ function BrandPresenceController(context) {
           queryParams,
         );
       } catch (err) {
-        log.error(`[brand-presence-controller] ClickHouse query failed: ${err.message}`);
+        log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 500 ClickHouse query failed: ${err.constructor.name}: ${err.message}`);
         return internalServerError('Database query failed');
       } finally {
         await ch.close();
       }
 
-      log.info(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data: ${rows.length}/${total} records returned (start_week: ${startWeek ?? 'none'}, end_week: ${endWeek ?? 'none'})`);
+      log.info(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 200 OK: ${rows.length}/${total} records returned, start_week: ${startWeek ?? 'none'}, end_week: ${endWeek ?? 'none'}, limit: ${limit}, offset: ${offset}`);
 
       return ok({ metadata: { total, limit, offset }, data: rows });
     } catch (err) {
-      log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data: ${err.message}`, err);
+      log.error(`[brand-presence-controller] GET /sites/${siteId}/brand-presence/data — 500 Internal Server Error: ${err.constructor.name}: ${err.message}`, err);
       return internalServerError('Internal server error');
     }
   };
