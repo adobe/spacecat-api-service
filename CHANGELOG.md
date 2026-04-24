@@ -1,3 +1,15 @@
+# [1.450.0](https://github.com/adobe/spacecat-api-service/compare/v1.449.1...v1.450.0) (2026-04-24)
+
+
+### Bug Fixes
+
+* **llmo:** sanitize error message in updateLlmoConfig catch block ([#2241](https://github.com/adobe/spacecat-api-service/issues/2241)) ([22a2c84](https://github.com/adobe/spacecat-api-service/commit/22a2c84b84835d518c5ff002223a26af3f8644f8)), closes [src/controllers/llmo/llmo.js#L593](https://github.com/src/controllers/llmo/llmo.js/issues/L593)
+
+
+### Features
+
+* add URL Inspector PG API endpoints | LLMO-4030 ([#2113](https://github.com/adobe/spacecat-api-service/issues/2113)) ([a41acc2](https://github.com/adobe/spacecat-api-service/commit/a41acc268f244f63fc5de818bda1c7b78bd6f9dd))
+
 ## [1.449.1](https://github.com/adobe/spacecat-api-service/compare/v1.449.0...v1.449.1) (2026-04-20)
 
 
