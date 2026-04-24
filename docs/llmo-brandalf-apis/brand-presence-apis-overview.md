@@ -11,6 +11,8 @@ Parameters are typically supplied as **query string** fields (merged into reques
 
 Deep-dive docs: [filter-dimensions](filter-dimensions-api.md), [weeks](brand-presence-weeks-api.md), [sentiment-overview](sentiment-overview-api.md), [market-tracking-trends](market-tracking-trends-api.md), [topics & prompts](topics-api.md), [search](search-api.md), [topic detail](topic-detail-api.md), [prompt detail](prompt-detail-api.md), [sentiment-movers](sentiment-movers-api.md), [share-of-voice](share-of-voice-api.md), [stats](brand-presence-stats-api.md), [execution sources](execution-sources-api.md).
 
+**URL Inspector APIs** (site-scoped, separate suite): see [url-inspector-apis-overview.md](url-inspector-apis-overview.md) — covers `stats`, `owned-urls`, `trending-urls`, `cited-domains`, `domain-urls`, `url-prompts`.
+
 ---
 
 ## Master table
