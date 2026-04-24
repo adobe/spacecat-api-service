@@ -128,7 +128,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
