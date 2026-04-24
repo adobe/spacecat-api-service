@@ -1292,12 +1292,24 @@ function LlmoController(ctx) {
         }
 
         // Fire-and-forget internal email — does not block the opt-in response.
+        // Resolve the real user email from IMS since profile.email is the IMS userId (sub claim).
+        const imsUserId = profile?.email;
+        let optedBy;
+        if (imsUserId) {
+          try {
+            const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
+            optedBy = adminProfile?.email;
+          } catch (imsErr) {
+            log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
+          }
+        }
+
         notifyOptInIfNeeded(context, {
           siteId,
           siteBaseURL: baseURL,
           cdnLogSource: currentConfig.getLlmoCdnBucketConfig()?.cdnProvider,
           orgId: site.getOrganizationId?.(),
-          optedBy: lastModifiedBy,
+          optedBy,
         }).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
       }
 

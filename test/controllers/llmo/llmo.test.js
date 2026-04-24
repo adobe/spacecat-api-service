@@ -87,6 +87,7 @@ describe('LlmoController', () => {
   let isUserInImsGroupStub;
   let getOrgGroupsStub;
   let getImsUserProfileStub;
+  let getImsAdminProfileStub;
   let getImsUserOrganizationsStub;
   let probeSiteAndResolveDomainStub;
   let callCdnRoutingApiStub;
@@ -639,6 +640,7 @@ describe('LlmoController', () => {
         isUserInImsGroup: (...args) => isUserInImsGroupStub(...args),
         getOrgGroups: (...args) => getOrgGroupsStub(...args),
         getImsUserProfile: (...args) => getImsUserProfileStub(...args),
+        getImsAdminProfile: (...args) => getImsAdminProfileStub(...args),
         getImsUserOrganizations: (...args) => getImsUserOrganizationsStub(...args),
       },
     };
@@ -647,6 +649,7 @@ describe('LlmoController', () => {
     isUserInImsGroupStub = sinon.stub().resolves(false);
     getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
     getImsUserProfileStub = sinon.stub().resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
+    getImsAdminProfileStub = sinon.stub().resolves({ email: 'test@example.com' });
     getImsUserOrganizationsStub = sinon.stub().resolves([]);
     getImsTokenFromPromiseTokenStub.reset();
     getImsTokenFromPromiseTokenStub.resolves('test-ims-user-token');
@@ -5823,6 +5826,7 @@ describe('LlmoController', () => {
       expect(params.siteBaseURL).to.equal('https://www.example.com');
       expect(params.cdnLogSource).to.equal('byocdn-akamai'); // read from llmo.cdnBucketConfig.cdnProvider
       expect(params.orgId).to.equal(TEST_ORG_ID);
+      expect(params.optedBy).to.equal('test@example.com'); // resolved via getImsAdminProfile
     });
 
     it('should succeed and log error when opt-in notification throws unexpectedly', async () => {
