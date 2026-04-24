@@ -1017,18 +1017,21 @@ function SuggestionsController(ctx, sqs, env) {
           appliedOnPagePath,
           cancelInheritance,
         } = relationshipContext;
-        if (!hasText(fixTargetPageId)) {
-          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string');
+
+        if (!fixTargetMode || (fixTargetMode !== 'source' && fixTargetMode !== 'local')) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode is required: "source" or "local"');
         }
+
+        if (fixTargetMode === 'local' && !hasText(fixTargetPageId)) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId is required when fixTargetMode is "local"');
+        }
+
+        if (fixTargetPageId !== undefined && !hasText(fixTargetPageId)) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string when provided');
+        }
+
         if (cancelInheritance !== undefined && typeof cancelInheritance !== 'boolean') {
           return badRequest('Each fixTargetGroup relationshipContext.cancelInheritance must be a boolean');
-        }
-        if (
-          fixTargetMode !== undefined
-          && fixTargetMode !== 'source'
-          && fixTargetMode !== 'local'
-        ) {
-          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"');
         }
         if (appliedOnPagePath !== undefined && !hasText(appliedOnPagePath)) {
           return badRequest('Each fixTargetGroup relationshipContext.appliedOnPagePath must be a non-empty string');
