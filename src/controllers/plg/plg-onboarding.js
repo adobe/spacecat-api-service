@@ -239,8 +239,35 @@ function getReviewerIdentity(context) {
   return hasText(profile?.email) ? profile.email : 'admin';
 }
 
-async function ensureAsoEntitlement(site, context) {
+/**
+ * Assigns a site to the given organization and persists. After save, if the in-memory getter
+ * does not reflect the new value (observed drift where save() reassignment did not surface to
+ * the next read), logs a loud warning and re-applies on the in-memory instance so downstream
+ * reads on the same request see the intended value.
+ * @param {object} site - The site to reassign.
+ * @param {string} organizationId - Target org id.
+ * @param {object} log - Logger.
+ */
+async function reassignSiteOrganization(site, organizationId, log) {
+  site.setOrganizationId(organizationId);
+  await site.save();
+  if (site.getOrganizationId() !== organizationId) {
+    log.warn(`Site ${site.getId()} org drift after save: in-memory ${site.getOrganizationId()}, expected ${organizationId}. Re-applying on instance.`);
+    site.setOrganizationId(organizationId);
+  }
+}
+
+async function ensureAsoEntitlement(site, organization, context) {
   const { log } = context;
+  // Ground truth for the entitlement is the customer org resolved from the request's imsOrgId,
+  // not whatever the site currently reports. If the two disagree, realign the in-memory site
+  // so TierClient.createForSite resolves to the correct (customer) org. Guards against the
+  // case where an earlier site.save() reassignment did not surface to the next read.
+  const expectedOrgId = organization.getId();
+  if (site.getOrganizationId() !== expectedOrgId) {
+    log.warn(`Site ${site.getId()} org drift before ASO entitlement: in-memory ${site.getOrganizationId()}, expected ${expectedOrgId}. Realigning.`);
+    site.setOrganizationId(expectedOrgId);
+  }
   const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
   try {
     const result = await tierClient.createEntitlement(ASO_TIER);
@@ -254,27 +281,6 @@ async function ensureAsoEntitlement(site, context) {
     throw error;
   }
 }
-
-/**
- * Revokes the ASO site enrollment for any other site under the same entitlement.
- * Used to enforce one active PLG enrollment per org when upgrading from PRE_ONBOARD.
- * @param {object} site - The newly enrolled site.
- * @param {object} entitlement - The ASO entitlement for the org.
- * @param {object} context - Request context.
- */
-async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
-  const { dataAccess, log } = context;
-  const { SiteEnrollment } = dataAccess;
-
-  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
-  const toRevoke = enrollments.filter((e) => e.getSiteId() !== site.getId());
-
-  await Promise.all(toRevoke.map((e) => {
-    log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${e.getSiteId()}`);
-    return e.remove();
-  }));
-}
-
 /**
  * Disables the summit-plg config handler for a given site. Non-fatal.
  * @param {object} site - The site to disable the handler for.
@@ -304,20 +310,26 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
   const { Site } = dataAccess;
 
   const siteId = onboarding.getSiteId();
+  const domain = onboarding.getDomain();
+  const imsOrgId = onboarding.getImsOrgId();
+  const orgId = onboarding.getOrganizationId();
+
+  log.info(`Revoking ASO site enrollments for domain ${domain} (imsOrg: ${imsOrgId}, org: ${orgId}, site: ${siteId})`);
+
   if (!siteId) {
-    log.info(`No site linked to onboarding ${onboarding.getId()}, skipping enrollment revocation`);
+    log.info(`No site linked to onboarding ${onboarding.getId()} (domain: ${domain}, imsOrg: ${imsOrgId}), skipping enrollment revocation`);
     return;
   }
 
   const site = await Site.findById(siteId);
   if (!site) {
-    log.warn(`Site ${siteId} not found for onboarding ${onboarding.getId()}, skipping enrollment revocation`);
+    log.warn(`Site ${siteId} not found for onboarding ${onboarding.getId()} (domain: ${domain}, imsOrg: ${imsOrgId}), skipping enrollment revocation`);
     return;
   }
 
   const enrollments = await site.getSiteEnrollments();
   if (!enrollments || enrollments.length === 0) {
-    log.info(`No enrollments to revoke for site ${siteId}`);
+    log.info(`No enrollments to revoke for site ${siteId} (domain: ${domain}, imsOrg: ${imsOrgId})`);
   } else {
     const entitlements = await Promise.all(enrollments.map((e) => e.getEntitlement()));
     const asoEnrollments = enrollments.filter(
@@ -325,20 +337,80 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
     );
 
     if (asoEnrollments.length === 0) {
-      log.info(`No ASO enrollments to revoke for site ${siteId}`);
+      log.info(`No ASO enrollments to revoke for site ${siteId} (domain: ${domain}, imsOrg: ${imsOrgId})`);
     } else {
-      try {
-        await Promise.all(asoEnrollments.map((enrollment) => {
-          log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId}`);
-          return enrollment.remove();
-        }));
-      } catch (revokeError) {
-        log.warn(`Failed to revoke one or more ASO enrollments for site ${siteId}: ${revokeError.message}`);
-      }
+      await Promise.all(asoEnrollments.map(async (enrollment) => {
+        try {
+          log.info(`Revoking ASO enrollment ${enrollment.getId()} for offboarded site ${siteId} (domain: ${domain}, imsOrg: ${imsOrgId})`);
+          await enrollment.remove();
+        } catch (revokeError) {
+          log.warn(`Failed to revoke ASO enrollment ${enrollment.getId()} for site ${siteId} (domain: ${domain}, imsOrg: ${imsOrgId}): ${revokeError.message}`);
+        }
+      }));
     }
   }
 
   await disableSummitPlgHandler(site, context);
+}
+
+/**
+ * Enforces the "one active ASO enrollment per org" business rule by revoking every ASO
+ * enrollment under the target entitlement other than the newly onboarded site's.
+ *
+ * The previous incident (2026-04-21) showed this pattern is dangerous when entitlement
+ * resolution drifts to the wrong org — a single mis-resolution mass-deletes unrelated sites.
+ * Two invariants guard against that here:
+ *
+ *   1. The entitlement's org MUST equal the customer org we resolved from the request's
+ *      imsOrgId. If they disagree, entitlement resolution drifted — abort loudly, don't delete.
+ *   2. The target customer org MUST NOT be internal/demo. Caller-level mistake guard.
+ *
+ * @param {object} newSite - The newly onboarded site (kept active).
+ * @param {object} organization - The customer organization resolved from imsOrgId (ground truth).
+ * @param {object} entitlement - The ASO entitlement returned by ensureAsoEntitlement.
+ * @param {object} context - Request context.
+ */
+async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitlement, context) {
+  const { dataAccess, log, env } = context;
+  const { SiteEnrollment } = dataAccess;
+
+  const expectedOrgId = organization.getId();
+
+  // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  if (isInternalOrg(expectedOrgId, env)) {
+    log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
+    return;
+  }
+
+  // Guard 2: tight invariant — the entitlement we got back must belong to the expected customer
+  // org. If TierClient ever drifts and hands back an entitlement for a different org, abort.
+  const entitlementOrgId = entitlement.getOrganizationId();
+  if (entitlementOrgId !== expectedOrgId) {
+    log.error(`Refusing to revoke sibling ASO enrollments: entitlement ${entitlement.getId()} belongs to org ${entitlementOrgId} but expected ${expectedOrgId} (resolved from request imsOrgId). Possible entitlement-resolution drift.`);
+    return;
+  }
+
+  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  const newSiteId = newSite.getId();
+  const toRevoke = enrollments.filter((e) => e.getSiteId() !== newSiteId);
+
+  if (toRevoke.length === 0) {
+    return;
+  }
+
+  if (toRevoke.length > 3) {
+    log.warn(`Found ${toRevoke.length} other ASO enrollments under entitlement ${entitlement.getId()} for org ${expectedOrgId}; revoking all. Investigate if unexpected.`);
+  }
+
+  await Promise.all(toRevoke.map(async (e) => {
+    const prevSiteId = e.getSiteId();
+    try {
+      log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${prevSiteId} (org ${expectedOrgId})`);
+      await e.remove();
+    } catch (err) {
+      log.warn(`Failed to revoke ASO enrollment ${e.getId()} for site ${prevSiteId}: ${err.message}`);
+    }
+  }));
 }
 
 /**
@@ -397,10 +469,16 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
  * Enables all PLG auto-fix LaunchDarkly feature flags for the given site's org.
  * Uses the experience-success-studio project token (LD_EXPERIENCE_SUCCESS_API_TOKEN).
  * Each flag update is non-fatal — onboarding continues even if one fails.
+ *
+ * Takes the target organization explicitly (resolved upstream from the request's imsOrgId)
+ * rather than re-deriving it from site.getOrganizationId(). An earlier production incident
+ * flipped flags under the wrong IMS org id because the in-memory site still reported its
+ * pre-reassignment (internal) org after save.
  * @param {object} site - The onboarded site.
+ * @param {object} organization - The target customer organization.
  * @param {object} context - Request context.
  */
-async function updateLaunchDarklyFlags(site, context) {
+async function updateLaunchDarklyFlags(site, organization, context) {
   const { log, env } = context;
 
   const apiToken = env[LD_API_TOKEN_ENV_VAR];
@@ -411,9 +489,7 @@ async function updateLaunchDarklyFlags(site, context) {
 
   const ldClient = new LaunchDarklyClient({ apiToken }, log);
 
-  const imsOrgId = (await context.dataAccess.Organization.findById(
-    site.getOrganizationId(),
-  ))?.getImsOrgId();
+  const imsOrgId = organization?.getImsOrgId?.();
 
   if (!imsOrgId) {
     log.warn(`Cannot update LaunchDarkly flags: no IMS org ID for site ${site.getId()}`);
@@ -662,6 +738,11 @@ async function performAsoPlgOnboarding({
       // Resolve customer's organization from imsOrgId
       const organization = await createOrFindOrganization(imsOrgId, context);
       const customerOrgId = organization.getId();
+      // Anchor the onboarding record to the resolved customer org up-front, regardless of
+      // whether the site itself needs to be reassigned. Preonboarding records created earlier
+      // may carry a stale organizationId (e.g. the internal/demo org used during preonboard),
+      // and downstream consumers (notifications, displacement scoping) read it directly.
+      onboarding.setOrganizationId(customerOrgId);
 
       // Check if site needs to be moved from internal org to customer org
       const currentSiteOrgId = site.getOrganizationId();
@@ -698,19 +779,17 @@ async function performAsoPlgOnboarding({
         }
       }
 
-      // Reassign site org if needed BEFORE entitlement operations
-      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement
+      // Reassign site org if needed BEFORE entitlement operations.
+      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
+      // The onboarding record's organizationId was already anchored above.
       if (needsOrgReassignment) {
-        site.setOrganizationId(customerOrgId);
-        await site.save();
-        // Update PlgOnboarding's organizationId to match the site's new org
-        onboarding.setOrganizationId(customerOrgId);
+        await reassignSiteOrganization(site, customerOrgId, log);
         log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
       }
 
-      const { entitlement } = await ensureAsoEntitlement(site, context);
-      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-      await updateLaunchDarklyFlags(site, context);
+      const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+      await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
+      await updateLaunchDarklyFlags(site, organization, context);
 
       const steps = {
         ...(onboarding.getSteps() || {}),
@@ -1100,17 +1179,18 @@ async function performAsoPlgOnboarding({
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      site.setOrganizationId(organizationId);
-      await site.save();
+      await reassignSiteOrganization(site, organizationId, log);
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
     }
 
-    // Step 10: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
-    const { entitlement } = await ensureAsoEntitlement(site, context);
-    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-    await updateLaunchDarklyFlags(site, context);
+    // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.
+    // Revocation is guarded by entitlement.organizationId === organization.getId() and an
+    // internal-org check, so cross-org mass-revokes are blocked on any resolution drift.
+    const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+    await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
+    await updateLaunchDarklyFlags(site, organization, context);
 
     steps.entitlementCreated = true;
 
@@ -1470,6 +1550,7 @@ function PlgOnboardingController(ctx) {
 
     // ONBOARDED: revoke ASO enrollments, mark WAITLISTED, persist review (no bypass / re-run)
     if (status === STATUSES.ONBOARDED) {
+      log.info(`Admin ${reviewedBy} waitlisting ONBOARDED domain ${onboarding.getDomain()} (imsOrg: ${onboarding.getImsOrgId()}, org: ${onboarding.getOrganizationId()}, site: ${onboarding.getSiteId()}): ${justification}`);
       try {
         await revokeAsoSiteEnrollments(onboarding, context);
         onboarding.setStatus(STATUSES.WAITLISTED);
@@ -1635,13 +1716,12 @@ function PlgOnboardingController(ctx) {
               return badRequest('Onboarding record has no associated organization');
             }
             const currentImsOrgId = onboarding.getImsOrgId();
-            site.setOrganizationId(currentOrgId);
             /* c8 ignore next */
             const existingDeliveryConfig = site.getDeliveryConfig() || {};
             if (existingDeliveryConfig.imsOrgId) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
-            await site.save();
+            await reassignSiteOrganization(site, currentOrgId, log);
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
             await onboarding.save();
