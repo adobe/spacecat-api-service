@@ -75,7 +75,8 @@ const ERR_NOT_FOUND = 'not found';
  * @param {Function} handlerFn - Async (context, client) => response. Receives PostgREST client.
  * @returns {Promise<Response>}
  */
-async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
+// eslint-disable-next-line max-len
+export async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
   const { log, dataAccess } = context;
   const { Site } = dataAccess;
 
@@ -103,7 +104,7 @@ async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerNa
 /** @internal Exported for testing null/undefined fallbacks */
 export const strCompare = (a, b) => (a || '').localeCompare(b || '');
 
-function shouldApplyFilter(value) {
+export function shouldApplyFilter(value) {
   if (value == null) {
     return false;
   }
@@ -214,7 +215,7 @@ export function topicIdForDetailResponse(rows, decodedTopicParam) {
   return null;
 }
 
-function parseFilterDimensionsParams(context) {
+export function parseFilterDimensionsParams(context) {
   const q = context.data || {};
   return {
     startDate: q.startDate || q.start_date,
@@ -232,7 +233,7 @@ function parseFilterDimensionsParams(context) {
   };
 }
 
-function defaultDateRange() {
+export function defaultDateRange() {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - 28);
@@ -1541,7 +1542,7 @@ export function buildPromptDetails(rows) {
   });
 }
 
-function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
+export function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
   const q = context.data || {};
   return {
     sortBy: q.sortBy || 'name',
