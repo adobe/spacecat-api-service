@@ -1,3 +1,10 @@
+# [1.452.0](https://github.com/adobe/spacecat-api-service/compare/v1.451.0...v1.452.0) (2026-04-24)
+
+
+### Features
+
+* remove answers from brand presence topic details api ([#2254](https://github.com/adobe/spacecat-api-service/issues/2254)) ([b8e4e55](https://github.com/adobe/spacecat-api-service/commit/b8e4e55c5692e25f8d71e990d4dc3b3f166c9947))
+
 # [1.451.0](https://github.com/adobe/spacecat-api-service/compare/v1.450.0...v1.451.0) (2026-04-24)
 
 
