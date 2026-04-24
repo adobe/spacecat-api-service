@@ -824,24 +824,6 @@ describe('onboard-modal', () => {
       });
     });
 
-    it('responds with error when the onboarding request fails', async () => {
-      const bodyWithError = JSON.parse(JSON.stringify(body));
-      delete bodyWithError.view.state.values.site_url_input;
-      const onboardSiteModalAction = onboardSiteModal(context);
-      await onboardSiteModalAction({
-        ack: ackMock,
-        body: bodyWithError,
-        client: clientMock,
-      });
-      expect(ackMock).to.have.been.calledOnceWith({
-        response_action: 'errors',
-        errors: {
-          site_url_input: 'There was an error processing the onboarding request.',
-        },
-      });
-      expect(clientMock.chat.postMessage).to.not.have.been.called;
-    });
-
     it('should post error to channel when onboarding throws after modal is acknowledged', async () => {
       const onboardError = new Error('enableHandlerForSite failed: missing deps');
       const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {

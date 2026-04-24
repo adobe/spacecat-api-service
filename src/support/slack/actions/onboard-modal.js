@@ -596,7 +596,6 @@ export function onboardSiteModal(lambdaContext) {
   const { Site, Configuration } = dataAccess;
 
   return async ({ ack, body, client }) => {
-    let modalAcked = false;
     let siteUrl;
     let responseChannel;
     let responseThreadTs;
@@ -692,7 +691,6 @@ export function onboardSiteModal(lambdaContext) {
       }
 
       await ack();
-      modalAcked = true;
 
       const configuration = await Configuration.findLatest();
 
@@ -831,25 +829,16 @@ ${deliveryConfigInfo}${previewConfigInfo}
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
     } catch (error) {
       log.error('Error handling onboard site modal:', error);
-      if (modalAcked) {
-        try {
-          await client.chat.postMessage({
-            channel: responseChannel,
-            text: `:x: Onboarding failed for \`${siteUrl}\``
-              + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile} | *IMS Org:* ${imsOrgId || 'unknown'}`
-              + `\n*Error:* ${error.message}`,
-            thread_ts: responseThreadTs,
-          });
-        } catch (postError) {
-          log.error('Failed to notify channel of onboarding error:', postError);
-        }
-      } else {
-        await ack({
-          response_action: 'errors',
-          errors: {
-            site_url_input: 'There was an error processing the onboarding request.',
-          },
+      try {
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: `:x: Onboarding failed for \`${siteUrl}\``
+            + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile} | *IMS Org:* ${imsOrgId || 'unknown'}`
+            + `\n*Error:* ${error.message}`,
+          thread_ts: responseThreadTs,
         });
+      } catch (postError) {
+        log.error('Failed to notify channel of onboarding error:', postError);
       }
     }
   };
