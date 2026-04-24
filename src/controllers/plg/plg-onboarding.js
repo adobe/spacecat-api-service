@@ -262,7 +262,7 @@ async function reassignSiteOrganization(site, organizationId, dataAccess) {
   // Re-fetch to get a fresh instance where this.record reflects the DB value.
   const refreshed = await dataAccess.Site.findById(site.getId());
   if (!refreshed) {
-    throw new OnboardingWaitlistError(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshed?.getOrganizationId()}`);
+    throw new OnboardingWaitlistError(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got undefined`);
   }
   return refreshed;
 }
