@@ -111,14 +111,16 @@ function SlackController(SlackApp) {
   /**
    * Handles incoming events from Slack.
    *
-   * Slack requires an HTTP response within 3 seconds for view submissions.
-   * Long-running handlers (onboarding, bot detection, etc.) exceed this window,
-   * causing the "We had some trouble connecting" modal error.
+   * For view_submission events Slack requires an HTTP response within 3 seconds,
+   * but the onboarding handler does long-running work (database, bot-detection,
+   * site provisioning) that far exceeds that window.  The handler already calls
+   * ack() before any slow work, so we capture that ack payload and return it as
+   * the HTTP response as soon as ack() fires, while the rest of the handler keeps
+   * running in the background (Lambda stays alive until the event loop empties).
    *
-   * Strategy: fire processEvent without awaiting, then return the HTTP response
-   * as soon as the handler calls ack() — which happens before any slow async work.
-   * The handler continues running in the background; Lambda stays alive until its
-   * event loop empties (all pending promises settle).
+   * For all other event types (actions, app_mention, etc.) we await processEvent
+   * normally: those handlers perform side-effects such as client.views.open() that
+   * must complete before Lambda returns, otherwise the modal never appears.
    *
    * @param {Object} context - Context object containing information about the incoming request.
    * @returns {Response} HTTP response object.
@@ -148,35 +150,47 @@ function SlackController(SlackApp) {
       return internalServerError(errorMessage);
     }
 
-    // Capture the ack payload set by the handler, and resolve as soon as it is
-    // available so the HTTP response can be sent before slow async work starts.
-    let ackPayload;
-    let resolveAck;
-    const ackReady = new Promise((resolve) => {
-      resolveAck = resolve;
-    });
+    // view_submission: capture ack payload and return it before slow work starts.
+    if (payload.type === 'view_submission') {
+      let ackPayload;
+      let resolveAck;
+      const ackReady = new Promise((resolve) => {
+        resolveAck = resolve;
+      });
 
-    const ack = (p) => {
-      ackPayload = p;
-      resolveAck();
-    };
-
-    // Fire without awaiting — handler runs in the background.
-    // Resolve ackReady when processEvent settles so handleEvent never hangs.
-    Promise.resolve(slackBot.processEvent({ body: payload, ack }))
-      .then(resolveAck)
-      .catch((error) => {
-        log.error(`Error processing event: ${cleanupHeaderValue(error.message)}`);
+      const ack = (p) => {
+        ackPayload = p;
         resolveAck();
-      });
+      };
 
-    // Return as soon as the handler calls ack() (or processEvent finishes).
-    await ackReady;
+      // Fire without awaiting — handler runs in background, Lambda stays alive.
+      Promise.resolve(slackBot.processEvent({ body: payload, ack }))
+        .then(resolveAck)
+        .catch((error) => {
+          log.error(`Error processing event: ${cleanupHeaderValue(error.message)}`);
+          resolveAck();
+        });
 
-    if (ackPayload && typeof ackPayload === 'object' && Object.keys(ackPayload).length > 0) {
-      return new Response(JSON.stringify(ackPayload), {
-        headers: { 'content-type': 'application/json' },
-      });
+      await ackReady;
+
+      if (ackPayload && typeof ackPayload === 'object' && Object.keys(ackPayload).length > 0) {
+        return new Response(JSON.stringify(ackPayload), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      return new Response('');
+    }
+
+    // All other events: await so side-effects (e.g. views.open) complete before
+    // Lambda returns.
+    const ack = () => {};
+    try {
+      await slackBot.processEvent({ body: payload, ack });
+    } catch (error) {
+      const errorMessage = cleanupHeaderValue(error.message);
+      log.error(`Error processing event: ${errorMessage}`);
+      return internalServerError(errorMessage);
     }
 
     return new Response('');
