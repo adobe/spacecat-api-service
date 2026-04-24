@@ -28,6 +28,7 @@ describe('cdn-detection', () => {
   let sandbox;
   let detectCdnForDomain;
   let dnsStubs;
+  let fetchStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -36,10 +37,20 @@ describe('cdn-detection', () => {
       resolveCname: sandbox.stub(),
       resolve4: sandbox.stub(),
       resolve6: sandbox.stub().resolves([]),
+      reverse: sandbox.stub().rejects(dnsError('ENOTFOUND')),
     };
+
+    // Default Phase 2 to a no-op: every HTTP probe (HEAD/GET, DoH, ipinfo) rejects,
+    // so the detector falls back to DNS-only behaviour and existing Phase 1 tests
+    // remain authoritative.
+    fetchStub = sandbox.stub().rejects(new Error('test: network disabled'));
 
     ({ detectCdnForDomain } = await esmock('../../src/support/cdn-detection.js', {
       dns: { promises: dnsStubs },
+      '@adobe/spacecat-shared-utils': {
+        tracingFetch: fetchStub,
+        SPACECAT_USER_AGENT: 'spacecat-cdn-detection-test',
+      },
     }));
   });
 
@@ -437,6 +448,214 @@ describe('cdn-detection', () => {
       expect(result).to.equal('other');
       expect(log.info).to.have.been.calledWith('[cdn-detection] Detected CNAMES for domain www.example.com: ');
       expect(log.info).to.have.been.calledWith('[cdn-detection] Detected IPs for domain www.example.com: ');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Phase 2 — generic multi-signal CDN fingerprinting (ported from
+  // spacecat-audit-worker). Phase 1 is forced to 'other' (clean DNS, no
+  // Adobe match) so Phase 2 owns the result, then we assert the adapter
+  // (LABEL_TO_LLMO_TOKEN) translates each detector label into the correct
+  // LLMO byocdn-X token.
+  // -----------------------------------------------------------------------
+  describe('phase 2 — generic CDN fingerprinting', () => {
+    function mockHeaderResponse(headersObj = {}) {
+      const lower = new Map(
+        Object.entries(headersObj).map(([k, v]) => [k.toLowerCase(), v]),
+      );
+      return {
+        ok: true,
+        headers: { forEach: (cb) => lower.forEach((v, k) => cb(v, k)) },
+        body: { cancel: () => {} },
+        json: async () => ({}),
+      };
+    }
+
+    // Force Phase 1 to a clean 'other' so Phase 2 always runs.
+    beforeEach(() => {
+      dnsStubs.resolveCname.resolves(['no-match.example.net.']);
+      dnsStubs.resolve4.resolves(['1.2.3.4']);
+      dnsStubs.resolve6.resolves([]);
+    });
+
+    function probeReturns(headers) {
+      fetchStub.callsFake((url) => {
+        if (url.startsWith('https://example.com') || url.startsWith('https://www.example.com')) {
+          return Promise.resolve(mockHeaderResponse(headers));
+        }
+        return Promise.reject(new Error('blocked'));
+      });
+    }
+
+    const headerCases = [
+      { name: 'Cloudflare (cf-ray)', headers: { 'cf-ray': 'abc' }, token: 'byocdn-cloudflare' },
+      { name: 'Akamai (x-akamai-transformed)', headers: { 'x-akamai-transformed': '9' }, token: 'byocdn-akamai' },
+      { name: 'Fastly BYOCDN (x-fastly-request-id)', headers: { 'x-fastly-request-id': 'abc' }, token: 'byocdn-fastly' },
+      { name: 'CloudFront (x-amz-cf-id)', headers: { 'x-amz-cf-id': 'abc' }, token: 'byocdn-cloudfront' },
+      { name: 'Imperva (x-iinfo)', headers: { 'x-iinfo': 'a' }, token: 'byocdn-imperva' },
+      { name: 'Azure combined (x-azure-ref)', headers: { 'x-azure-ref': 'a' }, token: 'byocdn-azure' },
+      { name: 'Azure CDN (x-ec-debug)', headers: { 'x-ec-debug': 'a' }, token: 'byocdn-azure' },
+      { name: 'Azure Front Door (x-fd-healthprobe)', headers: { 'x-fd-healthprobe': '1' }, token: 'byocdn-frontdoor' },
+      { name: 'Google Cloud CDN (x-goog-*)', headers: { 'x-goog-foo': '1' }, token: 'byocdn-google' },
+      { name: 'Vercel (x-vercel-id)', headers: { 'x-vercel-id': '1' }, token: 'byocdn-vercel' },
+      { name: 'Netlify (x-nf-request-id)', headers: { 'x-nf-request-id': '1' }, token: 'byocdn-netlify' },
+      { name: 'KeyCDN (x-edge-location)', headers: { 'x-edge-location': '1' }, token: 'byocdn-keycdn' },
+      { name: 'Limelight (x-llid)', headers: { 'x-llid': '1' }, token: 'byocdn-limelight' },
+      { name: 'CDNetworks (x-cdn-request-id)', headers: { 'x-cdn-request-id': '1' }, token: 'byocdn-cdnetworks' },
+      { name: 'Bunny CDN (x-bunny-*)', headers: { 'x-bunny-foo': '1' }, token: 'byocdn-bunny' },
+      { name: 'StackPath (server: NetDNA)', headers: { server: 'NetDNA-cache' }, token: 'byocdn-stackpath' },
+      { name: 'Sucuri (x-sucuri-id)', headers: { 'x-sucuri-id': '1' }, token: 'byocdn-sucuri' },
+      { name: 'Alibaba via keyword (x-cdn: alicdn)', headers: { 'x-cdn': 'alicdn' }, token: 'byocdn-cloudflare' /* sanity placeholder; replaced below */ },
+    ];
+
+    // Drop the placeholder; Alibaba isn't matched via headers, only via DNS/ASN.
+    headerCases.pop();
+
+    for (const { name, headers, token } of headerCases) {
+      // eslint-disable-next-line no-loop-func
+      it(`maps ${name} header to ${token}`, async () => {
+        probeReturns(headers);
+        const result = await detectCdnForDomain('example.com');
+        expect(result).to.equal(token);
+      });
+    }
+
+    it('returns other when HTTP probe fails and DNS/ASN fallback finds nothing', async () => {
+      // fetchStub default rejects everything; DNS fallback also misses.
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('other');
+    });
+
+    it('returns null when Phase 1 DNS fails and Phase 2 cannot detect either', async () => {
+      dnsStubs.resolveCname.rejects(dnsError('SERVFAIL'));
+      dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
+      dnsStubs.resolve6.rejects(dnsError('SERVFAIL'));
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.be.null;
+    });
+
+    it('detects via DNS fallback CNAME chain (Cloudflare suffix)', async () => {
+      dnsStubs.resolveCname.resolves(['something.cloudflare.com.']);
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-cloudflare');
+    });
+
+    it('detects via DNS fallback CNAME chain (Akamai suffix)', async () => {
+      dnsStubs.resolveCname.resolves(['e1234.b.akamaiedge.net.']);
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-akamai');
+    });
+
+    it('detects via ASN when CNAME and headers miss (AS13335 → Cloudflare)', async () => {
+      fetchStub.callsFake((url) => {
+        if (url.startsWith('https://ipinfo.io/')) {
+          return Promise.resolve({
+            ok: true,
+            headers: { forEach: () => {} },
+            body: { cancel: () => {} },
+            json: async () => ({ org: 'AS13335 Cloudflare, Inc.' }),
+          });
+        }
+        return Promise.reject(new Error('blocked'));
+      });
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-cloudflare');
+    });
+
+    it('detects via ASN (AS54113 → Fastly BYOCDN)', async () => {
+      fetchStub.callsFake((url) => {
+        if (url.startsWith('https://ipinfo.io/')) {
+          return Promise.resolve({
+            ok: true,
+            headers: { forEach: () => {} },
+            body: { cancel: () => {} },
+            json: async () => ({ org: 'AS54113 Fastly, Inc.' }),
+          });
+        }
+        return Promise.reject(new Error('blocked'));
+      });
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-fastly');
+    });
+
+    it('detects via PTR keyword (Akamai PTR record)', async () => {
+      dnsStubs.reverse.resolves(['a23-45-67-89.deploy.static.akamaitechnologies.com']);
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-akamai');
+    });
+
+    it('detects via DoH CNAME (system DNS misses, DoH carries it)', async () => {
+      // System resolver returns no signature; DoH returns a Cloudflare CNAME.
+      dnsStubs.resolveCname.resolves([]);
+      fetchStub.callsFake((url) => {
+        if (url.startsWith('https://dns.google/resolve') && url.includes('type=5')) {
+          return Promise.resolve({
+            ok: true,
+            headers: { forEach: () => {} },
+            body: { cancel: () => {} },
+            json: async () => ({ Answer: [{ type: 5, data: 'edge.cloudflare.com.' }] }),
+          });
+        }
+        return Promise.reject(new Error('blocked'));
+      });
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-cloudflare');
+    });
+
+    it('Phase 1 wins over Phase 2: AEM CS Fastly DNS match short-circuits HTTP probe', async () => {
+      dnsStubs.resolveCname.withArgs('www.example.com').resolves(['cdn.adobeaemcloud.com.']);
+      probeReturns({ 'cf-ray': 'should-be-skipped' });
+
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('aem-cs-fastly');
+
+      const probedSite = fetchStub.getCalls().some((c) => {
+        const url = c.args[0];
+        return typeof url === 'string'
+          && url.includes('example.com')
+          && !url.startsWith('https://dns.google')
+          && !url.startsWith('https://ipinfo.io');
+      });
+      expect(probedSite, 'Phase 2 HTTP probe should not run when Phase 1 hits').to.be.false;
+    });
+
+    it('accepts a full URL as input (preserves backwards-compat with hostname-only)', async () => {
+      probeReturns({ 'cf-ray': 'abc' });
+      const result = await detectCdnForDomain('https://example.com/some/path');
+      expect(result).to.equal('byocdn-cloudflare');
+    });
+
+    it('returns null for empty input', async () => {
+      const result = await detectCdnForDomain('');
+      expect(result).to.be.null;
+    });
+
+    it('returns null for whitespace-only input', async () => {
+      const result = await detectCdnForDomain('   ');
+      expect(result).to.be.null;
+    });
+
+    it('returns null for malformed input that cannot be parsed as a URL', async () => {
+      // URL with embedded space cannot be parsed.
+      const result = await detectCdnForDomain('not a url');
+      expect(result).to.be.null;
+    });
+
+    it('falls back to GET when HEAD fails, then detects via headers', async () => {
+      let headCalls = 0;
+      fetchStub.callsFake((url, opts) => {
+        if (url.startsWith('https://example.com') || url.startsWith('https://www.example.com')) {
+          if (opts?.method === 'HEAD') {
+            headCalls += 1;
+            return Promise.reject(new Error('HEAD blocked'));
+          }
+          return Promise.resolve(mockHeaderResponse({ 'cf-ray': 'abc' }));
+        }
+        return Promise.reject(new Error('blocked'));
+      });
+      const result = await detectCdnForDomain('example.com');
+      expect(result).to.equal('byocdn-cloudflare');
+      expect(headCalls).to.be.greaterThan(0);
     });
   });
 });

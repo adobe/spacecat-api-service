@@ -916,8 +916,43 @@ llmo-onboard:
                   type:
                     - string
                     - 'null'
-                  enum: [aem-cs-fastly, commerce-fastly, other, null]
-                  description: CDN provider detected via DNS during onboarding. null when detection is inconclusive.
+                  enum:
+                    - aem-cs-fastly
+                    - commerce-fastly
+                    - byocdn-fastly
+                    - byocdn-akamai
+                    - byocdn-cloudfront
+                    - byocdn-cloudflare
+                    - byocdn-imperva
+                    - byocdn-azure
+                    - byocdn-frontdoor
+                    - byocdn-google
+                    - byocdn-vercel
+                    - byocdn-netlify
+                    - byocdn-bunny
+                    - byocdn-keycdn
+                    - byocdn-limelight
+                    - byocdn-cdnetworks
+                    - byocdn-stackpath
+                    - byocdn-sucuri
+                    - byocdn-alibaba
+                    - byocdn-clever
+                    - byocdn-airee
+                    - byocdn-cachefly
+                    - byocdn-edgecast
+                    - byocdn-beluga
+                    - byocdn-myra
+                    - other
+                    - null
+                  description: |
+                    CDN provider detected during onboarding. Returns:
+                      - `aem-cs-fastly` / `commerce-fastly` for Adobe-managed CDNs (DNS fast-path).
+                      - `byocdn-<provider>` for any third-party CDN identified by the multi-signal probe
+                        (HTTP headers, CNAME chain, ASN, PTR). Only the first 5 BYOCDN tokens
+                        (`byocdn-fastly|akamai|cloudfront|cloudflare|imperva`) drive UI auto-selection
+                        today; the rest are stored verbatim for analytics and Slack visibility.
+                      - `other` when DNS resolves cleanly but no signature matched.
+                      - `null` when at least one signal failed (inconclusive).
                   example: "aem-cs-fastly"
                 status:
                   type: string
