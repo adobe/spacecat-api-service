@@ -1375,20 +1375,21 @@ function volumeToCategory(volumeSum, volumeCount) {
 
 /**
  * Trims a PostgREST / RPC UUID string for JSON; null when missing or blank.
+ * PostgREST returns UUID columns as strings; non-strings are rejected.
  * @param {unknown} value
  * @returns {string|null}
  */
 function normalizeRpcUuid(value) {
-  if (typeof value !== 'string' && typeof value !== 'number') {
+  if (typeof value !== 'string') {
     return null;
   }
-  const s = String(value).trim();
+  const s = value.trim();
   return s || null;
 }
 
 /**
  * Picks the lexicographically greatest non-null topic UUID in a group,
- * matching `rpc_brand_presence_topics` (`topic_id ORDER BY ... DESC NULLS LAST`)[1].
+ * matching `rpc_brand_presence_topics` (`topic_id ORDER BY ... DESC NULLS LAST`).
  * @param {string|null} current
  * @param {string|null} candidate
  * @returns {string|null}
