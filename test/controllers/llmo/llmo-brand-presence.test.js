@@ -4114,6 +4114,60 @@ describe('llmo-brand-presence', () => {
       expect(aiTopic).to.exist;
       expect(pdfTopic.promptCount).to.equal(1);
       expect(aiTopic.promptCount).to.equal(1);
+      expect(pdfTopic.topicId).to.be.null;
+      expect(aiTopic.topicId).to.be.null;
+    });
+
+    it('sets topicId to max topic_id per topic group (matches rpc ordering)', () => {
+      const rows = [
+        {
+          topics: 'PDF',
+          topic_id: '00000000-0000-4000-8000-000000000001',
+          prompt: 'q1',
+          region_code: 'US',
+          mentions: true,
+          citations: false,
+          visibility_score: 80,
+          position: '2',
+          sentiment: 'Positive',
+          volume: 100,
+          execution_date: '2026-03-01',
+        },
+        {
+          topics: 'PDF',
+          topic_id: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+          prompt: 'q2',
+          region_code: 'DE',
+          mentions: false,
+          citations: true,
+          visibility_score: 60,
+          position: '5',
+          sentiment: 'Neutral',
+          volume: 200,
+          execution_date: '2026-03-02',
+        },
+      ];
+      const result = aggregateTopicData(rows);
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].topic).to.equal('PDF');
+      expect(result[0].topicId).to.equal('ffffffff-ffff-4fff-bfff-ffffffffffff');
+    });
+
+    it('normalizes blank and whitespace-only topic_id to null topicId', () => {
+      const base = {
+        topics: 'PDF',
+        prompt: 'q1',
+        region_code: 'US',
+        mentions: true,
+        citations: false,
+        visibility_score: 80,
+        position: '2',
+        sentiment: 'Positive',
+        volume: 100,
+        execution_date: '2026-03-01',
+      };
+      expect(aggregateTopicData([{ ...base, topic_id: '' }])[0].topicId).to.be.null;
+      expect(aggregateTopicData([{ ...base, topic_id: '  \t\n  ' }])[0].topicId).to.be.null;
     });
 
     it('deduplicates prompts by prompt|region within a topic', () => {
@@ -4840,6 +4894,23 @@ describe('llmo-brand-presence', () => {
       expect(td.topicId).to.be.null;
     });
 
+    it('returns null topicId when RPC topic_id is whitespace-only', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock({
+        data: [{
+          ...sampleRpcRow,
+          topic_id: '  \t\n  ',
+        }],
+        error: null,
+      });
+
+      const handler = createTopicsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topicDetails[0].topicId).to.be.null;
+    });
+
     it('handles null total_count in RPC row', async () => {
       mockContext.dataAccess.Site.postgrestService = createTopicsRpcMock({
         data: [{ ...sampleRpcRow, total_count: null }],
@@ -5307,6 +5378,7 @@ describe('llmo-brand-presence', () => {
       const rows = [
         {
           topics: 'PDF Editing',
+          topic_id: '0178a3f0-1234-7000-8000-000000000099',
           prompt: 'best pdf editor',
           region_code: 'US',
           mentions: true,
@@ -5335,6 +5407,7 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.topicDetails).to.have.lengthOf(1);
       expect(body.topicDetails[0].topic).to.equal('PDF Editing');
+      expect(body.topicDetails[0].topicId).to.equal('0178a3f0-1234-7000-8000-000000000099');
       expect(body.topicDetails[0].matchType).to.equal('topic');
       expect(body.totalCount).to.equal(1);
     });

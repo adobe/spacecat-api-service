@@ -1374,6 +1374,36 @@ function volumeToCategory(volumeSum, volumeCount) {
 }
 
 /**
+ * Trims a PostgREST / RPC UUID string for JSON; null when missing or blank.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function normalizeRpcUuid(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return null;
+  }
+  const s = String(value).trim();
+  return s || null;
+}
+
+/**
+ * Picks the lexicographically greatest non-null topic UUID in a group,
+ * matching `rpc_brand_presence_topics` (`topic_id ORDER BY ... DESC NULLS LAST`)[1].
+ * @param {string|null} current
+ * @param {string|null} candidate
+ * @returns {string|null}
+ */
+function maxTopicIdForAggregate(current, candidate) {
+  if (!candidate) {
+    return current;
+  }
+  if (!current || candidate > current) {
+    return candidate;
+  }
+  return current;
+}
+
+/**
  * Aggregates raw execution rows into topic-level summary objects.
  * Groups by topic name, deduplicates prompts by prompt|region_code within
  * each topic, keeps the latest execution per unique prompt, and computes
@@ -1382,7 +1412,7 @@ function volumeToCategory(volumeSum, volumeCount) {
  *
  * @param {Array<Object>} rows - Raw brand_presence_executions rows
  *   (with embedded brand_presence_sources)
- * @returns {Array<Object>} TopicDetail-compatible objects (without items)
+ * @returns {Array<Object>} TopicDetail-compatible objects (without items); each includes `topicId`
  * @internal Exported for testing
  */
 export function aggregateTopicData(rows) {
@@ -1395,6 +1425,7 @@ export function aggregateTopicData(rows) {
     if (!topicAgg.has(topicName)) {
       topicAgg.set(topicName, {
         promptMap: new Map(),
+        maxTopicId: null,
         totalMentions: 0,
         totalCitations: 0,
         uniqueSourceUrlIds: new Set(),
@@ -1409,6 +1440,8 @@ export function aggregateTopicData(rows) {
       });
     }
     const agg = topicAgg.get(topicName);
+
+    agg.maxTopicId = maxTopicIdForAggregate(agg.maxTopicId, normalizeRpcUuid(row.topic_id));
 
     // Dedup prompts (keep latest execution) — used only for promptCount
     const key = buildTopicPromptKey(row);
@@ -1474,6 +1507,7 @@ export function aggregateTopicData(rows) {
 
     return {
       topic: topicName,
+      topicId: agg.maxTopicId,
       promptCount: agg.promptMap.size,
       brandMentions: agg.totalMentions,
       brandCitations: agg.totalCitations,
@@ -1555,19 +1589,6 @@ export function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
   };
 }
 
-/**
- * Trims a PostgREST / RPC UUID string for JSON; null when missing or blank.
- * @param {unknown} value
- * @returns {string|null}
- */
-function normalizeRpcUuid(value) {
-  if (typeof value !== 'string' && typeof value !== 'number') {
-    return null;
-  }
-  const s = String(value).trim();
-  return s || null;
-}
-
 function sortTopicDetails(topicDetails, sortBy, sortOrder) {
   const field = SORT_FIELD_MAP[sortBy] || 'topic';
   const dir = sortOrder === 'desc' ? -1 : 1;
@@ -1583,7 +1604,7 @@ function sortTopicDetails(topicDetails, sortBy, sortOrder) {
 }
 
 // eslint-disable-next-line max-len
-const TOPICS_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
+const TOPICS_SELECT = 'id, topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
 
 /**
  * Creates the getTopics handler.
