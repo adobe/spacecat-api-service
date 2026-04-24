@@ -43,8 +43,9 @@ All brand endpoints return and accept the same shape:
   "vertical": "Software & Technology",
   "region": ["US", "GB", "DE"],
   "urls": [
-    { "value": "https://adobe.com" },
-    { "value": "https://adobe.com/products" }
+    { "value": "https://adobe.com", "onboarded": true, "siteId": "c2473d89-e997-458d-a86d-b4096649c12b" },
+    { "value": "https://adobe.com/products", "onboarded": true, "siteId": "c2473d89-e997-458d-a86d-b4096649c12b" },
+    { "value": "https://yahoo.com", "onboarded": false }
   ],
   "socialAccounts": [
     { "url": "https://twitter.com/adobe", "regions": ["US"] }
@@ -72,7 +73,11 @@ All brand endpoints return and accept the same shape:
 - `status` — `active` (default), `pending`, or `deleted`; use `pending` for brands awaiting review. Forced to `pending` if `baseSiteId` is not provided on create.
 - `origin` — `human` (default) or `ai`
 - `region` — ISO 3166-1 alpha-2 country codes (e.g. `US`, `GB`)
-- `urls` — brand site URLs, optionally with paths (e.g. `https://adobe.com/products`); matched against the org's known sites to populate `siteIds`. Multiple paths under the same base URL share one `brand_sites` row.
+- `urls` — brand URLs, optionally with paths (e.g. `https://adobe.com/products`). Every submitted URL is persisted to `brand_urls` regardless of whether its base resolves to a registered site. Each response entry carries:
+  - `value` — the submitted URL, normalized via `composeBaseURL`.
+  - `onboarded` — **response-only, ignored on input.** `true` when the URL's base matches a `sites` row in the organization (those URLs also populate `brand_sites` and feed CDN / Search Console config). `false` for external-only URLs. Legacy brands created before LLMO-4435 have no `brand_urls` rows; in that case the response falls back to expanding `brand_sites` and all entries are implicitly `onboarded: true`.
+  - `siteId` — **response-only, ignored on input.** UUID of the matching site when `onboarded: true`; absent / `null` otherwise.
+  - Multiple paths under the same base URL share one `brand_sites` row.
 - `socialAccounts` — `url` and `regions` are persisted and returned; `platform` sent by the UI is discarded
 - `earnedContent` — `name`, `url`, and `regions` are persisted and returned
 - `brandAliases` — each entry includes `name` and `regions`; accepts plain strings or `{ name }` objects on write
@@ -124,7 +129,7 @@ Creates a brand. Uses `organization_id + name` as the upsert conflict key — po
 | `description` | no | Free-text description |
 | `vertical` | no | Industry vertical |
 | `region` | no | Array of country codes |
-| `urls` | no | Array of `{ value: string }` objects; matched to org sites |
+| `urls` | no | Array of `{ value: string }` objects. Any URL is accepted (external domains included). The response annotates each entry with `onboarded` / `siteId` — see field notes above. |
 | `socialAccounts` | no | Array of `{ url: string, regions?: string[] }` objects |
 | `earnedContent` | no | Array of `{ name: string, url: string, regions?: string[] }` objects |
 | `brandAliases` | no | Array of strings or `{ name: string, regions?: string[] }` objects |
