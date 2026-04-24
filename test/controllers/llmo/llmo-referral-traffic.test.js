@@ -569,6 +569,29 @@ describe('llmo-referral-traffic', () => {
       expect(body.source).to.equal('adobe_analytics');
     });
 
+    it('maps optional numeric metrics when all fields are present', async () => {
+      const client = makeRpcClient({
+        data: [{
+          total_pageviews: 100,
+          visits: 50,
+          bounce_rate: 0.3,
+          entries: 40,
+          avg_session_duration: 120,
+          pages_per_visit: 2.5,
+          conversion_rate: 0.05,
+          orders: 5,
+          revenue: 500,
+        }],
+      });
+      const handler = createReferralTrafficBusinessImpactHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      const body = await res.json();
+      expect(body.metrics.entries).to.equal(40);
+      expect(body.metrics.avgSessionDuration).to.equal(120);
+      expect(body.metrics.pagesPerVisit).to.be.closeTo(2.5, 1e-6);
+      expect(body.metrics.conversionRate).to.be.closeTo(0.05, 1e-6);
+    });
+
     it('returns null bounceRate when bounce_rate is null', async () => {
       const client = makeRpcClient({
         data: [{

@@ -166,6 +166,7 @@ export function createReferralTrafficFilterDimensionsHandler(getSiteAndValidateA
         const parsed = parseParams(ctx);
         const { data, error } = await client.rpc('rpc_referral_traffic_filter_dimensions', {
           p_site_id: siteId,
+          p_source: parsed.source,
           p_start_date: parsed.startDate,
           p_end_date: parsed.endDate,
         });
@@ -500,13 +501,13 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
       async (ctx, client, siteId) => {
         const [minResult, maxResult] = await Promise.all([
           client
-            .from('referral_traffic')
+            .from('referral_traffic_optel')
             .select('traffic_date')
             .eq('site_id', siteId)
             .order('traffic_date', { ascending: true })
             .limit(1),
           client
-            .from('referral_traffic')
+            .from('referral_traffic_optel')
             .select('traffic_date')
             .eq('site_id', siteId)
             .order('traffic_date', { ascending: false })
@@ -580,6 +581,11 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
           metrics: {
             visits: Number(row?.visits ?? 0),
             bounceRate: row?.bounce_rate != null ? Number(row.bounce_rate) : null,
+            entries: row?.entries != null ? Number(row.entries) : null,
+            avgSessionDuration: row?.avg_session_duration != null
+              ? Number(row.avg_session_duration) : null,
+            pagesPerVisit: row?.pages_per_visit != null ? Number(row.pages_per_visit) : null,
+            conversionRate: row?.conversion_rate != null ? Number(row.conversion_rate) : null,
             orders: Number(row?.orders ?? 0),
             revenue: Number(row?.revenue ?? 0),
           },
