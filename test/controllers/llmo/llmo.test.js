@@ -502,6 +502,7 @@ describe('LlmoController', () => {
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
       updateLlmoCdnBucketConfig: sinon.stub(),
+      getLlmoCdnBucketConfig: sinon.stub().returns({}),
       addLlmoTag: sinon.stub(),
       state: { llmo: mockLlmoConfig },
       getSlackConfig: sinon.stub().returns(null),
