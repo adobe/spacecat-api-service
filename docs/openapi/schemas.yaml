@@ -6863,8 +6863,23 @@ V2BrandUrl:
   properties:
     value:
       type: string
-      description: Full URL (base URL + optional path)
+      description: Full URL (base URL + optional path) as submitted by the user
       example: 'https://www.example.com/products'
+    onboarded:
+      type: boolean
+      description: >-
+        Response-only. True when the URL's base resolves to a site in the
+        brand's organization. Onboarded URLs feed the CDN / Search Console
+        configuration; non-onboarded URLs are stored but excluded. Ignored on
+        input.
+    siteId:
+      type:
+        - string
+        - 'null'
+      format: uuid
+      description: >-
+        Response-only. Set to the matching site's UUID when onboarded is true.
+        Ignored on input.
   required:
     - value
 
@@ -8111,3 +8126,259 @@ AgenticTrafficMovers:
   description: |
     Top and bottom URL movers ordered by `direction DESC, abs(hitsChange) DESC`.
     Returns up to `limit` rows each for direction=up and direction=down.
+
+# ── URL Inspector schemas ─────────────────────────────────────────────────────
+
+UrlInspectorStats:
+  type: object
+  properties:
+    stats:
+      type: object
+      properties:
+        totalPromptsCited:
+          type: integer
+          description: Number of prompts where the site was cited
+          example: 10
+        totalPrompts:
+          type: integer
+          description: Total prompts evaluated
+          example: 50
+        uniqueUrls:
+          type: integer
+          description: Number of distinct site URLs cited
+          example: 5
+        totalCitations:
+          type: integer
+          description: Total citation count across all prompts
+          example: 100
+      required: [totalPromptsCited, totalPrompts, uniqueUrls, totalCitations]
+    weeklyTrends:
+      type: array
+      items:
+        type: object
+        properties:
+          week:
+            type: string
+            description: ISO week identifier
+            example: '2026-W10'
+          totalPromptsCited:
+            type: integer
+          totalPrompts:
+            type: integer
+          uniqueUrls:
+            type: integer
+          totalCitations:
+            type: integer
+        required: [week, totalPromptsCited, totalPrompts, uniqueUrls, totalCitations]
+  required: [stats, weeklyTrends]
+
+UrlInspectorOwnedUrlRow:
+  type: object
+  properties:
+    url:
+      type: string
+      format: uri
+      example: 'https://www.adobe.com/products/photoshop'
+    citations:
+      type: integer
+      example: 42
+    promptsCited:
+      type: integer
+      example: 12
+    products:
+      type: array
+      items:
+        type: string
+      example: ['Creative Cloud']
+    regions:
+      type: array
+      items:
+        type: string
+      example: ['US', 'DE']
+    weeklyCitations:
+      type: array
+      items:
+        type: object
+      description: Weekly citation breakdown (JSONB from RPC)
+    weeklyPromptsCited:
+      type: array
+      items:
+        type: object
+      description: Weekly prompts-cited breakdown (JSONB from RPC)
+
+UrlInspectorOwnedUrls:
+  type: object
+  properties:
+    urls:
+      type: array
+      items:
+        $ref: '#/UrlInspectorOwnedUrlRow'
+    totalCount:
+      type: integer
+      description: Total number of owned URLs matching the filters
+      example: 100
+  required: [urls, totalCount]
+
+UrlInspectorTrendingUrlPrompt:
+  type: object
+  properties:
+    prompt:
+      type: string
+      example: 'What is the best photo editor?'
+    category:
+      type: string
+      example: 'Creative Cloud'
+    region:
+      type: string
+      example: 'US'
+    topics:
+      type: string
+      example: 'Photo Editing'
+    citationCount:
+      type: integer
+      example: 30
+    executionCount:
+      type: integer
+      example: 5
+
+UrlInspectorTrendingUrlEntry:
+  type: object
+  properties:
+    url:
+      type: string
+      format: uri
+      example: 'https://competitor.com/page'
+    contentType:
+      type: string
+      example: 'earned'
+    prompts:
+      type: array
+      items:
+        $ref: '#/UrlInspectorTrendingUrlPrompt'
+    totalCitations:
+      type: integer
+      description: Sum of citationCount across all prompts for this URL
+      example: 55
+
+UrlInspectorTrendingUrls:
+  type: object
+  properties:
+    urls:
+      type: array
+      items:
+        $ref: '#/UrlInspectorTrendingUrlEntry'
+    totalNonOwnedUrls:
+      type: integer
+      description: Total non-owned URLs matching the filters
+      example: 500
+  required: [urls, totalNonOwnedUrls]
+
+UrlInspectorCitedDomainRow:
+  type: object
+  properties:
+    domain:
+      type: string
+      example: 'competitor.com'
+    totalCitations:
+      type: integer
+      example: 100
+    totalUrls:
+      type: integer
+      example: 25
+    promptsCited:
+      type: integer
+      example: 15
+    contentType:
+      type: string
+      example: 'earned'
+    categories:
+      type: string
+      description: Comma-separated category names
+      example: 'Category A,Category B'
+    regions:
+      type: string
+      description: Comma-separated region codes
+      example: 'US,DE'
+
+UrlInspectorCitedDomains:
+  type: object
+  properties:
+    domains:
+      type: array
+      items:
+        $ref: '#/UrlInspectorCitedDomainRow'
+    totalCount:
+      type: integer
+      description: Total number of cited domains matching the filters
+      example: 50
+  required: [domains, totalCount]
+
+UrlInspectorDomainUrlRow:
+  type: object
+  properties:
+    urlId:
+      type: string
+      description: URL identifier for prompt drilldown
+      example: '44444444-4444-4444-4444-444444444444'
+    url:
+      type: string
+      format: uri
+      example: 'https://competitor.com/page1'
+    contentType:
+      type: string
+      example: 'earned'
+    citations:
+      type: integer
+      example: 42
+    promptsCited:
+      type: integer
+      example: 12
+    categories:
+      type: string
+      description: Comma-separated category names
+      example: 'Category A'
+    regions:
+      type: string
+      description: Comma-separated region codes
+      example: 'US,DE'
+
+UrlInspectorDomainUrls:
+  type: object
+  properties:
+    urls:
+      type: array
+      items:
+        $ref: '#/UrlInspectorDomainUrlRow'
+    totalCount:
+      type: integer
+      description: Total URLs within the domain
+      example: 100
+  required: [urls, totalCount]
+
+UrlInspectorUrlPromptRow:
+  type: object
+  properties:
+    prompt:
+      type: string
+      example: 'What is the best photo editor?'
+    category:
+      type: string
+      example: 'Creative Cloud'
+    region:
+      type: string
+      example: 'US'
+    topics:
+      type: string
+      example: 'Photo Editing'
+    citations:
+      type: integer
+      example: 15
+
+UrlInspectorUrlPrompts:
+  type: object
+  properties:
+    prompts:
+      type: array
+      items:
+        $ref: '#/UrlInspectorUrlPromptRow'
+  required: [prompts]
