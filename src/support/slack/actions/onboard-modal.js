@@ -50,6 +50,29 @@ export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
 }
 
 /**
+ * Builds the ack payload for a modal update response.
+ * @param {string} title - Modal title text
+ * @param {string} message - Modal body message (mrkdwn)
+ * @returns {object} Ack payload with response_action 'update'
+ */
+function buildModalUpdateAck(title, message) {
+  return {
+    response_action: 'update',
+    view: {
+      type: 'modal',
+      title: { type: 'plain_text', text: title },
+      close: { type: 'plain_text', text: 'Close' },
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: message },
+        },
+      ],
+    },
+  };
+}
+
+/**
  * Onboards a single site from modal input
  */
 const onboardSingleSiteFromModal = async (
@@ -602,6 +625,7 @@ export function onboardSiteModal(lambdaContext) {
     let user;
     let profile;
     let imsOrgId;
+    let acknowledged = false;
     try {
       let view;
       ({ view, user } = body);
@@ -643,6 +667,7 @@ export function onboardSiteModal(lambdaContext) {
             site_url_input: 'Please provide a site URL',
           },
         });
+        acknowledged = true;
         return;
       }
 
@@ -675,6 +700,7 @@ export function onboardSiteModal(lambdaContext) {
               preview_url_input: 'Please provide a valid preview URL.',
             },
           });
+          acknowledged = true;
           return;
         }
 
@@ -686,27 +712,16 @@ export function onboardSiteModal(lambdaContext) {
               authoring_type_input: 'Authoring type is required when a preview URL is provided.',
             },
           });
+          acknowledged = true;
           return;
         }
       }
 
-      await ack({
-        response_action: 'update',
-        view: {
-          type: 'modal',
-          title: { type: 'plain_text', text: 'Request Submitted' },
-          close: { type: 'plain_text', text: 'Close' },
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: ':gear: *Onboarding request submitted!*\n\nYour request is being processed. Check the Slack thread for progress updates.\n\nYou can safely close this window.',
-              },
-            },
-          ],
-        },
-      });
+      await ack(buildModalUpdateAck(
+        'Request Submitted',
+        ':gear: *Onboarding request submitted!*\n\nYour request is being processed. Check the Slack thread for progress updates.\n\nYou can safely close this window.',
+      ));
+      acknowledged = true;
 
       const configuration = await Configuration.findLatest();
 
@@ -845,6 +860,16 @@ ${deliveryConfigInfo}${previewConfigInfo}
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
     } catch (error) {
       log.error('Error handling onboard site modal:', error);
+      if (!acknowledged) {
+        try {
+          await ack(buildModalUpdateAck(
+            'Error',
+            ':x: *Submission failed.* Close this window and check your Slack thread for details. To retry, run the onboarding command again.',
+          ));
+        } catch (ackError) {
+          log.error('Failed to acknowledge modal with error:', ackError);
+        }
+      }
       try {
         await client.chat.postMessage({
           channel: responseChannel,

@@ -863,6 +863,40 @@ describe('onboard-modal', () => {
       }));
     });
 
+    it('should call ack with error modal when exception is thrown before ack', async () => {
+      // Corrupt body so accessing values.site_url_input.site_url.value throws
+      const brokenBody = JSON.parse(JSON.stringify(body));
+      delete brokenBody.view.state.values.site_url_input;
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+      await onboardSiteModalAction({ ack: ackMock, body: brokenBody, client: clientMock });
+
+      // ack must still be called — with an error modal update, not the success view
+      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.calledWith(sinon.match({
+        response_action: 'update',
+        view: sinon.match({
+          title: sinon.match({ text: 'Error' }),
+          close: sinon.match({ text: 'Close' }),
+        }),
+      }));
+    });
+
+    it('should log error when fallback ack itself throws', async () => {
+      const ackError = new Error('ack failed');
+      const ackThatThrows = sinon.stub().rejects(ackError);
+      const brokenBody = JSON.parse(JSON.stringify(body));
+      delete brokenBody.view.state.values.site_url_input;
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+      await onboardSiteModalAction({ ack: ackThatThrows, body: brokenBody, client: clientMock });
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Failed to acknowledge modal with error:',
+        ackError,
+      );
+    });
+
     it('should use fallbacks in error message when user name and imsOrgId are absent', async () => {
       const onboardError = new Error('onboarding failed');
       const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
