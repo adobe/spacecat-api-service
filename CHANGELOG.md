@@ -1,3 +1,36 @@
+# [1.453.0](https://github.com/adobe/spacecat-api-service/compare/v1.452.0...v1.453.0) (2026-04-24)
+
+
+### Features
+
+* SITES-43069 - pass enabled preflight audits from Configuration to Mysticat ([#2210](https://github.com/adobe/spacecat-api-service/issues/2210)) ([6e8bd4e](https://github.com/adobe/spacecat-api-service/commit/6e8bd4e71a08b30c226146b9260c0593cc58d907))
+
+# [1.452.0](https://github.com/adobe/spacecat-api-service/compare/v1.451.0...v1.452.0) (2026-04-24)
+
+
+### Features
+
+* remove answers from brand presence topic details api ([#2254](https://github.com/adobe/spacecat-api-service/issues/2254)) ([b8e4e55](https://github.com/adobe/spacecat-api-service/commit/b8e4e55c5692e25f8d71e990d4dc3b3f166c9947))
+
+# [1.451.0](https://github.com/adobe/spacecat-api-service/compare/v1.450.0...v1.451.0) (2026-04-24)
+
+
+### Features
+
+* persist all brand URLs and annotate onboarded status | LLMO-4435 ([#2252](https://github.com/adobe/spacecat-api-service/issues/2252)) ([3f9e1cf](https://github.com/adobe/spacecat-api-service/commit/3f9e1cfe85194b419cba6d65c57a23a93777c0cc)), closes [adobe/mysticat-data-service#427](https://github.com/adobe/mysticat-data-service/issues/427)
+
+# [1.450.0](https://github.com/adobe/spacecat-api-service/compare/v1.449.1...v1.450.0) (2026-04-24)
+
+
+### Bug Fixes
+
+* **llmo:** sanitize error message in updateLlmoConfig catch block ([#2241](https://github.com/adobe/spacecat-api-service/issues/2241)) ([22a2c84](https://github.com/adobe/spacecat-api-service/commit/22a2c84b84835d518c5ff002223a26af3f8644f8)), closes [src/controllers/llmo/llmo.js#L593](https://github.com/src/controllers/llmo/llmo.js/issues/L593)
+
+
+### Features
+
+* add URL Inspector PG API endpoints | LLMO-4030 ([#2113](https://github.com/adobe/spacecat-api-service/issues/2113)) ([a41acc2](https://github.com/adobe/spacecat-api-service/commit/a41acc268f244f63fc5de818bda1c7b78bd6f9dd))
+
 ## [1.449.1](https://github.com/adobe/spacecat-api-service/compare/v1.449.0...v1.449.1) (2026-04-20)
 
 
