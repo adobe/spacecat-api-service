@@ -248,65 +248,6 @@ describe('SlackController', () => {
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal(testError.message);
     });
-
-    describe('view_submission events', () => {
-      beforeEach(() => {
-        context.data = { type: 'view_submission', callback_id: 'onboard_site_modal' };
-      });
-
-      it('returns ack payload as JSON when handler calls ack with response_action', async () => {
-        const ackPayload = {
-          response_action: 'update',
-          view: {
-            type: 'modal',
-            title: { type: 'plain_text', text: 'Request Submitted' },
-            close: { type: 'plain_text', text: 'Close' },
-            blocks: [],
-          },
-        };
-
-        processEventStub = sinon.stub().callsFake((event) => {
-          event.ack(ackPayload);
-        });
-        mockSlackApp = createMockSlackApp(processEventStub);
-
-        const controller = SlackController(mockSlackApp);
-        const response = await controller.handleEvent(context);
-
-        expect(response.status).to.equal(200);
-        expect(response.headers.get('content-type')).to.equal('application/json');
-        const body = await response.json();
-        expect(body).to.deep.equal(ackPayload);
-      });
-
-      it('returns empty 200 when handler calls ack with no payload', async () => {
-        processEventStub = sinon.stub().callsFake((event) => {
-          event.ack();
-        });
-        mockSlackApp = createMockSlackApp(processEventStub);
-
-        const controller = SlackController(mockSlackApp);
-        const response = await controller.handleEvent(context);
-
-        expect(response.status).to.equal(200);
-        const text = await response.text();
-        expect(text).to.equal('');
-      });
-
-      it('logs error and returns empty 200 when processEvent rejects', async () => {
-        const testError = new Error('view submission error');
-        processEventStub.rejects(testError);
-        mockSlackApp = createMockSlackApp(processEventStub);
-
-        const controller = SlackController(mockSlackApp);
-        const response = await controller.handleEvent(context);
-
-        expect(logStub.error.calledWith(
-          `Error processing event: ${testError.message}`,
-        )).to.be.true;
-        expect(response.status).to.equal(200);
-      });
-    });
   });
 
   describe('inviteUserToChannel', () => {

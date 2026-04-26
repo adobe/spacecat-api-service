@@ -1702,16 +1702,8 @@ export const onboardSingleSite = async (
       }
     }
 
-    // Resolve canonical URL for the site from the base URL.
-    // Safety net: AbortSignal may not abort TCP-level hangs (e.g. Fastly CDN).
-    // Promise.race ensures we continue after 25 s even if the signal is ignored.
-    const CANONICAL_URL_TIMEOUT_MS = 25000;
-    let resolvedUrl = await Promise.race([
-      resolveCanonicalUrl(baseURL),
-      new Promise((resolve) => {
-        setTimeout(() => resolve(null), CANONICAL_URL_TIMEOUT_MS);
-      }),
-    ]);
+    // Resolve canonical URL for the site from the base URL
+    let resolvedUrl = await resolveCanonicalUrl(baseURL);
     if (resolvedUrl === null) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
       resolvedUrl = baseURL;
