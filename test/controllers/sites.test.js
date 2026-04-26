@@ -4927,7 +4927,7 @@ describe('Sites Controller', () => {
       expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
     });
 
-    it('should return 404 with aso_pre_onboard errorCause for PRE_ONBOARD-tier site via siteId path', async () => {
+    it('should return 404 with aso_pre_onboard resolveStatus for PRE_ONBOARD-tier site via siteId path', async () => {
       const validSiteId = SITE_IDS[1];
 
       context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
@@ -4953,11 +4953,12 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
-      expect(body.errorCause).to.equal('aso_pre_onboard');
-      expect(body.details).to.deep.include({ productCode: 'ASO', tier: 'PRE_ONBOARD' });
+      expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      expect(body.details).to.deep.include({ productCode: 'ASO' });
+      expect(body.details).to.not.have.property('tier');
     });
 
-    it('should return 404 with no_entitlement_for_product errorCause when product has no entitlement', async () => {
+    it('should return 404 with no_entitlement_for_product resolveStatus when product has no entitlement', async () => {
       const validSiteId = SITE_IDS[1];
 
       context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
@@ -4975,11 +4976,11 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(404);
       const body = await response.json();
-      expect(body.errorCause).to.equal('no_entitlement_for_product');
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
     });
 
-    it('should return 404 with site_not_enrolled errorCause when entitlement is visible but site has no enrollment', async () => {
+    it('should return 404 with site_not_enrolled resolveStatus when entitlement is visible but site has no enrollment', async () => {
       const validSiteId = SITE_IDS[1];
 
       context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
@@ -5001,7 +5002,7 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(404);
       const body = await response.json();
-      expect(body.errorCause).to.equal('site_not_enrolled');
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
     });
 

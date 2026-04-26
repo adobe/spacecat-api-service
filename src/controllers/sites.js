@@ -1156,12 +1156,14 @@ function SitesController(ctx, log, env) {
    * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
    *
    * On failure, returns HTTP 404 with a structured body:
-   *   { message, errorCause, details? }
-   * where `errorCause` is one of:
-   *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product
-   *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD)
-   *   - 'site_not_enrolled' — entitlement is visible but no SiteEnrollment links this site
-   * Unspecified 404s fall through without errorCause (unknown/generic not-found).
+   *   { message, resolveStatus, details? }
+   * where `resolveStatus` is one of:
+   *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
+   *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
+   *   - 'site_not_enrolled' — entitlement is visible but no SiteEnrollment links this site.
+   * `details` shape is `{ productCode, siteId, organizationId }` for all three statuses
+   * (these branches are reached only via the siteId path, so siteId is always present).
+   * Unspecified 404s fall through without resolveStatus (unknown/generic not-found).
    *
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Resolved site and organization data response.
@@ -1179,8 +1181,8 @@ function SitesController(ctx, log, env) {
       return badRequest('Either organizationId or imsOrg must be provided');
     }
 
-    const resolveFailure = (message, errorCause, details) => createResponse(
-      { message, errorCause, details },
+    const resolveFailure = (message, resolveStatus, details) => createResponse(
+      { message, resolveStatus, details },
       404,
       { 'x-error': message },
     );
@@ -1218,12 +1220,7 @@ function SitesController(ctx, log, env) {
                 return resolveFailure(
                   'No site found for the provided parameters',
                   'aso_pre_onboard',
-                  {
-                    productCode,
-                    siteId,
-                    organizationId: orgId,
-                    tier: entitlement.getTier(),
-                  },
+                  { productCode, siteId, organizationId: orgId },
                 );
               }
 
