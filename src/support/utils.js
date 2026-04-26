@@ -1702,8 +1702,13 @@ export const onboardSingleSite = async (
       }
     }
 
-    // Resolve canonical URL for the site from the base URL
-    let resolvedUrl = await resolveCanonicalUrl(baseURL);
+    // Resolve canonical URL for the site from the base URL.
+    // Cap at 25 s — bot-blocked or slow sites can hang indefinitely otherwise.
+    const CANONICAL_TIMEOUT_MS = 25000;
+    let resolvedUrl = await Promise.race([
+      resolveCanonicalUrl(baseURL),
+      new Promise((resolve) => { setTimeout(() => resolve(null), CANONICAL_TIMEOUT_MS); }),
+    ]);
     if (resolvedUrl === null) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
       resolvedUrl = baseURL;
