@@ -1906,6 +1906,12 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // eslint-disable-next-line max-len
 const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
 
+/** PostgREST select for topic detail: `DETAIL_SELECT` without `answer`. */
+const TOPIC_DETAIL_SELECT = DETAIL_SELECT
+  .split(', ')
+  .filter((col) => col !== 'answer')
+  .join(', ');
+
 /** Minimal columns for execution-sources execution row (summary + execution_date partition key). */
 const EXECUTION_SOURCES_EXEC_SELECT = 'id, execution_date, brand_id, site_id, model';
 
@@ -1921,12 +1927,14 @@ function weekFromExecDate(execDate) {
 }
 
 /**
- * Maps a `brand_presence_executions` detail row (`DETAIL_SELECT`) to one `executions[]` entry.
- * Shared by topic-detail and prompt-detail handlers.
+ * Maps a `brand_presence_executions` detail row to one `executions[]` entry.
+ * Used for prompt detail (`DETAIL_SELECT`) and topic detail (`TOPIC_DETAIL_SELECT`).
  * @param {Object} r - Raw PostgREST row
+ * @param {{ includeAnswer?: boolean }} [options]
+ * @param {boolean} [options.includeAnswer=true] - When false, `answer` is omitted (topic detail).
  * @returns {Object}
  */
-function mapBrandPresenceDetailExecutionRow(r) {
+function mapBrandPresenceDetailExecutionRow(r, { includeAnswer = true } = {}) {
   const mentioned = r.mentions === true || r.mentions === 'true';
   const cited = r.citations === true || r.citations === 'true';
   const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
@@ -1937,7 +1945,7 @@ function mapBrandPresenceDetailExecutionRow(r) {
     region: r.region_code || '',
     executionDate: r.execution_date || '',
     week: weekFromExecDate(r.execution_date),
-    answer: r.answer || '',
+    ...(includeAnswer ? { answer: r.answer || '' } : {}),
     mentions: mentioned,
     citations: cited,
     visibilityScore: Number.isNaN(vs) ? 0 : vs,
@@ -1951,6 +1959,14 @@ function mapBrandPresenceDetailExecutionRow(r) {
     businessCompetitors: r.business_competitors || '',
     detectedBrandMentions: r.detected_brand_mentions || '',
   };
+}
+
+/**
+ * @param {Object} r - Raw PostgREST row (`TOPIC_DETAIL_SELECT`)
+ * @returns {Object}
+ */
+function mapBrandPresenceTopicDetailExecutionRow(r) {
+  return mapBrandPresenceDetailExecutionRow(r, { includeAnswer: false });
 }
 
 /**
@@ -2082,15 +2098,24 @@ export function aggregateDetailSources(sourceRows) {
 /**
  * Shared query builder for topic/prompt detail endpoints.
  * Returns the base PostgREST query on brand_presence_executions.
+ * @param {string} [selectColumns=DETAIL_SELECT] - PostgREST select list
+ *   (`TOPIC_DETAIL_SELECT` omits answer)
  */
-function buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId) {
+function buildDetailExecQuery(
+  client,
+  organizationId,
+  params,
+  defaults,
+  filterByBrandId,
+  selectColumns = DETAIL_SELECT,
+) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const model = resolveModelFromRequest(params.model);
 
   let q = client
     .from('brand_presence_executions')
-    .select(DETAIL_SELECT)
+    .select(selectColumns)
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
@@ -2300,7 +2325,14 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      let q = buildDetailExecQuery(
+        client,
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
+        TOPIC_DETAIL_SELECT,
+      );
       q = applyTopicPathFilter(q, topicName);
 
       const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
@@ -2340,10 +2372,10 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       // Weekly stats for mini-charts
       const weeklyStats = aggregateWeeklyDetailStats(rows);
 
-      // Build execution entries (all rows, newest first)
+      // Build execution entries (all rows, newest first; no answer field)
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map(mapBrandPresenceDetailExecutionRow);
+        .map(mapBrandPresenceTopicDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));
