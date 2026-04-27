@@ -1,3 +1,15 @@
+# [1.454.0](https://github.com/adobe/spacecat-api-service/compare/v1.453.0...v1.454.0) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2270](https://github.com/adobe/spacecat-api-service/issues/2270)) ([6876689](https://github.com/adobe/spacecat-api-service/commit/687668910bef6c9b9caf52f5530414b7dd4313ed))
+
+
+### Features
+
+* add GET /admin/user/:userid endpoint to resolve IMS user profiles ([#2266](https://github.com/adobe/spacecat-api-service/issues/2266)) ([ca7253b](https://github.com/adobe/spacecat-api-service/commit/ca7253bd2122e83da87e744624899178ebc01687))
+
 # [1.453.0](https://github.com/adobe/spacecat-api-service/compare/v1.452.0...v1.453.0) (2026-04-24)
 
 
