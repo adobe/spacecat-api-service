@@ -172,6 +172,11 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
   }
 
   async checkAuth(request, context) {
+    // Path-scoped: only handle /webhooks/* routes
+    if (!context.pathInfo?.suffix?.startsWith('webhooks/')) {
+      return null;
+    }
+
     const signature = request.headers.get('x-hub-signature-256');
 
     // Not a GitHub webhook request -- let other handlers try
@@ -191,8 +196,12 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
       return null;
     }
 
-    // Read raw body from request -- runs BEFORE bodyData middleware,
-    // so request.text() is the first consumer of the stream.
+    // Read raw body from request. Note: bodyData middleware runs BEFORE
+    // authWrapper in the .with() chain (last .with() = outermost = runs first),
+    // so bodyData has already consumed the stream and set context.data.
+    // request.text() returns the cached body via @adobe/helix-universal's
+    // Request implementation. Verify this caching behavior before Phase 2
+    // implementation (see Implementation Note below).
     const rawBody = await request.text();
     if (!rawBody) {
       this.log.warn('Empty request body for webhook');
@@ -213,11 +222,9 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
       return null;
     }
 
-    // Stash raw body and parsed data on context for controller use.
-    // bodyData middleware runs later but will find request stream already consumed;
-    // context.data is set here so the controller has access.
+    // Stash raw body on context for controller use (e.g. logging, debugging).
+    // context.data is already set by bodyData middleware; no need to parse again.
     context.rawBody = rawBody;
-    context.data = JSON.parse(rawBody);
 
     return new AuthInfo()
       .withAuthenticated(true)
@@ -231,9 +238,15 @@ export default GitHubWebhookHmacHandler;
 
 **Key design points:**
 
-- Runs BEFORE `bodyData` middleware in the stack, so it reads `request.text()` directly. The `bodyData` middleware will find the stream consumed, but `context.data` is already populated by the handler.
+- Path-scoped via `context.pathInfo.suffix` check -- only activates for `/webhooks/*` routes, preventing false matches on non-webhook requests that happen to carry an `X-Hub-Signature-256` header.
+- `bodyData` middleware runs BEFORE `authWrapper` in the execution order (last `.with()` = outermost = runs first). The handler reads the body via `request.text()`, which returns the cached body from `@adobe/helix-universal`'s Request implementation. `context.data` is already populated by `bodyData`.
 - Returns `null` (not a 401 response) on auth failure, so other auth handlers get a chance for non-webhook paths. The `authWrapper` returns 401 only if ALL handlers return null.
 - Format validation (`SIGNATURE_PATTERN`) prevents `timingSafeEqual` from throwing on length mismatch or non-hex input.
+
+**Implementation note (verify before Phase 2):** The handler relies on `request.text()` returning the cached body after `bodyData` has consumed the stream. This appears to work (precedent: `src/controllers/llmo/llmo.js` reads `context.request.arrayBuffer()` after `bodyData`), but is undocumented `@adobe/helix-universal` behavior. Before Phase 2 implementation, verify one of:
+- (a) `request.text()` returns the cached body after `bodyData` consumption (read `@adobe/helix-universal`'s Request implementation), OR
+- (b) Add a `rawBodyCapture` wrapper between `bodyData` and `authWrapper` in the `.with()` chain as insurance, OR
+- (c) Reorder `authWrapper` after `bodyData` in the chain (check other auth handlers aren't affected).
 
 **Registration in `src/index.js`:**
 
@@ -464,7 +477,8 @@ Test cases:
 - `X-Hub-Signature-256` wrong byte length returns null, not throw
 - Empty request body returns null, not throw
 - Signature computed over `JSON.stringify(data)` does NOT match signature over raw bytes (proves raw body capture works)
-- Stashes `context.rawBody` and `context.data` on success
+- Non-webhook path (`pathInfo.suffix` not starting with `webhooks/`) returns null without checking signature
+- Stashes `context.rawBody` on success
 
 **Trigger rules (`test/utils/github-trigger-rules.test.js`):**
 - `pull_request.review_requested` with Mysticat as reviewer -> null (no skip)
