@@ -51,6 +51,7 @@ const DEFAULT_MODEL = 'chatgpt-free';
 const MODEL_QUERY_ALIASES = new Map([
   ['all', 'chatgpt-paid'],
   ['chatgpt', 'chatgpt-free'],
+  ['openai', 'chatgpt-paid'], // UI PLATFORM_CODES.ChatGPTPaid sends 'openai'
 ]);
 
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);

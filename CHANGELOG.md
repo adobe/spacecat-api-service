@@ -1,3 +1,36 @@
+## [1.455.2](https://github.com/adobe/spacecat-api-service/compare/v1.455.1...v1.455.2) (2026-04-27)
+
+
+### Bug Fixes
+
+* **plg:** harden ASO enrollment revocation with org-identity guards and DB-confirmation reassignment     ([#2251](https://github.com/adobe/spacecat-api-service/issues/2251)) ([51df093](https://github.com/adobe/spacecat-api-service/commit/51df093204459f08e24b2949e7ae9d833d7e8f26))
+
+## [1.455.1](https://github.com/adobe/spacecat-api-service/compare/v1.455.0...v1.455.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.53.0 ([#2273](https://github.com/adobe/spacecat-api-service/issues/2273)) ([0931415](https://github.com/adobe/spacecat-api-service/commit/09314150391ae13edb09562c83705e14e4a2cd5e))
+
+# [1.455.0](https://github.com/adobe/spacecat-api-service/compare/v1.454.0...v1.455.0) (2026-04-27)
+
+
+### Features
+
+* add url-inspector filter-dimensions endpoint + fix openai model alias | LLMO-4525 ([#2269](https://github.com/adobe/spacecat-api-service/issues/2269)) ([35a320d](https://github.com/adobe/spacecat-api-service/commit/35a320dd5493f25e2fcc4edf6e66a4902fd8e844))
+
+# [1.454.0](https://github.com/adobe/spacecat-api-service/compare/v1.453.0...v1.454.0) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2270](https://github.com/adobe/spacecat-api-service/issues/2270)) ([6876689](https://github.com/adobe/spacecat-api-service/commit/687668910bef6c9b9caf52f5530414b7dd4313ed))
+
+
+### Features
+
+* add GET /admin/user/:userid endpoint to resolve IMS user profiles ([#2266](https://github.com/adobe/spacecat-api-service/issues/2266)) ([ca7253b](https://github.com/adobe/spacecat-api-service/commit/ca7253bd2122e83da87e744624899178ebc01687))
+
 # [1.453.0](https://github.com/adobe/spacecat-api-service/compare/v1.452.0...v1.453.0) (2026-04-24)
 
 

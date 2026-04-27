@@ -385,6 +385,8 @@ describe('llmo-brand-presence', () => {
       expect(resolveModelFromRequest('ALL')).to.equal('chatgpt-paid');
       expect(resolveModelFromRequest('chatgpt')).to.equal('chatgpt-free');
       expect(resolveModelFromRequest('ChatGPT')).to.equal('chatgpt-free');
+      expect(resolveModelFromRequest('openai')).to.equal('chatgpt-paid');
+      expect(resolveModelFromRequest('OpenAI')).to.equal('chatgpt-paid');
     });
 
     it('passes through canonical enum values and trims whitespace', () => {
@@ -400,7 +402,13 @@ describe('llmo-brand-presence', () => {
     });
 
     it('validateModel rejects unknown models with error message', () => {
-      const r = validateModel('openai');
+      // LLMO-4525 CI fix: 'openai' was previously used here as the canonical
+      // "unknown model" fixture, but is now a documented alias for
+      // 'chatgpt-paid' (see MODEL_QUERY_ALIASES in llmo-brand-presence.js).
+      // Use a string that is neither a canonical LLMO_EXECUTION_MODEL enum
+      // value nor a registered alias so this test actually exercises the
+      // rejection path.
+      const r = validateModel('not-a-real-model');
       expect(r.valid).to.equal(false);
       expect(r.error).to.include('Invalid model');
       expect(r.error).to.include('chatgpt-free');
