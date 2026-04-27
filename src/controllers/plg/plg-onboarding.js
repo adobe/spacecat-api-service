@@ -40,6 +40,7 @@ import {
   autoResolveAuthorUrl,
   findDeliveryType,
   deriveProjectName,
+  resolveWwwUrl,
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
@@ -68,6 +69,14 @@ const REVIEW_REASONS = {
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
+
+class OnboardingWaitlistError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'OnboardingWaitlistError';
+  }
+}
+
 /**
  * Derives the review check key from the onboarding record's current state.
  * @param {object} onboarding - The PlgOnboarding record.
@@ -239,6 +248,27 @@ function getReviewerIdentity(context) {
   return hasText(profile?.email) ? profile.email : 'admin';
 }
 
+/**
+ * Assigns a site to the given organization, persists, and returns a fresh instance
+ * fetched from DB so downstream consumers (e.g. TierClient) read the updated org.
+ * @param {object} site - The site to reassign.
+ * @param {string} organizationId - Target org id.
+ * @param {object} dataAccess - Data access layer.
+ * @returns {Promise<object>} Fresh site instance from DB.
+ */
+async function reassignSiteOrganization(site, organizationId, dataAccess) {
+  site.setOrganizationId(organizationId);
+  await site.save();
+
+  // Re-fetch to get a fresh instance where this.record reflects the DB value.
+  const refreshed = await dataAccess.Site.findById(site.getId());
+  const refreshedOrgId = refreshed?.getOrganizationId();
+  if (!refreshed || refreshedOrgId !== organizationId) {
+    throw new OnboardingWaitlistError(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshedOrgId ?? 'undefined'}`);
+  }
+  return refreshed;
+}
+
 async function ensureAsoEntitlement(site, context) {
   const { log } = context;
   const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
@@ -254,27 +284,6 @@ async function ensureAsoEntitlement(site, context) {
     throw error;
   }
 }
-
-/**
- * Revokes the ASO site enrollment for any other site under the same entitlement.
- * Used to enforce one active PLG enrollment per org when upgrading from PRE_ONBOARD.
- * @param {object} site - The newly enrolled site.
- * @param {object} entitlement - The ASO entitlement for the org.
- * @param {object} context - Request context.
- */
-async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
-  const { dataAccess, log } = context;
-  const { SiteEnrollment } = dataAccess;
-
-  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
-  const toRevoke = enrollments.filter((e) => e.getSiteId() !== site.getId());
-
-  await Promise.all(toRevoke.map((e) => {
-    log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${e.getSiteId()}`);
-    return e.remove();
-  }));
-}
-
 /**
  * Disables the summit-plg config handler for a given site. Non-fatal.
  * @param {object} site - The site to disable the handler for.
@@ -342,6 +351,67 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
 }
 
 /**
+ * Enforces the "one active ASO enrollment per org" business rule by revoking every ASO
+ * enrollment under the target entitlement other than the newly onboarded site's.
+ *
+ * The previous incident (2026-04-21) showed this pattern is dangerous when entitlement
+ * resolution drifts to the wrong org — a single mis-resolution mass-deletes unrelated sites.
+ * Two invariants guard against that here:
+ *
+ *   1. The entitlement's org MUST equal the customer org we resolved from the request's
+ *      imsOrgId. If they disagree, entitlement resolution drifted — abort loudly, don't delete.
+ *   2. The target customer org MUST NOT be internal/demo. Caller-level mistake guard.
+ *
+ * @param {object} newSite - The newly onboarded site (kept active).
+ * @param {object} organization - The customer organization resolved from imsOrgId (ground truth).
+ * @param {object} entitlement - The ASO entitlement returned by ensureAsoEntitlement.
+ * @param {object} context - Request context.
+ */
+async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitlement, context) {
+  const { dataAccess, log, env } = context;
+  const { SiteEnrollment } = dataAccess;
+
+  const expectedOrgId = organization.getId();
+
+  // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  if (isInternalOrg(expectedOrgId, env)) {
+    log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
+    return;
+  }
+
+  // Guard 2: tight invariant — the entitlement we got back must belong to the expected customer
+  // org. If TierClient ever drifts and hands back an entitlement for a different org, abort.
+  const entitlementOrgId = entitlement.getOrganizationId();
+  if (entitlementOrgId !== expectedOrgId) {
+    log.error(`Refusing to revoke sibling ASO enrollments: entitlement ${entitlement.getId()} belongs to org ${entitlementOrgId} but expected ${expectedOrgId} (resolved from request imsOrgId). Possible entitlement-resolution drift.`);
+    return;
+  }
+
+  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  const newSiteId = newSite.getId();
+  const toRevoke = enrollments.filter((e) => e.getSiteId() !== newSiteId);
+
+  if (toRevoke.length === 0) {
+    return;
+  }
+
+  // Normally at most 1 sibling (previous PRE_ONBOARD site); more than 3 suggests drift or a bug.
+  if (toRevoke.length > 3) {
+    log.warn(`Found ${toRevoke.length} other ASO enrollments under entitlement ${entitlement.getId()} for org ${expectedOrgId}; revoking all. Investigate if unexpected.`);
+  }
+
+  await Promise.all(toRevoke.map(async (e) => {
+    const prevSiteId = e.getSiteId();
+    try {
+      log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${prevSiteId} (org ${expectedOrgId})`);
+      await e.remove();
+    } catch (err) {
+      log.warn(`Failed to revoke ASO enrollment ${e.getId()} for site ${prevSiteId}: ${err.message}`);
+    }
+  }));
+}
+
+/**
  * Upserts a single LaunchDarkly flag's variation 0 to include the org + site.
  * Variation 0 value is a JSON object: { [imsOrgId]: [siteIds] }.
  *
@@ -397,10 +467,16 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
  * Enables all PLG auto-fix LaunchDarkly feature flags for the given site's org.
  * Uses the experience-success-studio project token (LD_EXPERIENCE_SUCCESS_API_TOKEN).
  * Each flag update is non-fatal — onboarding continues even if one fails.
+ *
+ * Takes the target organization explicitly (resolved upstream from the request's imsOrgId)
+ * rather than re-deriving it from site.getOrganizationId(). An earlier production incident
+ * flipped flags under the wrong IMS org id because the in-memory site still reported its
+ * pre-reassignment (internal) org after save.
  * @param {object} site - The onboarded site.
+ * @param {object} organization - The target customer organization.
  * @param {object} context - Request context.
  */
-async function updateLaunchDarklyFlags(site, context) {
+async function updateLaunchDarklyFlags(site, organization, context) {
   const { log, env } = context;
 
   const apiToken = env[LD_API_TOKEN_ENV_VAR];
@@ -411,9 +487,7 @@ async function updateLaunchDarklyFlags(site, context) {
 
   const ldClient = new LaunchDarklyClient({ apiToken }, log);
 
-  const imsOrgId = (await context.dataAccess.Organization.findById(
-    site.getOrganizationId(),
-  ))?.getImsOrgId();
+  const imsOrgId = organization?.getImsOrgId?.();
 
   if (!imsOrgId) {
     log.warn(`Cannot update LaunchDarkly flags: no IMS org ID for site ${site.getId()}`);
@@ -602,7 +676,9 @@ async function performAsoPlgOnboarding({
       // still gets onboarded. Orphaned enrollments can be cleaned up out-of-band.
       const { SiteEnrollment, Entitlement } = dataAccess;
       const oldOrgId = alreadyOnboarded.getOrganizationId();
-      if (oldOrgId) {
+      if (oldOrgId && isInternalOrg(oldOrgId, env)) {
+        log.error(`Refusing to revoke ASO enrollment for displaced site ${alreadyOnboardedSiteId}: previous org ${oldOrgId} is internal/demo.`);
+      } else if (oldOrgId) {
         try {
           const entitlements = await Entitlement.allByOrganizationId(oldOrgId);
           const asoEntitlement = entitlements.find((e) => e.getProductCode() === ASO_PRODUCT_CODE);
@@ -657,85 +733,108 @@ async function performAsoPlgOnboarding({
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
-    const site = await Site.findById(onboarding.getSiteId());
+    let site = await Site.findById(onboarding.getSiteId());
     if (site) {
+      try {
       // Resolve customer's organization from imsOrgId
-      const organization = await createOrFindOrganization(imsOrgId, context);
-      const customerOrgId = organization.getId();
+        const organization = await createOrFindOrganization(imsOrgId, context);
+        const customerOrgId = organization.getId();
+        // Anchor the onboarding record to the resolved customer org up-front, regardless of
+        // whether the site itself needs to be reassigned. Preonboarding records created earlier
+        // may carry a stale organizationId (e.g. the internal/demo org used during preonboard),
+        // and downstream consumers (notifications, displacement scoping) read it directly.
+        onboarding.setOrganizationId(customerOrgId);
 
-      // Check if site needs to be moved from internal org to customer org
-      const currentSiteOrgId = site.getOrganizationId();
-      let needsOrgReassignment = false;
+        // Check if site needs to be moved from internal org to customer org
+        const currentSiteOrgId = site.getOrganizationId();
+        let needsOrgReassignment = false;
 
-      // Note: On retry, currentSiteOrgId may already equal customerOrgId if a previous
-      // attempt successfully saved the org reassignment but failed during entitlement creation
-      if (currentSiteOrgId !== customerOrgId) {
-        if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
-          log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
-          needsOrgReassignment = true;
-        } else {
-          // Site is in different customer org - cannot reassign, must waitlist
-          const existingOrg = await Organization.findById(currentSiteOrgId);
-          /* c8 ignore next */
-          const existingImsOrgId = existingOrg?.getImsOrgId?.() || currentSiteOrgId;
-          /* c8 ignore next */
-          const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
-          const customerOrgName = organization.getName();
-          let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
-          const siteEnrollments = await site.getSiteEnrollments();
-          if (!siteEnrollments || siteEnrollments.length === 0) {
-            waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${customerOrgName}'.`;
+        // Note: On retry, currentSiteOrgId may already equal customerOrgId if a previous
+        // attempt successfully saved the org reassignment but failed during entitlement creation
+        if (currentSiteOrgId !== customerOrgId) {
+          if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
+            log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
+            needsOrgReassignment = true;
           } else {
-            waitlistReason += ` This domain cannot be moved to '${customerOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+            // Site is in different customer org - cannot reassign, must waitlist
+            const existingOrg = await Organization.findById(currentSiteOrgId);
+            /* c8 ignore next */
+            const existingImsOrgId = existingOrg?.getImsOrgId?.() || currentSiteOrgId;
+            /* c8 ignore next */
+            const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
+            const customerOrgName = organization.getName();
+            let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
+            const siteEnrollments = await site.getSiteEnrollments();
+            if (!siteEnrollments || siteEnrollments.length === 0) {
+              waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${customerOrgName}'.`;
+            } else {
+              waitlistReason += ` This domain cannot be moved to '${customerOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+            }
+
+            log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
+
+            onboarding.setStatus(STATUSES.WAITLISTED);
+            onboarding.setWaitlistReason(waitlistReason);
+            const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
+            onboarding.setSteps(steps);
+            if (updatedBy) {
+              onboarding.setUpdatedBy(updatedBy);
+            }
+            await onboarding.save();
+            await postPlgOnboardingNotification(onboarding, context);
+            return onboarding;
           }
+        }
 
-          log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
+        // Reassign site org if needed BEFORE entitlement operations.
+        // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
+        // The onboarding record's organizationId was already anchored above.
+        if (needsOrgReassignment) {
+          site = await reassignSiteOrganization(site, customerOrgId, dataAccess);
+          log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
+        }
 
+        const { entitlement } = await ensureAsoEntitlement(site, context);
+        await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
+        await updateLaunchDarklyFlags(site, organization, context);
+
+        const steps = {
+          ...(onboarding.getSteps() || {}),
+          entitlementCreated: true,
+        };
+        if (needsOrgReassignment) {
+          steps.siteOrgReassigned = true;
+        }
+        onboarding.setStatus(STATUSES.ONBOARDED);
+        onboarding.setWaitlistReason(null);
+        onboarding.setBotBlocker(null);
+        onboarding.setSteps(steps);
+        onboarding.setCompletedAt(new Date().toISOString());
+        if (updatedBy) {
+          onboarding.setUpdatedBy(updatedBy);
+        }
+        await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
+        return onboarding;
+      } catch (error) {
+        if (error instanceof OnboardingWaitlistError) {
           onboarding.setStatus(STATUSES.WAITLISTED);
-          onboarding.setWaitlistReason(waitlistReason);
-          const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
-          onboarding.setSteps(steps);
+          onboarding.setWaitlistReason(error.message);
+          const failedSteps = { ...(onboarding.getSteps() || {}), siteOrgReassignmentFailed: true };
+          onboarding.setSteps(failedSteps);
           if (updatedBy) {
             onboarding.setUpdatedBy(updatedBy);
           }
-          await onboarding.save();
-          await postPlgOnboardingNotification(onboarding, context);
+          try {
+            await onboarding.save();
+            await postPlgOnboardingNotification(onboarding, context);
+          } catch (saveError) {
+            log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+          }
           return onboarding;
         }
+        throw error;
       }
-
-      // Reassign site org if needed BEFORE entitlement operations
-      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement
-      if (needsOrgReassignment) {
-        site.setOrganizationId(customerOrgId);
-        await site.save();
-        // Update PlgOnboarding's organizationId to match the site's new org
-        onboarding.setOrganizationId(customerOrgId);
-        log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
-      }
-
-      const { entitlement } = await ensureAsoEntitlement(site, context);
-      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-      await updateLaunchDarklyFlags(site, context);
-
-      const steps = {
-        ...(onboarding.getSteps() || {}),
-        entitlementCreated: true,
-      };
-      if (needsOrgReassignment) {
-        steps.siteOrgReassigned = true;
-      }
-      onboarding.setStatus(STATUSES.ONBOARDED);
-      onboarding.setWaitlistReason(null);
-      onboarding.setBotBlocker(null);
-      onboarding.setSteps(steps);
-      onboarding.setCompletedAt(new Date().toISOString());
-      if (updatedBy) {
-        onboarding.setUpdatedBy(updatedBy);
-      }
-      await onboarding.save();
-      await postPlgOnboardingNotification(onboarding, context);
-      return onboarding;
     }
     log.warn(`Preonboarded site ${onboarding.getSiteId()} not found, falling through to full onboarding`);
   }
@@ -761,7 +860,9 @@ async function performAsoPlgOnboarding({
     const rumApiClient = RUMAPIClient.createFrom(context);
     let cachedDeliveryType = null;
     try {
-      await rumApiClient.retrieveDomainkey(domain);
+      const siteProxy = site ?? { getBaseURL: () => baseURL, getConfig: () => null };
+      const rumDomain = await resolveWwwUrl(siteProxy, context);
+      await rumApiClient.retrieveDomainkey(rumDomain);
       steps.rumVerified = true;
     } catch {
       steps.rumVerified = false;
@@ -1115,17 +1216,18 @@ async function performAsoPlgOnboarding({
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      site.setOrganizationId(organizationId);
-      await site.save();
+      site = await reassignSiteOrganization(site, organizationId, dataAccess);
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
     }
 
-    // Step 10: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
+    // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.
+    // Revocation is guarded by entitlement.organizationId === organization.getId() and an
+    // internal-org check, so cross-org mass-revokes are blocked on any resolution drift.
     const { entitlement } = await ensureAsoEntitlement(site, context);
-    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-    await updateLaunchDarklyFlags(site, context);
+    await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
+    await updateLaunchDarklyFlags(site, organization, context);
 
     steps.entitlementCreated = true;
 
@@ -1155,6 +1257,22 @@ async function performAsoPlgOnboarding({
 
     return onboarding;
   } catch (error) {
+    if (error instanceof OnboardingWaitlistError) {
+      onboarding.setStatus(STATUSES.WAITLISTED);
+      onboarding.setWaitlistReason(error.message);
+      onboarding.setSteps({ ...steps, siteOrgReassignmentFailed: true });
+      if (updatedBy) {
+        onboarding.setUpdatedBy(updatedBy);
+      }
+      try {
+        await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
+      } catch (saveError) {
+        log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+      }
+      return onboarding;
+    }
+
     // Persist the error in the onboarding record
     onboarding.setStatus(STATUSES.ERROR);
     onboarding.setSteps(steps);
@@ -1608,7 +1726,7 @@ function PlgOnboardingController(ctx) {
         case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED: {
           const domain = onboarding.getDomain();
           const baseURL = onboarding.getBaseURL();
-          const site = await Site.findByBaseURL(baseURL);
+          let site = await Site.findByBaseURL(baseURL);
 
           if (!site) {
             return badRequest('Site no longer exists for this domain');
@@ -1650,13 +1768,32 @@ function PlgOnboardingController(ctx) {
               return badRequest('Onboarding record has no associated organization');
             }
             const currentImsOrgId = onboarding.getImsOrgId();
-            site.setOrganizationId(currentOrgId);
             /* c8 ignore next */
             const existingDeliveryConfig = site.getDeliveryConfig() || {};
             if (existingDeliveryConfig.imsOrgId) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
-            await site.save();
+            try {
+              site = await reassignSiteOrganization(site, currentOrgId, da);
+            } catch (err) {
+              if (err instanceof OnboardingWaitlistError) {
+                onboarding.setStatus(STATUSES.WAITLISTED);
+                onboarding.setWaitlistReason(err.message);
+                const failedSteps = {
+                  ...(onboarding.getSteps() || {}),
+                  siteOrgReassignmentFailed: true,
+                };
+                onboarding.setSteps(failedSteps);
+                try {
+                  await onboarding.save();
+                  await postPlgOnboardingNotification(onboarding, context);
+                } catch (saveError) {
+                  log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+                }
+                return ok(PlgOnboardingDto.toAdminJSON(onboarding));
+              }
+              throw err;
+            }
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
             await onboarding.save();
