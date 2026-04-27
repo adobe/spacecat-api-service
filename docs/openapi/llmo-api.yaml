@@ -921,38 +921,30 @@ llmo-onboard:
                     - commerce-fastly
                     - byocdn-fastly
                     - byocdn-akamai
-                    - byocdn-cloudfront
                     - byocdn-cloudflare
                     - byocdn-imperva
-                    - byocdn-azure
-                    - byocdn-frontdoor
-                    - byocdn-google
-                    - byocdn-vercel
-                    - byocdn-netlify
-                    - byocdn-bunny
-                    - byocdn-keycdn
-                    - byocdn-limelight
-                    - byocdn-cdnetworks
-                    - byocdn-stackpath
-                    - byocdn-sucuri
-                    - byocdn-alibaba
-                    - byocdn-clever
-                    - byocdn-airee
-                    - byocdn-cachefly
-                    - byocdn-edgecast
-                    - byocdn-beluga
-                    - byocdn-myra
+                    - byocdn-other
                     - other
-                    - null
                   description: |
-                    CDN provider detected during onboarding. Returns:
-                      - `aem-cs-fastly` / `commerce-fastly` for Adobe-managed CDNs (DNS fast-path).
-                      - `byocdn-<provider>` for any third-party CDN identified by the multi-signal probe
-                        (HTTP headers, CNAME chain, ASN, PTR). Only the first 5 BYOCDN tokens
-                        (`byocdn-fastly|akamai|cloudfront|cloudflare|imperva`) drive UI auto-selection
-                        today; the rest are stored verbatim for analytics and Slack visibility.
-                      - `other` when DNS resolves cleanly but no signature matched.
-                      - `null` when at least one signal failed (inconclusive).
+                    CDN provider detected during onboarding. The enum mirrors the
+                    detector's emit set 1:1 so the UI can drive the radio
+                    auto-select directly off this value:
+                      - `aem-cs-fastly` / `commerce-fastly` — Adobe-managed CDNs
+                        identified by the DNS fast-path.
+                      - `byocdn-fastly|akamai|cloudflare|imperva` — direct
+                        BYOCDN matches from the multi-signal probe (HTTP
+                        headers, CNAME chain, ASN, PTR).
+                      - `byocdn-other` — catch-all for any other detected
+                        third-party CDN (CloudFront, Azure Front Door / Azure
+                        CDN, Vercel, Netlify, Bunny, Sucuri, Alibaba, etc.).
+                        Used for CloudFront/Azure today because the detector
+                        cannot disambiguate AMS vs BYOCDN tenancy from
+                        network signals; a future detector revision can split
+                        these out once AMS-aware signatures land.
+                      - `other` — both detection phases ran cleanly and no
+                        signature matched.
+                      - `null` — at least one probe was inconclusive (DNS or
+                        HTTP failure), so the auto-select stays neutral.
                   example: "aem-cs-fastly"
                 status:
                   type: string

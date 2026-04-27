@@ -4212,4 +4212,59 @@ describe('LLMO Onboarding Functions', () => {
       );
     });
   });
+
+  // Round-trip every detector-emitted detectedCdn token through the
+  // spacecat-shared Joi schema. If any of these fail the api-service has
+  // started emitting a token the schema doesn't know about — surface the
+  // mismatch immediately at unit-test time rather than at runtime when an
+  // onboard call would otherwise blow up with a Joi validation error.
+  //
+  // Currently `.skip`ped because the published `@adobe/spacecat-shared-
+  // data-access` only accepts ['aem-cs-fastly', 'other']. Flip to
+  // `describe(...)` once the shared package is released with the widened
+  // schema and the version bump lands in this repo's package.json.
+  // See LLMO-XXX (Joi widening PR in spacecat-shared).
+  describe.skip('detectedCdn Joi round-trip', () => {
+    const ACCEPTED_TOKENS = [
+      'aem-cs-fastly',
+      'commerce-fastly',
+      'byocdn-fastly',
+      'byocdn-akamai',
+      'byocdn-cloudflare',
+      'byocdn-imperva',
+      'byocdn-other',
+      'other',
+    ];
+
+    let validateConfiguration;
+
+    before(async () => {
+      ({ validateConfiguration } = await import('@adobe/spacecat-shared-data-access/src/models/site/config.js'));
+    });
+
+    ACCEPTED_TOKENS.forEach((token) => {
+      it(`accepts detectedCdn = "${token}" via the shared Joi schema`, () => {
+        const config = {
+          llmo: {
+            dataFolder: '/test',
+            brand: 'test',
+            detectedCdn: token,
+          },
+        };
+        const validated = validateConfiguration(config);
+        expect(validated.llmo.detectedCdn).to.equal(token);
+      });
+    });
+
+    it('rejects an unknown detectedCdn token (regression guard for future detector additions)', () => {
+      const config = {
+        llmo: {
+          dataFolder: '/test',
+          brand: 'test',
+          detectedCdn: 'byocdn-cloudfront',
+        },
+      };
+      expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
+    });
+  });
 });
