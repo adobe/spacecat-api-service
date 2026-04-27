@@ -7205,7 +7205,7 @@ describe('llmo-brand-presence', () => {
         },
       ];
       const client = createTableAwareMock({
-        brand_presence_executions: { data: rows, error: null },
+        brand_presence_executions_active: { data: rows, error: null },
         brand_presence_sources: { data: [], error: null },
       });
       mockContext.params.topicId = 'T';
