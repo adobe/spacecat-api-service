@@ -239,9 +239,12 @@ describe('Suggestions Controller', () => {
     site = {
       getId: sandbox.stub().returns(SITE_ID),
       getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+      getOrganizationId: sandbox.stub().returns('test-org-id'),
     };
     siteNotEnabled = {
       getId: sandbox.stub().returns(SITE_ID_NOT_ENABLED),
+      getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+      getOrganizationId: sandbox.stub().returns('test-org-id'),
     };
 
     removeStub = sandbox.stub().resolves();
@@ -488,6 +491,9 @@ describe('Suggestions Controller', () => {
       SuggestionGrant: mockSuggestionGrant,
       Site: mockSite,
       Configuration: mockConfiguration,
+      Entitlement: {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves(null),
+      },
       AsyncJob: {
         create: sandbox.stub(),
         findById: sandbox.stub(),
@@ -4426,6 +4432,86 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(404);
       const error = await response.json();
       expect(error).to.have.property('message', 'Opportunity not found');
+    });
+
+    it('auto-fix suggestions returns 403 for AEM Edge site on PLG tier with active enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      const ControllerWithPlgTier = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithPlgTier = ControllerWithPlgTier({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithPlgTier.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('unauthorized');
+      expect(context.log.warn).to.have.been.calledWithMatch(/Auto-fix blocked/);
+    });
+
+    it('auto-fix suggestions returns 403 for AEM Edge site on FREE_TRIAL tier with active enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-2' },
+        }),
+      };
+      const ControllerWithFreeTrial = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithFreeTrial = ControllerWithFreeTrial({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithFreeTrial.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('unauthorized');
+    });
+
+    it('auto-fix suggestions allows through for AEM Edge PLG tier without active enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: null,
+        }),
+      };
+      const ControllerWithPlgTier = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithPlgTier = ControllerWithPlgTier({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithPlgTier.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
     });
 
     it('auto-fix suggestions returns 400 if site not enabled for autofix', async () => {
