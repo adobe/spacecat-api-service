@@ -69,6 +69,7 @@ const REVIEW_REASONS = {
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
+const NOOP_LOGGER = { info: () => {} };
 
 class OnboardingWaitlistError extends Error {
   constructor(message) {
@@ -254,17 +255,23 @@ function getReviewerIdentity(context) {
  * @param {object} site - The site to reassign.
  * @param {string} organizationId - Target org id.
  * @param {object} dataAccess - Data access layer.
+ * @param {object} log - Logger.
  * @returns {Promise<object>} Fresh site instance from DB.
  */
-async function reassignSiteOrganization(site, organizationId, dataAccess) {
+async function reassignSiteOrganization(site, organizationId, dataAccess, log = NOOP_LOGGER) {
+  const siteId = site.getId();
+  const previousOrgId = site.getOrganizationId();
   site.setOrganizationId(organizationId);
+  log.info(`reassignSiteOrganization: before save — site ${siteId}, previous org: ${previousOrgId}, new org: ${organizationId}`);
   await site.save();
+  log.info(`reassignSiteOrganization: after save — site ${siteId}, org: ${organizationId}`);
 
   // Re-fetch to get a fresh instance where this.record reflects the DB value.
-  const refreshed = await dataAccess.Site.findById(site.getId());
+  const refreshed = await dataAccess.Site.findById(siteId);
   const refreshedOrgId = refreshed?.getOrganizationId();
+  log.info(`reassignSiteOrganization: after refetch — site ${siteId}, refreshed org: ${refreshedOrgId}`);
   if (!refreshed || refreshedOrgId !== organizationId) {
-    throw new OnboardingWaitlistError(`Site ${site.getId()} org not reflected in DB after save: expected ${organizationId}, got ${refreshedOrgId ?? 'undefined'}`);
+    throw new OnboardingWaitlistError(`Site ${siteId} org not reflected in DB after save: expected ${organizationId}, got ${refreshedOrgId ?? 'undefined'}`);
   }
   return refreshed;
 }
@@ -784,7 +791,7 @@ async function performAsoPlgOnboarding({
         // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
         // The onboarding record's organizationId was already anchored above.
         if (needsOrgReassignment) {
-          site = await reassignSiteOrganization(site, customerOrgId, dataAccess);
+          site = await reassignSiteOrganization(site, customerOrgId, dataAccess, log);
           log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
         }
 
@@ -1201,7 +1208,7 @@ async function performAsoPlgOnboarding({
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      site = await reassignSiteOrganization(site, organizationId, dataAccess);
+      site = await reassignSiteOrganization(site, organizationId, dataAccess, log);
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
@@ -1759,7 +1766,7 @@ function PlgOnboardingController(ctx) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
             try {
-              site = await reassignSiteOrganization(site, currentOrgId, da);
+              site = await reassignSiteOrganization(site, currentOrgId, da, context.log);
             } catch (err) {
               if (err instanceof OnboardingWaitlistError) {
                 onboarding.setStatus(STATUSES.WAITLISTED);
