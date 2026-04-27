@@ -14,11 +14,10 @@ import { expect } from 'chai';
 import { cachedOk } from '../../src/support/cached-response.js';
 
 describe('cachedOk', () => {
-  it('sets the default Cache-Control and Vary headers', async () => {
+  it('sets the default Cache-Control header', async () => {
     const response = cachedOk({ hello: 'world' });
     expect(response.status).to.equal(200);
     expect(response.headers.get('Cache-Control')).to.equal('private, max-age=7200');
-    expect(response.headers.get('Vary')).to.equal('Authorization');
     const body = await response.json();
     expect(body).to.deep.equal({ hello: 'world' });
   });
@@ -28,8 +27,6 @@ describe('cachedOk', () => {
       'Cache-Control': 'private, max-age=60',
     });
     expect(response.headers.get('Cache-Control')).to.equal('private, max-age=60');
-    // Vary default still applied because it wasn't overridden
-    expect(response.headers.get('Vary')).to.equal('Authorization');
   });
 
   it('accepts arbitrary additional headers', () => {

@@ -102,7 +102,6 @@ describe('LlmoController', () => {
       status: 200,
       headers: new Map(Object.entries({
         'Cache-Control': 'private, max-age=7200',
-        Vary: 'Authorization',
         ...additionalHeaders,
       })),
       json: async () => data,

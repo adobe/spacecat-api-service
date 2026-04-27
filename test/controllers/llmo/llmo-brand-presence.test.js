@@ -684,9 +684,8 @@ describe('llmo-brand-presence', () => {
       expect(body.topics).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000cc', label: 'Topic A' }]);
       expect(body.page_intents).to.deep.equal([{ id: 'informational', label: 'informational' }]);
       expect(tableMock.rpc).not.to.have.been.called;
-      // cachedOk wraps ok() with default browser-cache headers (2h + Vary: Authorization).
+      // cachedOk wraps ok() with the default 2h browser-cache directive.
       expect(result.headers.get('Cache-Control')).to.equal('private, max-age=7200');
-      expect(result.headers.get('Vary')).to.equal('Authorization');
     });
 
     it('returns badRequest when brandId is not a valid UUID', async () => {
@@ -1816,9 +1815,8 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.weeklyTrends).to.deep.equal([]);
-      // cachedOk wraps ok() with default browser-cache headers (2h + Vary: Authorization).
+      // cachedOk wraps ok() with the default 2h browser-cache directive.
       expect(result.headers.get('Cache-Control')).to.equal('private, max-age=7200');
-      expect(result.headers.get('Vary')).to.equal('Authorization');
     });
 
     it('handles data: null gracefully', async () => {

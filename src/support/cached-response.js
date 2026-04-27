@@ -20,8 +20,13 @@ import { ok } from '@adobe/spacecat-shared-http-utils';
  * Defaults:
  *  - `Cache-Control: private, max-age=7200` — only the user's own browser
  *    caches; shared caches (Fastly/Varnish, corporate proxies) bypass.
- *  - `Vary: Authorization` — different bearer tokens get different cache
- *    entries, preventing one user's response leaking to another.
+ *
+ * No `Vary: Authorization`: the SpaceCat session JWT is regenerated on every
+ * page reload (different signature even for the same user), so adding it to
+ * Vary changes the cache key on every reload and defeats caching entirely.
+ * The browser's private HTTP cache is per-profile, and `Cache-Control: private`
+ * keeps shared caches out, so cross-user contamination on a single profile
+ * remains unlikely.
  *
  * Caller-supplied headers in the second argument override the defaults
  * (e.g. `cachedOk(data, { 'Cache-Control': 'private, max-age=60' })`).
@@ -36,7 +41,6 @@ import { ok } from '@adobe/spacecat-shared-http-utils';
 export function cachedOk(body = '', additionalHeaders = {}) {
   return ok(body, {
     'Cache-Control': 'private, max-age=7200',
-    Vary: 'Authorization',
     ...additionalHeaders,
   });
 }
