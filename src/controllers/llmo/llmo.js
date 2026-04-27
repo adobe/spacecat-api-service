@@ -36,6 +36,7 @@ import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-t
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
+import { cachedOk } from '../../support/cached-response.js';
 import {
   probeSiteAndResolveDomain,
   parseEdgeRoutingConfig,
@@ -210,7 +211,7 @@ function LlmoController(ctx) {
       const data = await response.json();
 
       // Return the data, pass through any compression headers from upstream
-      return ok(data, {
+      return cachedOk(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
@@ -439,7 +440,7 @@ function LlmoController(ctx) {
 
       log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
       // Return the data and let the framework handle the compression
-      return ok(data, {
+      return cachedOk(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
@@ -475,7 +476,7 @@ function LlmoController(ctx) {
         return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
       }
 
-      return ok({ config, version: configVersion || null }, {
+      return cachedOk({ config, version: configVersion || null }, {
         'Content-Encoding': 'br',
       });
     } catch (error) {
@@ -601,7 +602,7 @@ function LlmoController(ctx) {
       return siteValidation;
     }
     const { llmoConfig } = siteValidation;
-    return ok(llmoConfig.questions || {});
+    return cachedOk(llmoConfig.questions || {});
   };
 
   // Handles requests to the LLMO questions endpoint, adds a new question
@@ -712,7 +713,7 @@ function LlmoController(ctx) {
         return siteValidation;
       }
       const { llmoConfig } = siteValidation;
-      return ok(llmoConfig.customerIntent || []);
+      return cachedOk(llmoConfig.customerIntent || []);
     } catch (error) {
       return badRequest(cleanupHeaderValue(error.message));
     }
@@ -1091,7 +1092,7 @@ function LlmoController(ctx) {
       }
       const { llmoConfig } = siteValidation;
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
-      return ok(data, headers);
+      return cachedOk(data, headers);
     } catch (error) {
       log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
@@ -1482,7 +1483,7 @@ function LlmoController(ctx) {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
-      return ok({
+      return cachedOk({
         ...metaconfig,
       });
     } catch (error) {
@@ -1517,7 +1518,7 @@ function LlmoController(ctx) {
         return notFound(`LLMO strategy not found for site '${siteId}'${version != null ? ` with version '${version}'` : ''}`);
       }
 
-      return ok({ data, version: strategyVersion }, {
+      return cachedOk({ data, version: strategyVersion }, {
         'Content-Encoding': 'br',
       });
     } catch (error) {
@@ -1631,7 +1632,7 @@ function LlmoController(ctx) {
     try {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const result = await tokowakaClient.checkEdgeOptimizeStatus(site, path);
-      return ok(result);
+      return cachedOk(result);
     } catch (error) {
       log.error(`Error checking edge optimize status: ${error.message} for site: ${siteId} and path: ${path}`);
       if (error.status) {

@@ -11,11 +11,12 @@
  */
 
 import {
-  ok, badRequest, forbidden, notFound, internalServerError,
+  badRequest, forbidden, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../../../support/access-control-util.js';
 import { OpportunityDto } from '../../../dto/opportunity.js';
 import { getBrandById } from '../../../support/brands-storage.js';
+import { cachedOk } from '../../../support/cached-response.js';
 
 const MAX_CONCURRENT_SITES = 5;
 const MAX_SITES_FOR_COUNT = 40;
@@ -138,7 +139,7 @@ function LlmoOpportunitiesController(ctx) {
       const bySite = await processBatch(sites, countForSite, MAX_CONCURRENT_SITES);
       const total = bySite.reduce((sum, s) => sum + s.count, 0);
 
-      return ok({ total, bySite });
+      return cachedOk({ total, bySite });
     } catch (error) {
       log.error(`Error counting opportunities: ${error.message}`);
       return internalServerError(error.message);
@@ -203,7 +204,7 @@ function LlmoOpportunitiesController(ctx) {
       }
 
       if (siteIds.length === 0) {
-        return ok({
+        return cachedOk({
           brandId, brandName, opportunities: [], total: 0,
         });
       }
@@ -231,7 +232,7 @@ function LlmoOpportunitiesController(ctx) {
       const results = await processBatch(siteIds, fetchForSite, MAX_CONCURRENT_SITES);
       const opportunities = results.flat();
 
-      return ok({
+      return cachedOk({
         brandId, brandName, opportunities, total: opportunities.length,
       });
     } catch (error) {
