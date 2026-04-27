@@ -1,3 +1,10 @@
+# [1.456.0](https://github.com/adobe/spacecat-api-service/compare/v1.455.3...v1.456.0) (2026-04-27)
+
+
+### Features
+
+* filter deleted prompts for brand presence dashboard | LLMO-4433 ([#2247](https://github.com/adobe/spacecat-api-service/issues/2247)) ([fbb82e1](https://github.com/adobe/spacecat-api-service/commit/fbb82e12c314a671522815c48827424e7ec49cf5))
+
 ## [1.455.3](https://github.com/adobe/spacecat-api-service/compare/v1.455.2...v1.455.3) (2026-04-27)
 
 
