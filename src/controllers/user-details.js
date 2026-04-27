@@ -220,18 +220,8 @@ function UserDetailsController(ctx) {
    * @returns {Promise<Response>} Resolved user profile.
    */
   const resolveUser = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.isAccessTypeJWT() || !accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can resolve user profiles');
-    }
-
-    // hasAdminAccess() returns true for all legacy API key callers regardless of key tier.
-    // Explicitly require ADMIN_API_KEY for this PII-returning endpoint.
-    const authType = context.attributes?.authInfo?.getType?.();
-    if (authType === 'legacyApiKey') {
-      const providedKey = context.pathInfo?.headers?.['x-api-key'];
-      if (!hasText(providedKey) || providedKey !== context.env?.ADMIN_API_KEY) {
-        return forbidden('Only admins can resolve user profiles');
-      }
     }
 
     const { userId } = context.params;

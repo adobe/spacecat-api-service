@@ -98,6 +98,7 @@ describe('User Details Controller', () => {
     mockAccessControlUtil = {
       hasAccess: sandbox.stub().resolves(true),
       hasAdminAccess: sandbox.stub().returns(true),
+      isAccessTypeJWT: sandbox.stub().returns(true),
     };
 
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
@@ -483,27 +484,14 @@ describe('User Details Controller', () => {
       expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
     });
 
-    it('should return forbidden when caller uses USER_API_KEY instead of ADMIN_API_KEY', async () => {
+    it('should return forbidden when caller is not using JWT auth', async () => {
+      mockAccessControlUtil.isAccessTypeJWT.returns(false);
       context.params = { userId: 'user@AdobeOrg' };
-      context.attributes = { authInfo: { getType: () => 'legacyApiKey' } };
-      context.pathInfo = { headers: { 'x-api-key': 'user-key' } };
-      context.env = { ADMIN_API_KEY: 'admin-key' };
 
       const result = await controller.resolveUser(context);
 
       expect(result.status).to.equal(403);
       expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
-    });
-
-    it('should allow caller presenting ADMIN_API_KEY', async () => {
-      context.params = { userId: 'user@AdobeOrg' };
-      context.attributes = { authInfo: { getType: () => 'legacyApiKey' } };
-      context.pathInfo = { headers: { 'x-api-key': 'admin-key' } };
-      context.env = { ADMIN_API_KEY: 'admin-key' };
-
-      const result = await controller.resolveUser(context);
-
-      expect(result.status).to.equal(200);
     });
 
     it('should return bad request when userId param is missing', async () => {
