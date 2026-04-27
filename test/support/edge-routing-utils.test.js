@@ -336,6 +336,15 @@ describe('edge-routing-utils', () => {
       expect(result).to.equal(null);
     });
 
+    it('tolerates falsy CNAME entries in the resolveCname response and still matches valid ones', async () => {
+      dnsPromises.resolveCname
+        .withArgs('example.com')
+        .resolves([null, undefined, '', 'origin.example.cdn.adobeaemcloud.com']);
+      dnsPromises.resolve4.resolves([]);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
+    });
+
     it('logs CNAME and A-record diagnostics when log is provided (covers log?.info branches)', async () => {
       const dnsLog = { info: sandbox.stub() };
       dnsPromises.resolveCname.withArgs('example.com').resolves(['unrelated-cname.example.com']);
