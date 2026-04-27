@@ -3318,6 +3318,18 @@ describe('PlgOnboardingController', () => {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       // Verify order: site org reassignment happens BEFORE entitlement operations
       expect(siteInInternalOrg.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
+      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
+      // this is the core invariant of the post-save re-fetch design.
+      expect(tierClientCreateForSiteStub).to.have.been.calledWith(
+        sinon.match.any,
+        refreshedSite,
+        sinon.match.any,
+      );
+      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
+        sinon.match.any,
+        siteInInternalOrg,
+        sinon.match.any,
+      );
     });
 
     it('does not reassign when preonboarded site already in customer org', async () => {
@@ -3516,6 +3528,18 @@ describe('PlgOnboardingController', () => {
       expect(existingSite.save).to.have.been.called;
       // Verify order: site org reassignment happens BEFORE entitlement operations
       expect(existingSite.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
+      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
+      // this is the core invariant of the post-save re-fetch design.
+      expect(tierClientCreateForSiteStub).to.have.been.calledWith(
+        sinon.match.any,
+        refreshedSiteFullPath,
+        sinon.match.any,
+      );
+      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
+        sinon.match.any,
+        existingSite,
+        sinon.match.any,
+      );
     });
 
     it('waitlists in full onboarding path when re-fetch after org reassignment returns null', async () => {
