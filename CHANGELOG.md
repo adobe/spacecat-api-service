@@ -1,3 +1,62 @@
+# [1.454.0](https://github.com/adobe/spacecat-api-service/compare/v1.453.0...v1.454.0) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2270](https://github.com/adobe/spacecat-api-service/issues/2270)) ([6876689](https://github.com/adobe/spacecat-api-service/commit/687668910bef6c9b9caf52f5530414b7dd4313ed))
+
+
+### Features
+
+* add GET /admin/user/:userid endpoint to resolve IMS user profiles ([#2266](https://github.com/adobe/spacecat-api-service/issues/2266)) ([ca7253b](https://github.com/adobe/spacecat-api-service/commit/ca7253bd2122e83da87e744624899178ebc01687))
+
+# [1.453.0](https://github.com/adobe/spacecat-api-service/compare/v1.452.0...v1.453.0) (2026-04-24)
+
+
+### Features
+
+* SITES-43069 - pass enabled preflight audits from Configuration to Mysticat ([#2210](https://github.com/adobe/spacecat-api-service/issues/2210)) ([6e8bd4e](https://github.com/adobe/spacecat-api-service/commit/6e8bd4e71a08b30c226146b9260c0593cc58d907))
+
+# [1.452.0](https://github.com/adobe/spacecat-api-service/compare/v1.451.0...v1.452.0) (2026-04-24)
+
+
+### Features
+
+* remove answers from brand presence topic details api ([#2254](https://github.com/adobe/spacecat-api-service/issues/2254)) ([b8e4e55](https://github.com/adobe/spacecat-api-service/commit/b8e4e55c5692e25f8d71e990d4dc3b3f166c9947))
+
+# [1.451.0](https://github.com/adobe/spacecat-api-service/compare/v1.450.0...v1.451.0) (2026-04-24)
+
+
+### Features
+
+* persist all brand URLs and annotate onboarded status | LLMO-4435 ([#2252](https://github.com/adobe/spacecat-api-service/issues/2252)) ([3f9e1cf](https://github.com/adobe/spacecat-api-service/commit/3f9e1cfe85194b419cba6d65c57a23a93777c0cc)), closes [adobe/mysticat-data-service#427](https://github.com/adobe/mysticat-data-service/issues/427)
+
+# [1.450.0](https://github.com/adobe/spacecat-api-service/compare/v1.449.1...v1.450.0) (2026-04-24)
+
+
+### Bug Fixes
+
+* **llmo:** sanitize error message in updateLlmoConfig catch block ([#2241](https://github.com/adobe/spacecat-api-service/issues/2241)) ([22a2c84](https://github.com/adobe/spacecat-api-service/commit/22a2c84b84835d518c5ff002223a26af3f8644f8)), closes [src/controllers/llmo/llmo.js#L593](https://github.com/src/controllers/llmo/llmo.js/issues/L593)
+
+
+### Features
+
+* add URL Inspector PG API endpoints | LLMO-4030 ([#2113](https://github.com/adobe/spacecat-api-service/issues/2113)) ([a41acc2](https://github.com/adobe/spacecat-api-service/commit/a41acc268f244f63fc5de818bda1c7b78bd6f9dd))
+
+## [1.449.1](https://github.com/adobe/spacecat-api-service/compare/v1.449.0...v1.449.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* make POST /v2/orgs/:id/categories idempotent by name | LLMO-4370 ([#2240](https://github.com/adobe/spacecat-api-service/issues/2240)) ([dfdd0fa](https://github.com/adobe/spacecat-api-service/commit/dfdd0fa65210da8672ee83af2d7e1211d1e214b9))
+
+# [1.449.0](https://github.com/adobe/spacecat-api-service/compare/v1.448.1...v1.449.0) (2026-04-20)
+
+
+### Features
+
+* add VPC configuration support via helix-deploy 13.4 ([#1935](https://github.com/adobe/spacecat-api-service/issues/1935)) ([e593a1e](https://github.com/adobe/spacecat-api-service/commit/e593a1e43900a9809a0f9d17800f2ab03cb4dfa3)), closes [adobe/helix-deploy#898](https://github.com/adobe/helix-deploy/issues/898) [adobe/helix-deploy#897](https://github.com/adobe/helix-deploy/issues/897) [adobe/spacecat-infrastructure#375](https://github.com/adobe/spacecat-infrastructure/issues/375)
+
 ## [1.448.1](https://github.com/adobe/spacecat-api-service/compare/v1.448.0...v1.448.1) (2026-04-20)
 
 

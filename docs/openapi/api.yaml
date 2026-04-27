@@ -126,6 +126,10 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/categories:
+    $ref: './categories-v2-api.yaml#/v2-categories-for-org'
+  /v2/orgs/{spaceCatId}/categories/{categoryId}:
+    $ref: './categories-v2-api.yaml#/v2-category-for-org'
   /v2/orgs/{spaceCatId}/topics:
     $ref: './topics-v2-api.yaml#/v2-topics-for-org'
   /v2/orgs/{spaceCatId}/topics/{topicId}:
@@ -489,6 +493,18 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/stats:
+    $ref: './llmo-api.yaml#/url-inspector-stats'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/owned-urls:
+    $ref: './llmo-api.yaml#/url-inspector-owned-urls'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/trending-urls:
+    $ref: './llmo-api.yaml#/url-inspector-trending-urls'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/cited-domains:
+    $ref: './llmo-api.yaml#/url-inspector-cited-domains'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/domain-urls:
+    $ref: './llmo-api.yaml#/url-inspector-domain-urls'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/url-prompts:
+    $ref: './llmo-api.yaml#/url-inspector-url-prompts'
   /sites/{siteId}/agentic-traffic/url-brand-presence:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-url-brand-presence'
   /sites/{siteId}/llmo/config:
