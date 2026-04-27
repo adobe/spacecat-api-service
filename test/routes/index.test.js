@@ -529,7 +529,6 @@ describe('getRouteHandlers', () => {
       'POST /llmo/onboard/update-query-index',
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
-      'GET /admin/resolve-user',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -569,7 +568,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
-    expect(staticRoutes['GET /admin/resolve-user']).to.equal(mockUserDetailsController.resolveUser);
 
     const expectedDynamicRouteKeys = [
       'GET /audits/latest/:auditType',
@@ -916,6 +914,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/weeks',
       'GET /sites/:siteId/agentic-traffic/movers',
       'GET /sites/:siteId/agentic-traffic/url-brand-presence',
+      'GET /admin/users/:userId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
@@ -1190,5 +1189,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /plg/records/:plgOnboardingId'].paramNames).to.deep.equal(['plgOnboardingId']);
     expect(dynamicRoutes['DELETE /plg/records/:plgOnboardingId'].handler).to.equal(mockPlgOnboardingController.deleteOnboarding);
     expect(dynamicRoutes['DELETE /plg/records/:plgOnboardingId'].paramNames).to.deep.equal(['plgOnboardingId']);
+    expect(dynamicRoutes['GET /admin/users/:userId'].handler).to.equal(mockUserDetailsController.resolveUser);
+    expect(dynamicRoutes['GET /admin/users/:userId'].paramNames).to.deep.equal(['userId']);
   });
 });

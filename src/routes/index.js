@@ -511,7 +511,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'POST /sites/:siteId/site-enrollments': siteEnrollmentController.createPlgEnrollment,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
-    'GET /admin/resolve-user': userDetailsController.resolveUser,
+    'GET /admin/users/:userId': userDetailsController.resolveUser,
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,

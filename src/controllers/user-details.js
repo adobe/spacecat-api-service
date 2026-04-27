@@ -25,6 +25,17 @@ import {
 
 import AccessControlUtil from '../support/access-control-util.js';
 
+// IMS GUID format: <hex>@<alphanumeric-with-dots>
+const IMS_USER_ID_RE = /^[A-Za-z0-9]+@[A-Za-z0-9.]+$/;
+
+function toProfileShape(imsProfile) {
+  return {
+    firstName: imsProfile.first_name || '-',
+    lastName: imsProfile.last_name || '-',
+    email: imsProfile.email || '',
+  };
+}
+
 /**
  * UserDetails controller. Provides methods to fetch user details by external user ID.
  * @param {object} ctx - Context of the request.
@@ -68,9 +79,7 @@ function UserDetailsController(ctx) {
       log.debug(`Admin user requesting details for ${externalUserId}, attempting IMS fallback`);
       const imsProfile = await imsClient.getImsAdminProfile(externalUserId);
       return {
-        firstName: imsProfile.first_name || '-',
-        lastName: imsProfile.last_name || '-',
-        email: imsProfile.email || '',
+        ...toProfileShape(imsProfile),
         organizationId,
       };
     } catch (error) {
@@ -215,24 +224,41 @@ function UserDetailsController(ctx) {
       return forbidden('Only admins can resolve user profiles');
     }
 
-    const userId = context.request?.url
-      ? new URL(context.request.url).searchParams.get('userId')
-      : null;
+    // hasAdminAccess() returns true for all legacy API key callers regardless of key tier.
+    // Explicitly require ADMIN_API_KEY for this PII-returning endpoint.
+    const authType = context.attributes?.authInfo?.getType?.();
+    if (authType === 'legacyApiKey') {
+      const providedKey = context.pathInfo?.headers?.['x-api-key'];
+      if (!hasText(providedKey) || providedKey !== context.env?.ADMIN_API_KEY) {
+        return forbidden('Only admins can resolve user profiles');
+      }
+    }
+
+    const { userId } = context.params;
 
     if (!hasText(userId)) {
-      return badRequest('userId query parameter is required');
+      return badRequest('userId path parameter is required');
+    }
+
+    if (!IMS_USER_ID_RE.test(userId)) {
+      return badRequest('userId must be a valid IMS GUID (e.g. ABCDEF@AdobeOrg)');
     }
 
     try {
       const imsProfile = await imsClient.getImsAdminProfile(userId);
-      return ok({
-        firstName: imsProfile.first_name || '-',
-        lastName: imsProfile.last_name || '-',
-        email: imsProfile.email || '',
-      });
+      log.info(`Admin resolved IMS profile for userId: ${userId}`);
+      return ok(toProfileShape(imsProfile));
     } catch (e) {
       log.error(`Failed to resolve user profile for ${userId}: ${e.message}`);
-      return internalServerError(e.message);
+      const statusMatch = e.message?.match(/status: (\d{3})/);
+      const upstreamStatus = statusMatch ? parseInt(statusMatch[1], 10) : null;
+      if (upstreamStatus === 404) {
+        return notFound(`User not found: ${userId}`);
+      }
+      if (upstreamStatus >= 400 && upstreamStatus < 500) {
+        return badRequest(`Invalid userId: ${userId}`);
+      }
+      return internalServerError('Failed to resolve user profile');
     }
   };
 
