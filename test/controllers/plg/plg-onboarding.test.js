@@ -3547,6 +3547,37 @@ describe('PlgOnboardingController', () => {
       expect(tierClientCreateEntitlementStub).to.not.have.been.called;
     });
 
+    it('waitlists when re-fetch returns a stale site with the old org (replica lag)', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-stale';
+
+      // Full onboarding (not PRE_ONBOARDING)
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+      const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      // Re-fetch returns a site whose org still reflects the OLD internal org id —
+      // simulates replica lag. reassignSiteOrganization must throw a waitlist error.
+      const staleRefreshed = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findById.resolves(staleRefreshed);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
+        new RegExp(`expected ${TEST_ORG_ID}, got ${INTERNAL_ORG_ID}`),
+      );
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch(
+        sinon.match({ siteOrgReassignmentFailed: true }),
+      );
+      // Entitlement creation must NOT happen when reassignment landed on stale data.
+      expect(tierClientCreateEntitlementStub).to.not.have.been.called;
+    });
+
     it('logs and continues when persisting waitlist state fails during full onboarding', async () => {
       const INTERNAL_ORG_ID = 'internal-org-full-save-err';
 
