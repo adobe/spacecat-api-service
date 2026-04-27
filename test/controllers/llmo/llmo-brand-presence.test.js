@@ -684,6 +684,10 @@ describe('llmo-brand-presence', () => {
       expect(body.topics).to.deep.equal([{ id: '0178a3f0-1234-7000-8000-0000000000cc', label: 'Topic A' }]);
       expect(body.page_intents).to.deep.equal([{ id: 'informational', label: 'informational' }]);
       expect(tableMock.rpc).not.to.have.been.called;
+      // Browser-cache contract: filter-dimensions is taxonomy-tier (1h max-age, 24h SWR).
+      expect(result.headers.get('Cache-Control')).to.equal(
+        'private, max-age=3600, stale-while-revalidate=86400',
+      );
     });
 
     it('returns badRequest when brandId is not a valid UUID', async () => {
@@ -1813,6 +1817,10 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.weeklyTrends).to.deep.equal([]);
+      // Browser-cache contract: sentiment-overview is metrics-tier (5min max-age, 15min SWR).
+      expect(result.headers.get('Cache-Control')).to.equal(
+        'private, max-age=300, stale-while-revalidate=900',
+      );
     });
 
     it('handles data: null gracefully', async () => {

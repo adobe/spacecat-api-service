@@ -18,6 +18,10 @@ import {
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import {
+  taxonomyCacheHeaders,
+  metricsCacheHeaders,
+} from './brand-presence-cache-policy.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -712,7 +716,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         regions,
         stats,
         page_intents: pageIntents,
-      });
+      }, taxonomyCacheHeaders());
     },
   );
 }
@@ -923,7 +927,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         };
       });
 
-      return ok({ weeks });
+      return ok({ weeks }, taxonomyCacheHeaders());
     },
   );
 }
@@ -1080,7 +1084,7 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
       return ok({
         weeklyTrends,
         weeklyTrendsForComparison: weeklyTrends,
-      });
+      }, metricsCacheHeaders());
     },
   );
 }
@@ -1133,7 +1137,7 @@ export function createCompetitorSummaryHandler(getOrgAndValidateAccess) {
           mentions: r.total_mentions || 0,
           citations: r.total_citations || 0,
         })),
-      });
+      }, metricsCacheHeaders());
     },
   );
 }
@@ -1321,7 +1325,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       }
 
       const weeklyTrends = aggregateSentimentByWeek(data || []);
-      return ok({ weeklyTrends });
+      return ok({ weeklyTrends }, metricsCacheHeaders());
     },
   );
 }
@@ -1647,7 +1651,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         popularityVolume: row.popularity_volume || 'N/A',
       }));
 
-      return ok({ topicDetails, totalCount });
+      return ok({ topicDetails, totalCount }, metricsCacheHeaders());
     },
   );
 }
@@ -1749,7 +1753,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         totalCount,
         topic: topicResponseLabel,
         topicId: topicIdResponse,
-      });
+      }, metricsCacheHeaders());
     },
   );
 }
@@ -1795,7 +1799,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 
       const query = (ctx.data?.query ?? '').trim();
       if (!query) {
-        return ok({ topicDetails: [], totalCount: 0 });
+        return ok({ topicDetails: [], totalCount: 0 }, metricsCacheHeaders());
       }
 
       if (query.length < MIN_SEARCH_QUERY_LENGTH) {
@@ -1897,7 +1901,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = topicDetails.slice(start, start + pagination.pageSize);
 
-      return ok({ topicDetails: paged, totalCount });
+      return ok({ topicDetails: paged, totalCount }, metricsCacheHeaders());
     },
   );
 }
@@ -2363,7 +2367,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
           weeklyStats: [],
           executions: [],
           sources: [],
-        });
+        }, metricsCacheHeaders());
       }
 
       // Compute overall topic stats (reuse aggregateTopicData logic inline)
@@ -2407,7 +2411,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
         weeklyStats,
         executions,
         sources,
-      });
+      }, metricsCacheHeaders());
     },
   );
 }
@@ -2490,7 +2494,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
           weeklyStats: [],
           executions: [],
           sources: [],
-        });
+        }, metricsCacheHeaders());
       }
 
       // Compute stats
@@ -2571,7 +2575,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
         weeklyStats,
         executions,
         sources,
-      });
+      }, metricsCacheHeaders());
     },
   );
 }
@@ -2658,7 +2662,7 @@ export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
           executionDate: execDate,
         },
         sources,
-      });
+      }, metricsCacheHeaders());
     },
   );
 }
@@ -2951,7 +2955,7 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
         brandName,
       );
 
-      return ok({ shareOfVoiceData });
+      return ok({ shareOfVoiceData }, metricsCacheHeaders());
     },
   );
 }
@@ -3048,7 +3052,7 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         executionCount: row.execution_count,
       }));
 
-      return ok({ movers });
+      return ok({ movers }, metricsCacheHeaders());
     },
   );
 }
@@ -3186,7 +3190,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      return ok(response);
+      return ok(response, metricsCacheHeaders());
     },
   );
 }
