@@ -40,6 +40,7 @@ import {
   autoResolveAuthorUrl,
   findDeliveryType,
   deriveProjectName,
+  resolveWwwUrl,
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
@@ -853,7 +854,9 @@ async function performAsoPlgOnboarding({
     const rumApiClient = RUMAPIClient.createFrom(context);
     let cachedDeliveryType = null;
     try {
-      await rumApiClient.retrieveDomainkey(domain);
+      const siteProxy = site ?? { getBaseURL: () => baseURL, getConfig: () => null };
+      const rumDomain = await resolveWwwUrl(siteProxy, context);
+      await rumApiClient.retrieveDomainkey(rumDomain);
       steps.rumVerified = true;
     } catch {
       steps.rumVerified = false;
