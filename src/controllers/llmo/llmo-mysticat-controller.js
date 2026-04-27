@@ -32,6 +32,7 @@ import {
   createUrlInspectorCitedDomainsHandler,
   createUrlInspectorDomainUrlsHandler,
   createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
 } from './llmo-url-inspector.js';
 import {
   createAgenticTrafficGlobalGetHandler,
@@ -133,6 +134,9 @@ function LlmoMysticatController(ctx) {
   const getUrlInspectorUrlPrompts = createUrlInspectorUrlPromptsHandler(
     getOrgAndValidateAccess,
   );
+  const getUrlInspectorFilterDimensions = createUrlInspectorFilterDimensionsHandler(
+    getOrgAndValidateAccess,
+  );
   const getRegions = createRegionsHandler();
   const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
     validateGlobalAgenticTrafficReadAccess,
@@ -202,6 +206,7 @@ function LlmoMysticatController(ctx) {
     getUrlInspectorCitedDomains,
     getUrlInspectorDomainUrls,
     getUrlInspectorUrlPrompts,
+    getUrlInspectorFilterDimensions,
     getRegions,
     getAgenticTrafficGlobal,
     postAgenticTrafficGlobal,

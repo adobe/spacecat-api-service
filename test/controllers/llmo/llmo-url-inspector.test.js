@@ -21,6 +21,7 @@ import {
   createUrlInspectorCitedDomainsHandler,
   createUrlInspectorDomainUrlsHandler,
   createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
 } from '../../../src/controllers/llmo/llmo-url-inspector.js';
 
 use(sinonChai);
@@ -1385,6 +1386,289 @@ describe('URL Inspector Handlers', () => {
       const handler = createUrlInspectorStatsHandler(
         getOrgAndValidateAccess(),
       );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+  });
+
+  describe('createUrlInspectorFilterDimensionsHandler', () => {
+    const DIMENSIONS_DATA = {
+      categories: [{ id: 'Reader', label: 'Reader' }],
+      regions: [{ id: 'US', label: 'US' }],
+      content_types: [{ id: 'owned', label: 'owned' }],
+    };
+
+    it('returns filter dimensions on success', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { startDate: '2026-01-01', endDate: '2026-01-31', platform: 'chatgpt-paid' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.categories).to.deep.equal(DIMENSIONS_DATA.categories);
+      expect(body.regions).to.deep.equal(DIMENSIONS_DATA.regions);
+      expect(body.content_types).to.deep.equal(DIMENSIONS_DATA.content_types);
+
+      // LLMO-4525 review (major): pin the FULL RPC argument contract so any
+      // drift in parameter names or types is caught here — not in prod.
+      // p_brand_id is NULL for brandId='all' (the default fixture).
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', {
+        p_site_id: SITE_ID,
+        p_start_date: '2026-01-01',
+        p_end_date: '2026-01-31',
+        p_platform: 'chatgpt-paid',
+        p_brand_id: null,
+      });
+    });
+
+    it('passes brandId from path to RPC when not \'all\'', async () => {
+      // LLMO-4525 review (major bug this PR fixes): previously the handler
+      // read brandId via parseFilterDimensionsParams (query string only),
+      // which always yielded undefined. It must come from ctx.params (path).
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_ID },
+        { startDate: '2026-01-01', endDate: '2026-01-31' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_brand_id: BRAND_ID,
+      }));
+    });
+
+    it('passes p_brand_id = null when brandId path param is \'all\'', async () => {
+      const { context, rpcStub } = createContext(
+        { brandId: 'all' },
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_brand_id: null,
+      }));
+    });
+
+    it('maps \'openai\' platform alias to canonical \'chatgpt-paid\' (MODEL_QUERY_ALIASES)', async () => {
+      // LLMO-4525 review (major): the UI sends platform='openai' via
+      // PLATFORM_CODES.ChatGPTPaid. The alias is resolved by validateModel
+      // in llmo-brand-presence.js. Guard this seam so silent regressions are
+      // caught at the API layer.
+      const { context, rpcStub } = createContext(
+        {},
+        { platform: 'openai' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_platform: 'chatgpt-paid',
+      }));
+    });
+
+    it('passes p_platform = null when platform is absent ("no filter" semantics)', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_platform: null,
+      }));
+    });
+
+    it('defaults dates when startDate/endDate are absent', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const call = rpcStub.firstCall.args[1];
+      // defaultDateRange returns a 28-day window ending today.
+      expect(call.p_start_date).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(call.p_end_date).to.match(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('returns 400 when siteId is missing', async () => {
+      const { context } = createContext({}, { siteId: undefined });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 403 when site does not belong to org', async () => {
+      const { context } = createContext({}, {});
+      context.dataAccess.Site.postgrestService.from = sinon.stub().returns({
+        select: sinon.stub().returns({
+          eq: sinon.stub().returns({
+            eq: sinon.stub().returns({
+              limit: sinon.stub().resolves({ data: [], error: null }),
+            }),
+          }),
+        }),
+      });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when RPC returns an error', async () => {
+      const { context } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: null, error: { message: 'db error' } },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('logs enriched error context (code/details/hint + structured fields)', async () => {
+      // LLMO-4525 review (tester): when the RPC fails we need enough detail
+      // to triage without DB access. Assert the logger sees code/details/hint
+      // in the message and structured siteId/platform in the metadata object.
+      const { context } = createContext(
+        { brandId: BRAND_ID },
+        { platform: 'chatgpt-paid' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: {
+              data: null,
+              error: {
+                message: 'permission denied for function',
+                code: '42501',
+                details: 'missing grant on rpc_url_inspector_filter_dimensions',
+                hint: 'GRANT EXECUTE TO postgrest_anon',
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+
+      expect(context.log.error).to.have.been.calledOnce;
+      const [message, meta] = context.log.error.firstCall.args;
+      expect(message).to.contain('permission denied for function');
+      expect(message).to.contain('[code=42501]');
+      expect(message).to.contain('[details=missing grant');
+      expect(message).to.contain('[hint=GRANT EXECUTE TO postgrest_anon]');
+      expect(meta).to.include({
+        route: 'url-inspector-filter-dimensions',
+        siteId: SITE_ID,
+        platform: 'chatgpt-paid',
+        hasBrandIdFilter: true,
+      });
+    });
+
+    it('returns 500 and logs structured context when the RPC client throws', async () => {
+      // LLMO-4525 review (security): defence-in-depth — a throwing transport
+      // must not leak a stack to the caller, and we still want structured
+      // context in the log for triage.
+      const { context, rpcStub } = createContext({}, {});
+      rpcStub.callsFake(() => Promise.reject(new Error('ECONNRESET')));
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+
+      expect(context.log.error).to.have.been.calledOnce;
+      const [message, meta] = context.log.error.firstCall.args;
+      expect(message).to.contain('ECONNRESET');
+      expect(meta).to.include({ route: 'url-inspector-filter-dimensions', siteId: SITE_ID });
+    });
+
+    it('falls back to String(e) when a non-Error value is thrown', async () => {
+      // LLMO-4525 CI fix (branch coverage): the catch block uses
+      // `e?.message || e` so that both Error instances AND bare thrown
+      // values (strings, null, numbers — what some AWS SDK transports do
+      // under the hood) produce a useful log line. The happy-path throw
+      // test above only exercises the `.message` branch. This test pins
+      // the fallback branch so coverage does not regress to < 100 %.
+      // Matches the pattern used at the top of this file for
+      // `createUrlInspectorStatsHandler` (bare-string-reject test) which
+      // scopes the `prefer-promise-reject-errors` disable to a single
+      // line — intentional non-Error rejection to exercise the fallback.
+      const { context, rpcStub } = createContext({}, {});
+      /* eslint-disable prefer-promise-reject-errors */
+      rpcStub.callsFake(() => Promise.reject('bare-string-rejection'));
+      /* eslint-enable prefer-promise-reject-errors */
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+
+      expect(context.log.error).to.have.been.calledOnce;
+      const [message, meta] = context.log.error.firstCall.args;
+      expect(message).to.contain('bare-string-rejection');
+      expect(meta).to.include({ route: 'url-inspector-filter-dimensions', siteId: SITE_ID });
+    });
+
+    it('returns 400 for invalid platform value', async () => {
+      const { context } = createContext({}, { platform: 'not-a-real-model' });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
       expect(response.status).to.equal(400);
