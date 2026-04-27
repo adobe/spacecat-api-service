@@ -2673,6 +2673,42 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
+    it('displaces but skips ASO revocation when previous org is internal/demo', async () => {
+      const OLD_SITE_ID = 'old-site-uuid';
+      const INTERNAL_OLD_ORG_ID = 'internal-old-org';
+
+      const onboardedRecord = createMockOnboarding({
+        id: 'other-onboarding-id',
+        domain: 'other-domain.com',
+        status: 'ONBOARDED',
+        siteId: OLD_SITE_ID,
+        organizationId: INTERNAL_OLD_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([onboardedRecord]);
+      mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_OLD_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+
+      // Old domain is still waitlisted
+      expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
+
+      // ASO revocation must be SKIPPED — entitlement lookup never runs for internal old org.
+      expect(mockDataAccess.Entitlement.allByOrganizationId)
+        .not.to.have.been.calledWith(INTERNAL_OLD_ORG_ID);
+      expect(mockLog.error).to.have.been.calledWithMatch(
+        /Refusing to revoke ASO enrollment.*previous org .* is internal\/demo/,
+      );
+
+      // New domain is onboarded
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
     it('displaces already-onboarded domain when no ASO entitlement found for old org', async () => {
       const OLD_SITE_ID = 'old-site-uuid';
       const OLD_ORG_ID = OTHER_CUSTOMER_ORG_ID;
@@ -6089,6 +6125,44 @@ describe('PlgOnboardingController', () => {
         );
         // Onboarding flow must NOT be triggered when reassignment failed.
         expect(tierClientCreateEntitlementStub).to.not.have.been.called;
+      });
+
+      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: logs and continues when persisting waitlist state fails', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain example.com is already assigned to another organization',
+          siteId: TEST_SITE_ID,
+          organizationId: TEST_ORG_ID,
+        });
+        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
+        const existingOrg = {
+          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
+          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
+          getName: sandbox.stub().returns('Other Org'),
+        };
+
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+        // Re-fetch returns null → reassignSiteOrganization throws waitlist error.
+        mockDataAccess.Site.findById.resolves(null);
+        mockDataAccess.Organization.findById.resolves(existingOrg);
+        // Persisting the WAITLISTED transition fails inside the moveSite handler.
+        record.save.rejects(new Error('db write failed'));
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'BYPASSED', justification: 'Move site', siteConfig: { moveSite: true } },
+          attributes: adminAuthAttributes,
+          env: mockEnv,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
+        expect(mockLog.error).to.have.been.calledWithMatch(
+          /Failed to persist waitlist state/,
+        );
       });
 
       it('returns 400 for unknown waitlist reason', async () => {
