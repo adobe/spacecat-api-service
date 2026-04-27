@@ -1,3 +1,10 @@
+# [1.455.0](https://github.com/adobe/spacecat-api-service/compare/v1.454.0...v1.455.0) (2026-04-27)
+
+
+### Features
+
+* add url-inspector filter-dimensions endpoint + fix openai model alias | LLMO-4525 ([#2269](https://github.com/adobe/spacecat-api-service/issues/2269)) ([35a320d](https://github.com/adobe/spacecat-api-service/commit/35a320dd5493f25e2fcc4edf6e66a4902fd8e844))
+
 # [1.454.0](https://github.com/adobe/spacecat-api-service/compare/v1.453.0...v1.454.0) (2026-04-27)
 
 
