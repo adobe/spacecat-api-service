@@ -4218,13 +4218,8 @@ describe('LLMO Onboarding Functions', () => {
   // started emitting a token the schema doesn't know about — surface the
   // mismatch immediately at unit-test time rather than at runtime when an
   // onboard call would otherwise blow up with a Joi validation error.
-  //
-  // Currently `.skip`ped because the published `@adobe/spacecat-shared-
-  // data-access` only accepts ['aem-cs-fastly', 'other']. Flip to
-  // `describe(...)` once the shared package is released with the widened
-  // schema and the version bump lands in this repo's package.json.
-  // See LLMO-XXX (Joi widening PR in spacecat-shared).
-  describe.skip('detectedCdn Joi round-trip', () => {
+  // Schema lives in `@adobe/spacecat-shared-data-access` >= 3.53.0.
+  describe('detectedCdn Joi round-trip', () => {
     const ACCEPTED_TOKENS = [
       'aem-cs-fastly',
       'commerce-fastly',
