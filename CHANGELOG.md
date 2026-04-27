@@ -1,3 +1,17 @@
+## [1.455.2](https://github.com/adobe/spacecat-api-service/compare/v1.455.1...v1.455.2) (2026-04-27)
+
+
+### Bug Fixes
+
+* **plg:** harden ASO enrollment revocation with org-identity guards and DB-confirmation reassignment     ([#2251](https://github.com/adobe/spacecat-api-service/issues/2251)) ([51df093](https://github.com/adobe/spacecat-api-service/commit/51df093204459f08e24b2949e7ae9d833d7e8f26))
+
+## [1.455.1](https://github.com/adobe/spacecat-api-service/compare/v1.455.0...v1.455.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.53.0 ([#2273](https://github.com/adobe/spacecat-api-service/issues/2273)) ([0931415](https://github.com/adobe/spacecat-api-service/commit/09314150391ae13edb09562c83705e14e4a2cd5e))
+
 # [1.455.0](https://github.com/adobe/spacecat-api-service/compare/v1.454.0...v1.455.0) (2026-04-27)
 
 
