@@ -505,6 +505,8 @@ paths:
     $ref: './llmo-api.yaml#/url-inspector-domain-urls'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/url-prompts:
     $ref: './llmo-api.yaml#/url-inspector-url-prompts'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/filter-dimensions:
+    $ref: './llmo-api.yaml#/url-inspector-filter-dimensions'
   /sites/{siteId}/agentic-traffic/url-brand-presence:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-url-brand-presence'
   /sites/{siteId}/llmo/config:

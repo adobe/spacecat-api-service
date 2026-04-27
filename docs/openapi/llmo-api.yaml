@@ -2688,9 +2688,19 @@ url-inspector-common-params: &url-inspector-common-params
   - name: brandId
     in: path
     required: true
-    description: Brand ID or "all" for unfiltered
+    description: |
+      Brand UUID to filter by, or the literal string `all` to aggregate across
+      all brands for the given organization. The routing layer registers both
+      `/brands/{brandId}` (UUID) and the concrete `/brands/all/...` path; both
+      resolve to the same operation and this single path parameter
+      (LLMO-4525 review — architect finding).
     schema:
       type: string
+      oneOf:
+        - type: string
+          format: uuid
+        - type: string
+          enum: [all]
 
 url-inspector-common-query-params: &url-inspector-common-query-params
   - name: siteId
@@ -2717,9 +2727,26 @@ url-inspector-common-query-params: &url-inspector-common-query-params
   - name: platform
     in: query
     required: false
-    description: LLM platform code (e.g. perplexity, openai). Omit for all models.
+    description: |
+      LLM platform / model identifier. Omit (or pass one of the `shouldApplyFilter`
+      "no filter" sentinels) to return data for ALL models. Accepts either the
+      canonical `llmo_execution_model` enum value OR a known alias mapped by
+      `MODEL_QUERY_ALIASES` — e.g. `openai` → `chatgpt-paid`.
+      LLMO-4525 review note: do NOT pin `enum` here because aliases are
+      deliberately accepted. The canonical values (enum mapped by `validateModel`)
+      are listed below for reference.
     schema:
       type: string
+      x-canonical-values:
+        - chatgpt-free
+        - chatgpt-paid
+        - perplexity
+        - google-ai-mode
+        - google-ai-overview
+        - gemini
+        - copilot
+      x-known-aliases:
+        openai: chatgpt-paid
   - name: categoryId
     in: query
     required: false
@@ -3082,6 +3109,78 @@ url-inspector-url-prompts:
           application/json:
             schema:
               $ref: './schemas.yaml#/UrlInspectorUrlPrompts'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+url-inspector-filter-dimensions:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Filter dimensions for the URL Inspector PG dashboard
+    description: |
+      Returns the distinct categories, regions, and content types present in
+      `url_inspector_domain_stats` for the given site and date range. Used to
+      populate the top-of-page Category, Region, and Channel filter dropdowns.
+
+      Brand scoping is driven by the `brandId` path segment:
+        * `brands/{brandId}` → filter by that specific brand
+        * `brands/all`       → aggregate across all brands (p_brand_id = NULL)
+
+      LLMO-4525 review note: this endpoint is intentionally NOT filtered by
+      category / region / channel — it defines the option universe that those
+      dropdowns choose from.
+    operationId: getUrlInspectorFilterDimensions
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        description: Site ID to scope the query. Required — RPC is site-scoped.
+        schema: { type: string, format: uuid }
+      - name: startDate
+        in: query
+        required: false
+        description: |
+          ISO date (inclusive) lower bound. Defaults to 28 days before today
+          when omitted.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: |
+          ISO date (inclusive) upper bound. Defaults to today when omitted.
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        description: |
+          LLM platform / model identifier. Omit to return dimensions across
+          all models. Accepts canonical `llmo_execution_model` values OR
+          known aliases (e.g. `openai` → `chatgpt-paid`).
+        schema:
+          type: string
+          x-canonical-values:
+            - chatgpt-free
+            - chatgpt-paid
+            - perplexity
+            - google-ai-mode
+            - google-ai-overview
+            - gemini
+            - copilot
+          x-known-aliases:
+            openai: chatgpt-paid
+    responses:
+      '200':
+        description: Filter dimensions for the URL Inspector page
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorFilterDimensions'
       '400': { $ref: './responses.yaml#/400' }
       '401': { $ref: './responses.yaml#/401' }
       '403': { $ref: './responses.yaml#/403' }
