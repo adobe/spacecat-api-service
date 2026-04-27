@@ -1,3 +1,10 @@
+## [1.455.3](https://github.com/adobe/spacecat-api-service/compare/v1.455.2...v1.455.3) (2026-04-27)
+
+
+### Bug Fixes
+
+* use www-resolved domain for RUM AEM check in PLG onboarding ([#2246](https://github.com/adobe/spacecat-api-service/issues/2246)) ([9c5ab65](https://github.com/adobe/spacecat-api-service/commit/9c5ab65666b18aae31acf5e8a36d15d241968657))
+
 ## [1.455.2](https://github.com/adobe/spacecat-api-service/compare/v1.455.1...v1.455.2) (2026-04-27)
 
 
