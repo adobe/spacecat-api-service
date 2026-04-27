@@ -559,6 +559,16 @@ describe('User Details Controller', () => {
       expect(result.status).to.equal(404);
     });
 
+    it('should return 400 when IMS reports invalid userId (non-404 4xx)', async () => {
+      mockImsClient.getImsAdminProfile.rejects(new Error('IMS getAdminProfile request failed with status: 400'));
+      context.params = { userId: 'user@AdobeOrg' };
+
+      const result = await controller.resolveUser(context);
+
+      expect(result.status).to.equal(400);
+      expect(mockLog.error).to.have.been.called;
+    });
+
     it('should return 500 when IMS call fails with server error', async () => {
       mockImsClient.getImsAdminProfile.rejects(new Error('IMS unavailable'));
       context.params = { userId: 'user@AdobeOrg' };
