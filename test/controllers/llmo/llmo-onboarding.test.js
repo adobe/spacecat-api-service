@@ -1947,8 +1947,16 @@ describe('LLMO Onboarding Functions', () => {
       }, context);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
-      // Prompt generation is deferred to DRS post-Brandalf, so no DRS submitJob call in v1 mode
+      // V1 mode does not trigger Brandalf, but it MUST trigger DRS prompt generation
+      // directly so the legacy LLMO config still gets prompts written (LLMO-4534).
       expect(mockDrsClient.createFrom().submitJob).to.not.have.been.called;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
+        audience: 'Tech-savvy professionals',
+      });
     }).timeout(10000);
 
     it('should skip DRS prompt generation when DRS client is not configured', async () => {
