@@ -178,7 +178,7 @@ Aggregated citation sources across all executions in the topic. Deduplicated by 
 ## Aggregation Logic
 
 1. Query all `brand_presence_executions` rows matching the topic and filters (using `TOPIC_DETAIL_SELECT`, derived in code from `DETAIL_SELECT` by dropping the `answer` column)
-2. Compute overall topic stats via `aggregateTopicData` (same logic as the `/topics` endpoint)
+2. Compute overall topic stats via `aggregateTopicData` over those rows (the `GET …/brand-presence/topics` list uses `rpc_brand_presence_topics` and returns per-row `topicId` separately)
 3. Compute weekly stats via `aggregateWeeklyDetailStats`:
    - Group rows by ISO week (derived from `execution_date`)
    - Per week: average visibility, average position, sum mentions/citations, average volume → category, average sentiment
