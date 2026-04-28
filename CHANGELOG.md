@@ -1,3 +1,60 @@
+## [1.457.3](https://github.com/adobe/spacecat-api-service/compare/v1.457.2...v1.457.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* **llmo:** trigger DRS prompt generation for v1 onboarding (LLMO-4534) ([#2272](https://github.com/adobe/spacecat-api-service/issues/2272)) ([cf9631e](https://github.com/adobe/spacecat-api-service/commit/cf9631e580ee5e2c6ad01c2b9fa67c6bc2912350))
+
+## [1.457.2](https://github.com/adobe/spacecat-api-service/compare/v1.457.1...v1.457.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.55.0 ([#2282](https://github.com/adobe/spacecat-api-service/issues/2282)) ([2ff49de](https://github.com/adobe/spacecat-api-service/commit/2ff49de3782ccbd0a05bfbe5f4c770b0b6c52519))
+
+## [1.457.1](https://github.com/adobe/spacecat-api-service/compare/v1.457.0...v1.457.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* cache control for llmo endpoint | LLMO-4480 ([#2274](https://github.com/adobe/spacecat-api-service/issues/2274)) ([65e2cb0](https://github.com/adobe/spacecat-api-service/commit/65e2cb0ea8c49605afa3c9b198acf660b1fa653e))
+
+# [1.457.0](https://github.com/adobe/spacecat-api-service/compare/v1.456.4...v1.457.0) (2026-04-28)
+
+
+### Features
+
+* **llmo:** expand onboarding CDN detection to all CDN providers | LLMO-4091 ([#2245](https://github.com/adobe/spacecat-api-service/issues/2245)) ([7634a52](https://github.com/adobe/spacecat-api-service/commit/7634a521de791b9a2e5c11adc1328f0fa802f5bd))
+
+## [1.456.4](https://github.com/adobe/spacecat-api-service/compare/v1.456.3...v1.456.4) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/mysticat-shared-seo-client to v1.3.0 ([#2280](https://github.com/adobe/spacecat-api-service/issues/2280)) ([58bb4d4](https://github.com/adobe/spacecat-api-service/commit/58bb4d405b5604c0e9bd63112c82e75ca2d97ee5))
+
+## [1.456.3](https://github.com/adobe/spacecat-api-service/compare/v1.456.2...v1.456.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.5.0 ([#2279](https://github.com/adobe/spacecat-api-service/issues/2279)) ([73e369e](https://github.com/adobe/spacecat-api-service/commit/73e369e62a719f8eb388a602d0fbc3727ac96edd))
+* llmo include topicId in the get topics api call ([#2268](https://github.com/adobe/spacecat-api-service/issues/2268)) ([90629c1](https://github.com/adobe/spacecat-api-service/commit/90629c16f315b05225fb7c22e89ca42f3b15c6a0))
+
+## [1.456.2](https://github.com/adobe/spacecat-api-service/compare/v1.456.1...v1.456.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* updated waitlisted reason for Ip allowlist and preonboarding flow ([#2260](https://github.com/adobe/spacecat-api-service/issues/2260)) ([5cea8e8](https://github.com/adobe/spacecat-api-service/commit/5cea8e8bf2140ab873023bbaab6de7f7cd1e09bc))
+
+## [1.456.1](https://github.com/adobe/spacecat-api-service/compare/v1.456.0...v1.456.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2277](https://github.com/adobe/spacecat-api-service/issues/2277)) ([3fa4ebb](https://github.com/adobe/spacecat-api-service/commit/3fa4ebb3703ca059c9ce9b482afa717398071205))
+
 # [1.456.0](https://github.com/adobe/spacecat-api-service/compare/v1.455.3...v1.456.0) (2026-04-27)
 
 
