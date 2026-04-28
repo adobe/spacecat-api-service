@@ -31,6 +31,7 @@ import {
   queueDeliveryConfigWriter,
   validateSiteForRedirects,
   sendAutofixMessage,
+  isViewAsTrialRequest,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -663,6 +664,78 @@ describe('utils', () => {
 
       expect(result).to.be.false;
       expect(context.log.error).to.have.been.calledOnce;
+    });
+
+    it('returns true immediately when x-view-as-trial header is set, without config or entitlement lookup', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      };
+      // Configuration and Entitlement intentionally absent to prove they are not reached
+      context.dataAccess = {};
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.true;
+    });
+
+    it('does not short-circuit when x-view-as-trial is absent in requestContext', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      };
+      // No Configuration — falls through and returns false
+      context.dataAccess = {};
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when requestContext is present but x-client-type is wrong', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'other-client', 'x-view-as-trial': 'true' } },
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.false;
+    });
+  });
+
+  describe('isViewAsTrialRequest', () => {
+    it('returns true when both x-client-type and x-view-as-trial headers are correct', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.true;
+    });
+
+    it('returns false when x-client-type is not sites-optimizer-ui', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'other-client', 'x-view-as-trial': 'true' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-as-trial header is absent', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-as-trial is not "true"', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'false' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when requestContext is undefined', () => {
+      expect(isViewAsTrialRequest(undefined)).to.be.false;
+    });
+
+    it('returns false when pathInfo is undefined', () => {
+      expect(isViewAsTrialRequest({})).to.be.false;
     });
   });
 

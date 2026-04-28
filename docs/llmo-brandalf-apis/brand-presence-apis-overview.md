@@ -9,7 +9,9 @@ Single entry point for all org-scoped Brand Presence HTTP APIs backed by mystica
 
 Parameters are typically supplied as **query string** fields (merged into request `data` by the API gateway). Aliases such as `start_date` / `startDate` are noted per endpoint.
 
-Deep-dive docs: [filter-dimensions](filter-dimensions-api.md), [weeks](brand-presence-weeks-api.md), [sentiment-overview](sentiment-overview-api.md), [market-tracking-trends](market-tracking-trends-api.md), [topics & prompts](topics-api.md), [search](search-api.md), [topic detail](topic-detail-api.md), [prompt detail](prompt-detail-api.md), [sentiment-movers](sentiment-movers-api.md), [share-of-voice](share-of-voice-api.md), [stats](brand-presence-stats-api.md).
+Deep-dive docs: [filter-dimensions](filter-dimensions-api.md), [weeks](brand-presence-weeks-api.md), [sentiment-overview](sentiment-overview-api.md), [market-tracking-trends](market-tracking-trends-api.md), [topics & prompts](topics-api.md), [search](search-api.md), [topic detail](topic-detail-api.md), [prompt detail](prompt-detail-api.md), [sentiment-movers](sentiment-movers-api.md), [share-of-voice](share-of-voice-api.md), [stats](brand-presence-stats-api.md), [execution sources](execution-sources-api.md).
+
+**URL Inspector APIs** (site-scoped, separate suite): see [url-inspector-apis-overview.md](url-inspector-apis-overview.md) — covers `stats`, `owned-urls`, `trending-urls`, `cited-domains`, `domain-urls`, `url-prompts`.
 
 ---
 
@@ -23,14 +25,15 @@ Each **Query parameters** cell lists one parameter per line as `name : sample (o
 | 2 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/weeks` | Returns ISO weeks (`YYYY-Wnn`) with calendar start/end for week pickers from `brand_metrics_weekly`. | <ul><li><code>model</code> : <code>gemini</code> (optional)</li><li><code>siteId</code> : <code>c2473d89-e997-458d-a86d-b4096649c12b</code> (optional)</li></ul> | [§2](#2-weeks) | [brand-presence-weeks-api.md](brand-presence-weeks-api.md) |
 | 3 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/sentiment-overview` | Weekly positive/neutral/negative **percentages** and prompt counts (deduped per week) for sentiment charts. | <ul><li><code>startDate</code> : <code>2025-09-01</code> (optional)</li><li><code>endDate</code> : <code>2025-09-30</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : <code>c2473d89-e997-458d-a86d-b4096649c12b</code> (optional)</li><li><code>categoryId</code> : <code>Acrobat</code> or UUID (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>human</code> (optional)</li></ul> | [§3](#3-sentiment-overview) | [sentiment-overview-api.md](sentiment-overview-api.md) |
 | 4 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/market-tracking-trends` | Weekly brand mentions/citations (deduped) plus competitor mention/citation totals per week. | <ul><li><code>startDate</code> : <code>2025-09-01</code> (optional)</li><li><code>endDate</code> : <code>2025-09-30</code> (optional)</li><li><code>model</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : <code>c2473d89-e997-458d-a86d-b4096649c12b</code> (optional)</li><li><code>categoryId</code> : <code>0178a3f0-1234-7000-8000-000000000099</code> (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li></ul> <em>Not supported:</em> <code>topicIds</code>, <code>origin</code>. | [§4](#4-market-tracking-trends) | [market-tracking-trends-api.md](market-tracking-trends-api.md) |
-| 5 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/topics` | Paginated **topic summaries** for the Data Insights table (aggregates per topic). | <ul><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : UUID or name (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>DE</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li><li><code>page</code> : <code>0</code> (optional)</li><li><code>pageSize</code> : <code>20</code> (optional)</li><li><code>sortBy</code> : <code>mentions</code> (optional; <code>name</code>, <code>visibility</code>, <code>citations</code>, <code>sentiment</code>, <code>popularity</code>, <code>position</code>)</li><li><code>sortOrder</code> : <code>desc</code> (optional; <code>asc</code>)</li></ul> | [§5](#5-topics) | [topics-api.md — Topics](topics-api.md#1-topics-endpoint) |
-| 6 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/topics/:topicId/prompts` | Prompt-level rows for one topic (`:topicId` = URL-encoded topic name). Same filters/pagination as topics. | <ul><li><code>:topicId</code> (path) : <code>PDF%20Editing</code> (required)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : UUID or name (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li><li><code>page</code> : <code>0</code> (optional)</li><li><code>pageSize</code> : <code>20</code> (optional)</li><li><code>query</code> : <code>merge</code> (optional; prompt text substring)</li></ul> | [§6](#6-topic-prompts) | [topics-api.md — Topic prompts](topics-api.md#2-topic-prompts-endpoint) |
-| 7 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/search` | Search topics/prompts; returns topic summaries with `matchType` (`topic` vs `prompt`). | <ul><li><code>query</code> : <code>pdf</code> (required; 2–500 chars)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : UUID or name (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>JP</code> (optional)</li><li><code>origin</code> : <code>human</code> (optional)</li><li><code>page</code> : <code>0</code> (optional)</li><li><code>pageSize</code> : <code>20</code> (optional)</li><li><code>sortBy</code> : <code>mentions</code> (optional)</li><li><code>sortOrder</code> : <code>desc</code> (optional)</li></ul> | [§7](#7-search) | [search-api.md](search-api.md) |
+| 5 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/topics` | Paginated **topic summaries** for the Data Insights table (aggregates per topic). Each item includes <code>topicId</code> (UUID or <code>null</code>) when the RPC supplies <code>topic_id</code>. | <ul><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : UUID or name (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>DE</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li><li><code>page</code> : <code>0</code> (optional)</li><li><code>pageSize</code> : <code>20</code> (optional)</li><li><code>sortBy</code> : <code>mentions</code> (optional; <code>name</code>, <code>visibility</code>, <code>citations</code>, <code>sentiment</code>, <code>popularity</code>, <code>position</code>)</li><li><code>sortOrder</code> : <code>desc</code> (optional; <code>asc</code>)</li></ul> | [§5](#5-topics) | [topics-api.md — Topics](topics-api.md#1-topics-endpoint) |
+| 6 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/topics/:topicId/prompts` | Prompt-level rows for one topic (`:topicId` = URL-encoded display topic name or topic UUID; same as [topics-api.md — Path parameters](topics-api.md#api-paths)). Same filters/pagination as topics. | <ul><li><code>:topicId</code> (path) : <code>PDF%20Editing</code> (required)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : UUID or name (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li><li><code>page</code> : <code>0</code> (optional)</li><li><code>pageSize</code> : <code>20</code> (optional)</li><li><code>query</code> : <code>merge</code> (optional; prompt text substring)</li></ul> | [§6](#6-topic-prompts) | [topics-api.md — Topic prompts](topics-api.md#2-topic-prompts-endpoint) |
+| 7 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/search` | Search topics/prompts; returns topic summaries with <code>matchType</code> (<code>topic</code> vs <code>prompt</code>) and <code>topicId</code> per row when executions include <code>topic_id</code>. | <ul><li><code>query</code> : <code>pdf</code> (required; 2–500 chars)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : UUID or name (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>JP</code> (optional)</li><li><code>origin</code> : <code>human</code> (optional)</li><li><code>page</code> : <code>0</code> (optional)</li><li><code>pageSize</code> : <code>20</code> (optional)</li><li><code>sortBy</code> : <code>mentions</code> (optional)</li><li><code>sortOrder</code> : <code>desc</code> (optional)</li></ul> | [§7](#7-search) | [search-api.md](search-api.md) |
 | 8 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/topics/:topicId/detail` | Full **topic** drill-down: stats, weekly mini-stats, all executions, citation sources. | <ul><li><code>:topicId</code> (path) : <code>PDF%20Editing</code> (required)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>human</code> (optional)</li></ul> <em>Note:</em> detail query does not apply <code>categoryId</code> / <code>topicIds</code>. | [§8](#8-topic-detail) | [topic-detail-api.md](topic-detail-api.md) |
 | 9 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/topics/:topicId/prompt-detail` | Drill-down for one **prompt** (+ optional region) inside a topic. | <ul><li><code>:topicId</code> (path) : <code>PDF%20Editing</code> (required)</li><li><code>prompt</code> : <code>best pdf editor for mac</code> (required)</li><li><code>promptRegion</code> / <code>prompt_region</code> : <code>US</code> (optional)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>chatgpt</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>origin</code> : <code>human</code> (optional)</li></ul> | [§9](#9-prompt-detail) | [prompt-detail-api.md](prompt-detail-api.md) |
 | 10 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/sentiment-movers` | Top/bottom prompts by sentiment change (RPC `rpc_sentiment_movers`). | <ul><li><code>type</code> : <code>top</code> or <code>bottom</code> (optional)</li><li><code>startDate</code> : <code>2026-02-09</code> (optional)</li><li><code>endDate</code> : <code>2026-03-09</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>google-ai-mode</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : category UUID (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>human</code> (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li></ul> | [§10](#10-sentiment-movers) | [sentiment-movers-api.md](sentiment-movers-api.md) |
 | 11 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/share-of-voice` | Per-topic share of voice, competitors, rankings (`rpc_share_of_voice`). | <ul><li><code>startDate</code> : <code>2025-09-27</code> (optional)</li><li><code>endDate</code> : <code>2025-09-30</code> (optional)</li><li><code>model</code> : <code>gemini</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : <code>0178a3f0-1234-7000-8000-000000000099</code> (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li><li><code>maxCompetitors</code> / <code>max_competitors</code> : <code>5</code> (optional)</li></ul> | [§11](#11-share-of-voice) | [share-of-voice-api.md](share-of-voice-api.md) |
 | 12 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/stats` | Org/brand execution totals and averages via `rpc_brand_presence_stats`; optional weekly slices. | <ul><li><code>startDate</code> : <code>2025-01-01</code> (optional)</li><li><code>endDate</code> : <code>2025-01-31</code> (optional)</li><li><code>model</code> / <code>platform</code> : <code>gemini</code> (optional)</li><li><code>showTrends</code> / <code>show_trends</code> : <code>true</code> (optional)</li><li><code>siteId</code> : site UUID (optional)</li><li><code>categoryId</code> : category UUID (optional)</li><li><code>topicIds</code> : comma-separated UUIDs (optional)</li><li><code>regionCode</code> / <code>region</code> : <code>US</code> (optional)</li><li><code>origin</code> : <code>ai</code> (optional)</li></ul> | [§12](#12-stats) | [brand-presence-stats-api.md](brand-presence-stats-api.md) |
+| 13 | GET | `/org/:spaceCatId/brands/{all\|:brandId}/brand-presence/executions/:executionId/sources` | Source rows for one execution (<code>:executionId</code> = execution UUID), with resolved URLs from <code>source_urls</code>. | <ul><li><code>startDate</code> / <code>start_date</code> (required)</li><li><code>endDate</code> / <code>end_date</code> (required)</li><li><code>platform</code> / <code>model</code> (required)</li><li><code>siteId</code> / <code>site_id</code> (optional)</li><li><code>regionCode</code> / <code>region</code> / <code>region_code</code> (optional)</li><li><code>origin</code> (optional)</li></ul> | [§13](#13-execution-sources) | [execution-sources-api.md](execution-sources-api.md) |
 
 ---
 
@@ -117,6 +120,7 @@ Illustrative JSON; real data varies by org and filters.
   "topicDetails": [
     {
       "topic": "PDF Editing",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "promptCount": 47,
       "brandMentions": 312,
       "brandCitations": 198,
@@ -130,6 +134,8 @@ Illustrative JSON; real data varies by org and filters.
   "totalCount": 142
 }
 ```
+
+`topicId` may be `null` when executions in range have no `topic_id` for that topic label.
 
 ### 6. Topic prompts
 
@@ -166,6 +172,7 @@ Illustrative JSON; real data varies by org and filters.
   "topicDetails": [
     {
       "topic": "PDF Editing",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "matchType": "topic",
       "promptCount": 47,
       "brandMentions": 312,
@@ -180,6 +187,8 @@ Illustrative JSON; real data varies by org and filters.
   "totalCount": 1
 }
 ```
+
+`topicId` may be `null` when executions lack `topic_id` for that topic label.
 
 ### 8. Topic detail
 
@@ -361,6 +370,31 @@ Illustrative JSON; real data varies by org and filters.
   ]
 }
 ```
+
+### 13. Execution sources
+
+```json
+{
+  "execution": {
+    "executionId": "001b5813-283f-4563-9b94-3f32727f6051",
+    "executionDate": "2026-03-02",
+    "brandId": "019cb903-1184-7f92-8325-f9d1176af316",
+    "siteId": "c2473d89-e997-458d-a86d-b4096649c12b",
+    "model": "chatgpt-free"
+  },
+  "sources": [
+    {
+      "urlId": "019cba12-b404-7077-9aa1-2992346a1767",
+      "contentType": "earned",
+      "isOwned": false,
+      "url": "https://www.example.com/article",
+      "hostname": "www.example.com"
+    }
+  ]
+}
+```
+
+See [execution-sources-api.md](execution-sources-api.md) for errors and filters.
 
 ---
 

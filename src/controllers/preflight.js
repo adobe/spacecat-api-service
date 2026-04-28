@@ -18,6 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
+import { TierClient } from '@adobe/spacecat-shared-tier-client';
 import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
@@ -106,6 +107,41 @@ function PreflightController(ctx, log, env) {
    *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
    * @returns {Promise<Object>} The HTTP response object
    */
+  /**
+   * Checks if a handler type is enabled for a site, including product code
+   * entitlement verification. Mirrors the audit worker's isAuditEnabledForSite.
+   */
+  async function isAuditEnabledForSite(type, site, configuration) {
+    const handler = configuration.getHandlers()?.[type];
+    if (!handler) {
+      log.info(`Handler ${type} not found in Configuration`);
+      return false;
+    }
+    if (isNonEmptyArray(handler.productCodes)) {
+      const tierContext = { dataAccess, log };
+      const enrollmentChecks = await Promise.all(
+        handler.productCodes.map(async (productCode) => {
+          try {
+            const tierClient = await TierClient.createForSite(tierContext, site, productCode);
+            const tierResult = await tierClient.checkValidEntitlement();
+            return tierResult.siteEnrollment || false;
+          } catch (e) {
+            log.error(`Failed to check entitlement for ${productCode}: ${e.message}`);
+            return false;
+          }
+        }),
+      );
+      if (!enrollmentChecks.some((has) => has)) {
+        log.info(`No valid site enrollment for handler ${type} with product codes ${handler.productCodes} for site ${site.getId()}`);
+        return false;
+      }
+    } else {
+      log.info(`Handler ${type} has no product codes`);
+      return false;
+    }
+    return configuration.isHandlerEnabledForSite(type, site);
+  }
+
   async function checkEnableAuthentication(previewBaseURL) {
     const headResponse = await fetch(previewBaseURL, {
       method: 'HEAD',
@@ -269,6 +305,7 @@ function PreflightController(ctx, log, env) {
     url,
     step,
     authorizationHeader,
+    audits,
   ) {
     const response = await fetch(`${mysticatBaseUrl}/v1/preflight/analyze`, {
       method: 'POST',
@@ -277,7 +314,12 @@ function PreflightController(ctx, log, env) {
         ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
       },
       body: JSON.stringify({
-        site_id: siteId, url, mode: step, scan_id: scanId, persist: true,
+        site_id: siteId,
+        url,
+        mode: step,
+        scan_id: scanId,
+        persist: true,
+        ...(audits !== undefined && { audits }),
       }),
     });
 
@@ -386,6 +428,31 @@ function PreflightController(ctx, log, env) {
         }
       }
 
+      // Resolve Configuration and check preflight enablement for the site.
+      let configuration;
+      try {
+        configuration = await dataAccess.Configuration.findLatest();
+        if (!configuration) {
+          return internalServerError('Configuration not available');
+        }
+      } catch (e) {
+        log.error(`Failed to load Configuration: ${e.message}`);
+        return internalServerError('Failed to load audit configuration');
+      }
+
+      // Check that the preflight handler is enabled for this site
+      // (includes product code entitlement check, matching the audit worker)
+      const preflightEnabled = await isAuditEnabledForSite('preflight', site, configuration);
+
+      // Resolve individual preflight audits.
+      // Convention: handler types are suffixed with -preflight (e.g. headings-preflight).
+      // Strip the suffix so names match Mysticat's audit registry (e.g. headings).
+      const enabledAudits = configuration.getEnabledAuditsForSite(site);
+      const preflightAudits = enabledAudits
+        .filter((type) => type.endsWith('-preflight'))
+        .map((type) => type.replace(/-preflight$/, ''));
+
+      // Always create the job so callers can poll for status
       const job = await dataAccess.AsyncJob.create({
         status: AsyncJob.Status.IN_PROGRESS,
         metadata: {
@@ -395,6 +462,44 @@ function PreflightController(ctx, log, env) {
         },
       });
 
+      // Cancel if preflight is not enabled for the site
+      if (!preflightEnabled) {
+        const reason = `preflight audits disabled for site ${site.getId()}`;
+        log.info(`[preflight-beta] ${reason}`);
+        job.setStatus(AsyncJob.Status.CANCELLED);
+        job.setMetadata({
+          ...job.getMetadata(),
+          payload: { ...job.getMetadata().payload, reason },
+        });
+        await job.save();
+        return accepted({
+          jobId: job.getId(),
+          status: job.getStatus(),
+          createdAt: job.getCreatedAt(),
+          pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
+            + `/preflight/beta/jobs/${job.getId()}`,
+        });
+      }
+
+      // Cancel if no individual preflight audits are enabled
+      if (preflightAudits.length === 0) {
+        const reason = `all individual preflight audits disabled for site ${site.getId()}`;
+        log.info(`[preflight-beta] ${reason}`);
+        job.setStatus(AsyncJob.Status.CANCELLED);
+        job.setMetadata({
+          ...job.getMetadata(),
+          payload: { ...job.getMetadata().payload, reason },
+        });
+        await job.save();
+        return accepted({
+          jobId: job.getId(),
+          status: job.getStatus(),
+          createdAt: job.getCreatedAt(),
+          pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
+            + `/preflight/beta/jobs/${job.getId()}`,
+        });
+      }
+
       try {
         await callMysticatAnalyze(
           mysticatBaseUrl,
@@ -403,6 +508,7 @@ function PreflightController(ctx, log, env) {
           url,
           step,
           authorizationHeader,
+          preflightAudits,
         );
       } catch (mysticatError) {
         log.error(`Mysticat analyze failed: ${mysticatError.message}`);

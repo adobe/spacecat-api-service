@@ -100,11 +100,13 @@ describe('topics-storage', () => {
     });
 
     it('throws on database error', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const dbError = { message: 'DB error' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(listTopics({ organizationId: ORG_ID, postgrestClient }))
-        .to.be.rejectedWith('Failed to list topics');
+      const err = await listTopics({ organizationId: ORG_ID, postgrestClient }).catch((e) => e);
+      expect(err.message).to.include('Failed to list topics');
+      expect(err.cause).to.equal(dbError);
     });
   });
 
@@ -155,15 +157,156 @@ describe('topics-storage', () => {
       expect(result.createdBy).to.equal('user@test.com');
     });
 
+    it('upserts topic_categories when categoryId is provided', async () => {
+      const dbRow = {
+        id: 'uuid-tc',
+        topic_id: 'cat-linked-topic',
+        name: 'Category Linked',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+
+      const topicsQuery = createChainableQuery({ data: dbRow, error: null });
+      const tcQuery = createChainableQuery({ data: null, error: null });
+      const fromStub = sinon.stub();
+      fromStub.withArgs('topics').returns(topicsQuery);
+      fromStub.withArgs('topic_categories').returns(tcQuery);
+      const postgrestClient = { from: fromStub };
+
+      await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Category Linked', categoryId: 'cat-uuid-123' },
+        postgrestClient,
+      });
+
+      expect(fromStub).to.have.been.calledWith('topic_categories');
+    });
+
+    it('warns via log when topic_categories upsert fails', async () => {
+      const dbRow = {
+        id: 'uuid-warn',
+        topic_id: 'warn-topic',
+        name: 'Warn Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+
+      const topicsQuery = createChainableQuery({ data: dbRow, error: null });
+      const tcQuery = createChainableQuery({ data: null, error: { message: 'FK violation' } });
+      const fromStub = sinon.stub();
+      fromStub.withArgs('topics').returns(topicsQuery);
+      fromStub.withArgs('topic_categories').returns(tcQuery);
+      const postgrestClient = { from: fromStub };
+      const log = { warn: sinon.stub() };
+
+      const result = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Warn Topic', categoryId: 'bad-category-uuid' },
+        postgrestClient,
+        log,
+      });
+
+      // Topic creation still succeeds
+      expect(result.id).to.equal('warn-topic');
+      // Warning was emitted
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.include('FK violation');
+    });
+
+    it('skips topic_categories when categoryId is not provided', async () => {
+      const dbRow = {
+        id: 'uuid-no-cat',
+        topic_id: 'no-cat-topic',
+        name: 'No Category',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: dbRow, error: null });
+      const fromStub = sinon.stub().returns(query);
+      const postgrestClient = { from: fromStub };
+
+      await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'No Category' },
+        postgrestClient,
+      });
+
+      expect(fromStub).to.not.have.been.calledWith('topic_categories');
+    });
+
     it('throws on database error during create', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'unique violation' } });
+      const dbError = { message: 'unique violation' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(createTopic({
+      const err = await createTopic({
         organizationId: ORG_ID,
         topic: { name: 'Duplicate Topic' },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to create topic');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to create topic');
+      expect(err.cause).to.equal(dbError);
+    });
+
+    it('throws a 409-typed error echoing the constraint name on a 23505 unique violation', async () => {
+      const raw = {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "uq_topic_per_org"',
+        details: '',
+        hint: '',
+      };
+      const postgrestClient = {
+        from: sinon.stub().returns(createChainableQuery({ data: null, error: raw })),
+      };
+
+      const err = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'DupTopic' },
+        postgrestClient,
+        updatedBy: 'test',
+      }).catch((e) => e);
+
+      expect(err).to.be.instanceOf(Error);
+      expect(err.status).to.equal(409);
+      expect(err.message).to.include('uq_topic_per_org');
+      // Original PostgREST error preserved as `cause` so operators reading
+      // the WARN-level conflict log can still reach the raw DB payload
+      // during triage. LLMO-4370 #14.
+      expect(err.cause).to.equal(raw);
+    });
+
+    it('still surfaces 409 with a generic message when the 23505 error lacks a constraint clause', async () => {
+      const postgrestClient = {
+        from: sinon.stub().returns(createChainableQuery({
+          data: null,
+          error: { code: '23505', message: '' },
+        })),
+      };
+
+      const err = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Whatever' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.message).to.match(/unique constraint/i);
     });
   });
 
@@ -251,15 +394,18 @@ describe('topics-storage', () => {
     });
 
     it('throws on database error during update', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'connection timeout' } });
+      const dbError = { message: 'connection timeout' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(updateTopic({
+      const err = await updateTopic({
         organizationId: ORG_ID,
         topicId: 'test',
         updates: { name: 'Will Fail' },
         postgrestClient,
-      })).to.be.rejectedWith('Failed to update topic');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to update topic');
+      expect(err.cause).to.equal(dbError);
     });
   });
 
@@ -298,14 +444,17 @@ describe('topics-storage', () => {
     });
 
     it('throws on database error during delete', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'permission denied' } });
+      const dbError = { message: 'permission denied' };
+      const query = createChainableQuery({ data: null, error: dbError });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
-      await expect(deleteTopic({
+      const err = await deleteTopic({
         organizationId: ORG_ID,
         topicId: 'test',
         postgrestClient,
-      })).to.be.rejectedWith('Failed to delete topic');
+      }).catch((e) => e);
+      expect(err.message).to.include('Failed to delete topic');
+      expect(err.cause).to.equal(dbError);
     });
   });
 

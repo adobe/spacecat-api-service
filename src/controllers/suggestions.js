@@ -45,6 +45,7 @@ import {
   ErrorWithStatusCode,
   getHostName,
   getIsSummitPlgEnabled,
+  isViewAsTrialRequest,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
@@ -1102,7 +1103,10 @@ function SuggestionsController(ctx, sqs, env) {
     if (await getIsSummitPlgEnabled(site, ctx, context)) {
       const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
       if (notGrantedIds.length > 0) {
-        return forbidden(`The following suggestions are not granted: ${notGrantedIds.join(', ')}`);
+        const trialSuffix = isViewAsTrialRequest(context)
+          ? ' (trial simulation mode is active - disable the View as Trial toggle to deploy)'
+          : '';
+        return forbidden(`The following suggestions are not granted: ${notGrantedIds.join(', ')}${trialSuffix}`);
       }
     }
 
@@ -1778,7 +1782,8 @@ function SuggestionsController(ctx, sqs, env) {
           siteId,
           opportunityId,
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          name: context.data?.name || opportunity.getType(),
+          name: context.data?.name
+            || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
           promptsCount: prompts.length,
           promptsLocation: promptsS3Key,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
@@ -2486,7 +2491,7 @@ function SuggestionsController(ctx, sqs, env) {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });

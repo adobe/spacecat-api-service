@@ -130,7 +130,11 @@ describe('onboard-llmo-modal', () => {
           maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
         }),
       }),
-      upsert: sinonSandbox.stub().resolves({ error: null }),
+      upsert: sinonSandbox.stub().returns({
+        select: sinonSandbox.stub().returns({
+          single: sinonSandbox.stub().resolves({ data: { flag_value: true }, error: null }),
+        }),
+      }),
     })),
   });
 
@@ -268,6 +272,9 @@ describe('onboard-llmo-modal', () => {
         default: tierClientMock,
       },
       '../../../../src/utils/slack/base.js': sharedSlackMock,
+      '../../../../src/support/cdn-detection.js': {
+        detectCdnForDomain: sinon.stub().resolves(null),
+      },
       '@adobe/spacecat-shared-utils': {
         composeBaseURL: sinon.stub().callsFake((url) => url),
         tracingFetch: createDefaultMockTracingFetch(sandbox),
@@ -492,6 +499,9 @@ describe('onboard-llmo-modal', () => {
           default: tierClientMock,
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/cdn-detection.js': {
+          detectCdnForDomain: sinon.stub().resolves(null),
+        },
       });
 
       // Re-mock the module with the new octokit mock
@@ -998,6 +1008,9 @@ describe('onboard-llmo-modal', () => {
         '@octokit/rest': { Octokit: octokitMock },
         '@adobe/spacecat-shared-tier-client': { default: tierClientMock },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/cdn-detection.js': {
+          detectCdnForDomain: sinon.stub().resolves(null),
+        },
       });
 
       mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
@@ -1078,6 +1091,9 @@ example-com:
           default: tierClientMock,
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/cdn-detection.js': {
+          detectCdnForDomain: sinon.stub().resolves(null),
+        },
       });
 
       // Re-mock the module with the new octokit mock
