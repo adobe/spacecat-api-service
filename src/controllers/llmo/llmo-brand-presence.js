@@ -51,6 +51,7 @@ const DEFAULT_MODEL = 'chatgpt-free';
 const MODEL_QUERY_ALIASES = new Map([
   ['all', 'chatgpt-paid'],
   ['chatgpt', 'chatgpt-free'],
+  ['openai', 'chatgpt-paid'], // UI PLATFORM_CODES.ChatGPTPaid sends 'openai'
 ]);
 
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
@@ -1273,7 +1274,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const model = resolveModelFromRequest(params.model);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select('execution_date, sentiment, prompt, region_code, topics')
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -1374,6 +1375,37 @@ function volumeToCategory(volumeSum, volumeCount) {
 }
 
 /**
+ * Trims a PostgREST / RPC UUID string for JSON; null when missing or blank.
+ * PostgREST returns UUID columns as strings; non-strings are rejected.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function normalizeRpcUuid(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const s = value.trim();
+  return s || null;
+}
+
+/**
+ * Picks the lexicographically greatest non-null topic UUID in a group,
+ * matching `rpc_brand_presence_topics` (`topic_id ORDER BY ... DESC NULLS LAST`).
+ * @param {string|null} current
+ * @param {string|null} candidate
+ * @returns {string|null}
+ */
+function maxTopicIdForAggregate(current, candidate) {
+  if (!candidate) {
+    return current;
+  }
+  if (!current || candidate > current) {
+    return candidate;
+  }
+  return current;
+}
+
+/**
  * Aggregates raw execution rows into topic-level summary objects.
  * Groups by topic name, deduplicates prompts by prompt|region_code within
  * each topic, keeps the latest execution per unique prompt, and computes
@@ -1382,7 +1414,7 @@ function volumeToCategory(volumeSum, volumeCount) {
  *
  * @param {Array<Object>} rows - Raw brand_presence_executions rows
  *   (with embedded brand_presence_sources)
- * @returns {Array<Object>} TopicDetail-compatible objects (without items)
+ * @returns {Array<Object>} TopicDetail-compatible objects (without items); each includes `topicId`
  * @internal Exported for testing
  */
 export function aggregateTopicData(rows) {
@@ -1395,6 +1427,7 @@ export function aggregateTopicData(rows) {
     if (!topicAgg.has(topicName)) {
       topicAgg.set(topicName, {
         promptMap: new Map(),
+        maxTopicId: null,
         totalMentions: 0,
         totalCitations: 0,
         uniqueSourceUrlIds: new Set(),
@@ -1409,6 +1442,8 @@ export function aggregateTopicData(rows) {
       });
     }
     const agg = topicAgg.get(topicName);
+
+    agg.maxTopicId = maxTopicIdForAggregate(agg.maxTopicId, normalizeRpcUuid(row.topic_id));
 
     // Dedup prompts (keep latest execution) — used only for promptCount
     const key = buildTopicPromptKey(row);
@@ -1474,6 +1509,7 @@ export function aggregateTopicData(rows) {
 
     return {
       topic: topicName,
+      topicId: agg.maxTopicId,
       promptCount: agg.promptMap.size,
       brandMentions: agg.totalMentions,
       brandCitations: agg.totalCitations,
@@ -1570,7 +1606,7 @@ function sortTopicDetails(topicDetails, sortBy, sortOrder) {
 }
 
 // eslint-disable-next-line max-len
-const TOPICS_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
+const TOPICS_SELECT = 'id, topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
 
 /**
  * Creates the getTopics handler.
@@ -1636,6 +1672,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
 
       const topicDetails = rows.map((row) => ({
         topic: row.topic,
+        topicId: normalizeRpcUuid(row.topic_id),
         promptCount: Number(row.prompt_count ?? 0),
         brandMentions: Number(row.brand_mentions ?? 0),
         brandCitations: Number(row.brand_citations ?? 0),
@@ -1684,7 +1721,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       }
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(PROMPTS_SELECT)
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -1809,7 +1846,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const pattern = buildSearchPattern(bounded);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(TOPICS_SELECT)
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -2114,7 +2151,7 @@ function buildDetailExecQuery(
   const model = resolveModelFromRequest(params.model);
 
   let q = client
-    .from('brand_presence_executions')
+    .from('brand_presence_executions_active')
     .select(selectColumns)
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
@@ -2180,7 +2217,7 @@ function buildSingleExecutionSourcesExecQuery(
   const model = resolveModelFromRequest(modelParam);
 
   let q = client
-    .from('brand_presence_executions')
+    .from('brand_presence_executions_active')
     .select(EXECUTION_SOURCES_EXEC_SELECT)
     .eq('organization_id', organizationId)
     .eq('id', executionId)
