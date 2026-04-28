@@ -19,9 +19,22 @@ const PHRASES = ['check cdn logs status'];
 const CDN_LOGS_AUDIT = 'cdn-logs-analysis';
 const BATCH_SIZE = 10;
 
-// These CDN providers only produce a single daily aggregate (hour 23).
+// These CDN families only produce a single daily aggregate (hour 23).
 // All others produce 24 hourly aggregates (hours 00–23).
-const DAILY_ONLY_PROVIDERS = new Set(['cloudflare', 'imperva', 'other']);
+const DAILY_ONLY_CDN_FAMILIES = new Set(['cloudflare', 'imperva', 'other']);
+const SERVICE_PROVIDER_TO_CDN_FAMILY = {
+  'aem-cs-fastly': 'fastly',
+  'commerce-fastly': 'fastly',
+  'byocdn-fastly': 'fastly',
+  'byocdn-akamai': 'akamai',
+  'byocdn-cloudflare': 'cloudflare',
+  'byocdn-cloudfront': 'cloudfront',
+  'byocdn-frontdoor': 'frontdoor',
+  'byocdn-imperva': 'imperva',
+  'byocdn-other': 'other',
+  'ams-cloudfront': 'cloudfront',
+  'ams-frontdoor': 'frontdoor',
+};
 
 const ALL_HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -32,6 +45,51 @@ function getYMD(date) {
     month: pad2(date.getUTCMonth() + 1),
     day: pad2(date.getUTCDate()),
   };
+}
+
+function normalizeProvider(raw) {
+  return raw ? String(raw).trim().toLowerCase() : 'unknown';
+}
+
+function getCdnFamily(cdnProvider) {
+  const normalized = normalizeProvider(cdnProvider);
+  if (SERVICE_PROVIDER_TO_CDN_FAMILY[normalized]) {
+    return SERVICE_PROVIDER_TO_CDN_FAMILY[normalized];
+  }
+  if (normalized.includes('cloudflare')) {
+    return 'cloudflare';
+  }
+  if (normalized.includes('imperva') || normalized.includes('incapsula')) {
+    return 'imperva';
+  }
+  if (normalized.includes('fastly')) {
+    return 'fastly';
+  }
+  if (normalized.includes('akamai')) {
+    return 'akamai';
+  }
+  if (normalized.includes('cloudfront')) {
+    return 'cloudfront';
+  }
+  if (normalized.includes('frontdoor')) {
+    return 'frontdoor';
+  }
+  return normalized;
+}
+
+function resolveAggregateBucket(env, region) {
+  const environment = env.AWS_ENV || 'prod';
+  return `spacecat-${environment}-cdn-logs-aggregates-${region}`;
+}
+
+function getSiteLlmoConfig(site) {
+  return site.getConfig?.()?.getLlmoConfig?.() || {};
+}
+
+function getSiteCdnBucketConfig(site) {
+  return site.getConfig?.()?.getLlmoCdnBucketConfig?.()
+    || getSiteLlmoConfig(site).cdnBucketConfig
+    || {};
 }
 
 /**
@@ -70,21 +128,41 @@ async function listPresentHours(s3Client, bucket, prefix) {
 }
 
 /**
- * Gets CDN provider for a site from its LLMO S3 config.
+ * Gets CDN provider and aggregate bucket settings for a site from LLMO config.
  *
- * @param {string} siteId
+ * @param {Object} site
  * @param {import('@aws-sdk/client-s3').S3Client} s3Client
  * @param {string} s3Bucket
- * @returns {Promise<string>} Normalized lowercase CDN provider or 'unknown'.
+ * @param {Object} env
+ * @returns {Promise<Object>} Normalized CDN settings.
  */
-async function getCdnProvider(siteId, s3Client, s3Bucket) {
+async function getCdnSettings(site, s3Client, s3Bucket, env) {
+  let s3Config;
   try {
-    const { config } = await llmo.readConfig(siteId, s3Client, { s3Bucket });
-    const raw = config?.cdnBucketConfig?.cdnProvider;
-    return raw ? raw.toLowerCase() : 'unknown';
+    ({ config: s3Config } = await llmo.readConfig(site.getId(), s3Client, { s3Bucket }));
   } catch {
-    return 'unknown';
+    s3Config = {};
   }
+
+  const siteLlmoConfig = getSiteLlmoConfig(site);
+  const siteCdnBucketConfig = getSiteCdnBucketConfig(site);
+  const cdnProvider = normalizeProvider(
+    s3Config?.cdnBucketConfig?.cdnProvider
+      || siteCdnBucketConfig?.cdnProvider
+      || siteLlmoConfig?.detectedCdn,
+  );
+  const cdnFamily = getCdnFamily(cdnProvider);
+  const region = s3Config?.cdnBucketConfig?.region
+    || siteCdnBucketConfig?.region
+    || env.AWS_REGION
+    || 'us-east-1';
+
+  return {
+    cdnProvider,
+    cdnFamily,
+    region,
+    aggregateBucket: resolveAggregateBucket(env, region),
+  };
 }
 
 /**
@@ -136,12 +214,12 @@ function CheckCdnLogsStatusCommand(context) {
       const dateStr = targetDate.toISOString().slice(0, 10);
       const { year, month, day } = getYMD(targetDate);
 
-      // Resolve CDN aggregate bucket name from environment
-      const region = env.AWS_REGION || 'us-east-1';
-      const environment = env.AWS_ENV || 'prod';
-      const aggregateBucket = `spacecat-${environment}-cdn-logs-aggregates-${region}`;
+      // Resolve default CDN aggregate bucket name from environment. Per-site
+      // region overrides are honored below when the site config provides them.
+      const defaultRegion = env.AWS_REGION || 'us-east-1';
+      const defaultAggregateBucket = resolveAggregateBucket(env, defaultRegion);
 
-      await say(`:hourglass_flowing_sand: Checking CDN logs status for *${dateStr}* in \`${aggregateBucket}\`...`);
+      await say(`:hourglass_flowing_sand: Checking CDN logs status for *${dateStr}* in \`${defaultAggregateBucket}\`...`);
 
       // Find all sites with cdn-logs-analysis enabled
       const [allSites, configuration] = await Promise.all([
@@ -171,8 +249,13 @@ function CheckCdnLogsStatusCommand(context) {
           const baseURL = site.getBaseURL();
 
           try {
-            const cdnProvider = await getCdnProvider(siteId, s3Client, s3.s3Bucket);
-            const isDailyOnly = DAILY_ONLY_PROVIDERS.has(cdnProvider);
+            const {
+              cdnProvider,
+              cdnFamily,
+              region,
+              aggregateBucket,
+            } = await getCdnSettings(site, s3Client, s3.s3Bucket, env);
+            const isDailyOnly = DAILY_ONLY_CDN_FAMILIES.has(cdnFamily);
             const expectedHours = isDailyOnly ? ['23'] : ALL_HOURS;
 
             const aggPrefix = `aggregated/${siteId}/${year}/${month}/${day}/`;
@@ -184,6 +267,9 @@ function CheckCdnLogsStatusCommand(context) {
               siteId,
               baseURL,
               cdnProvider,
+              cdnFamily,
+              region,
+              aggregateBucket,
               isDailyOnly,
               expectedCount: expectedHours.length,
               presentCount: presentHours.length,
@@ -216,7 +302,10 @@ function CheckCdnLogsStatusCommand(context) {
       if (incomplete.length > 0) {
         lines.push('', '*Sites with missing aggregate hours:*');
         for (const r of incomplete) {
-          const providerTag = r.isDailyOnly ? `${r.cdnProvider} [daily-only]` : r.cdnProvider;
+          const providerName = r.cdnProvider === r.cdnFamily
+            ? r.cdnProvider
+            : `${r.cdnProvider} => ${r.cdnFamily}`;
+          const providerTag = r.isDailyOnly ? `${providerName} [daily-only]` : providerName;
           let missingStr;
           if (r.missingHours.length <= 6) {
             missingStr = r.missingHours.join(', ');
