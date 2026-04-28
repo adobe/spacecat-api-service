@@ -67,6 +67,22 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
 
+  // URL Inspector - org-scoped, site-filtered; LLMO product, not yet required by S2S consumers
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/stats',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/stats',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/owned-urls',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/owned-urls',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/trending-urls',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/trending-urls',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/cited-domains',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/cited-domains',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/domain-urls',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions',
+
   // LLMO Opportunities - org-scoped, LLMO product; not yet required by S2S consumers
   'GET /org/:spaceCatId/opportunities/count',
   'GET /org/:spaceCatId/brands/all/opportunities',
@@ -121,6 +137,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/user-activities',
   'POST /sites/:siteId/user-activities',
   'GET /organizations/:organizationId/trial-users',
+  'GET /admin/users/:userId',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
   'POST /organizations/:organizationId/trial-user-invite',
