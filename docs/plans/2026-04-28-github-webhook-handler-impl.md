@@ -247,6 +247,17 @@ Include in the PR body that Phase 1 (OpenAPI contract) is ready for review, Phas
 
 > **Do not start Phase 2 until Phase 1 is approved by the team.**
 
+### Phase 2 Prerequisites
+
+Before starting Task 7, confirm all of the following:
+
+- [ ] **Dispatcher `_ALLOWED_KEYS` expansion** — companion PR on `adobe/spacecat-infrastructure` has been merged adding `event_type`, `event_action`, `installation_id`, `delivery_id`, `workspace_repos` to the Dispatcher Lambda's whitelist (see Cross-repo Contract section above).
+- [ ] **`AbstractHandler` import verified** — the import path `@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js` is the established pattern in this repo (used by `SkipAuthHandler` at `src/index.js:32`). No change needed.
+- [ ] **`request.text()` caching confirmed** — Task 6 has been completed and the caching behavior works. If it does not, Task 6.b must be completed first.
+- [ ] **GitHub App installed in both orgs** — the Mysticat GitHub App installation must have access to repos in both `adobe` and `Adobe-AEM-Sites` orgs, because `workspace_repos` includes `Adobe-AEM-Sites/aem-sites-architecture`. Missing this will cause `git clone` failures in the worker.
+
+---
+
 ### Task 6: Verify request.text() caching behavior
 
 **Files:**
@@ -264,8 +275,98 @@ Alternatively, confirm via precedent: `src/controllers/llmo/llmo.js` reads `cont
 
 - [ ] **Step 2: Document finding**
 
-If `request.text()` works: proceed as designed.
-If it does NOT work: implement option (b) from the spec — add a `rawBodyCapture` wrapper in `src/index.js` between `bodyData` and `authWrapper` in the `.with()` chain.
+If `request.text()` works: proceed as designed — skip Task 6.b, go to Task 7.
+If it does NOT work: complete Task 6.b before proceeding.
+
+---
+
+### Task 6.b: Add rawBodyCapture wrapper (only if Task 6 Step 1 fails)
+
+**Files:**
+- Create: `src/support/raw-body-capture.js`
+- Modify: `src/index.js` (add wrapper to `.with()` chain)
+
+- [ ] **Step 1: Create the rawBodyCapture wrapper**
+
+Create `src/support/raw-body-capture.js`:
+
+```javascript
+/**
+ * Middleware wrapper that captures the raw request body before bodyData
+ * consumes the stream. Stashes the raw bytes on context.rawBody.
+ *
+ * Place this AFTER bodyData in the .with() chain (so it runs BEFORE bodyData
+ * in execution order — last .with() = outermost = runs first).
+ */
+export default function rawBodyCapture(fn) {
+  return async (request, context) => {
+    if (!context.rawBody) {
+      const buffer = await request.arrayBuffer();
+      context.rawBody = new TextDecoder().decode(buffer);
+    }
+    return fn(request, context);
+  };
+}
+```
+
+- [ ] **Step 2: Add wrapper to the .with() chain in src/index.js**
+
+Insert `rawBodyCapture` AFTER `bodyData` in the `.with()` chain (so it runs before bodyData in execution order):
+
+```javascript
+import rawBodyCapture from './support/raw-body-capture.js';
+
+// In the wrappedMain definition:
+const wrappedMain = wrap(run)
+  .with(authWrapper, { ... })        // runs 3rd
+  // ...
+  .with(bodyData)                     // runs 2nd
+  .with(rawBodyCapture)               // runs 1st (outermost) — captures raw body before bodyData consumes it
+```
+
+- [ ] **Step 3: Update HMAC handler to read from context.rawBody**
+
+In `src/support/github-webhook-hmac-handler.js`, change:
+```javascript
+const rawBody = await request.text();
+```
+to:
+```javascript
+const rawBody = context.rawBody;
+```
+
+- [ ] **Step 4: Update HMAC handler tests**
+
+In `test/support/github-webhook-hmac-handler.test.js`, change `makeRequest` to not need `text()` and instead pass `rawBody` on the context:
+
+```javascript
+function makeContext(overrides = {}) {
+  return {
+    pathInfo: { suffix: 'webhooks/github' },
+    env: { GITHUB_WEBHOOK_SECRET: secret },
+    rawBody: validPayload,  // populated by rawBodyCapture wrapper
+    ...overrides,
+  };
+}
+```
+
+- [ ] **Step 5: Run tests**
+
+Run: `npx mocha test/support/github-webhook-hmac-handler.test.js`
+Expected: All tests PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/support/raw-body-capture.js src/index.js src/support/github-webhook-hmac-handler.js test/support/github-webhook-hmac-handler.test.js
+git commit -m "feat: add rawBodyCapture wrapper for HMAC verification
+
+request.text() does not return cached body after bodyData consumption.
+Added rawBodyCapture wrapper that runs before bodyData to stash raw
+bytes on context.rawBody for HMAC signature verification.
+
+Ref: SITES-42733"
+```
 
 ---
 
@@ -549,7 +650,7 @@ describe('GitHubWebhookHmacHandler', () => {
 
   function makeRequest(headers = {}, body = validPayload) {
     return {
-      headers: new Map(Object.entries(headers)),
+      headers: { get: (name) => headers[name] || null },
       text: sinon.stub().resolves(body),
     };
   }
@@ -787,7 +888,6 @@ export default GitHubWebhookHmacHandler;
 Run: `npx mocha test/support/github-webhook-hmac-handler.test.js`
 Expected: All tests PASS.
 
-Note: if tests fail because `request.headers` is a Map but the real Request uses a Headers object, adjust the `makeRequest` helper to use `{ get: (name) => headers[name] || null }` instead of `new Map()`. Check how the existing auth handler tests mock the request.
 
 - [ ] **Step 5: Commit**
 
@@ -920,7 +1020,7 @@ describe('WebhooksController', () => {
     const response = await controller.processGitHubWebhook(context);
 
     expect(response.status).to.equal(400);
-    const body = await response.json();
+    const body = await (await controller.processGitHubWebhook(context)).json();
     expect(body.message).to.include('action');
   });
 
@@ -933,7 +1033,7 @@ describe('WebhooksController', () => {
     const response = await controller.processGitHubWebhook(context);
 
     expect(response.status).to.equal(400);
-    const body = await response.json();
+    const body = await (await controller.processGitHubWebhook(context)).json();
     expect(body.message).to.include('installation.id');
   });
 
@@ -1094,7 +1194,6 @@ export default WebhooksController;
 Run: `npx mocha test/controllers/webhooks.test.js`
 Expected: All tests PASS.
 
-Note: if the `response.json()` call in the 400 tests does not work with the shared HTTP utils' response objects, adjust to read the body via `JSON.parse(response.body)` or whatever pattern the existing controller tests use. Check `test/controllers/hooks.test.js` for the response reading pattern.
 
 - [ ] **Step 5: Commit**
 

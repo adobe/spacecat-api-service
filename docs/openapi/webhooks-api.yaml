@@ -58,6 +58,8 @@ github-webhook:
       '400':
         $ref: './responses.yaml#/400'
       '401':
+        # Custom 401 (not $ref responses.yaml#/401) because HMAC failures need
+        # a message body for debugging; the shared 401 response has no body schema.
         description: Invalid or missing HMAC signature
         content:
           application/json:
