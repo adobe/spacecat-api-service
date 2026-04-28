@@ -18,6 +18,8 @@ import { postErrorMessage } from '../../../utils/slack/base.js';
 const PHRASES = ['check cdn logs status'];
 const CDN_LOGS_AUDIT = 'cdn-logs-analysis';
 const BATCH_SIZE = 10;
+const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
 
 // These CDN families only produce a single daily aggregate (hour 23).
 // All others produce 24 hourly aggregates (hours 00–23).
@@ -45,6 +47,31 @@ function getYMD(date) {
     month: pad2(date.getUTCMonth() + 1),
     day: pad2(date.getUTCDate()),
   };
+}
+
+function parseCommandArgs(args) {
+  const parsed = {};
+
+  for (const rawArg of args) {
+    const arg = String(rawArg || '').trim();
+    if (arg) {
+      const siteIdMatch = arg.match(SITE_ID_ARG_RE);
+      if (siteIdMatch) {
+        parsed.siteId = siteIdMatch[2].trim();
+        if (!parsed.siteId) {
+          return { error: ':warning: siteId must not be empty.' };
+        }
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
+        parsed.dateArg = arg;
+      } else if (SITE_ID_RE.test(arg)) {
+        parsed.siteId = arg;
+      } else {
+        return { error: ':warning: Invalid date format. Use YYYY-MM-DD.' };
+      }
+    }
+  }
+
+  return parsed;
 }
 
 function normalizeProvider(raw) {
@@ -177,7 +204,7 @@ function CheckCdnLogsStatusCommand(context) {
     name: 'Check CDN Logs Status',
     description: 'Checks CDN logs aggregate processing status for all sites with cdn-logs-analysis enabled.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} [YYYY-MM-DD]`,
+    usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>]`,
   });
 
   const {
@@ -194,7 +221,13 @@ function CheckCdnLogsStatusCommand(context) {
         return;
       }
 
-      const [dateArg] = args;
+      const parsedArgs = parseCommandArgs(args);
+      if (parsedArgs.error) {
+        await say(parsedArgs.error);
+        return;
+      }
+
+      const { dateArg, siteId: requestedSiteId } = parsedArgs;
       let targetDate;
       if (dateArg) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
@@ -213,29 +246,41 @@ function CheckCdnLogsStatusCommand(context) {
 
       const dateStr = targetDate.toISOString().slice(0, 10);
       const { year, month, day } = getYMD(targetDate);
+      const siteScopeText = requestedSiteId ? ` for site \`${requestedSiteId}\`` : '';
 
       // Resolve default CDN aggregate bucket name from environment. Per-site
       // region overrides are honored below when the site config provides them.
       const defaultRegion = env.AWS_REGION || 'us-east-1';
       const defaultAggregateBucket = resolveAggregateBucket(env, defaultRegion);
 
-      await say(`:hourglass_flowing_sand: Checking CDN logs status for *${dateStr}* in \`${defaultAggregateBucket}\`...`);
+      await say(`:hourglass_flowing_sand: Checking CDN logs status for *${dateStr}*${siteScopeText} in \`${defaultAggregateBucket}\`...`);
 
       // Find all sites with cdn-logs-analysis enabled
       const [allSites, configuration] = await Promise.all([
         Site.all(),
         Configuration.findLatest(),
       ]);
-      const enabledSites = allSites.filter(
+      const candidateSites = requestedSiteId
+        ? allSites.filter((site) => site.getId() === requestedSiteId)
+        : allSites;
+
+      if (requestedSiteId && candidateSites.length === 0) {
+        await say(`:warning: No site found with siteId \`${requestedSiteId}\`.`);
+        return;
+      }
+
+      const enabledSites = candidateSites.filter(
         (site) => configuration.isHandlerEnabledForSite(CDN_LOGS_AUDIT, site),
       );
 
       if (enabledSites.length === 0) {
-        await say(':information_source: No sites have cdn-logs-analysis enabled.');
+        await say(requestedSiteId
+          ? `:information_source: Site \`${requestedSiteId}\` does not have cdn-logs-analysis enabled.`
+          : ':information_source: No sites have cdn-logs-analysis enabled.');
         return;
       }
 
-      await say(`:gear: Checking ${enabledSites.length} enabled sites...`);
+      await say(`:gear: Checking ${enabledSites.length} enabled site${enabledSites.length === 1 ? '' : 's'}...`);
 
       const { s3Client } = s3;
       const results = [];

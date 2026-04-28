@@ -130,6 +130,48 @@ describe('CheckCdnLogsStatusCommand', () => {
     );
   });
 
+  it('filters the check to one requested siteId', async () => {
+    const targetSite = makeSite('site-target', 'https://target.com');
+    const otherSite = makeSite('site-other', 'https://other.com');
+    context.dataAccess.Site.all.resolves([targetSite, otherSite]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'cloudflare' } } });
+    s3SendStub.resolves({
+      CommonPrefixes: [{ Prefix: 'aggregated/site-target/2026/04/21/23/' }],
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21', 'siteId=site-target'], slackContext);
+
+    expect(s3SendStub).to.have.been.calledOnce;
+    expect(s3SendStub.firstCall.args[0].params.Prefix)
+      .to.equal('aggregated/site-target/2026/04/21/');
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('for site `site-target`');
+    expect(output).to.include('Complete: *1*');
+    expect(output).to.include('(1 total sites)');
+    expect(output).not.to.include('https://other.com');
+  });
+
+  it('reports when the requested CDN status siteId is not found', async () => {
+    context.dataAccess.Site.all.resolves([makeSite('site-1', 'https://example.com')]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21', 'siteId=missing-site'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: No site found with siteId `missing-site`.',
+    );
+    expect(s3SendStub).not.to.have.been.called;
+  });
+
   it('shows complete status when all expected hours present for fastly (hourly) site', async () => {
     const site = makeSite('site-1', 'https://fastly-site.com');
     context.dataAccess.Site.all.resolves([site]);

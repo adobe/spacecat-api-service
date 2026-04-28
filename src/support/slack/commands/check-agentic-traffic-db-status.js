@@ -27,6 +27,8 @@ const AGENTIC_REFRESH_ENABLED_ENV = 'MYSTICAT_AGENTIC_REFRESH_ENABLED';
 const BATCH_SIZE = 10;
 const STALE_PENDING_THRESHOLD_HOURS = 4;
 const STALE_PENDING_THRESHOLD_MS = STALE_PENDING_THRESHOLD_HOURS * 60 * 60 * 1000;
+const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -94,6 +96,31 @@ function getAuditTimestamp(latestAudit) {
   return latestAudit.getAuditedAt?.() || latestAudit.auditedAt;
 }
 
+function parseCommandArgs(args) {
+  const parsed = {};
+
+  for (const rawArg of args) {
+    const arg = String(rawArg || '').trim();
+    if (arg) {
+      const siteIdMatch = arg.match(SITE_ID_ARG_RE);
+      if (siteIdMatch) {
+        parsed.siteId = siteIdMatch[2].trim();
+        if (!parsed.siteId) {
+          return { error: ':warning: siteId must not be empty.' };
+        }
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
+        parsed.dateArg = arg;
+      } else if (SITE_ID_RE.test(arg)) {
+        parsed.siteId = arg;
+      } else {
+        return { error: ':warning: Invalid date format. Use YYYY-MM-DD.' };
+      }
+    }
+  }
+
+  return parsed;
+}
+
 function formatExportCounts(siteExport) {
   const trafficRows = siteExport.rowCount ?? 'unknown';
   const classificationRows = siteExport.classificationCount;
@@ -157,7 +184,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
     name: 'Check Agentic Traffic DB Status',
     description: 'Checks the agentic traffic daily export + projection status per site.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} [YYYY-MM-DD]`,
+    usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>]`,
   });
 
   const { dataAccess, log, env = {} } = context;
@@ -167,7 +194,13 @@ function CheckAgenticTrafficDbStatusCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [dateArg] = args;
+      const parsedArgs = parseCommandArgs(args);
+      if (parsedArgs.error) {
+        await say(parsedArgs.error);
+        return;
+      }
+
+      const { dateArg, siteId: requestedSiteId } = parsedArgs;
       let targetDate;
       if (dateArg) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
@@ -185,24 +218,36 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       }
 
       const dateStr = `${targetDate.getUTCFullYear()}-${pad2(targetDate.getUTCMonth() + 1)}-${pad2(targetDate.getUTCDate())}`;
+      const siteScopeText = requestedSiteId ? ` for site \`${requestedSiteId}\`` : '';
 
-      await say(`:hourglass_flowing_sand: Checking agentic traffic export + projection status for *${dateStr}*...`);
+      await say(`:hourglass_flowing_sand: Checking agentic traffic export + projection status for *${dateStr}*${siteScopeText}...`);
 
       // 1. Find all sites with cdn-logs-report enabled (those run the daily agentic export)
       const [allSites, configuration] = await Promise.all([
         Site.all(),
         Configuration.findLatest(),
       ]);
-      const enabledSites = allSites.filter(
+      const candidateSites = requestedSiteId
+        ? allSites.filter((site) => site.getId() === requestedSiteId)
+        : allSites;
+
+      if (requestedSiteId && candidateSites.length === 0) {
+        await say(`:warning: No site found with siteId \`${requestedSiteId}\`.`);
+        return;
+      }
+
+      const enabledSites = candidateSites.filter(
         (site) => configuration.isHandlerEnabledForSite(CDN_LOGS_REPORT_AUDIT, site),
       );
 
       if (enabledSites.length === 0) {
-        await say(':information_source: No sites have cdn-logs-report enabled.');
+        await say(requestedSiteId
+          ? `:information_source: Site \`${requestedSiteId}\` does not have cdn-logs-report enabled.`
+          : ':information_source: No sites have cdn-logs-report enabled.');
         return;
       }
 
-      await say(`:gear: Checking ${enabledSites.length} sites with cdn-logs-report enabled...`);
+      await say(`:gear: Checking ${enabledSites.length} site${enabledSites.length === 1 ? '' : 's'} with cdn-logs-report enabled...`);
 
       // 2. Read latest cdn-logs-report audit per site to extract batchId
       const siteExports = [];
