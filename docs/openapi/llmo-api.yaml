@@ -916,8 +916,51 @@ llmo-onboard:
                   type:
                     - string
                     - 'null'
-                  enum: [aem-cs-fastly, other, null]
-                  description: CDN provider detected via DNS during onboarding. null when detection is inconclusive.
+                  enum:
+                    - aem-cs-fastly
+                    - commerce-fastly
+                    - byocdn-fastly
+                    - byocdn-akamai
+                    - byocdn-cloudfront
+                    - byocdn-cloudflare
+                    - byocdn-imperva
+                    - byocdn-other
+                    - ams-cloudfront
+                    - ams-frontdoor
+                  description: |
+                    CDN provider detected during onboarding. The enum is the
+                    canonical `CDN_TYPES` vocabulary shared with the radio
+                    selector UI (see
+                    `src/controllers/llmo/llmo-utils.js#CDN_TYPES`), so the
+                    value can drive the UI auto-select directly.
+
+                    Emitted by the detector today (7 of the 10 tokens):
+                      - `aem-cs-fastly` / `commerce-fastly` — Adobe-managed
+                        CDNs identified by the DNS fast-path.
+                      - `byocdn-fastly` / `byocdn-akamai` /
+                        `byocdn-cloudflare` / `byocdn-imperva` — direct
+                        BYOCDN matches from the multi-signal probe (HTTP
+                        headers, CNAME chain, ASN, PTR).
+                      - `byocdn-other` — catch-all. Emitted when Phase 1 +
+                        Phase 2 both run cleanly and no specific signature
+                        matches, OR when the probe identifies a third-party
+                        CDN (CloudFront, Azure Front Door / Azure CDN,
+                        Vercel, Netlify, Bunny, Sucuri, Alibaba, etc.) that
+                        LLMO does not model as a first-class BYOCDN.
+                        CloudFront and Azure Front Door land here today
+                        because the detector cannot disambiguate AMS vs BYO
+                        tenancy from network signals alone.
+
+                    Reserved for future detector revisions (not emitted
+                    today):
+                      - `byocdn-cloudfront`, `ams-cloudfront`,
+                        `ams-frontdoor` — will replace the `byocdn-other`
+                        collapse above once AMS-aware signatures ship;
+                        listed here so consumers don't need a schema bump
+                        at that point.
+
+                    `null` — at least one probe was inconclusive (DNS or
+                    HTTP failure), so the UI auto-select stays neutral.
                   example: "aem-cs-fastly"
                 status:
                   type: string

@@ -307,7 +307,7 @@ describe('LlmoController', () => {
       '../../../src/support/edge-routing-utils.js': {
         probeSiteAndResolveDomain: (...args) => probeSiteAndResolveDomainStub(...args),
         callCdnRoutingApi: (...args) => callCdnRoutingApiStub(...args),
-        detectCdnForDomain: (...args) => detectCdnForDomainStub(...args),
+        detectAemCsFastlyForDomain: (...args) => detectCdnForDomainStub(...args),
         getHostnameWithoutWww(url, log) {
           try {
             const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -4408,7 +4408,7 @@ describe('LlmoController', () => {
     const trialEdgeRoutingUtilsForCdnAuth = () => ({
       probeSiteAndResolveDomain: sinon.stub().resolves('www.example.com'),
       callCdnRoutingApi: sinon.stub().resolves(),
-      detectCdnForDomain: sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY),
+      detectAemCsFastlyForDomain: sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY),
       getHostnameWithoutWww(url, log) {
         try {
           const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
