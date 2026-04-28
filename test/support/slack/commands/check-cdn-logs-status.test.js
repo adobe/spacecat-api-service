@@ -24,9 +24,13 @@ describe('CheckCdnLogsStatusCommand', () => {
   let readConfigStub;
   let s3SendStub;
 
-  const makeSite = (id, url) => ({
+  const makeSite = (id, url, llmoConfig = {}) => ({
     getId: () => id,
     getBaseURL: () => url,
+    getConfig: () => ({
+      getLlmoConfig: () => llmoConfig,
+      getLlmoCdnBucketConfig: () => llmoConfig.cdnBucketConfig,
+    }),
   });
 
   const makeS3ListResponse = (hours, nextToken) => ({
@@ -286,6 +290,66 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(output).to.include('Incomplete: *1*');
     expect(output).to.include('[daily-only]');
     expect(output).to.include('imperva');
+  });
+
+  it('treats BYOCDN Cloudflare as a daily-only provider family', async () => {
+    const site = makeSite('site-bcf', 'https://byocdn-cloudflare.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'byocdn-cloudflare' } } });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('byocdn-cloudflare => cloudflare [daily-only]');
+    expect(output).to.include('present: 0/1');
+  });
+
+  it('falls back to site detectedCdn when the S3 LLMO config has no provider', async () => {
+    const site = makeSite('site-det', 'https://detected-cdn.com', { detectedCdn: 'byocdn-imperva' });
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: {} });
+    s3SendStub.resolves({ CommonPrefixes: [] });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('byocdn-imperva => imperva [daily-only]');
+    expect(output).to.include('present: 0/1');
+  });
+
+  it('uses the site CDN region when resolving the aggregate bucket', async () => {
+    const site = makeSite('site-region', 'https://regional.com');
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({
+      config: { cdnBucketConfig: { cdnProvider: 'fastly', region: 'eu-west-1' } },
+    });
+    const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+    s3SendStub.resolves({
+      CommonPrefixes: allHours.map((h) => ({
+        Prefix: `aggregated/site-region/2026/04/21/${h}/`,
+      })),
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    expect(s3SendStub.firstCall.args[0].params.Bucket)
+      .to.equal('spacecat-ci-cdn-logs-aggregates-eu-west-1');
   });
 
   it('treats unknown provider as hourly (all 24 hours expected)', async () => {

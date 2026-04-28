@@ -189,6 +189,109 @@ describe('BackfillLlmoCommand', () => {
       expect(message.auditContext).to.have.property('weekOffset', 0);
     });
 
+    it('sends a cdn-logs-report daily DB import message using traffic date + 1 as auditContext.date', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=db',
+        'date=2026-04-27',
+      ], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(
+        `:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_REPORT} for https://example.com (daily DB import for 2026-04-27 (audit context date 2026-04-28))...`,
+      );
+      expect(sqsStub.sendMessage.callCount).to.equal(1);
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('test-audits-queue-url');
+      expect(message).to.deep.equal({
+        type: AUDIT_TYPES.CDN_LOGS_REPORT,
+        siteId: 'test-site-id',
+        auditContext: {
+          date: '2026-04-28',
+        },
+      });
+    });
+
+    it('supports year month day for cdn-logs-report daily DB import', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=db',
+        'year=2026',
+        'month=4',
+        'day=27',
+      ], slackContext);
+
+      expect(sqsStub.sendMessage.callCount).to.equal(1);
+      const [, message] = sqsStub.sendMessage.firstCall.args;
+      expect(message.auditContext).to.deep.equal({ date: '2026-04-28' });
+    });
+
+    it('rejects invalid cdn-logs-report daily DB import date', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=db',
+        'date=2026-04-31',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Invalid date format. Use date=YYYY-MM-DD.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('requires mode=db for cdn-logs-report daily DB import date', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'date=2026-04-27',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: For cdn-logs-report daily DB import, use mode=db with date=YYYY-MM-DD.',
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('requires date when cdn-logs-report mode=db is used', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=db',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: mode=db requires date=YYYY-MM-DD for the traffic date.',
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects unsupported cdn-logs-report mode', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=weekly',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: Unsupported mode for cdn-logs-report. Use mode=db for daily DB imports, or omit mode for weekly report backfill.',
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
     it('sends correct SQS message structure for cdn-logs-analysis', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);

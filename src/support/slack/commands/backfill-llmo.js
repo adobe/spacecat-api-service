@@ -41,6 +41,51 @@ function parseArgs(args) {
   return parsed;
 }
 
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function formatUtcDate(date) {
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function isDbBackfillMode(parsed) {
+  return parsed.mode?.toLowerCase() === 'db';
+}
+
+function hasDateInput(parsed) {
+  return Boolean(parsed.date || (parsed.year && parsed.month && parsed.day));
+}
+
+function parseTrafficDate(parsed) {
+  const dateArg = parsed.date
+    || (parsed.year && parsed.month && parsed.day
+      ? `${parsed.year}-${pad2(parsed.month)}-${pad2(parsed.day)}`
+      : null);
+
+  if (!dateArg) {
+    return null;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
+    throw new Error('Invalid date format. Use date=YYYY-MM-DD.');
+  }
+
+  const date = new Date(`${dateArg}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || formatUtcDate(date) !== dateArg) {
+    throw new Error('Invalid date format. Use date=YYYY-MM-DD.');
+  }
+
+  return {
+    date,
+    dateStr: dateArg,
+  };
+}
+
 async function triggerBackfill(
   context,
   configuration,
@@ -98,6 +143,18 @@ async function triggerBackfill(
     }
 
     case AUDIT_TYPES.CDN_LOGS_REPORT: {
+      if (specificDate?.date) {
+        const message = {
+          type: auditType,
+          siteId,
+          auditContext: {
+            date: specificDate.date,
+          },
+        };
+        await sqs.sendMessage(configuration.getQueues().audits, message);
+        break;
+      }
+
       const weeks = timeValue;
 
       // Determine weekOffset values: [0] for current week, [-1, -2, -3, -4] for previous weeks
@@ -189,6 +246,7 @@ function BackfillLlmoCommand(context) {
         await say(`• \`backfill-llmo baseurl=all audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (all enabled sites)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} mode=db date=2026-04-27\` (daily DB import for that traffic date)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLM_ERROR_PAGES} weeks=0\` (current week)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
@@ -233,6 +291,38 @@ function BackfillLlmoCommand(context) {
           break;
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
+          if (parsed.mode && !isDbBackfillMode(parsed)) {
+            await say(':warning: Unsupported mode for cdn-logs-report. Use mode=db for daily DB imports, or omit mode for weekly report backfill.');
+            return;
+          }
+
+          if (hasDateInput(parsed) && !isDbBackfillMode(parsed)) {
+            await say(':warning: For cdn-logs-report daily DB import, use mode=db with date=YYYY-MM-DD.');
+            return;
+          }
+
+          if (isDbBackfillMode(parsed) && !hasDateInput(parsed)) {
+            await say(':warning: mode=db requires date=YYYY-MM-DD for the traffic date.');
+            return;
+          }
+
+          try {
+            const trafficDate = parseTrafficDate(parsed);
+            if (trafficDate) {
+              const auditContextDate = formatUtcDate(addUtcDays(trafficDate.date, 1));
+              specificDate = {
+                date: auditContextDate,
+                trafficDate: trafficDate.dateStr,
+              };
+              timeValue = 1;
+              timeDesc = `daily DB import for ${trafficDate.dateStr} (audit context date ${auditContextDate})`;
+              break;
+            }
+          } catch (e) {
+            await say(`:warning: ${e.message}`);
+            return;
+          }
+
           timeValue = parseInt(parsed.weeks, 10);
           if (Number.isNaN(timeValue)) {
             timeValue = 4;

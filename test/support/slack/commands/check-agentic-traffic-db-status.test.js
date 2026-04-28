@@ -23,6 +23,9 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   let slackContext;
   let postgrestStub;
   let configStub;
+  const IMPORT_HANDLER = 'wrpc_import_agentic_traffic';
+  const DAILY_REFRESH_HANDLER = 'wrpc_refresh_agentic_traffic_daily';
+  const WEEKLY_REFRESH_HANDLER = 'wrpc_refresh_agentic_traffic_weekly';
 
   /**
    * Build a minimal site mock. Pass `null` for latestAuditReturnValue to
@@ -58,6 +61,24 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     chain.order.resolves(result);
     return chain;
   };
+
+  const makeProjectionRow = ({
+    correlationId = 'batch-1',
+    handlerName = IMPORT_HANDLER,
+    outputCount = 100,
+    projectedAt = '2026-04-22T08:30:00Z',
+    skipped = false,
+    metadata = null,
+    scopePrefix = 'site-1',
+  } = {}) => ({
+    correlation_id: correlationId,
+    scope_prefix: scopePrefix,
+    handler_name: handlerName,
+    output_count: outputCount,
+    projected_at: projectedAt,
+    skipped,
+    metadata,
+  });
 
   beforeEach(() => {
     postgrestStub = { from: sinon.stub() };
@@ -289,13 +310,22 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     context.dataAccess.Site.all.resolves([makeSite('site-pr', 'https://projected.com', audit)]);
 
     const chain = makePostgrestChain({
-      data: [{
-        correlation_id: 'batch-proj',
-        scope_prefix: 'site-pr',
-        output_count: 200,
-        projected_at: '2026-04-22T08:30:00Z',
-        skipped: false,
-      }],
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-proj',
+          scopePrefix: 'site-pr',
+          outputCount: 255,
+          projectedAt: '2026-04-22T08:30:00Z',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-proj:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-pr',
+          outputCount: 80,
+          projectedAt: '2026-04-22T08:35:00Z',
+          metadata: { dailyRefreshDates: ['2026-04-22'], dailyRefreshRows: 80 },
+        }),
+      ],
       error: null,
     });
     postgrestStub.from.returns(chain);
@@ -304,10 +334,90 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Projected');
+    expect(output).to.include('Dashboard-ready');
     expect(output).to.include('https://projected.com');
-    expect(output).to.include('200');
+    expect(output).to.include('255');
+    expect(output).to.include('daily refresh: projected (80 rows (2026-04-22))');
     expect(output).to.include('2026-04-22 08:30');
+  });
+
+  it('reports refresh pending when raw import is projected but daily refresh is missing', async () => {
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-refresh-pending',
+        rowCount: 200,
+        classificationCount: 55,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-rp', 'https://refresh-pending.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-refresh-pending',
+          scopePrefix: 'site-rp',
+          outputCount: 255,
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Refresh Pending: *1*');
+    expect(output).to.include('missing: daily refresh');
+    expect(output).to.include('batch-refresh-pending');
+  });
+
+  it('checks weekly refresh for closed Sunday exports', async () => {
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-19',
+        batchId: 'batch-sunday',
+        rowCount: 120,
+        classificationCount: 30,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-sun', 'https://sunday.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-sunday',
+          scopePrefix: 'site-sun',
+          outputCount: 150,
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-sunday:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-sun',
+          outputCount: 42,
+          metadata: { dailyRefreshDates: ['2026-04-19'] },
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-sunday:weekly-refresh',
+          handlerName: WEEKLY_REFRESH_HANDLER,
+          scopePrefix: 'site-sun',
+          outputCount: 99,
+          metadata: { weeklyRefreshWeeks: ['2026-04-13'] },
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-19'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Refresh weekly: *1/1*');
+    expect(output).to.include('weekly refresh: projected (99 rows (2026-04-13))');
   });
 
   it('treats null projRows with no error the same as an empty result (|| [] fallback)', async () => {
@@ -500,13 +610,21 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     // Only batch-a is projected; batch-b has no row
     const chain = makePostgrestChain({
-      data: [{
-        correlation_id: 'batch-a',
-        scope_prefix: 'site-proj',
-        output_count: 100,
-        projected_at: '2026-04-22T10:00:00Z',
-        skipped: false,
-      }],
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-a',
+          scopePrefix: 'site-proj',
+          outputCount: 120,
+          projectedAt: '2026-04-22T10:00:00Z',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-a:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-proj',
+          outputCount: 45,
+          projectedAt: '2026-04-22T10:05:00Z',
+        }),
+      ],
       error: null,
     });
     postgrestStub.from.returns(chain);
@@ -515,8 +633,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Projected: *1*');
-    expect(output).to.include('Pending: *1*');
+    expect(output).to.include('Dashboard-ready: *1*');
+    expect(output).to.include('Import Pending: *1*');
     expect(output).to.include('Skipped: *1*');
     expect(output).to.include('Failed: *1*');
     expect(output).to.include('(4 sites total)');
