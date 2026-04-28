@@ -128,7 +128,7 @@ describe('cdn-detection', () => {
     dnsStubs.resolve4.resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.equal('other');
+    expect(result).to.equal('byocdn-other');
   });
 
   it('returns other when domain does not match Fastly CNAME or IPs', async () => {
@@ -136,7 +136,7 @@ describe('cdn-detection', () => {
     dnsStubs.resolve4.resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.equal('other');
+    expect(result).to.equal('byocdn-other');
   });
 
   it('returns other when no CNAME records exist (ENODATA) but A records have non-matching IPs', async () => {
@@ -144,7 +144,7 @@ describe('cdn-detection', () => {
     dnsStubs.resolve4.resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.equal('other');
+    expect(result).to.equal('byocdn-other');
   });
 
   it('returns aem-cs-fastly when no CNAME records exist (ENODATA) but A records match Fastly IP', async () => {
@@ -156,9 +156,10 @@ describe('cdn-detection', () => {
   });
 
   it('returns null when domain does not exist (ENOTFOUND) — Phase 2 has no signals to work with', async () => {
-    // ENOTFOUND on every Phase 1 lookup → Phase 1 returns 'other' (clean miss),
-    // but Phase 2 also has no DNS chain or IP to inspect. With probeSucceeded
-    // tracking, the detector now reports null instead of misleading 'other'.
+    // ENOTFOUND on every Phase 1 lookup → Phase 1 would return byocdn-other
+    // (clean miss), but Phase 2 also has no DNS chain or IP to inspect.
+    // With probeSucceeded tracking, the detector now reports null instead
+    // of misleading byocdn-other.
     dnsStubs.resolveCname.rejects(dnsError('ENOTFOUND'));
     dnsStubs.resolve4.rejects(dnsError('ENOTFOUND'));
     dnsStubs.resolve6.rejects(dnsError('ENOTFOUND'));
@@ -189,7 +190,7 @@ describe('cdn-detection', () => {
     dnsStubs.resolve4.resolves(['1.2.3.4']);
 
     const result = await detectCdnForDomain('example.com');
-    expect(result).to.equal('other');
+    expect(result).to.equal('byocdn-other');
   });
 
   it('returns aem-cs-fastly when www DNS fails but bare domain CNAME matches', async () => {
@@ -336,7 +337,7 @@ describe('cdn-detection', () => {
       dnsStubs.resolve6.resolves(['2001:db8::1']);
 
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('returns null when AAAA lookup fails with SERVFAIL on www and bare returns other', async () => {
@@ -390,7 +391,7 @@ describe('cdn-detection', () => {
       dnsStubs.resolve4.resolves(['1.2.3.4']);
 
       const result = await detectCdnForDomain('example.com', log);
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
       expect(log.info).to.have.been.calledWith('[cdn-detection] Detecting CDN for domain example.com');
       expect(log.info).to.have.been.calledWith(sinon.match('Detected CNAMES for domain www.example.com'));
       expect(log.info).to.have.been.calledWith(sinon.match('Detected IPs for domain www.example.com'));
@@ -447,9 +448,9 @@ describe('cdn-detection', () => {
       dnsStubs.resolveCname.resolves([]);
       dnsStubs.resolve4.resolves([]);
 
-      // Phase 1 is a clean 'other' but Phase 2 has no IP either, so the new
-      // probeSucceeded gate downgrades to null. The log assertions still cover
-      // the template-interpolation behaviour we care about.
+      // Phase 1 is a clean byocdn-other but Phase 2 has no IP either, so the
+      // new probeSucceeded gate downgrades to null. The log assertions still
+      // cover the template-interpolation behaviour we care about.
       const result = await detectCdnForDomain('example.com', log);
       expect(result).to.be.null;
       expect(log.info).to.have.been.calledWith('[cdn-detection] Detected CNAMES for domain www.example.com: ');
@@ -459,8 +460,8 @@ describe('cdn-detection', () => {
 
   // -----------------------------------------------------------------------
   // Phase 2 — generic multi-signal CDN fingerprinting (ported from
-  // spacecat-audit-worker). Phase 1 is forced to 'other' (clean DNS, no
-  // Adobe match) so Phase 2 owns the result, then we assert the adapter
+  // spacecat-audit-worker). Phase 1 is forced to byocdn-other (clean DNS,
+  // no Adobe match) so Phase 2 owns the result, then we assert the adapter
   // (LABEL_TO_LLMO_TOKEN) translates each detector label into the correct
   // LLMO byocdn-X token.
   // -----------------------------------------------------------------------
@@ -477,7 +478,7 @@ describe('cdn-detection', () => {
       };
     }
 
-    // Force Phase 1 to a clean 'other' so Phase 2 always runs.
+    // Force Phase 1 to a clean byocdn-other so Phase 2 always runs.
     beforeEach(() => {
       dnsStubs.resolveCname.resolves(['no-match.example.net.']);
       dnsStubs.resolve4.resolves(['1.2.3.4']);
@@ -530,7 +531,7 @@ describe('cdn-detection', () => {
     it('returns other when HTTP probe fails and DNS/ASN fallback finds nothing', async () => {
       // fetchStub default rejects everything; DNS fallback also misses.
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('returns null when Phase 1 DNS fails and Phase 2 cannot detect either', async () => {
@@ -674,7 +675,7 @@ describe('cdn-detection', () => {
     it('returns other when probe responds 200 with no identifying headers (empty keyword blob)', async () => {
       probeReturns({});
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('detects via header keyword blob (x-cdn-forward: cachefly → byocdn-other after collapse)', async () => {
@@ -696,7 +697,7 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('breaks DoH chain when CNAME data normalizes to empty string', async () => {
@@ -712,7 +713,7 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('falls back to DoH A-record when system resolve4 is empty, then resolves ASN → Cloudflare', async () => {
@@ -753,7 +754,7 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('treats ipinfo response without an "org" field as null ASN', async () => {
@@ -769,7 +770,7 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('falls through to other when ASN resolves to an unknown AS number', async () => {
@@ -785,7 +786,7 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('detects via CNAME keyword (no domain-suffix match): edge.cachefly.mycorp.com → byocdn-other', async () => {
@@ -840,7 +841,7 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('treats ASN org string without an "AS<digits>" prefix as null ASN', async () => {
@@ -856,13 +857,13 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('treats empty PTR hostname list as no PTR match (covers reverse → [] branch)', async () => {
       dnsStubs.reverse.resolves([]);
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('handles non-Error rejections from HEAD and GET probes gracefully', async () => {
@@ -878,7 +879,7 @@ describe('cdn-detection', () => {
         return Promise.reject(new Error('blocked'));
       });
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
   });
 
@@ -920,7 +921,7 @@ describe('cdn-detection', () => {
     });
 
     it('logs warn when Phase 2 getOneIp resolve4 rejects', async () => {
-      // Phase 1 www still returns 'other' via default resolve4 for www.example.com.
+      // Phase 1 www still returns byocdn-other via default resolve4 for www.example.com.
       dnsStubs.resolve4.withArgs('www.example.com').resolves(['1.2.3.4']);
       dnsStubs.resolve4.withArgs('example.com').rejects(dnsError('SERVFAIL'));
       await detectCdnForDomain('example.com', log);
@@ -1055,7 +1056,7 @@ describe('cdn-detection', () => {
       dnsStubs.resolveCname.resolves(['edge.azureedge.net.attacker.example']);
       dnsStubs.resolve4.resolves(['1.2.3.4']);
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('falls back to Cloudflare DoH when Google DoH errors (smoke check)', async () => {
@@ -1085,16 +1086,16 @@ describe('cdn-detection', () => {
     it('returns other when Phase 1 misses cleanly AND at least one Phase 2 probe ran (DNS chain present)', async () => {
       // Phase 1: clean miss. Phase 2: HTTP probe rejects, but the system
       // resolver returned a non-empty (non-matching) chain. probeSucceeded=true
-      // → 'other' (not null).
+      // → byocdn-other (not null).
       dnsStubs.resolveCname.resolves(['no-match.example.net.']);
       dnsStubs.resolve4.resolves(['1.2.3.4']);
       const result = await detectCdnForDomain('example.com');
-      expect(result).to.equal('other');
+      expect(result).to.equal('byocdn-other');
     });
 
     it('returns null when both phases fail outright (no signal anywhere)', async () => {
       // Phase 1: SERVFAIL. Phase 2: HTTP probes reject, DNS lookup yields
-      // nothing. probeSucceeded=false everywhere → null instead of 'other'.
+      // nothing. probeSucceeded=false everywhere → null instead of byocdn-other.
       dnsStubs.resolveCname.rejects(dnsError('SERVFAIL'));
       dnsStubs.resolve4.rejects(dnsError('SERVFAIL'));
       dnsStubs.resolve6.rejects(dnsError('SERVFAIL'));

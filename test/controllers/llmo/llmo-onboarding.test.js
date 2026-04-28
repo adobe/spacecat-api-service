@@ -1685,7 +1685,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDetectCdnForDomain).to.have.been.calledWith('example.com');
     });
 
-    it('should store detectedCdn as other when CDN detection resolves but does not match', async () => {
+    it('should store detectedCdn as byocdn-other when CDN detection resolves but does not match a specific provider', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -1742,7 +1742,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
-      const mockDetectCdnForDomain = sinon.stub().resolves('other');
+      const mockDetectCdnForDomain = sinon.stub().resolves('byocdn-other');
 
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
@@ -1772,8 +1772,8 @@ describe('LLMO Onboarding Functions', () => {
         imsOrgId: 'ABC123@AdobeOrg',
       }, context);
 
-      expect(result.detectedCdn).to.equal('other');
-      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('other');
+      expect(result.detectedCdn).to.equal('byocdn-other');
+      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('byocdn-other');
     });
 
     it('should continue onboarding when CDN detection throws', async () => {

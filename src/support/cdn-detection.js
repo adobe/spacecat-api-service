@@ -96,7 +96,7 @@ function cnameMatches(cnames, patterns) {
  * Returns:
  *  - 'aem-cs-fastly'   — DNS matched known AEM CS Fastly CNAME / A records
  *  - 'commerce-fastly' — DNS matched known Commerce Fastly CNAME / A / AAAA records
- *  - 'other'           — DNS resolved cleanly but nothing matched
+ *  - 'byocdn-other'    — DNS resolved cleanly but nothing matched (Phase 2 then runs)
  *  - null              — at least one DNS lookup failed (inconclusive)
  *
  * @param {string} host - Hostname to check.
@@ -145,7 +145,7 @@ async function checkHost(host, log) {
     return 'commerce-fastly';
   }
 
-  return 'other';
+  return 'byocdn-other';
 }
 
 /**
@@ -167,7 +167,7 @@ async function detectAdobeManagedCdn(domain, log) {
     return null;
   }
 
-  return 'other';
+  return 'byocdn-other';
 }
 
 /* ============================================================================
@@ -603,7 +603,7 @@ async function detectCdnFromDnsFallback(url, options = {}) {
 
   // Track whether any DNS / DoH / ASN / PTR stage produced usable data.
   // Distinguishes a clean "no match" from a fully inconclusive run, which
-  // detectCdnForDomain uses to choose between 'other' and null.
+  // detectCdnForDomain uses to choose between 'byocdn-other' and null.
   let probeSucceeded = false;
 
   const cnameChainSystem = await getCnameChain(hostname, log);
@@ -686,7 +686,7 @@ async function detectCdnFromUrl(url, options = {}) {
   let result;
   // True when at least one HTTP probe (HEAD or GET) returned a response,
   // even when the response carried no CDN-revealing header. Used downstream
-  // to decide between 'other' (clean miss) and null (inconclusive run).
+  // to decide between 'byocdn-other' (clean miss) and null (inconclusive run).
   let httpProbeSucceeded = false;
   try {
     const response = await fetch(url, { ...fetchOptions, method: 'HEAD' });
@@ -783,8 +783,13 @@ async function detectGenericCdnToken(url, log) {
  * Returns:
  *   - 'aem-cs-fastly' | 'commerce-fastly'  — Phase 1 hit
  *   - 'byocdn-<provider>'                  — Phase 2 hit (mapped via adapter)
- *   - 'other'                               — both phases ran cleanly, nothing matched
+ *   - 'byocdn-other'                       — both phases ran cleanly, nothing matched
  *   - null                                  — at least one signal failed (inconclusive)
+ *
+ * The result is always a `CDN_TYPES` value (see
+ * `src/controllers/llmo/llmo-utils.js#CDN_TYPES`); `'byocdn-other'` is the
+ * sole catch-all, including for CloudFront / Azure Front Door today where
+ * the detector cannot disambiguate AMS vs BYO tenancy from network signals.
  *
  * Never throws.
  *
@@ -840,13 +845,14 @@ export async function detectCdnForDomain(input, log) {
       return null;
     }
     // Both Phase 1 and Phase 2 ran without a hit but at least one Phase 2
-    // probe produced data — clean miss, returns 'other'.
+    // probe produced data — clean miss, returns 'byocdn-other' (CDN_TYPES
+    // catch-all).
     if (probeSucceeded) {
-      return 'other';
+      return 'byocdn-other';
     }
     // Phase 1 succeeded with no match, Phase 2 produced no data anywhere
     // (HTTP probes, DNS, DoH, ASN/PTR all failed). Treat as inconclusive
-    // rather than mislead callers with a stale 'other'.
+    // rather than mislead callers with a stale 'byocdn-other'.
     return null;
     /* c8 ignore next 4 */
   } catch (err) {
