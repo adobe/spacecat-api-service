@@ -1,3 +1,10 @@
+# [1.457.0](https://github.com/adobe/spacecat-api-service/compare/v1.456.4...v1.457.0) (2026-04-28)
+
+
+### Features
+
+* **llmo:** expand onboarding CDN detection to all CDN providers | LLMO-4091 ([#2245](https://github.com/adobe/spacecat-api-service/issues/2245)) ([7634a52](https://github.com/adobe/spacecat-api-service/commit/7634a521de791b9a2e5c11adc1328f0fa802f5bd))
+
 ## [1.456.4](https://github.com/adobe/spacecat-api-service/compare/v1.456.3...v1.456.4) (2026-04-28)
 
 
