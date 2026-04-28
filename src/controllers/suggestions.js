@@ -797,11 +797,11 @@ function SuggestionsController(ctx, sqs, env) {
       const {
         id, status, skipReason, skipDetail,
       } = item;
-      if (!hasText(id)) {
+      if (!isValidUUID(id)) {
         return {
           index,
-          uuid: '',
-          message: 'suggestion id is required',
+          uuid: id || '',
+          message: 'suggestion id must be a valid UUID',
           statusCode: 400,
         };
       }
@@ -1093,6 +1093,10 @@ function SuggestionsController(ctx, sqs, env) {
     // suggestion-based flow (assess, fix, etc.)
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
+    }
+    const invalidAutoFixIds = suggestionIds.filter((id) => !isValidUUID(id));
+    if (invalidAutoFixIds.length > 0) {
+      return badRequest(`suggestionIds must contain valid UUIDs. Invalid: ${invalidAutoFixIds.join(', ')}`);
     }
     if (variations && !isArray(variations)) {
       return badRequest('variations must be an array');
@@ -1404,6 +1408,11 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       context.log.warn(`[edge-preview-failed] site: ${apexBaseUrl}, suggestionIds is not a non-empty array`);
       return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+    const invalidPreviewIds = suggestionIds.filter((id) => !isValidUUID(id));
+    if (invalidPreviewIds.length > 0) {
+      context.log.warn(`[edge-preview-failed] site: ${apexBaseUrl}, invalid suggestionIds: ${invalidPreviewIds.join(', ')}`);
+      return badRequest(`suggestionIds must contain valid UUIDs. Invalid: ${invalidPreviewIds.join(', ')}`);
     }
 
     if (!await accessControlUtil.hasAccess(site)) {
@@ -2197,6 +2206,11 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       context.log.warn('[edge-rollback-failed] site: n/a, suggestionIds is not a non-empty array');
       return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+    const invalidRollbackIds = suggestionIds.filter((id) => !isValidUUID(id));
+    if (invalidRollbackIds.length > 0) {
+      context.log.warn(`[edge-rollback-failed] site: ${apexBaseUrl}, invalid suggestionIds: ${invalidRollbackIds.join(', ')}`);
+      return badRequest(`suggestionIds must contain valid UUIDs. Invalid: ${invalidRollbackIds.join(', ')}`);
     }
 
     // No productCode is passed to hasAccess(); the delegation block is not entered.

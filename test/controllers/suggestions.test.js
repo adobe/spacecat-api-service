@@ -2926,6 +2926,25 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
   });
 
+  it('bulk patches suggestion status returns 400 per item when id is not a valid UUID', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: 'not-a-uuid', status: 'NEW' }, { id: SUGGESTION_IDS[0], status: 'NEW' }],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const body = await response.json();
+    expect(body.metadata).to.have.property('total', 2);
+    expect(body.metadata).to.have.property('success', 1);
+    expect(body.metadata).to.have.property('failed', 1);
+    expect(body.suggestions[0]).to.have.property('statusCode', 400);
+    expect(body.suggestions[0]).to.have.property('message', 'suggestion id must be a valid UUID');
+    expect(body.suggestions[1]).to.have.property('statusCode', 200);
+  });
+
   it('bulk patches suggestion status 1 fails passed data does not have id', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
@@ -2950,7 +2969,7 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
     expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
     expect(bulkPatchResponse.suggestions[0].message).to.not.exist;
-    expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'suggestion id is required');
+    expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'suggestion id must be a valid UUID');
   });
 
   it('bulk patches suggestion status fails if site ID does not match site id of the opportunity', async () => {
@@ -4268,6 +4287,36 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Request body must be an array of suggestionIds');
+    });
+
+    it('auto-fix suggestions returns 400 when suggestionIds contains non-UUID values', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: ['not-a-uuid', 'https://example.com/page'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.include('https://example.com/page');
+    });
+
+    it('auto-fix suggestions returns 400 when suggestionIds contains a mix of valid and invalid UUIDs', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], 'not-a-uuid'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.not.include(SUGGESTION_IDS[0]);
     });
 
     it('auto-fix suggestions returns 404 if site not found', async () => {
@@ -8297,6 +8346,30 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
     });
 
+    it('should return 400 when suggestionIds contains non-UUID values', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: ['not-a-uuid', 'https://example.com/page'] },
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.include('https://example.com/page');
+    });
+
+    it('should return 400 when suggestionIds contains a mix of valid and invalid UUIDs', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], 'not-a-uuid'] },
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.not.include(SUGGESTION_IDS[0]);
+    });
+
     it('uses base URL fallback when getHostName returns null (rollback)', async () => {
       site.getBaseURL = sandbox.stub().returns('');
       const response = await suggestionsController.rollbackSuggestionFromEdge({
@@ -9287,6 +9360,30 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const body = await response.json();
       expect(body.message).to.include('non-empty array');
+    });
+
+    it('should return 400 if suggestionIds contains non-UUID values', async () => {
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: ['not-a-uuid', 'https://example.com/page'] },
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.include('https://example.com/page');
+    });
+
+    it('should return 400 if suggestionIds contains a mix of valid and invalid UUIDs', async () => {
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], 'not-a-uuid'] },
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('not-a-uuid');
+      expect(body.message).to.not.include(SUGGESTION_IDS[0]);
     });
 
     it('should return 404 if site not found', async () => {
