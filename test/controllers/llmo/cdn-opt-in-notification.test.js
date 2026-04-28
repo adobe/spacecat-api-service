@@ -67,7 +67,7 @@ describe('cdn-opt-in-notification', () => {
     const baseParams = {
       siteId: 'site-uuid-123',
       siteBaseURL: 'https://www.example.com',
-      cdnLogSource: 'byocdn-akamai',
+      cdnType: 'byocdn-akamai',
       orgId: 'org-uuid-456',
       optedBy: 'user@adobe.com',
     };
@@ -187,26 +187,35 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.orgMembers).to.equal('plain1@example.com, plain2@example.com');
     });
 
-    it('passes docLink for CDNs with setup guide and empty note for CDNs without one', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'byocdn-cloudflare' });
+    it('passes docLink for byocdn-fastly', async () => {
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'byocdn-fastly' });
+
+      const { templateData } = sendEmailStub.firstCall.args[1];
+      expect(templateData.docLink).to.include('fastly-byocdn');
+      expect(templateData.cdnNote).to.equal('');
+      expect(templateData.cdnDisplayName).to.equal('Fastly (BYOCDN)');
+    });
+
+    it('passes docLink and cdnNote for Cloudflare with existing Worker warning', async () => {
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'byocdn-cloudflare' });
 
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.docLink).to.include('cloudflare');
-      expect(templateData.cdnNote).to.equal('');
+      expect(templateData.cdnNote).to.include('existing Cloudflare Worker');
       expect(templateData.cdnDisplayName).to.equal('Cloudflare (BYOCDN)');
     });
 
     it('passes docLink and cdnNote for CloudFront which has Lambda@Edge specific note', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'byocdn-cloudfront' });
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'byocdn-cloudfront' });
 
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.docLink).to.include('cloudfront');
-      expect(templateData.cdnNote).to.include('Lambda@Edge');
+      expect(templateData.cdnNote).to.include('AWS IAM');
       expect(templateData.cdnDisplayName).to.equal('CloudFront (BYOCDN)');
     });
 
     it('passes empty docLink and cdnNote for CDNs without extra config', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'byocdn-imperva' });
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'byocdn-imperva' });
 
       const { templateData, templateName } = sendEmailStub.firstCall.args[1];
       expect(templateData.docLink).to.equal('');
@@ -216,36 +225,36 @@ describe('cdn-opt-in-notification', () => {
     });
 
     it('uses adobe managed template for ams-cloudfront', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'ams-cloudfront' });
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'ams-cloudfront' });
 
       const { templateName, templateData } = sendEmailStub.firstCall.args[1];
       expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
-      expect(templateData.cdnDisplayName).to.equal('AMS CloudFront');
+      expect(templateData.cdnDisplayName).to.equal('Adobe Managed Services CloudFront');
     });
 
     it('uses adobe managed template for ams-frontdoor', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'ams-frontdoor' });
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'ams-frontdoor' });
 
       const { templateName } = sendEmailStub.firstCall.args[1];
       expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
     });
 
     it('uses adobe managed template for aem-cs-fastly', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'aem-cs-fastly' });
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'aem-cs-fastly' });
 
       const { templateName } = sendEmailStub.firstCall.args[1];
       expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
     });
 
     it('uses adobe managed template for commerce-fastly', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'commerce-fastly' });
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'commerce-fastly' });
 
       const { templateName } = sendEmailStub.firstCall.args[1];
       expect(templateName).to.equal('llmo_cdn_opt_in_notification_adobe_managed');
     });
 
     it('uses byocdn template for a CDN type and handles gracefully', async () => {
-      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnLogSource: 'some-unknown-cdn' });
+      await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'some-unknown-cdn' });
 
       const { templateName, templateData } = sendEmailStub.firstCall.args[1];
       expect(templateName).to.equal('llmo_cdn_opt_in_notification');
@@ -331,7 +340,7 @@ describe('cdn-opt-in-notification', () => {
       );
     });
 
-    it('handles missing optional params (undefined cdnLogSource, orgId, optedBy)', async () => {
+    it('handles missing optional params (undefined cdnType, orgId, optedBy)', async () => {
       const result = await notifyOptInIfNeeded(mockContext, {
         siteId: 'site-uuid-123',
         siteBaseURL: 'https://www.example.com',

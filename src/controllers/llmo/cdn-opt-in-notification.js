@@ -27,56 +27,38 @@
  */
 
 import { sendEmail } from '../../support/email-service.js';
+import { CDN_TYPES, CDN_DISPLAY_NAMES } from './llmo-utils.js';
 
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
 const OPT_IN_NOTIFICATION_TEMPLATE_ADOBE_MANAGED = 'llmo_cdn_opt_in_notification_adobe_managed';
 const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
 
 const CDN_CONFIG = {
-  'byocdn-fastly': {
-    displayName: 'Fastly (BYOCDN)',
+  [CDN_TYPES.BYOCDN_FASTLY]: {
     adobeManaged: false,
+    docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/fastly-byocdn',
   },
-  'byocdn-akamai': {
-    displayName: 'Akamai (BYOCDN)',
+  [CDN_TYPES.BYOCDN_AKAMAI]: {
     adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/akamai-byocdn',
+    note: 'Apply the routing rule only to agentic HTML page traffic (match html and extensionless URLs) — exclude API endpoints. If property activation fails, ensure the SSL verification mode on the Optimize at Edge rule matches your default rule.',
   },
-  'byocdn-cloudflare': {
-    displayName: 'Cloudflare (BYOCDN)',
+  [CDN_TYPES.BYOCDN_CLOUDFLARE]: {
     adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/cloudflare-byocdn',
+    note: 'If an existing Cloudflare Worker is already deployed on this domain, use Option 2 (manual setup) to merge the Edge Optimize routing logic into it — do not use the one-click deploy. The worker route must be linked to the domain manually regardless of setup option.',
   },
-  'byocdn-cloudfront': {
-    displayName: 'CloudFront (BYOCDN)',
+  [CDN_TYPES.BYOCDN_CLOUDFRONT]: {
     adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/cloudfront-byocdn',
-    note: 'This involves Lambda@Edge and cache policy setup — follow the step-by-step guide closely.',
+    note: 'Requires AWS IAM permissions for Lambda, IAM roles, CloudFront distributions, and cache policies. Cache policy setup varies by scenario (legacy/custom/managed) — follow the step-by-step guide closely.',
   },
-  'byocdn-imperva': {
-    displayName: 'Imperva (BYOCDN)',
-    adobeManaged: false,
-  },
-  'byocdn-other': {
-    displayName: 'Custom BYOCDN',
-    adobeManaged: false,
-  },
-  'ams-cloudfront': {
-    displayName: 'AMS CloudFront',
-    adobeManaged: true,
-  },
-  'ams-frontdoor': {
-    displayName: 'AMS Front Door',
-    adobeManaged: true,
-  },
-  'aem-cs-fastly': {
-    displayName: 'AEM Cloud Service Managed CDN (Fastly)',
-    adobeManaged: true,
-  },
-  'commerce-fastly': {
-    displayName: 'Adobe Commerce Cloud - PaaS (Fastly)',
-    adobeManaged: true,
-  },
+  [CDN_TYPES.BYOCDN_IMPERVA]: { adobeManaged: false },
+  [CDN_TYPES.BYOCDN_OTHER]: { adobeManaged: false },
+  [CDN_TYPES.AMS_CLOUDFRONT]: { adobeManaged: true },
+  [CDN_TYPES.AMS_FRONTDOOR]: { adobeManaged: true },
+  [CDN_TYPES.AEM_CS_FASTLY]: { adobeManaged: true },
+  [CDN_TYPES.COMMERCE_FASTLY]: { adobeManaged: true },
 };
 
 function parseRecipients(raw) {
@@ -134,7 +116,7 @@ async function getOrgMembersCsv(context, orgId) {
  * @param {Object} params
  * @param {string} params.siteId
  * @param {string} params.siteBaseURL
- * @param {string} [params.cdnLogSource] - CDN type stored during provisioning.
+ * @param {string} [params.cdnType] - CDN type stored during provisioning.
  * @param {string} [params.orgId] - Organization ID used to load members email list.
  * @param {string} [params.optedBy] - Email of the customer user who triggered the opt-in.
  * @returns {Promise<{sent: boolean, reason?: string}>}
@@ -144,7 +126,7 @@ export async function notifyOptInIfNeeded(context, params) {
   const {
     siteId,
     siteBaseURL,
-    cdnLogSource,
+    cdnType,
     orgId,
     optedBy,
   } = params || {};
@@ -156,8 +138,8 @@ export async function notifyOptInIfNeeded(context, params) {
       return { sent: false, reason: 'no-recipients' };
     }
 
-    const cdnEntry = CDN_CONFIG[cdnLogSource];
-    const cdnDisplayName = cdnEntry?.displayName || cdnLogSource || 'A CDN';
+    const cdnEntry = CDN_CONFIG[cdnType];
+    const cdnDisplayName = CDN_DISPLAY_NAMES[cdnType] || cdnType || 'A CDN';
     const docLink = cdnEntry?.docLink || '';
     const cdnNote = cdnEntry?.note || '';
     const isAdobeManaged = cdnEntry?.adobeManaged === true;
@@ -176,7 +158,7 @@ export async function notifyOptInIfNeeded(context, params) {
       orgMembers,
     };
 
-    log.info(`[cdn-opt-in-notification] Sending ${templateName} for site=${siteId} cdnLogSource=${cdnLogSource}`);
+    log.info(`[cdn-opt-in-notification] Sending ${templateName} for site=${siteId} cdnType=${cdnType}`);
 
     const result = await sendEmail(context, {
       recipients,
