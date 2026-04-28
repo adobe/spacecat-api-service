@@ -44,6 +44,7 @@ describe('PlgOnboardingController', () => {
   let enableImportsStub;
   let triggerAuditsStub;
   let autoResolveAuthorUrlStub;
+  let resolveWwwUrlStub;
   let updateCodeConfigStub;
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
@@ -186,6 +187,7 @@ describe('PlgOnboardingController', () => {
 
     // Support utils stubs
     autoResolveAuthorUrlStub = sandbox.stub().resolves(null);
+    resolveWwwUrlStub = sandbox.stub().resolves(TEST_DOMAIN);
     updateCodeConfigStub = sandbox.stub().resolves();
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
@@ -373,6 +375,7 @@ describe('PlgOnboardingController', () => {
         },
         '../../../src/support/utils.js': {
           autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+          resolveWwwUrl: resolveWwwUrlStub,
           updateCodeConfig: updateCodeConfigStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
@@ -1410,6 +1413,64 @@ describe('PlgOnboardingController', () => {
         userAgent: 'Bot/2.0',
       });
     });
+
+    it('sets waitlist reason with IPs and user-agent when bot blocked', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4', '5.6.7.8'],
+        userAgent: 'SpaceCat/1.0',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/blocked by a bot blocker of type 'cloudflare'/);
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/1\.2\.3\.4.*5\.6\.7\.8/);
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/SpaceCat\/1\.0/);
+    });
+
+    it('sets waitlist reason without IPs when ipsToAllowlist is empty', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'akamai',
+        userAgent: 'SpaceCat/1.0',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/blocked by a bot blocker of type 'akamai'/);
+      expect(mockOnboarding.setWaitlistReason).to.not.have.been.calledWithMatch(/IPs must be allowlisted/);
+    });
+
+    it('sets waitlist reason without user-agent when not provided', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4'],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/blocked by a bot blocker of type 'cloudflare'/);
+      expect(mockOnboarding.setWaitlistReason).to.not.have.been.calledWithMatch(/User-agent used/);
+    });
+
+    it('sets waitlist reason before setBotBlocker', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4'],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledBefore(mockOnboarding.setBotBlocker);
+    });
   });
 
   // --- Slack notifications ---
@@ -1572,8 +1633,8 @@ describe('PlgOnboardingController', () => {
       expect(message).to.include('akamai');
       expect(message).to.not.include('IPs to allowlist');
       // organizationId is null on this onboarding, so org name/ID should not appear
-      expect(message).to.not.include('Org Name');
-      expect(message).to.not.include('Org ID');
+      expect(message).to.not.include('IMS Org Name');
+      expect(message).to.not.include('SpaceCat Org ID (derived from IMS Org)');
       expect(message).to.not.include('Site ID');
     });
 
@@ -1651,7 +1712,7 @@ describe('PlgOnboardingController', () => {
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Waitlisted');
-      expect(message).to.not.include('Org Name');
+      expect(message).to.not.include('IMS Org Name');
       expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Failed to look up org name for onboarding notification/),
       );
@@ -1678,7 +1739,7 @@ describe('PlgOnboardingController', () => {
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Onboarded');
-      expect(message).to.not.include('Org Name');
+      expect(message).to.not.include('IMS Org Name');
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
     });
@@ -2129,6 +2190,149 @@ describe('PlgOnboardingController', () => {
     let controller;
     beforeEach(() => {
       controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('verifies RUM using www-resolved domain so www-keyed sites are not wrongly waitlisted', async () => {
+      const wwwDomain = `www.${TEST_DOMAIN}`;
+      resolveWwwUrlStub.resolves(wwwDomain);
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(wwwDomain);
+    });
+
+    it('proxy passed to resolveWwwUrl when no site record exists has getConfig so sharedWwwUrlResolver does not throw', async () => {
+      // sharedWwwUrlResolver calls site.getConfig() (not site.getConfig?.()) so the proxy
+      // must expose getConfig, otherwise resolveWwwUrl throws and rumVerified is wrongly false
+      resolveWwwUrlStub.callsFake((siteArg) => {
+        // Simulate the real implementation accessing site.getConfig()
+        siteArg.getConfig();
+        return Promise.resolve(TEST_DOMAIN);
+      });
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+      mockDataAccess.Site.findByBaseURL.resolves(null); // no existing site record
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('proxy getBaseURL returns the correct baseURL when no site record exists', async () => {
+      resolveWwwUrlStub.callsFake((siteArg) => Promise.resolve(siteArg.getBaseURL()));
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      // resolveWwwUrl should have been called with a proxy whose getBaseURL returns TEST_BASE_URL
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg.getBaseURL()).to.equal(TEST_BASE_URL);
+    });
+
+    it('passes the real site object (not proxy) to resolveWwwUrl when a site record exists', async () => {
+      const existingSite = createMockSite({ orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg).to.equal(existingSite);
+    });
+
+    it('sets rumVerified=false and falls through to delivery type when resolveWwwUrl itself throws', async () => {
+      resolveWwwUrlStub.rejects(new Error('RUM client network error'));
+      findDeliveryTypeStub.resolves('aem_edge');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(rumRetrieveDomainkeyStub).to.not.have.been.called;
+      expect(findDeliveryTypeStub).to.have.been.called;
+    });
+
+    it('sets rumVerified=false when resolveWwwUrl resolves but outer retrieveDomainkey rejects', async () => {
+      resolveWwwUrlStub.resolves(`www.${TEST_DOMAIN}`);
+      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey'));
+      findDeliveryTypeStub.resolves('aem_edge');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(`www.${TEST_DOMAIN}`);
+      expect(findDeliveryTypeStub).to.have.been.called;
+    });
+
+    it('uses overrideBaseURL from site fetchConfig — real site passed so resolveWwwUrl short-circuits without a RUM call', async () => {
+      // Real-world: ingrammicro.com site has overrideBaseURL = https://www.ingrammicro.com
+      // sharedWwwUrlResolver reads overrideBaseURL and returns www.ingrammicro.com immediately
+      // (no internal RUM calls — the only RUM call is the outer retrieveDomainkey)
+      const siteWithOverride = createMockSite({ orgId: TEST_ORG_ID });
+      const fetchConfigWithOverride = { overrideBaseURL: `https://www.${TEST_DOMAIN}` };
+      siteWithOverride.getConfig.returns({
+        getFetchConfig: () => fetchConfigWithOverride,
+        updateFetchConfig: sandbox.stub(),
+        getImports: () => [],
+        enableImport: sandbox.stub(),
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(siteWithOverride);
+      // Simulate resolveWwwUrl returning www domain via overrideBaseURL (no internal RUM call)
+      resolveWwwUrlStub.callsFake((siteArg) => {
+        const override = siteArg.getConfig()?.getFetchConfig()?.overrideBaseURL;
+        const wwwDomain = override ? override.replace(/^https?:\/\//, '') : `www.${TEST_DOMAIN}`;
+        return Promise.resolve(wwwDomain);
+      });
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // Real site was passed (not proxy) so overrideBaseURL was accessible
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg).to.equal(siteWithOverride);
+      expect(siteArg.getConfig().getFetchConfig().overrideBaseURL).to.equal(`https://www.${TEST_DOMAIN}`);
+      // Outer retrieveDomainkey was called with the www domain from overrideBaseURL
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(`www.${TEST_DOMAIN}`);
+    });
+
+    it('resolves www variant via proxy when no site record exists — proxy getConfig returns null skipping overrideBaseURL', async () => {
+      // Real-world: ingrammicro.com with no existing site record
+      // Proxy getConfig() returns null → sharedWwwUrlResolver skips overrideBaseURL,
+      // falls through to www-toggle RUM check, returns www.ingrammicro.com
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      resolveWwwUrlStub.callsFake((siteArg) => {
+        // Simulate real sharedWwwUrlResolver: getConfig() returns null → no overrideBaseURL
+        const override = siteArg.getConfig()?.getFetchConfig()?.overrideBaseURL;
+        expect(override).to.be.undefined; // proxy never sets overrideBaseURL
+        return Promise.resolve(`www.${TEST_DOMAIN}`);
+      });
+      rumRetrieveDomainkeyStub.resolves('test-domainkey');
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // Proxy was passed, not the real site
+      const [siteArg] = resolveWwwUrlStub.firstCall.args;
+      expect(siteArg.getConfig()).to.be.null; // proxy returns null, not throw
+      expect(siteArg.getBaseURL()).to.equal(TEST_BASE_URL);
+      // Outer retrieveDomainkey used the www-resolved domain
+      expect(rumRetrieveDomainkeyStub).to.have.been.calledWith(`www.${TEST_DOMAIN}`);
     });
 
     it('waitlists domain when RUM check fails and delivery type is OTHER', async () => {
@@ -3445,7 +3649,7 @@ describe('PlgOnboardingController', () => {
       // Should be WAITLISTED, not ONBOARDED
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        /different organization/,
+        /already assigned to another organization/,
       );
       // Site should NOT be changed
       expect(siteInOtherOrg.setOrganizationId).to.not.have.been.called;
@@ -3454,6 +3658,78 @@ describe('PlgOnboardingController', () => {
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT create entitlement
       expect(tierClientCreateForSiteStub).to.not.have.been.called;
+    });
+
+    it('waitlists with "safely moved" hint when preonboarded site in different org has no enrollments', async () => {
+      const OTHER_CUSTOMER_ORG = 'other-customer-org-789';
+      const existingOrg = {
+        getImsOrgId: sandbox.stub().returns('existing-ims@AdobeOrg'),
+        getName: sandbox.stub().returns('Existing Org Name'),
+      };
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInOtherOrg = createMockSite({
+        id: TEST_SITE_ID,
+        orgId: OTHER_CUSTOMER_ORG,
+        siteEnrollments: [],
+      });
+      mockDataAccess.Site.findById.resolves(siteInOtherOrg);
+      mockDataAccess.Organization.findById.resolves(existingOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/no active products in its existing org/);
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/safely moved to 'Test Org'/);
+    });
+
+    it('waitlists with "cannot be moved" message when preonboarded site in different org has active enrollments', async () => {
+      const OTHER_CUSTOMER_ORG = 'other-customer-org-789';
+      const existingOrg = {
+        getImsOrgId: sandbox.stub().returns('existing-ims@AdobeOrg'),
+        getName: sandbox.stub().returns('Existing Org Name'),
+      };
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInOtherOrg = createMockSite({
+        id: TEST_SITE_ID,
+        orgId: OTHER_CUSTOMER_ORG,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findById.resolves(siteInOtherOrg);
+      mockDataAccess.Organization.findById.resolves(existingOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/cannot be moved.*active products/);
     });
 
     it('waitlists when re-fetch after org reassignment returns null', async () => {
