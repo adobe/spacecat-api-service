@@ -51,6 +51,8 @@ describe('SiteDetectionController', () => {
 
   const mockDataAccess = {
     AsyncJob: { create: sandbox.stub(), findById: sandbox.stub() },
+    Site: { findByBaseURL: sandbox.stub() },
+    Organization: { findById: sandbox.stub() },
   };
 
   const mockSqs = {
@@ -68,8 +70,11 @@ describe('SiteDetectionController', () => {
     sandbox.resetHistory();
     mockDataAccess.AsyncJob.create.resolves(mockJob);
     mockDataAccess.AsyncJob.findById.resolves(mockJob);
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+    mockDataAccess.Organization.findById.resolves(null);
     mockJob.getResult.returns(null);
     mockJob.getError.returns(null);
+    mockJob.getStatus.returns(AsyncJob.Status.IN_PROGRESS);
 
     controller = SiteDetectionController(
       { dataAccess: mockDataAccess, sqs: mockSqs },
@@ -331,6 +336,107 @@ describe('SiteDetectionController', () => {
 
       const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
       expect(resp.status).to.equal(500);
+    });
+
+    // ── imsOrgId resolution ────────────────────────────────────────────────
+
+    describe('imsOrgId resolution', () => {
+      const completedCreatedResult = {
+        action: 'created',
+        domain: 'foo.example.com',
+        reason: null,
+        baseURL: 'https://foo.example.com',
+      };
+
+      beforeEach(() => {
+        mockDataAccess.Site.findByBaseURL.resetHistory();
+        mockDataAccess.Organization.findById.resetHistory();
+        mockJob.getStatus.returns(AsyncJob.Status.COMPLETED);
+        mockJob.getResult.returns(completedCreatedResult);
+      });
+
+      it('returns imsOrgId when Site is linked to an Organization', async () => {
+        const site = { getOrganizationId: sandbox.stub().returns('org-123') };
+        const organization = { getImsOrgId: sandbox.stub().returns('1234567890ABCDEF12345678@AdobeOrg') };
+        mockDataAccess.Site.findByBaseURL.resolves(site);
+        mockDataAccess.Organization.findById.resolves(organization);
+
+        const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        const body = await resp.json();
+        expect(body.result.imsOrgId).to.equal('1234567890ABCDEF12345678@AdobeOrg');
+        expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://foo.example.com');
+        expect(mockDataAccess.Organization.findById).to.have.been.calledWith('org-123');
+      });
+
+      it('returns null imsOrgId when Site does not exist yet', async () => {
+        mockDataAccess.Site.findByBaseURL.resolves(null);
+
+        const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        const body = await resp.json();
+        expect(body.result.imsOrgId).to.be.null;
+        expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+      });
+
+      it('returns null imsOrgId when Site exists but has no organizationId', async () => {
+        mockDataAccess.Site.findByBaseURL.resolves({
+          getOrganizationId: sandbox.stub().returns(null),
+        });
+
+        const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        const body = await resp.json();
+        expect(body.result.imsOrgId).to.be.null;
+        expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+      });
+
+      it('returns null imsOrgId when Organization is not found', async () => {
+        mockDataAccess.Site.findByBaseURL.resolves({
+          getOrganizationId: sandbox.stub().returns('org-123'),
+        });
+        mockDataAccess.Organization.findById.resolves(null);
+
+        const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        const body = await resp.json();
+        expect(body.result.imsOrgId).to.be.null;
+      });
+
+      it('logs and returns null imsOrgId when Site lookup throws', async () => {
+        mockDataAccess.Site.findByBaseURL.rejects(new Error('DB unavailable'));
+
+        const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        const body = await resp.json();
+        expect(resp.status).to.equal(200);
+        expect(body.result.imsOrgId).to.be.null;
+        expect(log.warn).to.have.been.calledWith(
+          sinon.match(/Failed to resolve imsOrgId for job/),
+        );
+      });
+
+      it('does not look up Site when status is IN_PROGRESS', async () => {
+        mockJob.getStatus.returns(AsyncJob.Status.IN_PROGRESS);
+
+        await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        expect(mockDataAccess.Site.findByBaseURL).to.not.have.been.called;
+      });
+
+      it('does not look up Site when status is FAILED', async () => {
+        mockJob.getStatus.returns(AsyncJob.Status.FAILED);
+
+        await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        expect(mockDataAccess.Site.findByBaseURL).to.not.have.been.called;
+      });
+
+      it('does not look up Site when result has no baseURL (rejected/duplicate)', async () => {
+        mockJob.getResult.returns({
+          action: 'rejected',
+          domain: 'foo.example.com',
+          reason: 'Site did not serve a Helix-format DOM',
+        });
+
+        const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+        const body = await resp.json();
+        expect(body.result.imsOrgId).to.be.null;
+        expect(mockDataAccess.Site.findByBaseURL).to.not.have.been.called;
+      });
     });
   });
 });

@@ -123,6 +123,10 @@ export const TRIAL_USER_ACTIVITY_1_ID = 'c2222222-2222-4222-a222-222222222222'; 
 
 export const ASYNC_JOB_1_ID = 'eeee1111-1111-4111-b111-111111111111'; // COMPLETED preflight job
 export const ASYNC_JOB_2_ID = 'eeee2222-2222-4222-a222-222222222222'; // IN_PROGRESS site-detection job
+// COMPLETED site-detection: result.baseURL = SITE_1_BASE_URL → Site_1 → ORG_1 → ORG_1_IMS_ORG_ID
+export const ASYNC_JOB_3_ID = 'eeee3333-3333-4333-b333-333333333333';
+// COMPLETED site-detection: result.baseURL points at a domain with no Site row → imsOrgId is null
+export const ASYNC_JOB_4_ID = 'eeee4444-4444-4444-a444-444444444444';
 export const NON_EXISTENT_JOB_ID = 'eeee9999-9999-4999-b999-999999999999';
 
 // ── Consumers (S2S) ──

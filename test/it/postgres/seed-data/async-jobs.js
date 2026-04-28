@@ -47,4 +47,43 @@ export const asyncJobs = [
     started_at: '2025-01-20T10:00:00.000Z',
     ended_at: '2025-01-20T10:05:00.000Z',
   },
+  // COMPLETED site-detection whose baseURL matches an existing seeded Site
+  // (SITE_1 → ORG_1 → ORG_1_IMS_ORG_ID). Used to assert imsOrgId is resolved
+  // and surfaced on poll once Slack approval has linked the candidate.
+  {
+    id: 'eeee3333-3333-4333-b333-333333333333',
+    status: 'COMPLETED',
+    result: {
+      action: 'created',
+      domain: 'site1.example.com',
+      baseURL: 'https://site1.example.com',
+      reason: null,
+    },
+    metadata: {
+      payload: { domain: 'site1.example.com', hlxVersion: 5 },
+      jobType: 'site-detection',
+      tags: ['site-detection'],
+    },
+    started_at: '2025-01-20T10:00:00.000Z',
+    ended_at: '2025-01-20T10:05:00.000Z',
+  },
+  // COMPLETED site-detection whose baseURL has no Site row yet — models the
+  // "candidate created, awaiting human approval" state where imsOrgId is null.
+  {
+    id: 'eeee4444-4444-4444-a444-444444444444',
+    status: 'COMPLETED',
+    result: {
+      action: 'created',
+      domain: 'awaiting-approval.example.com',
+      baseURL: 'https://awaiting-approval.example.com',
+      reason: null,
+    },
+    metadata: {
+      payload: { domain: 'awaiting-approval.example.com', hlxVersion: null },
+      jobType: 'site-detection',
+      tags: ['site-detection'],
+    },
+    started_at: '2025-01-20T10:00:00.000Z',
+    ended_at: '2025-01-20T10:05:00.000Z',
+  },
 ];

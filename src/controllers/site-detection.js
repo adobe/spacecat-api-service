@@ -177,12 +177,32 @@ function SiteDetectionController(ctx, log, env) {
         return notFound(`Job with ID ${jobId} not found`);
       }
 
+      const status = job.getStatus();
       const result = job.getResult();
       const rawError = job.getError();
 
+      // imsOrgId is resolved by a separate human-in-the-loop Slack flow
+      // (approve-site-candidate → OrgDetectorAgent → approve-org), which
+      // sets Site.organizationId after the job has already terminated.
+      // Look it up at GET time so callers can poll for it; it remains null
+      // until that flow completes.
+      let imsOrgId = null;
+      if (status === AsyncJob.Status.COMPLETED && hasText(result?.baseURL)) {
+        try {
+          const site = await dataAccess.Site.findByBaseURL(result.baseURL);
+          const organizationId = site?.getOrganizationId();
+          if (organizationId) {
+            const organization = await dataAccess.Organization.findById(organizationId);
+            imsOrgId = organization?.getImsOrgId() ?? null;
+          }
+        } catch (e) {
+          log.warn(`Failed to resolve imsOrgId for job ${jobId}: ${e.message}`);
+        }
+      }
+
       return ok({
         jobId: job.getId(),
-        status: job.getStatus(),
+        status,
         createdAt: job.getCreatedAt(),
         updatedAt: job.getUpdatedAt(),
         result: result ? {
@@ -190,6 +210,7 @@ function SiteDetectionController(ctx, log, env) {
           domain: result.domain,
           baseURL: result.baseURL,
           reason: result.reason,
+          imsOrgId,
         } : null,
         error: rawError ? { code: rawError.code, message: rawError.message } : null,
       });

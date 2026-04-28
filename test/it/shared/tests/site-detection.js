@@ -13,7 +13,11 @@
 import { expect } from 'chai';
 import {
   ASYNC_JOB_2_ID,
+  ASYNC_JOB_3_ID,
+  ASYNC_JOB_4_ID,
   NON_EXISTENT_JOB_ID,
+  ORG_1_IMS_ORG_ID,
+  SITE_1_BASE_URL,
 } from '../seed-ids.js';
 
 /**
@@ -91,6 +95,31 @@ export default function siteDetectionTests(getHttpClient, resetData) {
         expect(job.error).to.be.null;
         expect(job.createdAt).to.be.a('string');
         expect(job.updatedAt).to.be.a('string');
+      });
+
+      it('resolves imsOrgId when the result baseURL matches a Site linked to an Organization', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/detect/jobs/${ASYNC_JOB_3_ID}`);
+        expect(res.status).to.equal(200);
+
+        const job = res.body;
+        expect(job.status).to.equal('COMPLETED');
+        expect(job.result).to.deep.include({
+          action: 'created',
+          baseURL: SITE_1_BASE_URL,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+        });
+      });
+
+      it('returns null imsOrgId when the result baseURL has no Site row yet', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/detect/jobs/${ASYNC_JOB_4_ID}`);
+        expect(res.status).to.equal(200);
+
+        const job = res.body;
+        expect(job.status).to.equal('COMPLETED');
+        expect(job.result.action).to.equal('created');
+        expect(job.result.imsOrgId).to.be.null;
       });
     });
   });
