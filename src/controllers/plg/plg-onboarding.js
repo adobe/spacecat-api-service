@@ -262,7 +262,7 @@ async function reassignSiteOrganization(site, organizationId, dataAccess, log = 
   const siteId = site.getId();
   const previousOrgId = site.getOrganizationId();
   site.setOrganizationId(organizationId);
-  log.info(`reassignSiteOrganization: before save — site ${siteId}, previous org: ${previousOrgId}, new org: ${organizationId}`);
+  log.info(`reassignSiteOrganization: before save — site ${siteId}, previous org: ${previousOrgId}, new org: ${organizationId}, site.getOrganizationId() after set: ${site.getOrganizationId()}`);
   await site.save();
   log.info(`reassignSiteOrganization: after save — site ${siteId}, org: ${organizationId}`);
 
@@ -793,17 +793,23 @@ async function performAsoPlgOnboarding({
           }
         }
 
-        // Reassign site org if needed BEFORE entitlement operations.
-        // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
-        // The onboarding record's organizationId was already anchored above.
+        // Set new org in-memory BEFORE entitlement so TierClient resolves the customer org,
+        // but defer the site.save() until after entitlement/revoke/LD to avoid intermediate
+        // saves clobbering the org change within the same request.
         if (needsOrgReassignment) {
-          site = await reassignSiteOrganization(site, customerOrgId, dataAccess, log);
-          log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
+          const previousOrgId = site.getOrganizationId();
+          site.setOrganizationId(customerOrgId);
+          log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${customerOrgId} (save deferred)`);
         }
 
         const { entitlement } = await ensureAsoEntitlement(site, context);
         await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
         await updateLaunchDarklyFlags(site, organization, context);
+
+        if (needsOrgReassignment) {
+          site = await reassignSiteOrganization(site, customerOrgId, dataAccess, log);
+          log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
+        }
 
         const steps = {
           ...(onboarding.getSteps() || {}),
@@ -1219,14 +1225,16 @@ async function performAsoPlgOnboarding({
       log.warn(`Failed to enroll site in config handlers: ${error.message}`);
     }
 
-    // Step 9: Reassign site org if it was previously in an internal/demo org
-    // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
+    // Step 9: Reassign site org if it was previously in an internal/demo org.
+    // Set new org in-memory BEFORE entitlement so TierClient resolves the customer org,
+    // but defer the site.save() until after entitlement/revoke/LD (Step 10) to avoid
+    // intermediate saves within this request clobbering the org change.
     if (needsOrgReassignment) {
-      log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      site = await reassignSiteOrganization(site, organizationId, dataAccess, log);
-      // Update PlgOnboarding's organizationId to match the site's new org
+      const previousOrgId = site.getOrganizationId();
+      site.setOrganizationId(organizationId);
+      log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${organizationId} (save deferred until after entitlement)`);
+      // Anchor onboarding record to target org now (independent record, safe to save).
       onboarding.setOrganizationId(organizationId);
-      steps.siteOrgReassigned = true;
     }
 
     // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.
@@ -1235,6 +1243,14 @@ async function performAsoPlgOnboarding({
     const { entitlement } = await ensureAsoEntitlement(site, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
     await updateLaunchDarklyFlags(site, organization, context);
+
+    // Persist site org change now (after entitlement/revoke/LD) so any intermediate
+    // site mutations earlier in this request can't clobber the new org.
+    if (needsOrgReassignment) {
+      log.info(`Persisting site ${site.getId()} org reassignment to ${organizationId}`);
+      site = await reassignSiteOrganization(site, organizationId, dataAccess, log);
+      steps.siteOrgReassigned = true;
+    }
 
     steps.entitlementCreated = true;
 
