@@ -1168,7 +1168,9 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log, dataAccess, env } = context;
+    const {
+      log, dataAccess, env, s3,
+    } = context;
     const { siteId } = context.params;
     const { authInfo: { profile } } = context.attributes;
     const { Site } = dataAccess;
@@ -1315,10 +1317,25 @@ function LlmoController(ctx) {
           log.warn(`[cdn-opt-in-notification] Bot blocker check failed for ${baseURL}: ${botErr.message}`);
         }
 
+        // CDN selection is owned by the log-infra team and persisted in the S3 LLMO config
+        // (auth-service writes it during CDN provisioning). Site DynamoDB cdnBucketConfig
+        // does not carry cdnProvider, so we read from the canonical source here.
+        let notificationCdnType;
+        try {
+          if (s3?.s3Client) {
+            const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
+              s3Bucket: s3.s3Bucket,
+            });
+            notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
+          }
+        } catch (s3Err) {
+          log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+        }
+
         notifyOptInIfNeeded(context, {
           siteId,
           siteBaseURL: baseURL,
-          cdnType: currentConfig.getLlmoCdnBucketConfig()?.cdnProvider,
+          cdnType: notificationCdnType,
           orgId: site.getOrganizationId?.(),
           optedBy,
           botBlocked,
