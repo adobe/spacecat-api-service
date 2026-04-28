@@ -1413,6 +1413,64 @@ describe('PlgOnboardingController', () => {
         userAgent: 'Bot/2.0',
       });
     });
+
+    it('sets waitlist reason with IPs and user-agent when bot blocked', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4', '5.6.7.8'],
+        userAgent: 'SpaceCat/1.0',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/blocked by a bot blocker of type 'cloudflare'/);
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/1\.2\.3\.4.*5\.6\.7\.8/);
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/SpaceCat\/1\.0/);
+    });
+
+    it('sets waitlist reason without IPs when ipsToAllowlist is empty', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'akamai',
+        userAgent: 'SpaceCat/1.0',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/blocked by a bot blocker of type 'akamai'/);
+      expect(mockOnboarding.setWaitlistReason).to.not.have.been.calledWithMatch(/IPs must be allowlisted/);
+    });
+
+    it('sets waitlist reason without user-agent when not provided', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4'],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/blocked by a bot blocker of type 'cloudflare'/);
+      expect(mockOnboarding.setWaitlistReason).to.not.have.been.calledWithMatch(/User-agent used/);
+    });
+
+    it('sets waitlist reason before setBotBlocker', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4'],
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledBefore(mockOnboarding.setBotBlocker);
+    });
   });
 
   // --- Slack notifications ---
@@ -1575,8 +1633,8 @@ describe('PlgOnboardingController', () => {
       expect(message).to.include('akamai');
       expect(message).to.not.include('IPs to allowlist');
       // organizationId is null on this onboarding, so org name/ID should not appear
-      expect(message).to.not.include('Org Name');
-      expect(message).to.not.include('Org ID');
+      expect(message).to.not.include('IMS Org Name');
+      expect(message).to.not.include('SpaceCat Org ID (derived from IMS Org)');
       expect(message).to.not.include('Site ID');
     });
 
@@ -1654,7 +1712,7 @@ describe('PlgOnboardingController', () => {
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Waitlisted');
-      expect(message).to.not.include('Org Name');
+      expect(message).to.not.include('IMS Org Name');
       expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Failed to look up org name for onboarding notification/),
       );
@@ -1681,7 +1739,7 @@ describe('PlgOnboardingController', () => {
       expect(postSlackMessageStub).to.have.been.called;
       const [, message] = postSlackMessageStub.firstCall.args;
       expect(message).to.include('Onboarded');
-      expect(message).to.not.include('Org Name');
+      expect(message).to.not.include('IMS Org Name');
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
     });
@@ -3591,7 +3649,7 @@ describe('PlgOnboardingController', () => {
       // Should be WAITLISTED, not ONBOARDED
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        /different organization/,
+        /already assigned to another organization/,
       );
       // Site should NOT be changed
       expect(siteInOtherOrg.setOrganizationId).to.not.have.been.called;
@@ -3600,6 +3658,78 @@ describe('PlgOnboardingController', () => {
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT create entitlement
       expect(tierClientCreateForSiteStub).to.not.have.been.called;
+    });
+
+    it('waitlists with "safely moved" hint when preonboarded site in different org has no enrollments', async () => {
+      const OTHER_CUSTOMER_ORG = 'other-customer-org-789';
+      const existingOrg = {
+        getImsOrgId: sandbox.stub().returns('existing-ims@AdobeOrg'),
+        getName: sandbox.stub().returns('Existing Org Name'),
+      };
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInOtherOrg = createMockSite({
+        id: TEST_SITE_ID,
+        orgId: OTHER_CUSTOMER_ORG,
+        siteEnrollments: [],
+      });
+      mockDataAccess.Site.findById.resolves(siteInOtherOrg);
+      mockDataAccess.Organization.findById.resolves(existingOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/no active products in its existing org/);
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/safely moved to 'Test Org'/);
+    });
+
+    it('waitlists with "cannot be moved" message when preonboarded site in different org has active enrollments', async () => {
+      const OTHER_CUSTOMER_ORG = 'other-customer-org-789';
+      const existingOrg = {
+        getImsOrgId: sandbox.stub().returns('existing-ims@AdobeOrg'),
+        getName: sandbox.stub().returns('Existing Org Name'),
+      };
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: OTHER_CUSTOMER_ORG,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const siteInOtherOrg = createMockSite({
+        id: TEST_SITE_ID,
+        orgId: OTHER_CUSTOMER_ORG,
+        siteEnrollments: [{ getId: () => 'enroll-1' }],
+      });
+      mockDataAccess.Site.findById.resolves(siteInOtherOrg);
+      mockDataAccess.Organization.findById.resolves(existingOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = 'some-internal-org';
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/cannot be moved.*active products/);
     });
 
     it('waitlists when re-fetch after org reassignment returns null', async () => {
