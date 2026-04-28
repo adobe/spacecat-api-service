@@ -11,7 +11,15 @@
  */
 
 import BaseCommand from './base.js';
-import { postErrorMessage, sendFile } from '../../../utils/slack/base.js';
+import {
+  formatUtcDate,
+  isFutureUtcDate,
+  parseStatusCommandArgs,
+  parseUtcDateArg,
+  postReport,
+  startOfUtcDay,
+} from './status-command-helpers.js';
+import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check agentic traffic db status'];
 const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
@@ -27,11 +35,6 @@ const AGENTIC_REFRESH_ENABLED_ENV = 'MYSTICAT_AGENTIC_REFRESH_ENABLED';
 const BATCH_SIZE = 10;
 const STALE_PENDING_THRESHOLD_HOURS = 4;
 const STALE_PENDING_THRESHOLD_MS = STALE_PENDING_THRESHOLD_HOURS * 60 * 60 * 1000;
-const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
-const REPORT_CHUNK_LIMIT = 2800;
-
-const pad2 = (n) => String(n).padStart(2, '0');
 
 function addUtcDays(date, days) {
   const next = new Date(date.getTime());
@@ -39,19 +42,11 @@ function addUtcDays(date, days) {
   return next;
 }
 
-function startOfUtcDay(date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
 function startOfUtcIsoWeek(date) {
   const midnight = startOfUtcDay(date);
   const day = midnight.getUTCDay();
   const diffToMonday = -((day + 6) % 7);
   return addUtcDays(midnight, diffToMonday);
-}
-
-function isFutureUtcDate(date, now = new Date()) {
-  return startOfUtcDay(date) > startOfUtcDay(now);
 }
 
 function isClosedSunday(date, now = new Date()) {
@@ -101,31 +96,6 @@ function getAuditTimestamp(latestAudit) {
   return latestAudit.getAuditedAt?.() || latestAudit.auditedAt;
 }
 
-function parseCommandArgs(args) {
-  const parsed = {};
-
-  for (const rawArg of args) {
-    const arg = String(rawArg || '').trim();
-    if (arg) {
-      const siteIdMatch = arg.match(SITE_ID_ARG_RE);
-      if (siteIdMatch) {
-        parsed.siteId = siteIdMatch[2].trim();
-        if (!parsed.siteId) {
-          return { error: ':warning: siteId must not be empty.' };
-        }
-      } else if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
-        parsed.dateArg = arg;
-      } else if (SITE_ID_RE.test(arg)) {
-        parsed.siteId = arg;
-      } else {
-        return { error: ':warning: Invalid date format. Use YYYY-MM-DD.' };
-      }
-    }
-  }
-
-  return parsed;
-}
-
 function formatExportCounts(siteExport) {
   const trafficRows = siteExport.rowCount ?? 'unknown';
   const classificationRows = siteExport.classificationCount;
@@ -168,39 +138,6 @@ function formatRefreshStage(row, stale = false) {
   return `${status} (${formatRefreshRow(row)})`;
 }
 
-async function postReport(slackContext, lines, filenamePrefix, title, initialComment) {
-  const { say } = slackContext;
-  const fullText = lines.join('\n');
-  if (fullText.length > REPORT_CHUNK_LIMIT && slackContext.client) {
-    await sendFile(
-      slackContext,
-      Buffer.from(fullText, 'utf8'),
-      `${filenamePrefix}-${Date.now()}.txt`,
-      title,
-      initialComment,
-    );
-    return;
-  }
-
-  if (fullText.length <= REPORT_CHUNK_LIMIT) {
-    await say(fullText);
-    return;
-  }
-
-  let chunk = '';
-  for (const line of lines) {
-    if (chunk.length + line.length + 1 > REPORT_CHUNK_LIMIT) {
-      // eslint-disable-next-line no-await-in-loop
-      await say(chunk.trim());
-      chunk = '';
-    }
-    chunk += `${line}\n`;
-  }
-  if (chunk.trim()) {
-    await say(chunk.trim());
-  }
-}
-
 /**
  * Factory function to create the CheckAgenticTrafficDbStatusCommand object.
  *
@@ -229,7 +166,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
     const { say } = slackContext;
 
     try {
-      const parsedArgs = parseCommandArgs(args);
+      const parsedArgs = parseStatusCommandArgs(args);
       if (parsedArgs.error) {
         await say(parsedArgs.error);
         return;
@@ -238,8 +175,8 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const { dateArg, siteId: requestedSiteId } = parsedArgs;
       let targetDate;
       if (dateArg) {
-        targetDate = new Date(`${dateArg}T00:00:00Z`);
-        if (Number.isNaN(targetDate.getTime())) {
+        targetDate = parseUtcDateArg(dateArg);
+        if (!targetDate) {
           await say(':warning: Invalid date format. Use YYYY-MM-DD.');
           return;
         }
@@ -252,19 +189,16 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         return;
       }
 
-      const dateStr = `${targetDate.getUTCFullYear()}-${pad2(targetDate.getUTCMonth() + 1)}-${pad2(targetDate.getUTCDate())}`;
+      const dateStr = formatUtcDate(targetDate);
       const siteScopeText = requestedSiteId ? ` for site \`${requestedSiteId}\`` : '';
 
       await say(`:hourglass_flowing_sand: Checking agentic traffic export + projection status for *${dateStr}*${siteScopeText}...`);
 
       // 1. Find all sites with cdn-logs-report enabled (those run the daily agentic export)
-      const [allSites, configuration] = await Promise.all([
-        Site.all(),
-        Configuration.findLatest(),
-      ]);
+      const configuration = await Configuration.findLatest();
       const candidateSites = requestedSiteId
-        ? allSites.filter((site) => site.getId() === requestedSiteId)
-        : allSites;
+        ? [await Site.findById(requestedSiteId)].filter(Boolean)
+        : await Site.all();
 
       if (requestedSiteId && candidateSites.length === 0) {
         await say(`:warning: No site found with siteId \`${requestedSiteId}\`.`);
@@ -373,6 +307,11 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         `${batchId}:daily-refresh`,
         `${batchId}:weekly-refresh`,
       ]);
+      const siteIdByCorrelationId = new Map(exportedSites.flatMap((s) => [
+        [s.batchId, s.siteId],
+        [`${s.batchId}:daily-refresh`, s.siteId],
+        [`${s.batchId}:weekly-refresh`, s.siteId],
+      ]));
 
       const projectionMap = new Map();
       const postgrestClient = dataAccess?.services?.postgrestClient;
@@ -394,6 +333,12 @@ function CheckAgenticTrafficDbStatusCommand(context) {
             log.warn(`projection_audit query failed: ${projError.message}`);
           } else {
             for (const row of projRows || []) {
+              const expectedSiteId = siteIdByCorrelationId.get(row.correlation_id);
+              if (row.scope_prefix && expectedSiteId && row.scope_prefix !== expectedSiteId) {
+                log.warn(`Ignoring projection_audit row with mismatched scope_prefix for ${row.correlation_id}: expected ${expectedSiteId}, got ${row.scope_prefix}`);
+                // eslint-disable-next-line no-continue
+                continue;
+              }
               projectionMap.set(projectionKey(row.handler_name, row.correlation_id), row);
             }
           }
@@ -513,7 +458,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const lines = [
         `*Agentic Traffic Export + Serving Status — ${dateStr}*`,
-        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*  :arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*  :hourglass_flowing_sand: Import Pending: *${importPending.length}*  :warning: Stale Pending: *${stalePendingSites}*  :grey_question: Unknown: *${unknown.length}*  :skip: Skipped: *${skipped.length}*  :x: Failed: *${failed.length}*  :warning: Missing batchId: *${missingBatchId.length}*  (${enabledSites.length} sites total)`,
+        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*  :arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*  :hourglass_flowing_sand: Import Pending: *${importPending.length}*  :warning: Stale Pending: *${stalePendingSites}*  :grey_question: Unknown: *${unknown.length}*  :skip: Skipped: *${skipped.length}*  :x: Failed: *${failed.length}*  :warning: Missing batchId: *${missingBatchId.length}*  (${enabledSites.length} site${enabledSites.length === 1 ? '' : 's'} total)`,
       ];
       if (projectionCheckStatus === 'ok') {
         lines.push(`Import daily: *${rawImportsProjected}/${exportedSites.length}*  Refresh daily: *${dailyRefreshProjected}/${refreshEnabled ? rawImportsProjected : 0}*${weeklyRefreshAvailableCount > 0 ? `  Refresh weekly: *${weeklyRefreshProjected}/${weeklyRefreshAvailableCount}*` : ''}`);

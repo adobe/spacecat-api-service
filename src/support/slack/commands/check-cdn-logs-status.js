@@ -13,14 +13,19 @@
 import { llmoConfig as llmo } from '@adobe/spacecat-shared-utils';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import BaseCommand from './base.js';
-import { postErrorMessage, sendFile } from '../../../utils/slack/base.js';
+import {
+  formatUtcDate,
+  getUtcYMD,
+  isFutureUtcDate,
+  parseStatusCommandArgs,
+  parseUtcDateArg,
+  postReport,
+} from './status-command-helpers.js';
+import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check cdn logs status'];
 const CDN_LOGS_AUDIT = 'cdn-logs-analysis';
 const BATCH_SIZE = 10;
-const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
-const REPORT_CHUNK_LIMIT = 2800;
 
 // These CDN families only produce a single daily aggregate (hour 23).
 // All others produce 24 hourly aggregates (hours 00–23).
@@ -40,48 +45,6 @@ const SERVICE_PROVIDER_TO_CDN_FAMILY = {
 };
 
 const ALL_HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-const pad2 = (n) => String(n).padStart(2, '0');
-
-function getYMD(date) {
-  return {
-    year: String(date.getUTCFullYear()),
-    month: pad2(date.getUTCMonth() + 1),
-    day: pad2(date.getUTCDate()),
-  };
-}
-
-function startOfUtcDay(date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function isFutureUtcDate(date, now = new Date()) {
-  return startOfUtcDay(date) > startOfUtcDay(now);
-}
-
-function parseCommandArgs(args) {
-  const parsed = {};
-
-  for (const rawArg of args) {
-    const arg = String(rawArg || '').trim();
-    if (arg) {
-      const siteIdMatch = arg.match(SITE_ID_ARG_RE);
-      if (siteIdMatch) {
-        parsed.siteId = siteIdMatch[2].trim();
-        if (!parsed.siteId) {
-          return { error: ':warning: siteId must not be empty.' };
-        }
-      } else if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
-        parsed.dateArg = arg;
-      } else if (SITE_ID_RE.test(arg)) {
-        parsed.siteId = arg;
-      } else {
-        return { error: ':warning: Invalid date format. Use YYYY-MM-DD.' };
-      }
-    }
-  }
-
-  return parsed;
-}
 
 function normalizeProvider(raw) {
   return raw ? String(raw).trim().toLowerCase() : 'unknown';
@@ -205,39 +168,6 @@ async function getCdnSettings(site, s3Client, s3Bucket, env, log) {
   };
 }
 
-async function postReport(slackContext, lines, filenamePrefix, title, initialComment) {
-  const { say } = slackContext;
-  const fullText = lines.join('\n');
-  if (fullText.length > REPORT_CHUNK_LIMIT && slackContext.client) {
-    await sendFile(
-      slackContext,
-      Buffer.from(fullText, 'utf8'),
-      `${filenamePrefix}-${Date.now()}.txt`,
-      title,
-      initialComment,
-    );
-    return;
-  }
-
-  if (fullText.length <= REPORT_CHUNK_LIMIT) {
-    await say(fullText);
-    return;
-  }
-
-  let chunk = '';
-  for (const line of lines) {
-    if (chunk.length + line.length + 1 > REPORT_CHUNK_LIMIT) {
-      // eslint-disable-next-line no-await-in-loop
-      await say(chunk.trim());
-      chunk = '';
-    }
-    chunk += `${line}\n`;
-  }
-  if (chunk.trim()) {
-    await say(chunk.trim());
-  }
-}
-
 /**
  * Factory function to create the CheckCdnLogsStatusCommand object.
  *
@@ -267,7 +197,7 @@ function CheckCdnLogsStatusCommand(context) {
         return;
       }
 
-      const parsedArgs = parseCommandArgs(args);
+      const parsedArgs = parseStatusCommandArgs(args);
       if (parsedArgs.error) {
         await say(parsedArgs.error);
         return;
@@ -276,8 +206,8 @@ function CheckCdnLogsStatusCommand(context) {
       const { dateArg, siteId: requestedSiteId } = parsedArgs;
       let targetDate;
       if (dateArg) {
-        targetDate = new Date(`${dateArg}T00:00:00Z`);
-        if (Number.isNaN(targetDate.getTime())) {
+        targetDate = parseUtcDateArg(dateArg);
+        if (!targetDate) {
           await say(':warning: Invalid date format. Use YYYY-MM-DD.');
           return;
         }
@@ -290,8 +220,8 @@ function CheckCdnLogsStatusCommand(context) {
         return;
       }
 
-      const dateStr = targetDate.toISOString().slice(0, 10);
-      const { year, month, day } = getYMD(targetDate);
+      const dateStr = formatUtcDate(targetDate);
+      const { year, month, day } = getUtcYMD(targetDate);
       const siteScopeText = requestedSiteId ? ` for site \`${requestedSiteId}\`` : '';
 
       // Resolve default CDN aggregate bucket name from environment. Per-site
@@ -302,13 +232,10 @@ function CheckCdnLogsStatusCommand(context) {
       await say(`:hourglass_flowing_sand: Checking CDN logs status for *${dateStr}*${siteScopeText} in \`${defaultAggregateBucket}\`...`);
 
       // Find all sites with cdn-logs-analysis enabled
-      const [allSites, configuration] = await Promise.all([
-        Site.all(),
-        Configuration.findLatest(),
-      ]);
+      const configuration = await Configuration.findLatest();
       const candidateSites = requestedSiteId
-        ? allSites.filter((site) => site.getId() === requestedSiteId)
-        : allSites;
+        ? [await Site.findById(requestedSiteId)].filter(Boolean)
+        : await Site.all();
 
       if (requestedSiteId && candidateSites.length === 0) {
         await say(`:warning: No site found with siteId \`${requestedSiteId}\`.`);
