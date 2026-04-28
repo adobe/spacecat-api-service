@@ -32,7 +32,7 @@ const VALID_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
 const DEFAULT_SOURCE = 'optel';
 
 const DEFAULT_BY_URL_PAGE_SIZE = 50;
-const MAX_BY_URL_PAGE_SIZE = 500;
+const MAX_BY_URL_PAGE_SIZE = 1000;
 
 // Mirrors the CASE whitelist in rpc_referral_traffic_by_url for defence-in-depth.
 const VALID_BY_URL_SORT_COLUMNS = new Set([
