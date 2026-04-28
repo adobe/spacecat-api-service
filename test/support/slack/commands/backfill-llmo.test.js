@@ -247,6 +247,20 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
+    it('rejects malformed cdn-logs-report daily DB import date syntax', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=db',
+        'date=2026/04/27',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Invalid date format. Use date=YYYY-MM-DD.')).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
     it('requires mode=db for cdn-logs-report daily DB import date', async () => {
       const command = BackfillLlmoCommand(context);
 

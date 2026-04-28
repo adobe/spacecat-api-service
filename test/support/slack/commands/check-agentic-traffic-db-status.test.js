@@ -13,6 +13,7 @@
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import nock from 'nock';
 
 import CheckAgenticTrafficDbStatusCommand from '../../../../src/support/slack/commands/check-agentic-traffic-db-status.js';
 
@@ -81,6 +82,22 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     metadata,
   });
 
+  const attachSlackFileClient = () => {
+    nock('https://slack-upload.test').post('/agentic-report').reply(200);
+    slackContext.channelId = 'C123';
+    slackContext.threadTs = '123.456';
+    slackContext.client = {
+      files: {
+        getUploadURLExternal: sinon.stub().resolves({
+          ok: true,
+          upload_url: 'https://slack-upload.test/agentic-report',
+          file_id: 'F123',
+        }),
+        completeUploadExternal: sinon.stub().resolves({ ok: true }),
+      },
+    };
+  };
+
   beforeEach(() => {
     postgrestStub = { from: sinon.stub() };
     configStub = { isHandlerEnabledForSite: sinon.stub().returns(true) };
@@ -98,6 +115,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   });
 
   afterEach(() => {
+    nock.cleanAll();
     sinon.restore();
   });
 
@@ -126,6 +144,49 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(slackContext.say).to.have.been.calledWith(
       ':warning: Invalid date format. Use YYYY-MM-DD.',
     );
+  });
+
+  it('warns when the requested traffic date is in the future', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2099-01-01'], slackContext);
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: Cannot check a future traffic date.',
+    );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+  });
+
+  it('warns when siteId is empty', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['siteId='], slackContext);
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: siteId must not be empty.',
+    );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+  });
+
+  it('accepts a bare site UUID as single-site scope', async () => {
+    const targetId = '11111111-2222-3333-4444-555555555555';
+    const targetSite = makeSite(targetId, 'https://uuid-target.com', null);
+    const otherSite = makeSite('site-other', 'https://other.com', null);
+    context.dataAccess.Site.all.resolves([targetSite, otherSite]);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22', targetId], slackContext);
+
+    expect(targetSite.getLatestAuditByAuditType).to.have.been.calledOnce;
+    expect(otherSite.getLatestAuditByAuditType).not.to.have.been.called;
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include(`for site \`${targetId}\``);
+    expect(output).to.include('https://uuid-target.com');
+    expect(output).not.to.include('https://other.com');
+  });
+
+  it('ignores empty argument tokens and uses the default date', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution([null], slackContext);
+
+    const firstArg = slackContext.say.getCall(0).args[0];
+    expect(firstArg).to.include(':hourglass_flowing_sand:');
   });
 
   it('uses yesterday as the target date when no argument is provided', async () => {
@@ -217,6 +278,19 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     expect(slackContext.say).to.have.been.calledWith(
       ':warning: No site found with siteId `missing-site`.',
+    );
+    expect(postgrestStub.from).not.to.have.been.called;
+  });
+
+  it('reports when the requested site does not have cdn-logs-report enabled', async () => {
+    configStub.isHandlerEnabledForSite.returns(false);
+    context.dataAccess.Site.all.resolves([makeSite('site-1', 'https://example.com', null)]);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22', 'siteId=site-1'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':information_source: Site `site-1` does not have cdn-logs-report enabled.',
     );
     expect(postgrestStub.from).not.to.have.been.called;
   });
@@ -367,6 +441,49 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('150');
   });
 
+  it('reports exported sites that are missing batchId', async () => {
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-nb', 'https://no-batch.com', audit)]);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    expect(postgrestStub.from).not.to.have.been.called;
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing batchId: *1*');
+    expect(output).to.include('Export missing batchId');
+    expect(output).to.include('unknown traffic rows');
+  });
+
+  it('keeps import pending fresh when the audit timestamp is invalid', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-04-22T13:00:00Z').getTime());
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-invalid-audit-time',
+        rowCount: 12,
+      },
+    }, 'not-a-date');
+    context.dataAccess.Site.all.resolves([makeSite('site-it', 'https://invalid-time.com', audit)]);
+
+    const chain = makePostgrestChain({ data: [], error: null });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('import daily: pending');
+    expect(output).not.to.include('import daily: stale pending');
+  });
+
   it('marks missing raw import as stale pending after the lag threshold', async () => {
     const clock = sinon.useFakeTimers(new Date('2026-04-22T13:00:00Z').getTime());
     const audit = makeAudit({
@@ -391,6 +508,28 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Stale Pending: *1*');
     expect(output).to.include('import daily: stale pending (>4h)');
     expect(output).to.include('batch-stale-import');
+  });
+
+  it('shows weekly refresh waiting on import for closed Sunday import pending sites', async () => {
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-19',
+        batchId: 'batch-sunday-pending',
+        rowCount: 150,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-sw', 'https://sunday-pending.com', audit)]);
+
+    const chain = makePostgrestChain({ data: [], error: null });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-19'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('weekly refresh: waiting on import');
+    expect(output).to.include('batch-sunday-pending');
   });
 
   it('reports projected for an exported site whose batchId is in projection_audit', async () => {
@@ -437,6 +576,64 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('2026-04-22 08:30');
   });
 
+  it('formats missing and invalid projection timestamps explicitly', async () => {
+    const missingTimeAudit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-missing-time',
+        rowCount: 21,
+      },
+    });
+    const invalidTimeAudit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-invalid-time',
+        rowCount: 22,
+      },
+    });
+    context.dataAccess.Site.all.resolves([
+      makeSite('site-mt', 'https://missing-time.com', missingTimeAudit),
+      makeSite('site-bt', 'https://bad-time.com', invalidTimeAudit),
+    ]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-missing-time',
+          scopePrefix: 'site-mt',
+          projectedAt: null,
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-missing-time:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-mt',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-invalid-time',
+          scopePrefix: 'site-bt',
+          projectedAt: 'not-a-time',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-invalid-time:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-bt',
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('at unknown time');
+    expect(output).to.include('at not-a-time');
+    expect(output).to.include('21 traffic rows');
+  });
+
   it('reports refresh pending when raw import is projected but daily refresh is missing', async () => {
     const audit = makeAudit({
       dailyAgenticExport: {
@@ -468,6 +665,42 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Refresh Pending: *1*');
     expect(output).to.include('missing: daily refresh');
     expect(output).to.include('batch-refresh-pending');
+  });
+
+  it('reports skipped daily refresh as refresh pending', async () => {
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-refresh-skipped',
+        rowCount: 200,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-rs', 'https://refresh-skipped.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-refresh-skipped',
+          scopePrefix: 'site-rs',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-refresh-skipped:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-rs',
+          skipped: true,
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('daily refresh: skipped');
+    expect(output).to.include('missing: daily refresh');
   });
 
   it('marks missing daily refresh as stale pending when raw import is old enough', async () => {
@@ -552,6 +785,115 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('weekly refresh: projected (99 rows (2026-04-13))');
   });
 
+  it('marks missing weekly refresh as stale pending for closed Sunday exports', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-04-22T13:00:00Z').getTime());
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-19',
+        batchId: 'batch-weekly-stale',
+        rowCount: 120,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-ws', 'https://weekly-stale.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-weekly-stale',
+          scopePrefix: 'site-ws',
+          projectedAt: '2026-04-22T08:30:00Z',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-weekly-stale:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-ws',
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-19'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Refresh weekly: *0/1*');
+    expect(output).to.include('weekly refresh: stale pending (>4h)');
+    expect(output).to.include('missing: weekly refresh (stale)');
+  });
+
+  it('reports dashboard-ready with daily refresh disabled', async () => {
+    context.env = { MYSTICAT_AGENTIC_REFRESH_ENABLED: 'false' };
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-refresh-disabled',
+        rowCount: 80,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-rd', 'https://refresh-disabled.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-refresh-disabled',
+          scopePrefix: 'site-rd',
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Dashboard-ready: *1*');
+    expect(output).to.include('daily refresh: disabled');
+    expect(output).to.include('Projector refresh enqueue appears disabled');
+  });
+
+  it('reports refresh pending with daily refresh disabled when weekly refresh is skipped', async () => {
+    context.env = { MYSTICAT_AGENTIC_REFRESH_ENABLED: 'false' };
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-disabled-weekly-skipped',
+        rowCount: 80,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-dws', 'https://disabled-weekly-skipped.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-disabled-weekly-skipped',
+          scopePrefix: 'site-dws',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-disabled-weekly-skipped:weekly-refresh',
+          handlerName: WEEKLY_REFRESH_HANDLER,
+          scopePrefix: 'site-dws',
+          skipped: true,
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Refresh Pending: *1*');
+    expect(output).to.include('daily refresh: disabled');
+    expect(output).to.include('weekly refresh: skipped');
+  });
+
   it('treats null projRows with no error the same as an empty result (|| [] fallback)', async () => {
     const audit = makeAudit({
       dailyAgenticExport: {
@@ -600,6 +942,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Unknown: *1*');
     expect(output).to.include('projection audit check: error');
+    expect(output).to.include('Import daily: unknown (projection audit check error)');
   });
 
   it('skips projection_audit query when no sites have exportable batchIds', async () => {
@@ -707,6 +1050,24 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     // Expect more than 2 say() calls (header + chunks)
     expect(slackContext.say.callCount).to.be.greaterThan(2);
+  });
+
+  it('uploads long all-site reports as a Slack file when a file client is available', async () => {
+    attachSlackFileClient();
+    const sites = Array.from({ length: 50 }, (_, i) => ({
+      getId: () => `site-${i}`,
+      getBaseURL: () => `https://very-long-url-for-site-number-${i}-that-pads-the-output.example.com`,
+      getLatestAuditByAuditType: sinon.stub().resolves(null),
+    }));
+    context.dataAccess.Site.all.resolves(sites);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    expect(slackContext.client.files.getUploadURLExternal).to.have.been.calledOnce;
+    expect(slackContext.client.files.completeUploadExternal).to.have.been.calledOnce;
+    expect(slackContext.client.files.completeUploadExternal.firstCall.args[0].initial_comment)
+      .to.equal('Agentic traffic DB status report for 2026-04-22');
   });
 
   // ─── Mixed status summary ─────────────────────────────────────────────────
