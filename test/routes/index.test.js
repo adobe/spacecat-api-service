@@ -345,6 +345,7 @@ describe('getRouteHandlers', () => {
   const mockUserDetailsController = {
     getUserDetailsByExternalUserId: () => null,
     getUserDetailsInBulk: () => null,
+    resolveUser: () => null,
   };
 
   const mockEntitlementController = {
@@ -633,6 +634,20 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice',
       'GET /org/:spaceCatId/brands/all/brand-presence/stats',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/stats',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/stats',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/owned-urls',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/owned-urls',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/trending-urls',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/trending-urls',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/cited-domains',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/cited-domains',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/domain-urls',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions',
       'GET /org/:spaceCatId/opportunities/count',
       'GET /org/:spaceCatId/brands/all/opportunities',
       'GET /org/:spaceCatId/brands/:brandId/opportunities',
@@ -901,6 +916,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/weeks',
       'GET /sites/:siteId/agentic-traffic/movers',
       'GET /sites/:siteId/agentic-traffic/url-brand-presence',
+      'GET /admin/users/:userId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 
@@ -1175,5 +1191,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /plg/records/:plgOnboardingId'].paramNames).to.deep.equal(['plgOnboardingId']);
     expect(dynamicRoutes['DELETE /plg/records/:plgOnboardingId'].handler).to.equal(mockPlgOnboardingController.deleteOnboarding);
     expect(dynamicRoutes['DELETE /plg/records/:plgOnboardingId'].paramNames).to.deep.equal(['plgOnboardingId']);
+    expect(dynamicRoutes['GET /admin/users/:userId'].handler).to.equal(mockUserDetailsController.resolveUser);
+    expect(dynamicRoutes['GET /admin/users/:userId'].paramNames).to.deep.equal(['userId']);
   });
 });
