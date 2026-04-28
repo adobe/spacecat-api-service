@@ -1,3 +1,10 @@
+## [1.457.4](https://github.com/adobe/spacecat-api-service/compare/v1.457.3...v1.457.4) (2026-04-28)
+
+
+### Bug Fixes
+
+* add money-pages to Slack run-audit allowed audits list ([#2202](https://github.com/adobe/spacecat-api-service/issues/2202)) ([6080670](https://github.com/adobe/spacecat-api-service/commit/6080670e153776e62b8b2cf374a8e6ff055bd64d))
+
 ## [1.457.3](https://github.com/adobe/spacecat-api-service/compare/v1.457.2...v1.457.3) (2026-04-28)
 
 
