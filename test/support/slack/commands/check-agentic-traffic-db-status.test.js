@@ -27,6 +27,10 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   const IMPORT_HANDLER = 'wrpc_import_agentic_traffic';
   const DAILY_REFRESH_HANDLER = 'wrpc_refresh_agentic_traffic_daily';
   const WEEKLY_REFRESH_HANDLER = 'wrpc_refresh_agentic_traffic_weekly';
+  const TARGET_SITE_ID = '11111111-2222-3333-4444-555555555555';
+  const OTHER_SITE_ID = '22222222-3333-4444-5555-555555555555';
+  const MISSING_SITE_ID = '33333333-4444-5555-6666-555555555555';
+  const DISABLED_SITE_ID = '44444444-5555-6666-7777-555555555555';
 
   /**
    * Build a minimal site mock. Pass `null` for latestAuditReturnValue to
@@ -104,7 +108,10 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     context = {
       dataAccess: {
-        Site: { all: sinon.stub().resolves([]) },
+        Site: {
+          all: sinon.stub().resolves([]),
+          findById: sinon.stub().resolves(null),
+        },
         Configuration: { findLatest: sinon.stub().resolves(configStub) },
         services: { postgrestClient: postgrestStub },
       },
@@ -133,7 +140,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['not-a-date'], slackContext);
     expect(slackContext.say).to.have.been.calledWith(
-      ':warning: Invalid date format. Use YYYY-MM-DD.',
+      ':warning: Unrecognized argument. Expected YYYY-MM-DD or siteId=<UUID>.',
     );
   });
 
@@ -144,6 +151,15 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(slackContext.say).to.have.been.calledWith(
       ':warning: Invalid date format. Use YYYY-MM-DD.',
     );
+  });
+
+  it('warns when date matches regex but is not a real UTC calendar date', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-02-30'], slackContext);
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: Invalid date format. Use YYYY-MM-DD.',
+    );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
   });
 
   it('warns when the requested traffic date is in the future', async () => {
@@ -164,26 +180,52 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(context.dataAccess.Site.all).not.to.have.been.called;
   });
 
+  it('warns when siteId key is not a UUID', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['siteId=foo`<!channel>'], slackContext);
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: Invalid siteId. Expected UUID.',
+    );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+    expect(context.dataAccess.Site.findById).not.to.have.been.called;
+  });
+
+  it('warns when duplicate date arguments are provided', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21', '2026-04-22'], slackContext);
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: Duplicate date argument.',
+    );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+  });
+
+  it('warns when duplicate siteId arguments are provided', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution([TARGET_SITE_ID, `siteId=${OTHER_SITE_ID}`], slackContext);
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: Duplicate siteId argument.',
+    );
+    expect(context.dataAccess.Site.findById).not.to.have.been.called;
+  });
+
   it('accepts a bare site UUID as single-site scope', async () => {
-    const targetId = '11111111-2222-3333-4444-555555555555';
-    const targetSite = makeSite(targetId, 'https://uuid-target.com', null);
-    const otherSite = makeSite('site-other', 'https://other.com', null);
-    context.dataAccess.Site.all.resolves([targetSite, otherSite]);
+    const targetSite = makeSite(TARGET_SITE_ID, 'https://uuid-target.com', null);
+    context.dataAccess.Site.findById.resolves(targetSite);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', targetId], slackContext);
+    await cmd.handleExecution(['2026-04-22', TARGET_SITE_ID], slackContext);
 
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+    expect(context.dataAccess.Site.findById).to.have.been.calledWith(TARGET_SITE_ID);
     expect(targetSite.getLatestAuditByAuditType).to.have.been.calledOnce;
-    expect(otherSite.getLatestAuditByAuditType).not.to.have.been.called;
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include(`for site \`${targetId}\``);
+    expect(output).to.include(`for site \`${TARGET_SITE_ID}\``);
     expect(output).to.include('https://uuid-target.com');
-    expect(output).not.to.include('https://other.com');
   });
 
   it('ignores empty argument tokens and uses the default date', async () => {
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution([null], slackContext);
+    await cmd.handleExecution([''], slackContext);
 
     const firstArg = slackContext.say.getCall(0).args[0];
     expect(firstArg).to.include(':hourglass_flowing_sand:');
@@ -214,7 +256,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   });
 
   it('filters the check to one requested siteId', async () => {
-    const targetSite = makeSite('site-target', 'https://target.com', makeAudit({
+    const targetSite = makeSite(TARGET_SITE_ID, 'https://target.com', makeAudit({
       dailyAgenticExport: {
         success: true,
         trafficDate: '2026-04-22',
@@ -223,28 +265,19 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
         classificationCount: 10,
       },
     }));
-    const otherSite = makeSite('site-other', 'https://other.com', makeAudit({
-      dailyAgenticExport: {
-        success: true,
-        trafficDate: '2026-04-22',
-        batchId: 'batch-other',
-        rowCount: 75,
-        classificationCount: 15,
-      },
-    }));
-    context.dataAccess.Site.all.resolves([targetSite, otherSite]);
+    context.dataAccess.Site.findById.resolves(targetSite);
 
     const chain = makePostgrestChain({
       data: [
         makeProjectionRow({
           correlationId: 'batch-target',
-          scopePrefix: 'site-target',
+          scopePrefix: TARGET_SITE_ID,
           outputCount: 60,
         }),
         makeProjectionRow({
           correlationId: 'batch-target:daily-refresh',
           handlerName: DAILY_REFRESH_HANDLER,
-          scopePrefix: 'site-target',
+          scopePrefix: TARGET_SITE_ID,
           outputCount: 20,
         }),
       ],
@@ -253,10 +286,11 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     postgrestStub.from.returns(chain);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', 'siteId=site-target'], slackContext);
+    await cmd.handleExecution(['2026-04-22', `siteId=${TARGET_SITE_ID}`], slackContext);
 
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+    expect(context.dataAccess.Site.findById).to.have.been.calledWith(TARGET_SITE_ID);
     expect(targetSite.getLatestAuditByAuditType).to.have.been.calledOnce;
-    expect(otherSite.getLatestAuditByAuditType).not.to.have.been.called;
     expect(chain.in.firstCall.args[1]).to.deep.equal([
       'batch-target',
       'batch-target:daily-refresh',
@@ -264,34 +298,35 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     ]);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('for site `site-target`');
+    expect(output).to.include(`for site \`${TARGET_SITE_ID}\``);
     expect(output).to.include('https://target.com');
-    expect(output).not.to.include('https://other.com');
-    expect(output).to.include('(1 sites total)');
+    expect(output).to.include('(1 site total)');
   });
 
   it('reports when the requested siteId is not found', async () => {
-    context.dataAccess.Site.all.resolves([makeSite('site-1', 'https://example.com', null)]);
+    context.dataAccess.Site.findById.resolves(null);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', 'siteId=missing-site'], slackContext);
+    await cmd.handleExecution(['2026-04-22', `siteId=${MISSING_SITE_ID}`], slackContext);
 
     expect(slackContext.say).to.have.been.calledWith(
-      ':warning: No site found with siteId `missing-site`.',
+      `:warning: No site found with siteId \`${MISSING_SITE_ID}\`.`,
     );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
     expect(postgrestStub.from).not.to.have.been.called;
   });
 
   it('reports when the requested site does not have cdn-logs-report enabled', async () => {
     configStub.isHandlerEnabledForSite.returns(false);
-    context.dataAccess.Site.all.resolves([makeSite('site-1', 'https://example.com', null)]);
+    context.dataAccess.Site.findById.resolves(makeSite(DISABLED_SITE_ID, 'https://example.com', null));
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', 'siteId=site-1'], slackContext);
+    await cmd.handleExecution(['2026-04-22', `siteId=${DISABLED_SITE_ID}`], slackContext);
 
     expect(slackContext.say).to.have.been.calledWith(
-      ':information_source: Site `site-1` does not have cdn-logs-report enabled.',
+      `:information_source: Site \`${DISABLED_SITE_ID}\` does not have cdn-logs-report enabled.`,
     );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
     expect(postgrestStub.from).not.to.have.been.called;
   });
 
@@ -439,6 +474,65 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Pending');
     expect(output).to.include('batch-pend');
     expect(output).to.include('150');
+  });
+
+  it('does not mark an old traffic date stale when a DB backfill audit ran recently', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-04-28T12:00:00Z').getTime());
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-15',
+        batchId: 'batch-recent-backfill',
+        rowCount: 150,
+        classificationCount: 40,
+      },
+    }, '2026-04-28T11:30:00Z');
+    context.dataAccess.Site.all.resolves([makeSite('site-rb', 'https://recent-backfill.com', audit)]);
+
+    const chain = makePostgrestChain({ data: [], error: null });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-15'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('import daily: pending');
+    expect(output).not.to.include('import daily: stale pending');
+  });
+
+  it('ignores projection rows whose scope_prefix belongs to another site', async () => {
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-scope-mismatch',
+        rowCount: 88,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-sm', 'https://scope-mismatch.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-scope-mismatch',
+          scopePrefix: 'other-site',
+          outputCount: 99,
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    expect(context.log.warn).to.have.been.calledWith(
+      sinon.match('Ignoring projection_audit row with mismatched scope_prefix'),
+    );
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Import Pending: *1*');
+    expect(output).to.include('batch-scope-mismatch');
   });
 
   it('reports exported sites that are missing batchId', async () => {
@@ -1050,6 +1144,22 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     // Expect more than 2 say() calls (header + chunks)
     expect(slackContext.say.callCount).to.be.greaterThan(2);
+    expect(slackContext.say.args.flat().every((message) => message.length <= 2800)).to.be.true;
+  });
+
+  it('splits a single oversized report line when file upload is unavailable', async () => {
+    const sites = [makeSite(
+      'site-long-line',
+      `https://${'a'.repeat(6200)}.example.com`,
+      null,
+    )];
+    context.dataAccess.Site.all.resolves(sites);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    expect(slackContext.say.callCount).to.be.greaterThan(3);
+    expect(slackContext.say.args.flat().every((message) => message.length <= 2800)).to.be.true;
   });
 
   it('uploads long all-site reports as a Slack file when a file client is available', async () => {
