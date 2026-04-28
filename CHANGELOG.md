@@ -1,3 +1,17 @@
+## [1.456.2](https://github.com/adobe/spacecat-api-service/compare/v1.456.1...v1.456.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* updated waitlisted reason for Ip allowlist and preonboarding flow ([#2260](https://github.com/adobe/spacecat-api-service/issues/2260)) ([5cea8e8](https://github.com/adobe/spacecat-api-service/commit/5cea8e8bf2140ab873023bbaab6de7f7cd1e09bc))
+
+## [1.456.1](https://github.com/adobe/spacecat-api-service/compare/v1.456.0...v1.456.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2277](https://github.com/adobe/spacecat-api-service/issues/2277)) ([3fa4ebb](https://github.com/adobe/spacecat-api-service/commit/3fa4ebb3703ca059c9ce9b482afa717398071205))
+
 # [1.456.0](https://github.com/adobe/spacecat-api-service/compare/v1.455.3...v1.456.0) (2026-04-27)
 
 
