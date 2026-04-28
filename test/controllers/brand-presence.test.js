@@ -11,7 +11,6 @@
  */
 
 /* eslint-env mocha */
-/* eslint-disable no-unused-vars */
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -96,15 +95,133 @@ describe('BrandPresenceController', () => {
     ...overrides,
   });
 
+  // eslint-disable-next-line no-unused-vars
   const buildQueryContext = (overrides = {}) => ({
     params: { siteId: SITE_ID },
     data: { start_week: '2025-W38', end_week: '2025-W40' },
     ...overrides,
   });
 
-  describe('ingestMetrics', () => {});
+  describe('ingest endpoint', () => {
+    it('P-01: returns 201 with total, success, failure and items for a valid batch', async () => {
+      const metrics = [
+        createValidMetric(),
+        createValidMetric({ week: '2025-W39' }),
+        createValidMetric({ week: '2025-W40' }),
+      ];
+      mockClickhouseInstance.writeBatch.resolves({ written: 3, failures: [] });
+      const controller = BrandPresenceController(context);
 
-  describe('queryData', () => {
+      const response = await controller.ingestMetrics(buildIngestContext({ data: { metrics } }));
+      const body = await response.json();
+
+      expect(response.status).to.equal(201);
+      expect(body).to.have.property('metadata');
+      expect(body.metadata).to.include({ total: 3, success: 3, failure: 0 });
+      expect(body).to.have.property('items').that.is.an('array').with.lengthOf(3);
+      expect(body).to.have.property('failures').that.is.an('array');
+    });
+
+    it('P-02: returns 400 referencing metrics field when body is null', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(buildIngestContext({ data: null }));
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('metrics');
+    });
+
+    it('P-02: returns 400 referencing metrics field when metrics key is absent', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(buildIngestContext({ data: {} }));
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('metrics');
+    });
+
+    it('P-02: returns 400 referencing metrics field when metrics is not an array', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(
+        buildIngestContext({ data: { metrics: 'not-an-array' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('metrics');
+    });
+
+    it('P-03: returns 400 referencing visibility_score when value exceeds valid range', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(
+        buildIngestContext({ data: { metrics: [createValidMetric({ visibility_score: 150.0 })] } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('visibility_score');
+    });
+
+    it('P-04: returns 401 when auth is missing', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(buildIngestContext({ auth: undefined }));
+
+      expect(response.status).to.equal(401);
+    });
+
+    it('P-05: returns 404 when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(buildIngestContext());
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('P-06: returns 201 with partial failure metadata and failures array containing index and cause', async () => {
+      const metrics = [
+        createValidMetric(),
+        createValidMetric({ week: '2025-W39' }),
+        createValidMetric({ week: '2025-W40', mention_count: -1 }),
+      ];
+      mockClickhouseInstance.writeBatch.resolves({
+        written: 2,
+        failures: [{ index: 2, error: 'mention_count must be non-negative' }],
+      });
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(buildIngestContext({ data: { metrics } }));
+      const body = await response.json();
+
+      expect(response.status).to.equal(201);
+      expect(body.metadata).to.include({ total: 3, success: 2, failure: 1 });
+      expect(body.failures).to.be.an('array').with.lengthOf(1);
+      expect(body.failures[0]).to.have.property('index', 2);
+      expect(body.failures[0]).to.have.property('error').that.is.a('string');
+    });
+
+    it('P-07: returns 500 with generic message and no internal details when ClickHouse is unreachable', async () => {
+      mockClickhouseInstance.writeBatch.rejects(
+        new Error('Connection refused: ch-node-1.internal:8123'),
+      );
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.ingestMetrics(buildIngestContext());
+      const body = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(body).to.have.property('message').that.is.a('string');
+      expect(body.message).to.not.include('ch-node-1.internal');
+      expect(body.message).to.not.include('Connection refused');
+    });
+  });
+
+  describe('query endpoint', () => {
     beforeEach(() => {
       mockClickhouseInstance.query
         .onFirstCall().resolves([{ total: '10' }])
