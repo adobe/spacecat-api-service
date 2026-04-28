@@ -1,3 +1,10 @@
+## [1.457.1](https://github.com/adobe/spacecat-api-service/compare/v1.457.0...v1.457.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* cache control for llmo endpoint | LLMO-4480 ([#2274](https://github.com/adobe/spacecat-api-service/issues/2274)) ([65e2cb0](https://github.com/adobe/spacecat-api-service/commit/65e2cb0ea8c49605afa3c9b198acf660b1fa653e))
+
 # [1.457.0](https://github.com/adobe/spacecat-api-service/compare/v1.456.4...v1.457.0) (2026-04-28)
 
 

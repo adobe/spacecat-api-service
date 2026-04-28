@@ -11,8 +11,9 @@
  */
 
 import {
-  ok, badRequest, notFound,
+  badRequest, notFound,
 } from '@adobe/spacecat-shared-http-utils';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * Filters topics based on provided query parameters.
@@ -107,7 +108,7 @@ export async function handleLlmoRationale(context) {
 
     log.info(`Filtered ${topics.length} topics down to ${filteredTopics.length} results`);
 
-    return ok(filteredTopics);
+    return cachedOk(filteredTopics);
   } catch (s3Error) {
     if (s3Error.name === 'NoSuchKey') {
       log.warn(`LLMO rationale file not found for site ${siteId} at ${s3Key}`);
