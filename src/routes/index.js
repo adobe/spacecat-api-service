@@ -490,6 +490,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
     'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
 
     // LLMO Opportunities (org-level)
     'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
@@ -511,6 +513,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'POST /sites/:siteId/site-enrollments': siteEnrollmentController.createPlgEnrollment,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'GET /admin/users/:userId': userDetailsController.resolveUser,
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,

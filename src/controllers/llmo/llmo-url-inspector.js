@@ -29,8 +29,21 @@ import {
  * Queries mysticat-data-service PostgreSQL via PostgREST RPCs.
  *
  * All RPCs are site-scoped (p_site_id), so siteId is required.
- * Platform is optional — when absent, no model filter is applied (unlike brand-presence
- * endpoints which default to chatgpt-free).
+ *
+ * Platform handling (LLMO-4525 review clarification):
+ *   - The caller may send `platform`/`model` as a query parameter. If absent
+ *     (or set to one of the `shouldApplyFilter` "no filter" sentinels), the
+ *     RPC is called with `p_platform = NULL`, which means
+ *     "do not filter by model". This differs from brand-presence endpoints
+ *     which default to `chatgpt-free`.
+ *   - When provided, the value is normalised via `validateModel`
+ *     (see llmo-brand-presence.js → MODEL_QUERY_ALIASES), so alias strings
+ *     like `'openai'` are mapped to the canonical enum
+ *     (`'chatgpt-paid'`). Unknown values return 400.
+ *
+ * Brand scoping:
+ *   - `brandId` is read from ctx.params (path segment), NOT from query string.
+ *   - `brandId === 'all'` or missing → no brand filter (`p_brand_id = NULL`).
  */
 
 /**
@@ -563,6 +576,111 @@ export function createUrlInspectorUrlPromptsHandler(
       }));
 
       return ok({ prompts });
+    },
+  );
+}
+
+/**
+ * Creates the getUrlInspectorFilterDimensions handler.
+ * Returns the distinct set of categories, regions, and content types present in
+ * url_inspector_domain_stats for the given site and date range. Used to hydrate
+ * the top-of-page Category, Region, and Channel filter dropdowns on the URL
+ * Inspector PG dashboard.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'url-inspector-filter-dimensions',
+    async (ctx, client) => {
+      // NOTE (LLMO-4525 review — major finding):
+      // Previously this handler pulled `params.brandId` from
+      // `parseFilterDimensionsParams(ctx)`, which reads ctx.data (query string)
+      // and does NOT include brandId. The path parameter `:brandId` was
+      // silently dropped, so `p_brand_id` was always `null` regardless of
+      // whether the caller hit `/brands/:brandId/...` or `/brands/all/...`.
+      // Align with the other URL Inspector handlers (stats, owned-urls,
+      // trending-urls, etc.) which read `brandId` from `ctx.params` and
+      // treat `'all'` as "no filter".
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+
+      if (!shouldApplyFilter(params.siteId)) {
+        return badRequest('siteId is required for URL Inspector endpoints');
+      }
+
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(
+        client,
+        spaceCatId,
+        params.siteId,
+      );
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+
+      const { model, error: modelError } = resolveUrlInspectorPlatform(params);
+      if (modelError) {
+        return badRequest(modelError);
+      }
+
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+      const rpcParams = {
+        p_site_id: params.siteId,
+        p_start_date: params.startDate || defaults.startDate,
+        p_end_date: params.endDate || defaults.endDate,
+        p_platform: model,
+        p_brand_id: filterByBrandId,
+      };
+
+      let response;
+      try {
+        response = await client.rpc('rpc_url_inspector_filter_dimensions', rpcParams);
+      } catch (e) {
+        // Defence in depth (LLMO-4525 review — security/junior-dev):
+        // the PostgREST client is expected to return `{ data, error }` rather
+        // than throw, but if the transport layer itself fails (TCP reset,
+        // JSON parse, etc.) we must not leak a raw error to the caller.
+        ctx.log.error(
+          `URL Inspector filter dimensions RPC threw: ${e?.message || e}`,
+          {
+            route: 'url-inspector-filter-dimensions',
+            siteId: params.siteId,
+            startDate: rpcParams.p_start_date,
+            endDate: rpcParams.p_end_date,
+            platform: rpcParams.p_platform,
+            hasBrandIdFilter: filterByBrandId !== null,
+          },
+        );
+        return internalServerError('Internal error processing URL Inspector filter dimensions');
+      }
+
+      const { data, error } = response;
+
+      if (error) {
+        // LLMO-4525 review — tester/architect finding:
+        // log code/details/hint so we can triage PostgREST errors
+        // (invalid enum values, missing grants, etc.) without shell access
+        // to the DB. Mirrors the stats handler's enriched error shape.
+        const codePart = error.code ? ` [code=${error.code}]` : '';
+        const detailsPart = error.details ? ` [details=${error.details}]` : '';
+        const hintPart = error.hint ? ` [hint=${error.hint}]` : '';
+        ctx.log.error(
+          `URL Inspector filter dimensions RPC error: ${error.message}${codePart}${detailsPart}${hintPart}`,
+          {
+            route: 'url-inspector-filter-dimensions',
+            siteId: params.siteId,
+            startDate: rpcParams.p_start_date,
+            endDate: rpcParams.p_end_date,
+            platform: rpcParams.p_platform,
+            hasBrandIdFilter: filterByBrandId !== null,
+          },
+        );
+        return internalServerError('Internal error processing URL Inspector filter dimensions');
+      }
+
+      return ok(data);
     },
   );
 }
