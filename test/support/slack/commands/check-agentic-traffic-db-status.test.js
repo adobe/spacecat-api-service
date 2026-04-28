@@ -13,7 +13,6 @@
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import nock from 'nock';
 
 import CheckAgenticTrafficDbStatusCommand from '../../../../src/support/slack/commands/check-agentic-traffic-db-status.js';
 
@@ -86,8 +85,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     metadata,
   });
 
-  const attachSlackFileClient = () => {
-    nock('https://slack-upload.test').post('/agentic-report').reply(200);
+  const attachSlackClient = () => {
     slackContext.channelId = 'C123';
     slackContext.threadTs = '123.456';
     slackContext.client = {
@@ -122,7 +120,6 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   });
 
   afterEach(() => {
-    nock.cleanAll();
     sinon.restore();
   });
 
@@ -300,7 +297,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include(`for site \`${TARGET_SITE_ID}\``);
     expect(output).to.include('https://target.com');
-    expect(output).to.include('(1 site total)');
+    expect(output).to.include('Sites checked: *1*');
   });
 
   it('reports when the requested siteId is not found', async () => {
@@ -1130,8 +1127,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
   // ─── Output chunking ──────────────────────────────────────────────────────
 
-  it('chunks output when the full report exceeds the Slack message limit', async () => {
-    // 50 sites with no audit → generates a long "No audit record found" section
+  it('caps long all-site detail lists and points to site-scoped checks', async () => {
     const sites = Array.from({ length: 50 }, (_, i) => ({
       getId: () => `site-${i}`,
       getBaseURL: () => `https://very-long-url-for-site-number-${i}-that-pads-the-output.example.com`,
@@ -1142,12 +1138,13 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
-    // Expect more than 2 say() calls (header + chunks)
-    expect(slackContext.say.callCount).to.be.greaterThan(2);
-    expect(slackContext.say.args.flat().every((message) => message.length <= 2800)).to.be.true;
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('No `cdn-logs-report` audit has run for any of the *50* enabled sites');
+    expect(output).to.include('… 42 more. Re-run with `siteId=<siteId>` for focused details.');
+    expect(output).not.to.include('site-49');
   });
 
-  it('splits a single oversized report line when file upload is unavailable', async () => {
+  it('splits a single oversized message line', async () => {
     const sites = [makeSite(
       'site-long-line',
       `https://${'a'.repeat(6200)}.example.com`,
@@ -1162,8 +1159,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(slackContext.say.args.flat().every((message) => message.length <= 2800)).to.be.true;
   });
 
-  it('uploads long all-site reports as a Slack file when a file client is available', async () => {
-    attachSlackFileClient();
+  it('keeps long all-site status output in Slack messages even when a file client is available', async () => {
+    attachSlackClient();
     const sites = Array.from({ length: 50 }, (_, i) => ({
       getId: () => `site-${i}`,
       getBaseURL: () => `https://very-long-url-for-site-number-${i}-that-pads-the-output.example.com`,
@@ -1174,10 +1171,9 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
-    expect(slackContext.client.files.getUploadURLExternal).to.have.been.calledOnce;
-    expect(slackContext.client.files.completeUploadExternal).to.have.been.calledOnce;
-    expect(slackContext.client.files.completeUploadExternal.firstCall.args[0].initial_comment)
-      .to.equal('Agentic traffic DB status report for 2026-04-22');
+    expect(slackContext.say).to.have.been.called;
+    expect(slackContext.client.files.getUploadURLExternal).not.to.have.been.called;
+    expect(slackContext.client.files.completeUploadExternal).not.to.have.been.called;
   });
 
   // ─── Mixed status summary ─────────────────────────────────────────────────
@@ -1207,9 +1203,10 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const failedSite = makeSite('site-fail', 'https://failed.com', makeAudit({
       dailyAgenticExport: { success: false, trafficDate: '2026-04-22', error: 'boom' },
     }));
+    const noAuditSite = makeSite('site-no-audit', 'https://no-audit.com', null);
 
     context.dataAccess.Site.all.resolves([
-      projectedSite, pendingSite, skippedSite, failedSite,
+      projectedSite, pendingSite, skippedSite, failedSite, noAuditSite,
     ]);
 
     // Only batch-a is projected; batch-b has no row
@@ -1241,6 +1238,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Import Pending: *1*');
     expect(output).to.include('Skipped: *1*');
     expect(output).to.include('Failed: *1*');
-    expect(output).to.include('(4 sites total)');
+    expect(output).to.include('1 site(s) have no latest audit record');
+    expect(output).to.include('Sites checked: *5*');
   });
 });

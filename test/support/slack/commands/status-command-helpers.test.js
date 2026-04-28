@@ -13,6 +13,7 @@
 import { expect } from 'chai';
 
 import {
+  appendLimitedDetails,
   parseStatusCommandArgs,
   parseUtcDateArg,
 } from '../../../../src/support/slack/commands/status-command-helpers.js';
@@ -28,5 +29,27 @@ describe('status command helpers', () => {
     expect(parseStatusCommandArgs([`siteId=${firstSiteId}`, secondSiteId])).to.deep.equal({
       error: ':warning: Duplicate siteId argument.',
     });
+  });
+
+  it('limits row detail and appends an omitted marker', () => {
+    const lines = [];
+    appendLimitedDetails(
+      lines,
+      Array.from({ length: 10 }, (_, i) => i),
+      (i) => `row ${i}`,
+      (omitted) => `${omitted} omitted`,
+    );
+
+    expect(lines).to.deep.equal([
+      'row 0',
+      'row 1',
+      'row 2',
+      'row 3',
+      'row 4',
+      'row 5',
+      'row 6',
+      'row 7',
+      '2 omitted',
+    ]);
   });
 });
