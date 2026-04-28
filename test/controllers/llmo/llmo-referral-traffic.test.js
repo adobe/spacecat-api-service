@@ -561,12 +561,18 @@ describe('llmo-referral-traffic', () => {
       expect(body.source).to.equal('adobe_analytics');
     });
 
-    it('defaults to adobe_analytics when source is unrecognised', async () => {
+    it('returns 400 for an unrecognised source', async () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficBusinessImpactHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client, data: { source: 'weird' } }));
-      const body = await res.json();
-      expect(body.source).to.equal('adobe_analytics');
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when source is optel (not supported by business-impact)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficBusinessImpactHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client, data: { source: 'optel' } }));
+      expect(res.status).to.equal(400);
     });
 
     it('maps optional numeric metrics when all fields are present', async () => {
@@ -669,6 +675,26 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
+    });
+
+    it('queries the source-specific table when ?source is given', async () => {
+      const client = makeWeeksChainClient(
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+        { data: [{ traffic_date: '2026-01-12' }], error: null },
+      );
+      const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { source: 'cdn' } }));
+      expect(client.from.calledWith('referral_traffic_cdn')).to.be.true;
+    });
+
+    it('defaults to referral_traffic_optel when source is omitted', async () => {
+      const client = makeWeeksChainClient(
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+        { data: [{ traffic_date: '2026-01-12' }], error: null },
+      );
+      const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
+      await handler(makeContext({ client }));
+      expect(client.from.calledWith('referral_traffic_optel')).to.be.true;
     });
   });
 

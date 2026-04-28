@@ -31,6 +31,13 @@ const ERR_NOT_FOUND = 'not found';
 const VALID_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
 const DEFAULT_SOURCE = 'optel';
 
+const SOURCE_TO_TABLE = {
+  optel: 'referral_traffic_optel',
+  cdn: 'referral_traffic_cdn',
+  adobe_analytics: 'referral_traffic_adobe_analytics',
+  ga4: 'referral_traffic_ga4',
+};
+
 const DEFAULT_BY_URL_PAGE_SIZE = 50;
 const MAX_BY_URL_PAGE_SIZE = 1000;
 
@@ -127,9 +134,8 @@ async function withReferralTrafficAuth(
 
   const { siteId } = context.params;
 
-  let siteContext;
   try {
-    siteContext = await getSiteAndValidateAccess(context);
+    await getSiteAndValidateAccess(context);
   } catch (error) {
     if (error.message?.includes(ERR_SITE_ACCESS)) {
       return forbidden('Only users belonging to the organization can view referral traffic data');
@@ -141,7 +147,7 @@ async function withReferralTrafficAuth(
     return internalServerError('Access validation failed');
   }
 
-  return handlerFn(context, Site.postgrestService, siteId, siteContext);
+  return handlerFn(context, Site.postgrestService, siteId);
 }
 
 // ============================================================================
@@ -400,7 +406,7 @@ export function createReferralTrafficByPageIntentHandler(getSiteAndValidateAcces
  *
  * Paginated top URLs by pageviews. Pagination and URL search are pushed down to
  * the RPC; total_count reflects the full result set size before the page limit.
- * Accepts pageSize/page_size/limit (max 500, default 50) and pageOffset/page_offset.
+ * Accepts pageSize/page_size/limit (max 1000, default 50) and pageOffset/page_offset.
  */
 export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficByUrl(context) {
@@ -464,31 +470,16 @@ export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
 }
 
 // ============================================================================
-// /business-impact
-// ============================================================================
-
-/**
- * GET /sites/:siteId/referral-traffic/business-impact
- *
- * Aggregates business metrics from adobe_analytics or ga4 sources. Returns a
- * normalized shape so the UI can render the same metric cards regardless of
- * provider. Defaults to source=adobe_analytics; caller passes ?source=ga4 for GA4.
- *
- * bounce_rate is computed server-side as SUM(bounces) / SUM(visits); null when
- * visits = 0.
- */
-// ============================================================================
 // /weeks
 // ============================================================================
 
 /**
  * GET /sites/:siteId/referral-traffic/weeks
  *
- * Returns the ISO weeks for which the site has referral traffic data.
- * Powers the ContinuousWeekPicker (custom-weeks time range option).
- *
- * Queries referral_traffic for the min and max traffic_date for the site,
- * then generates the full ISO week range between them.
+ * Returns the ISO weeks for which the site has referral traffic data for the
+ * requested source. Accepts ?source (optel|cdn|adobe_analytics|ga4, default optel).
+ * Powers the ContinuousWeekPicker (custom-weeks time range option) — each source
+ * tab passes its own source so the picker shows only weeks where that source has data.
  *
  * Returns: { weeks: [{ week: "2026-W10", startDate: "...", endDate: "..." }] }
  */
@@ -499,15 +490,21 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
       getSiteAndValidateAccess,
       'weeks',
       async (ctx, client, siteId) => {
+        /* c8 ignore next */
+        const q = ctx.data || {};
+        const rawSource = q.source;
+        const source = VALID_SOURCES.has(rawSource) ? rawSource : DEFAULT_SOURCE;
+        const tableName = SOURCE_TO_TABLE[source];
+
         const [minResult, maxResult] = await Promise.all([
           client
-            .from('referral_traffic_optel')
+            .from(tableName)
             .select('traffic_date')
             .eq('site_id', siteId)
             .order('traffic_date', { ascending: true })
             .limit(1),
           client
-            .from('referral_traffic_optel')
+            .from(tableName)
             .select('traffic_date')
             .eq('site_id', siteId)
             .order('traffic_date', { ascending: false })
@@ -551,6 +548,20 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
 // /business-impact
 // ============================================================================
 
+/**
+ * GET /sites/:siteId/referral-traffic/business-impact
+ *
+ * Aggregates business metrics from adobe_analytics or ga4 sources. Returns a
+ * normalized shape so the UI can render the same metric cards regardless of
+ * provider. Defaults to source=adobe_analytics; caller passes ?source=ga4 for GA4.
+ * Passing any other source (optel, cdn) returns a 400 — those sources do not
+ * carry the business metric columns required by this endpoint.
+ *
+ * bounce_rate is computed server-side as SUM(bounces) / SUM(visits); null when
+ * visits = 0.
+ */
+const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics']);
+
 export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficBusinessImpact(context) {
     return withReferralTrafficAuth(
@@ -560,6 +571,9 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
       async (ctx, client, siteId) => {
         const q = ctx.data || {};
         const rawSource = q.source;
+        if (rawSource != null && !VALID_BUSINESS_IMPACT_SOURCES.has(rawSource)) {
+          return badRequest('Business impact is only available for adobe_analytics and ga4 sources');
+        }
         const source = rawSource === 'ga4' ? 'ga4' : 'adobe_analytics';
         const parsed = { ...parseParams(ctx), source };
 
