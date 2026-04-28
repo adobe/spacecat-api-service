@@ -1,3 +1,10 @@
+## [1.456.4](https://github.com/adobe/spacecat-api-service/compare/v1.456.3...v1.456.4) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/mysticat-shared-seo-client to v1.3.0 ([#2280](https://github.com/adobe/spacecat-api-service/issues/2280)) ([58bb4d4](https://github.com/adobe/spacecat-api-service/commit/58bb4d405b5604c0e9bd63112c82e75ca2d97ee5))
+
 ## [1.456.3](https://github.com/adobe/spacecat-api-service/compare/v1.456.2...v1.456.3) (2026-04-28)
 
 
