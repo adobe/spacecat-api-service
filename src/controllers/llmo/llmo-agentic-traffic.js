@@ -11,10 +11,11 @@
  */
 
 import {
-  ok, badRequest, forbidden, internalServerError,
+  badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * Site-scoped agentic traffic handler factories.
@@ -175,7 +176,7 @@ export function createAgenticTrafficKpisHandler(getSiteAndValidateAccess) {
           return internalServerError('Failed to fetch agentic traffic KPIs');
         }
         /* c8 ignore next */ const row = (data || [])[0] || {};
-        return ok({
+        return cachedOk({
           totalHits: Number(row.total_hits ?? 0),
           successRate: row.success_rate !== null && row.success_rate !== undefined
             ? Number(row.success_rate) : null,
@@ -214,7 +215,7 @@ export function createAgenticTrafficKpisTrendHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic kpis-trend PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic KPIs trend');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           periodStart: row.period_start,
           totalHits: Number(row.total_hits ?? 0),
           successRate: row.success_rate !== null && row.success_rate !== undefined
@@ -250,7 +251,7 @@ export function createAgenticTrafficByRegionHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic by-region PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by region');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           region: row.region || '',
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -283,7 +284,7 @@ export function createAgenticTrafficByCategoryHandler(getSiteAndValidateAccess) 
           ctx.log.error(`Agentic traffic by-category PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by category');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           categoryName: row.category_name || 'Uncategorized',
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -312,7 +313,7 @@ export function createAgenticTrafficByPageTypeHandler(getSiteAndValidateAccess) 
           ctx.log.error(`Agentic traffic by-page-type PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by page type');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           pageType: row.page_type || 'Other',
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -341,7 +342,7 @@ export function createAgenticTrafficByStatusHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic by-status PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by status');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           httpStatus: row.http_status,
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -380,7 +381,7 @@ export function createAgenticTrafficByUserAgentHandler(getSiteAndValidateAccess)
           ctx.log.error(`Agentic traffic by-user-agent PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by user agent');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           pageType: row.page_type || '',
           agentType: row.agent_type || '',
           uniqueAgents: Number(row.unique_agents ?? 0),
@@ -440,7 +441,7 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
         // total_count is returned in every row by the RPC; pick it from the first one
         /* c8 ignore next */
         const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
-        /* c8 ignore next */ return ok({
+        /* c8 ignore next */ return cachedOk({
           totalCount,
           rows: rows.map((row) => ({
             host: row.host || '',
@@ -490,7 +491,7 @@ export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAc
           return internalServerError('Failed to fetch agentic traffic filter dimensions');
         }
         /* c8 ignore next */ const row = (data || [])[0] || {};
-        return ok({
+        return cachedOk({
           categories: row.categories || [],
           agentTypes: row.agent_types || [],
           platforms: row.platforms || [],
@@ -528,7 +529,7 @@ export function createAgenticTrafficMoversHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic movers PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic movers');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           host: row.host || '',
           urlPath: row.url_path || '',
           previousHits: Number(row.previous_hits ?? 0),
@@ -590,7 +591,7 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
         const maxDate = (maxResult.data || [])[0]?.traffic_date;
 
         if (!minDate || !maxDate) {
-          return ok({ weeks: [] });
+          return cachedOk({ weeks: [] });
         }
 
         const weeks = generateIsoWeekRange(minDate, maxDate).map((weekStr) => {
@@ -604,7 +605,7 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
           };
         });
 
-        return ok({ weeks });
+        return cachedOk({ weeks });
       },
     );
   };
@@ -661,7 +662,7 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
 
         // RETURNS JSONB → PostgREST delivers the object directly, not wrapped in an array
         /* c8 ignore next */ const result = data ?? {};
-        return ok({
+        return cachedOk({
           totalCitations: Number(result.totalCitations ?? 0),
           totalMentions: Number(result.totalMentions ?? 0),
           uniquePrompts: Number(result.uniquePrompts ?? 0),

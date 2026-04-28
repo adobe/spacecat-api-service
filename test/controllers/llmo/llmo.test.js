@@ -96,6 +96,19 @@ describe('LlmoController', () => {
   let detectCdnForDomainStub;
   let authorizeEdgeCdnRoutingStub;
 
+  // Passthrough mock for cachedOk: defers to the same fake `ok` shape that the
+  // tests already rely on (no real brotli compression / no real Response).
+  const mockCachedResponse = {
+    cachedOk: (data, additionalHeaders = {}) => ({
+      status: 200,
+      headers: new Map(Object.entries({
+        'Cache-Control': 'private, max-age=7200',
+        ...additionalHeaders,
+      })),
+      json: async () => data,
+    }),
+  };
+
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
       status: 200,
@@ -203,6 +216,7 @@ describe('LlmoController', () => {
         updateModifiedByDetails: updateModifiedByDetailsStub,
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -338,6 +352,7 @@ describe('LlmoController', () => {
         default: createMockAccessControlUtil(false),
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -381,6 +396,7 @@ describe('LlmoController', () => {
         },
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -421,6 +437,7 @@ describe('LlmoController', () => {
         },
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -2036,6 +2053,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
@@ -2130,6 +2148,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2184,6 +2203,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2217,6 +2237,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2380,6 +2401,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2612,6 +2634,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2679,6 +2702,7 @@ describe('LlmoController', () => {
         const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
           '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           ...getCommonMocks(),
         });
 
@@ -3090,6 +3114,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -4714,6 +4739,7 @@ describe('LlmoController', () => {
       const LlmoControllerNotOwner = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -4842,6 +4868,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await NonAdminController(mockContext)
@@ -4972,6 +4999,7 @@ describe('LlmoController', () => {
           updateModifiedByDetails: updateModifiedByDetailsStub,
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: TEST_USER_AGENT,
           tracingFetch: (...args) => tracingFetchStub(...args),
@@ -5081,6 +5109,7 @@ describe('LlmoController', () => {
           updateModifiedByDetails: updateModifiedByDetailsStub,
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: TEST_USER_AGENT,
           tracingFetch: (...args) => tracingFetchStub(...args),
@@ -5219,6 +5248,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5289,6 +5319,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5356,6 +5387,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5717,6 +5749,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await OrderedController(mockContext)
@@ -6683,6 +6716,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -6855,6 +6889,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await OrderedController(mockContext)
@@ -6931,6 +6966,7 @@ describe('LlmoController', () => {
           default: createMockAccessControlUtil(true, true, false),
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
@@ -7291,6 +7327,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
@@ -7589,6 +7626,7 @@ describe('LlmoController', () => {
             previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           '@adobe/spacecat-shared-utils': {
             tracingFetch: sinon.stub(),
             composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
@@ -7644,6 +7682,7 @@ describe('LlmoController', () => {
             previewAndPublishQueryIndex: sinon.stub(),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           '@adobe/spacecat-shared-utils': {
             tracingFetch: sinon.stub(),
             composeBaseURL: (d) => `https://${d}`,
