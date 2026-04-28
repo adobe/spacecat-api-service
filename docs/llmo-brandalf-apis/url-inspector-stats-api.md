@@ -164,4 +164,5 @@ On a 500, only the generic `Internal error processing URL Inspector stats` messa
 - [URL Inspector APIs Overview](./url-inspector-apis-overview.md)
 - [URL Inspector Owned URLs API](./url-inspector-owned-urls-api.md) — paginated per-URL owned citations
 - [URL Inspector Cited Domains API](./url-inspector-cited-domains-api.md) — domain-level aggregations
+- [URL Inspector Filter Dimensions API](./url-inspector-filter-dimensions-api.md) — option universe for the top-of-page filter dropdowns
 - [Brand Presence APIs Overview](./brand-presence-apis-overview.md)
