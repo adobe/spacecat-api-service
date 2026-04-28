@@ -1685,7 +1685,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDetectCdnForDomain).to.have.been.calledWith('example.com');
     });
 
-    it('should store detectedCdn as other when CDN detection resolves but does not match', async () => {
+    it('should store detectedCdn as byocdn-other when CDN detection resolves but does not match a specific provider', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -1742,7 +1742,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit();
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
-      const mockDetectCdnForDomain = sinon.stub().resolves('other');
+      const mockDetectCdnForDomain = sinon.stub().resolves('byocdn-other');
 
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
@@ -1772,8 +1772,8 @@ describe('LLMO Onboarding Functions', () => {
         imsOrgId: 'ABC123@AdobeOrg',
       }, context);
 
-      expect(result.detectedCdn).to.equal('other');
-      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('other');
+      expect(result.detectedCdn).to.equal('byocdn-other');
+      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('byocdn-other');
     });
 
     it('should continue onboarding when CDN detection throws', async () => {
@@ -4210,6 +4210,66 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/Publish failed.*502.*body: $/),
       );
+    });
+  });
+
+  // Round-trip every token the shared Joi schema accepts. Anchored against
+  // `@adobe/spacecat-shared-data-access` >= 3.54.0, which aligned the enum
+  // with the canonical CDN_TYPES vocabulary (10 tokens) plus the legacy
+  // `other` token kept for back-compat with records written by the
+  // original Phase-1-only detector. If the detector ever starts emitting a
+  // token the schema doesn't know about, the config write at runtime will
+  // throw; surfacing that at unit-test time is the whole point of this
+  // block.
+  describe('detectedCdn Joi round-trip', () => {
+    const ACCEPTED_TOKENS = [
+      // Detector emits today
+      'aem-cs-fastly',
+      'commerce-fastly',
+      'byocdn-fastly',
+      'byocdn-akamai',
+      'byocdn-cloudflare',
+      'byocdn-imperva',
+      'byocdn-other',
+      // Reserved CDN_TYPES tokens — not emitted today but accepted so
+      // a future detector revision with AMS-aware signatures can land
+      // without a coupled shared release.
+      'byocdn-cloudfront',
+      'ams-cloudfront',
+      'ams-frontdoor',
+      // Legacy sentinel kept for back-compat; detector no longer emits it.
+      'other',
+    ];
+
+    let validateConfiguration;
+
+    before(async () => {
+      ({ validateConfiguration } = await import('@adobe/spacecat-shared-data-access/src/models/site/config.js'));
+    });
+
+    ACCEPTED_TOKENS.forEach((token) => {
+      it(`accepts detectedCdn = "${token}" via the shared Joi schema`, () => {
+        const config = {
+          llmo: {
+            dataFolder: '/test',
+            brand: 'test',
+            detectedCdn: token,
+          },
+        };
+        const validated = validateConfiguration(config);
+        expect(validated.llmo.detectedCdn).to.equal(token);
+      });
+    });
+
+    it('rejects an unknown detectedCdn token (regression guard for future detector additions)', () => {
+      const config = {
+        llmo: {
+          dataFolder: '/test',
+          brand: 'test',
+          detectedCdn: 'byocdn-unknown-provider',
+        },
+      };
+      expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
     });
   });
 });
