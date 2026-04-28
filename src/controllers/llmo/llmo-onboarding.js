@@ -1384,17 +1384,27 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       try {
         const drsClient = DrsClient.createFrom(context);
         if (drsClient.isConfigured()) {
+          const trimmedBrand = brandName.trim();
           const brandProfile = siteConfig.getBrandProfile?.();
+          // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
+          // locale-aware audience from brand_profile.main_profile.target_audience.
           const audience = brandProfile?.main_profile?.target_audience
-            || `General consumers interested in ${brandName} products and services`;
+            || `General consumers interested in ${trimmedBrand} products and services`;
 
+          // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
+          // config write path when `onboarding_mode` is absent from the DRS job
+          // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
+          // prompts to the v2 customer-config storage and break v1 onboardings.
           const drsJob = await drsClient.submitPromptGenerationJob({
             baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
-            brandName: brandName.trim(),
+            brandName: trimmedBrand,
             audience,
             siteId: site.getId(),
             imsOrgId,
           });
+          if (!drsJob?.job_id) {
+            throw new Error('DRS submitPromptGenerationJob returned no job_id');
+          }
           log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
           say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
         } else {
@@ -1402,7 +1412,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         }
       } catch (drsError) {
         log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-        say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
+        say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
       }
     }
 
