@@ -239,9 +239,12 @@ describe('Suggestions Controller', () => {
     site = {
       getId: sandbox.stub().returns(SITE_ID),
       getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+      getOrganization: sandbox.stub().resolves({ getImsOrgId: () => 'TESTORG@AdobeOrg' }),
     };
     siteNotEnabled = {
       getId: sandbox.stub().returns(SITE_ID_NOT_ENABLED),
+      getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+      getOrganization: sandbox.stub().resolves({ getImsOrgId: () => 'TESTORG@AdobeOrg' }),
     };
 
     removeStub = sandbox.stub().resolves();
@@ -5085,6 +5088,28 @@ describe('Suggestions Controller', () => {
       const payload = mockSqs.sendMessage.firstCall.args[1];
       expect(payload.relationshipContext?.fixTargetPageId).to.equal('source-page-1');
     });
+
+    it('logs autofix-triggered with unknown triggeredBy when authInfo has no email', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
+      const noEmailContext = {
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...noEmailContext,
+      });
+      expect(noEmailContext.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({ triggeredBy: 'unknown' }));
+    });
   });
 
   describe('auto-fix with action assess-urls', () => {
@@ -5740,6 +5765,7 @@ describe('Suggestions Controller', () => {
         getDeliveryType: () => 'aem_edge',
         getId: () => SITE_ID,
         getBaseURL: () => 'https://test.com',
+        getOrganization: () => Promise.resolve({ getImsOrgId: () => 'TESTORG@AdobeOrg' }),
       };
 
       // Setup mocks using existing mockSuggestionDataAccess
@@ -5791,6 +5817,7 @@ describe('Suggestions Controller', () => {
         getDeliveryType: () => 'aem_edge',
         getId: () => SITE_ID,
         getBaseURL: () => 'https://test.com',
+        getOrganization: () => Promise.resolve({ getImsOrgId: () => 'TESTORG@AdobeOrg' }),
       };
 
       // Setup mocks using existing mockSuggestionDataAccess
@@ -5830,6 +5857,105 @@ describe('Suggestions Controller', () => {
       expect(accessControlStub).to.have.been.calledWith(
         sinon.match.has('getId', sinon.match.func),
         'auto_fix',
+      );
+    });
+
+    it('allows autofix for FREE_TRIAL user on non-EDS site without auto_fix scope', async () => {
+      const aemCsSite = {
+        id: SITE_ID,
+        getDeliveryType: () => 'aem_cs',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+        getOrganization: () => Promise.resolve({ getImsOrgId: () => 'TESTORG@AdobeOrg' }),
+      };
+      // withArgs is required to override the pre-wired stub from beforeEach
+      mockSuggestionDataAccess.Site.findById.withArgs(SITE_ID).resolves(aemCsSite);
+      mockSuggestionDataAccess.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      // deny auto_fix but allow org membership (empty subService)
+      const accessControlStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess');
+      accessControlStub.callsFake((_entity, permission) => permission !== 'auto_fix');
+
+      // FREE_TRIAL caller — non-EDS should skip the auto_fix scope check
+      const freeTierContext = {
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user', subScopes: [] }])
+            .withProfile({ tenants: [{ id: 'TESTORG', entitlement: { tier: 'FREE_TRIAL' } }] })
+            .withAuthenticated(true),
+        },
+      };
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...freeTierContext,
+      });
+
+      // FREE_TRIAL on non-EDS passes with org membership only — no auto_fix scope check
+      expect(response.status).to.equal(207);
+      expect(accessControlStub).to.have.been.calledWith(
+        sinon.match.has('getId', sinon.match.func),
+        '', // empty subService — tier-based bypass for free-tier on non-EDS
+      );
+    });
+
+    it('requires auto_fix scope for paid user on non-EDS site', async () => {
+      const aemCsSite = {
+        id: SITE_ID,
+        getDeliveryType: () => 'aem_cs',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+        getOrganization: () => Promise.resolve({ getImsOrgId: () => 'TESTORG@AdobeOrg' }),
+      };
+      mockSuggestionDataAccess.Site.findById.withArgs(SITE_ID).resolves(aemCsSite);
+
+      // deny auto_fix — simulates paid user missing the scope
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess')
+        .callsFake((_entity, permission) => permission !== 'auto_fix');
+
+      // PAID caller — non-EDS should still enforce auto_fix scope
+      const paidContext = {
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user', subScopes: [] }])
+            .withProfile({ tenants: [{ id: 'TESTORG', entitlement: { tier: 'PAID' } }] })
+            .withAuthenticated(true),
+        },
+      };
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...paidContext,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('blocks autofix for EDS site when user has no auto_fix scope', async () => {
+      // default site from beforeEach is already aem_edge — no override needed
+      // deny auto_fix (simulates free-trial user whose JWT has no auto_fix scope)
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess')
+        .callsFake((_entity, permission) => permission !== 'auto_fix');
+
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body).to.have.property(
+        'message',
+        'User does not belong to the organization or does not have sufficient permissions',
       );
     });
   });
