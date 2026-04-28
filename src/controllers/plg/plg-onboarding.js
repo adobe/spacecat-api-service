@@ -40,6 +40,7 @@ import {
   autoResolveAuthorUrl,
   findDeliveryType,
   deriveProjectName,
+  resolveWwwUrl,
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
@@ -165,13 +166,13 @@ async function postPlgOnboardingNotification(onboarding, context) {
 
   let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
     + `• *Domain:* \`${domain}\`\n`
-    + `• *IMS Org:* \`${imsOrgId}\``;
+    + `• *Onboarding requested on IMS Org:* \`${imsOrgId}\``;
 
   if (orgName) {
-    message += `\n• *Org Name:* ${orgName}`;
+    message += `\n• *IMS Org Name:* ${orgName}`;
   }
   if (organizationId) {
-    message += `\n• *Org ID:* \`${organizationId}\``;
+    message += `\n• *SpaceCat Org ID (derived from IMS Org):* \`${organizationId}\``;
   }
   if (siteId) {
     message += `\n• *Site ID:* \`${siteId}\``;
@@ -755,14 +756,20 @@ async function performAsoPlgOnboarding({
             log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
             needsOrgReassignment = true;
           } else {
-          // Site is in different customer org - cannot reassign, must waitlist
+            // Site is in different customer org - cannot reassign, must waitlist
             const existingOrg = await Organization.findById(currentSiteOrgId);
             /* c8 ignore next */
             const existingImsOrgId = existingOrg?.getImsOrgId?.() || currentSiteOrgId;
             /* c8 ignore next */
             const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
             const customerOrgName = organization.getName();
-            const waitlistReason = `Preonboarded site is assigned to different organization (org: ${existingOrgName}, id: ${existingImsOrgId}). Cannot be moved to '${customerOrgName}'.`;
+            let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
+            const siteEnrollments = await site.getSiteEnrollments();
+            if (!siteEnrollments || siteEnrollments.length === 0) {
+              waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${customerOrgName}'.`;
+            } else {
+              waitlistReason += ` This domain cannot be moved to '${customerOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+            }
 
             log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
 
@@ -853,7 +860,9 @@ async function performAsoPlgOnboarding({
     const rumApiClient = RUMAPIClient.createFrom(context);
     let cachedDeliveryType = null;
     try {
-      await rumApiClient.retrieveDomainkey(domain);
+      const siteProxy = site ?? { getBaseURL: () => baseURL, getConfig: () => null };
+      const rumDomain = await resolveWwwUrl(siteProxy, context);
+      await rumApiClient.retrieveDomainkey(rumDomain);
       steps.rumVerified = true;
     } catch {
       steps.rumVerified = false;
@@ -933,7 +942,16 @@ async function performAsoPlgOnboarding({
         userAgent: botBlockerResult.userAgent,
       };
 
+      let waitlistReason = `Domain ${domain} is blocked by a bot blocker of type '${botBlockerInfo.type}'.`;
+      if (botBlockerInfo.ipsToAllowlist?.length) {
+        waitlistReason += ` The following IPs must be allowlisted: ${botBlockerInfo.ipsToAllowlist.join(', ')}.`;
+      }
+      if (botBlockerInfo.userAgent) {
+        waitlistReason += ` User-agent used: ${botBlockerInfo.userAgent}.`;
+      }
+
       onboarding.setStatus(STATUSES.WAITING_FOR_IP_ALLOWLISTING);
+      onboarding.setWaitlistReason(waitlistReason);
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
