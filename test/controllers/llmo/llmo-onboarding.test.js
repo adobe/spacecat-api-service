@@ -1947,8 +1947,360 @@ describe('LLMO Onboarding Functions', () => {
       }, context);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
-      // Prompt generation is deferred to DRS post-Brandalf, so no DRS submitJob call in v1 mode
+      // V1 mode does not trigger Brandalf, but it MUST trigger DRS prompt generation
+      // directly so the legacy LLMO config still gets prompts written (LLMO-4534).
       expect(mockDrsClient.createFrom().submitJob).to.not.have.been.called;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
+        audience: 'Tech-savvy professionals',
+      });
+    }).timeout(10000);
+
+    it('should skip DRS prompt generation in v1 mode when DRS client is not configured', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS client not configured — v1 path should fall through the else branch and skip
+      // submitPromptGenerationJob, emitting a debug log instead.
+      const mockDrsClient = createMockDrsClient(sinon, { isConfigured: false });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.not.have.been.called;
+      expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping prompt generation');
+    }).timeout(10000);
+
+    it('should handle DRS prompt generation failure gracefully in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS prompt generation throws — onboarding should swallow the error, log it,
+      // and warn via say() that a manual trigger is required (LLMO-4534).
+      const submitPromptGenerationJob = sinon.stub().rejects(new Error('drs unavailable'));
+      const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const sayStub = sinon.stub();
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context, sayStub);
+
+      // Onboarding still completes despite DRS failure
+      expect(result.siteId).to.equal('site123');
+      expect(submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: drs unavailable');
+      expect(sayStub).to.have.been.calledWith(':warning: Failed to start DRS prompt generation for site site123 (will need manual trigger)');
+    }).timeout(10000);
+
+    it('should use the English fallback audience when brand profile is missing in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          // Brand profile missing entirely — exercises the `||` fallback at the audience line.
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      // Caller passes brandName with whitespace to confirm trim is applied to BOTH the
+      // audience template and the DRS payload (consistency).
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: '  Test Brand  ',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand',
+        audience: 'General consumers interested in Test Brand products and services',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
+      });
+    }).timeout(10000);
+
+    it('should treat a DRS response missing job_id as a failure in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS resolves without a job_id — onboarding must NOT log/say a fake success;
+      // it must throw into the catch and emit the `:warning:` instead.
+      const submitPromptGenerationJob = sinon.stub().resolves({});
+      const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const sayStub = sinon.stub();
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context, sayStub);
+
+      expect(result.siteId).to.equal('site123');
+      expect(submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: DRS submitPromptGenerationJob returned no job_id');
+      expect(sayStub).to.have.been.calledWith(':warning: Failed to start DRS prompt generation for site site123 (will need manual trigger)');
+      // The success log/say must NOT have been emitted with `undefined`
+      expect(mockLog.info).to.not.have.been.calledWith('Started DRS prompt generation: job=undefined');
+      expect(sayStub).to.not.have.been.calledWith(':robot_face: Started DRS prompt generation job: undefined');
     }).timeout(10000);
 
     it('should skip DRS prompt generation when DRS client is not configured', async () => {

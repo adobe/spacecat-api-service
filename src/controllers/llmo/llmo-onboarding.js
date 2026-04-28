@@ -1377,16 +1377,48 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       }
     } else {
       log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
+
+      // V1 has no Brandalf trigger, so DRS will not submit prompt generation
+      // automatically. Submit it directly here so v1 onboardings still get
+      // prompts written to the legacy LLMO config (LLMO-4534).
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        if (drsClient.isConfigured()) {
+          const trimmedBrand = brandName.trim();
+          const brandProfile = siteConfig.getBrandProfile?.();
+          // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
+          // locale-aware audience from brand_profile.main_profile.target_audience.
+          const audience = brandProfile?.main_profile?.target_audience
+            || `General consumers interested in ${trimmedBrand} products and services`;
+
+          // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
+          // config write path when `onboarding_mode` is absent from the DRS job
+          // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
+          // prompts to the v2 customer-config storage and break v1 onboardings.
+          const drsJob = await drsClient.submitPromptGenerationJob({
+            baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
+            brandName: trimmedBrand,
+            audience,
+            siteId: site.getId(),
+            imsOrgId,
+          });
+          if (!drsJob?.job_id) {
+            throw new Error('DRS submitPromptGenerationJob returned no job_id');
+          }
+          log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+          say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+        } else {
+          log.debug('DRS client not configured, skipping prompt generation');
+        }
+      } catch (drsError) {
+        log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+        say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
+      }
     }
 
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
     await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
-
-    // Prompt generation is deferred to DRS: when the Brandalf job completes
-    // and syncs brands (with correct regions) to SpaceCat, DRS automatically
-    // submits a prompt_generation_base_url job with the brand's region.
-    // This ensures prompts are generated in the correct language (LLMO-4258).
 
     return {
       site,
