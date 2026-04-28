@@ -246,5 +246,133 @@ describe('BrandPresenceController', () => {
         .onFirstCall().resolves([{ total: '10' }])
         .onSecondCall().resolves([]);
     });
+
+    it('G-01: returns 200 with data array and metadata (total, limit, offset) for valid params', async () => {
+      const rows = [
+        createValidMetric(),
+        createValidMetric({ week: '2025-W39' }),
+        createValidMetric({ week: '2025-W40' }),
+      ];
+      mockClickhouseInstance.query
+        .onFirstCall().resolves([{ total: '3' }])
+        .onSecondCall().resolves(rows);
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(
+        buildQueryContext({ data: { start_week: '2025-W38', end_week: '2025-W40' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.have.property('data').that.is.an('array');
+      expect(body).to.have.property('metadata');
+      expect(body.metadata).to.have.all.keys('total', 'limit', 'offset');
+    });
+
+    it('G-02: returns 404 for a non-existent siteId', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(buildQueryContext());
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('G-03: returns 400 with description when end_week is before start_week', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(
+        buildQueryContext({ data: { start_week: '2025-W10', end_week: '2025-W01' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body).to.have.property('message').that.is.a('string').and.has.length.greaterThan(0);
+    });
+
+    it('G-04: returns 200 with default limit of 1000 when no limit param is provided', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(buildQueryContext({ data: {} }));
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.metadata.limit).to.equal(1000);
+    });
+
+    it('G-05: returns 200 with limit=50 and offset=100 reflected in metadata', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(
+        buildQueryContext({ data: { limit: '50', offset: '100' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.metadata.limit).to.equal(50);
+      expect(body.metadata.offset).to.equal(100);
+    });
+
+    it('G-06: returns 500 with generic message and no internal details when ClickHouse query fails', async () => {
+      mockClickhouseInstance.query.reset();
+      mockClickhouseInstance.query.rejects(new Error('Database query failed'));
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(buildQueryContext());
+      const body = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(body).to.have.property('message').that.is.a('string');
+      expect(body.message).to.not.include('10.0.0.42');
+      expect(body.message).to.not.include('unreachable');
+    });
+
+    it('G-07: returns 400 when start_week does not match YYYY-Www format', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(
+        buildQueryContext({ data: { start_week: '2025-38', end_week: '2025-W40' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('start_week');
+    });
+
+    it('G-07: returns 400 when end_week does not match YYYY-Www format', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(
+        buildQueryContext({ data: { start_week: '2025-W38', end_week: 'week-40' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('end_week');
+    });
+
+    it('G-07: returns 400 when limit is not a positive integer', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(
+        buildQueryContext({ data: { limit: '-5' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('limit');
+    });
+
+    it('G-07: returns 400 when offset is negative', async () => {
+      const controller = BrandPresenceController(context);
+
+      const response = await controller.queryData(
+        buildQueryContext({ data: { offset: '-1' } }),
+      );
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.include('offset');
+    });
   });
 });
