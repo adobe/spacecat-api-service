@@ -1,3 +1,11 @@
+## [1.456.3](https://github.com/adobe/spacecat-api-service/compare/v1.456.2...v1.456.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.5.0 ([#2279](https://github.com/adobe/spacecat-api-service/issues/2279)) ([73e369e](https://github.com/adobe/spacecat-api-service/commit/73e369e62a719f8eb388a602d0fbc3727ac96edd))
+* llmo include topicId in the get topics api call ([#2268](https://github.com/adobe/spacecat-api-service/issues/2268)) ([90629c1](https://github.com/adobe/spacecat-api-service/commit/90629c16f315b05225fb7c22e89ca42f3b15c6a0))
+
 ## [1.456.2](https://github.com/adobe/spacecat-api-service/compare/v1.456.1...v1.456.2) (2026-04-28)
 
 
