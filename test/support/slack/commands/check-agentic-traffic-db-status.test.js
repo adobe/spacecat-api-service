@@ -40,8 +40,9 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   });
 
   /** Wrap an auditResult object in the standard Active-Record style audit mock. */
-  const makeAudit = (auditResult) => ({
+  const makeAudit = (auditResult, auditedAt) => ({
     getAuditResult: () => auditResult,
+    ...(auditedAt ? { getAuditedAt: () => auditedAt } : {}),
   });
 
   /**
@@ -297,6 +298,32 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('150');
   });
 
+  it('marks missing raw import as stale pending after the lag threshold', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-04-22T13:00:00Z').getTime());
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-stale-import',
+        rowCount: 150,
+        classificationCount: 40,
+      },
+    }, '2026-04-22T08:30:00Z');
+    context.dataAccess.Site.all.resolves([makeSite('site-sp', 'https://stale-pending.com', audit)]);
+
+    const chain = makePostgrestChain({ data: [], error: null });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Stale Pending: *1*');
+    expect(output).to.include('import daily: stale pending (>4h)');
+    expect(output).to.include('batch-stale-import');
+  });
+
   it('reports projected for an exported site whose batchId is in projection_audit', async () => {
     const audit = makeAudit({
       dailyAgenticExport: {
@@ -374,6 +401,42 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('batch-refresh-pending');
   });
 
+  it('marks missing daily refresh as stale pending when raw import is old enough', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-04-22T13:00:00Z').getTime());
+    const audit = makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-refresh-stale',
+        rowCount: 200,
+        classificationCount: 55,
+      },
+    });
+    context.dataAccess.Site.all.resolves([makeSite('site-rps', 'https://refresh-stale.com', audit)]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-refresh-stale',
+          scopePrefix: 'site-rps',
+          outputCount: 255,
+          projectedAt: '2026-04-22T08:30:00Z',
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Stale Pending: *1*');
+    expect(output).to.include('daily refresh: stale pending (>4h)');
+    expect(output).to.include('missing: daily refresh (stale)');
+  });
+
   it('checks weekly refresh for closed Sunday exports', async () => {
     const audit = makeAudit({
       dailyAgenticExport: {
@@ -444,7 +507,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Pending');
   });
 
-  it('handles projection_audit query error gracefully and treats site as pending', async () => {
+  it('handles projection_audit query error gracefully and reports projection status as unknown', async () => {
     const audit = makeAudit({
       dailyAgenticExport: {
         success: true,
@@ -465,9 +528,9 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(context.log.warn).to.have.been.calledWith(
       sinon.match('projection_audit query failed'),
     );
-    // Site is in pending because no projection data was found
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Pending');
+    expect(output).to.include('Unknown: *1*');
+    expect(output).to.include('projection audit check: error');
   });
 
   it('skips projection_audit query when no sites have exportable batchIds', async () => {
@@ -483,7 +546,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(postgrestStub.from).not.to.have.been.called;
   });
 
-  it('skips projection_audit query when the postgrest client is unavailable', async () => {
+  it('reports unknown when the postgrest client is unavailable', async () => {
     context.dataAccess.services = {}; // no postgrestClient
 
     const audit = makeAudit({
@@ -500,12 +563,12 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
-    // Site appears as pending since projection wasn't checked
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Pending');
+    expect(output).to.include('Unknown: *1*');
+    expect(output).to.include('projection audit check: unavailable');
   });
 
-  it('skips projection_audit query when postgrest client has no from method', async () => {
+  it('reports unknown when postgrest client has no from method', async () => {
     context.dataAccess.services = { postgrestClient: {} }; // client present but no .from
 
     const audit = makeAudit({
@@ -523,7 +586,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Pending');
+    expect(output).to.include('Unknown: *1*');
+    expect(output).to.include('projection audit check: unavailable');
   });
 
   // ─── Error handling ───────────────────────────────────────────────────────
