@@ -1,3 +1,10 @@
+## [1.457.3](https://github.com/adobe/spacecat-api-service/compare/v1.457.2...v1.457.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* **llmo:** trigger DRS prompt generation for v1 onboarding (LLMO-4534) ([#2272](https://github.com/adobe/spacecat-api-service/issues/2272)) ([cf9631e](https://github.com/adobe/spacecat-api-service/commit/cf9631e580ee5e2c6ad01c2b9fa67c6bc2912350))
+
 ## [1.457.2](https://github.com/adobe/spacecat-api-service/compare/v1.457.1...v1.457.2) (2026-04-28)
 
 
