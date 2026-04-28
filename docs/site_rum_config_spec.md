@@ -25,13 +25,12 @@ Add a `rumConfig` key to the Site `config` object (in `spacecat-shared-data-acce
 ```js
 rumConfig: {
   hasDomainKey: boolean,      // true if RUMAPIClient.retrieveDomainkey(domain) succeeded
-  verifiedAt: string,         // ISO timestamp of last successful check
   lastCheckedAt: string,      // ISO timestamp of last check attempt (success or failure)
 }
 ```
 
 - `hasDomainKey` is the flag the UI reads.
-- `verifiedAt` / `lastCheckedAt` let us detect staleness and add a refresh job later without a second schema change.
+- `lastCheckedAt` lets a future refresh job detect staleness without a schema change.
 - Absent `rumConfig` is treated as "unknown" by the UI until backfill runs — safe default is to show nothing.
 
 ### 2.2 Joi schema addition
@@ -41,7 +40,6 @@ In `spacecat-shared/packages/spacecat-shared-data-access/src/models/site/config.
 ```js
 rumConfig: Joi.object({
   hasDomainKey: Joi.boolean().required(),
-  verifiedAt: Joi.string().isoDate().optional(),
   lastCheckedAt: Joi.string().isoDate().required(),
 }).optional(),
 ```
@@ -54,26 +52,55 @@ On the `Config()` factory in `spacecat-shared/packages/spacecat-shared-data-acce
 self.getRumConfig = () => state?.rumConfig;
 self.hasRumDomainKey = () => state?.rumConfig?.hasDomainKey === true;
 self.updateRumConfig = (hasDomainKey) => {
-  const now = new Date().toISOString();
   state.rumConfig = {
     hasDomainKey,
-    verifiedAt: hasDomainKey ? now : state?.rumConfig?.verifiedAt,
-    lastCheckedAt: now,
+    lastCheckedAt: new Date().toISOString(),
   };
 };
 ```
 
 ## 3. Touchpoints
 
-### 3.1 Write paths (where the flag gets set)
+### 3.1 Shared service
 
-| Site lifecycle moment | Change | Owner file |
-|---|---|---|
-| **PLG onboarding** | After `rumApiClient.retrieveDomainkey(domain)` try/catch, call `site.getConfig().updateRumConfig(steps.rumVerified)` then `site.save()`. | [plg-onboarding.js:755-782](../src/controllers/plg/plg-onboarding.js#L755-L782) |
-| **Existing sites (backfill)** | One-time Lambda/script: iterate all sites, call `RUMAPIClient.retrieveDomainkey(domain)`, write result to config. Skip sites that already have `rumConfig`. | New script under `spacecat-api-service/scripts/` |
-| **Periodic refresh (future, out of scope v1)** | Cron or scheduled audit that re-checks all sites where `lastCheckedAt` is older than N days. | Future ticket |
+All write paths go through a single helper to avoid duplicating the RUM check + save logic:
 
-### 3.2 Read path (API surface)
+```js
+// src/support/rum-config-service.js
+export const updateRumConfig = async (site, context, log) => {
+  const domain = site.getBaseURL();
+  const rumApiClient = RUMAPIClient.createFrom(context);
+  let hasDomainKey = false;
+  try {
+    await rumApiClient.retrieveDomainkey(domain);
+    hasDomainKey = true;
+  } catch (e) {
+    log.warn(`RUM check failed for ${domain}: ${e.message}`);
+  }
+  site.getConfig().updateRumConfig(hasDomainKey);
+  await site.save();
+  return hasDomainKey;
+};
+```
+
+Follows the precedent of `updateCodeConfig` in `src/support/utils.js`.
+
+### 3.2 Write paths (where the flag gets set)
+
+All six site creation / onboarding paths call `updateRumConfig(site, context, log)` from the shared service above.
+
+| Site lifecycle moment | Owner file |
+|---|---|
+| **PLG onboarding** | [plg-onboarding.js:755-782](../src/controllers/plg/plg-onboarding.js#L755-L782) |
+| **Admin `POST /sites`** | [sites.js:305](../src/controllers/sites.js#L305) |
+| **Slack approve-site-candidate** | [slack/actions/approve-site-candidate.js:64](../src/support/slack/actions/approve-site-candidate.js#L64) |
+| **Slack `add-site` command** | [slack/commands/add-site.js:83](../src/support/slack/commands/add-site.js#L83) |
+| **LLMO onboarding** | [llmo/llmo-onboarding.js:983](../src/controllers/llmo/llmo-onboarding.js#L983) |
+| **`onboardSingleSite` util** | [support/utils.js:1053](../src/support/utils.js#L1053) |
+| **Backfill (one-time)** | New script under `spacecat-api-service/scripts/` |
+| **Periodic refresh (v1 — see §6)** | New audit-worker cron |
+
+### 3.3 Read path (API surface)
 
 `rumConfig` is already exposed automatically via [dto/site.js:50](../src/dto/site.js#L50) (`ConfigDto.toJSON(site.getConfig())`). No controller changes needed — any endpoint that returns Site already carries `config.rumConfig` after backfill.
 
@@ -82,23 +109,27 @@ Specifically the UI will read it from:
 
 No change needed to `/latest-metrics`.
 
-### 3.3 Event-driven updates (optional, v1.1)
+### 3.4 Event-driven updates (optional, v1.1)
 
 If Spacecat ever fires an internal event when a customer configures RUM post-onboarding, add a handler that flips `hasDomainKey` to `true`. Not required for v1; backfill + onboarding coverage is sufficient.
 
 ## 4. Backfill plan
 
+Targets **all sites without `rumConfig`** — regardless of PLG status. This covers:
+- All non-PLG sites (admin, Slack, LLMO onboarding paths).
+- PLG sites onboarded before PR 2 ships (they never had `updateRumConfig` called on them).
+
 1. Write `scripts/backfill-rum-config.mjs` in `spacecat-api-service`.
 2. Paginate `Site` collection, for each site without `rumConfig`:
-   - Call `RUMAPIClient.retrieveDomainkey(domain)`.
-   - Write `config.rumConfig` via the new accessor.
+   - Skip sites where `isLive = false` or org is in `ASO_PLG_EXCLUDED_ORGS`.
+   - Call `updateRumConfig(site, context, log)` from the shared service.
    - Log result, rate-limit to avoid hammering the RUM API.
 3. Run in dev → stage → prod, with manual review between environments.
 4. Idempotent: safe to re-run.
 
 ## 5. Testing
 
-- **Unit**: `Config.updateRumConfig` sets/updates the three fields correctly; `hasRumDomainKey()` returns expected boolean; Joi validation accepts/rejects bad shapes.
+- **Unit**: `Config.updateRumConfig` sets both fields correctly; `hasRumDomainKey()` returns expected boolean; Joi validation accepts/rejects bad shapes.
 - **Integration (PLG)**: onboarding a new site writes `rumConfig` when RUM check succeeds AND when it fails.
 - **Backfill script**: dry-run mode that reports counts without writing; wet-run idempotency.
 - **API contract**: `GET /sites/{id}` response includes `config.rumConfig` after update.
@@ -106,14 +137,15 @@ If Spacecat ever fires an internal event when a customer configures RUM post-onb
 ## 6. Rollout
 
 1. **PR 1** (spacecat-shared): add Joi schema + `Config` accessors + unit tests.
-2. **PR 2** (spacecat-api-service): wire PLG onboarding to call `updateRumConfig` + tests.
+2. **PR 2** (spacecat-api-service): create `rum-config-service.js` shared helper; wire all six site creation paths + tests.
 3. **PR 3** (spacecat-api-service): backfill script + dry-run + docs.
-4. Backfill run (stage → prod).
-5. **PR 4** (experience-success-studio-ui): consume the flag — dialog + banner.
+4. **PR 4** (spacecat-audit-worker): periodic refresh cron — daily re-check of sites where `lastCheckedAt` is older than N days, using the same shared service.
+5. Backfill run (stage → prod).
+6. **PR 5** (experience-success-studio-ui): consume the flag — dialog + banner.
 
-PRs 1–3 are independent of the UI work and can land first. UI work (PR 4) is gated on backfill completion in prod.
+PRs 1–4 are independent of the UI work and can land first. UI work (PR 5) is gated on backfill completion in prod.
 
 ## 7. Open questions
 
 - [ ] Should `rumConfig` be editable via an admin API for manual overrides? (default: no, v1)
-- [ ] Do we want a periodic refresh cron in v1, or defer? (recommended: defer)
+- [ ] Periodic refresh cron: promoted to first-class (PR 4, audit-worker). Frequency TBD — 7-day staleness threshold is a reasonable starting point.
