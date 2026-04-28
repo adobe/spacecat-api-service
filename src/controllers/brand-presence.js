@@ -17,6 +17,7 @@ import {
   createResponse,
   internalServerError,
   unauthorized,
+  forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import ClickhouseClient, { toBrandPresenceCompetitorData } from '@adobe/spacecat-shared-clickhouse-client';
 
@@ -31,11 +32,15 @@ function BrandPresenceController(context) {
     const { siteId } = requestContext.params;
     const { data, auth } = requestContext;
 
+    if (!auth) {
+      log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 401 Unauthorized: no auth`);
+      return unauthorized('Authentication required');
+    }
     try {
       auth.checkScopes([SCOPE_WRITE]);
     } catch {
-      log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 401 Unauthorized: missing scope ${SCOPE_WRITE}`);
-      return unauthorized('Missing required scope: brand-presence.write');
+      log.error(`[brand-presence-controller] POST /sites/${siteId}/brand-presence/metrics — 403 Forbidden: missing scope ${SCOPE_WRITE}`);
+      return forbidden('Missing required scope: brand-presence.write');
     }
 
     try {

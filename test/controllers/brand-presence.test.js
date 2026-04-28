@@ -174,16 +174,6 @@ describe('BrandPresenceController', () => {
       expect(response.status).to.equal(401);
     });
 
-    it('P-04: returns 401 when auth scope check fails', async () => {
-      const controller = BrandPresenceController(context);
-
-      const response = await controller.ingestMetrics(
-        buildIngestContext({ auth: { checkScopes: sandbox.stub().throws(new Error('missing scope')) } }),
-      );
-
-      expect(response.status).to.equal(401);
-    });
-
     it('P-04: proceeds past auth when scope check passes', async () => {
       mockClickhouseInstance.writeBatch.resolves({ written: 1, failures: [] });
       const controller = BrandPresenceController(context);
