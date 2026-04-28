@@ -323,8 +323,7 @@ describe('BrandPresenceController', () => {
 
       expect(response.status).to.equal(500);
       expect(body).to.have.property('message').that.is.a('string');
-      expect(body.message).to.not.include('10.0.0.42');
-      expect(body.message).to.not.include('unreachable');
+      expect(body.message).to.equal('Database query failed');
     });
 
     it('G-07: returns 400 when start_week does not match YYYY-Www format', async () => {
