@@ -4213,14 +4213,17 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
-  // Round-trip every detector-emitted detectedCdn token through the
-  // spacecat-shared Joi schema. If any of these fail the api-service has
-  // started emitting a token the schema doesn't know about — surface the
-  // mismatch immediately at unit-test time rather than at runtime when an
-  // onboard call would otherwise blow up with a Joi validation error.
-  // Schema lives in `@adobe/spacecat-shared-data-access` >= 3.53.0.
+  // Round-trip every token the shared Joi schema accepts. Anchored against
+  // `@adobe/spacecat-shared-data-access` >= 3.54.0, which aligned the enum
+  // with the canonical CDN_TYPES vocabulary (10 tokens) plus the legacy
+  // `other` token kept for back-compat with records written by the
+  // original Phase-1-only detector. If the detector ever starts emitting a
+  // token the schema doesn't know about, the config write at runtime will
+  // throw; surfacing that at unit-test time is the whole point of this
+  // block.
   describe('detectedCdn Joi round-trip', () => {
     const ACCEPTED_TOKENS = [
+      // Detector emits today
       'aem-cs-fastly',
       'commerce-fastly',
       'byocdn-fastly',
@@ -4228,6 +4231,13 @@ describe('LLMO Onboarding Functions', () => {
       'byocdn-cloudflare',
       'byocdn-imperva',
       'byocdn-other',
+      // Reserved CDN_TYPES tokens — not emitted today but accepted so
+      // a future detector revision with AMS-aware signatures can land
+      // without a coupled shared release.
+      'byocdn-cloudfront',
+      'ams-cloudfront',
+      'ams-frontdoor',
+      // Legacy sentinel kept for back-compat; detector no longer emits it.
       'other',
     ];
 
@@ -4256,7 +4266,7 @@ describe('LLMO Onboarding Functions', () => {
         llmo: {
           dataFolder: '/test',
           brand: 'test',
-          detectedCdn: 'byocdn-cloudfront',
+          detectedCdn: 'byocdn-unknown-provider',
         },
       };
       expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
