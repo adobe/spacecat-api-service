@@ -25,6 +25,8 @@ const AGENTIC_TRAFFIC_HANDLERS = [
 ];
 const AGENTIC_REFRESH_ENABLED_ENV = 'MYSTICAT_AGENTIC_REFRESH_ENABLED';
 const BATCH_SIZE = 10;
+const STALE_PENDING_THRESHOLD_HOURS = 4;
+const STALE_PENDING_THRESHOLD_MS = STALE_PENDING_THRESHOLD_HOURS * 60 * 60 * 1000;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -68,6 +70,30 @@ function formatProjectedAt(projectedAt) {
   return date.toISOString().slice(0, 16).replace('T', ' ');
 }
 
+function parseTimestamp(timestamp) {
+  if (!timestamp) {
+    return null;
+  }
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isStalePending(since, now) {
+  const sinceDate = parseTimestamp(since);
+  if (!sinceDate) {
+    return false;
+  }
+  return now.getTime() - sinceDate.getTime() >= STALE_PENDING_THRESHOLD_MS;
+}
+
+function formatPendingStatus(stale) {
+  return stale ? `stale pending (>${STALE_PENDING_THRESHOLD_HOURS}h)` : 'pending';
+}
+
+function getAuditTimestamp(latestAudit) {
+  return latestAudit.getAuditedAt?.() || latestAudit.auditedAt;
+}
+
 function formatExportCounts(siteExport) {
   const trafficRows = siteExport.rowCount ?? 'unknown';
   const classificationRows = siteExport.classificationCount;
@@ -102,7 +128,10 @@ function formatProjectedStage(row, projectedAt) {
   return `projected (${row.output_count} rows at ${projectedAt})`;
 }
 
-function formatRefreshStage(row) {
+function formatRefreshStage(row, stale = false) {
+  if (!row) {
+    return formatPendingStatus(stale);
+  }
   const status = getRefreshStatus(row);
   if (status !== 'projected') {
     return status;
@@ -231,6 +260,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
               batchId: dailyExport.batchId,
               rowCount: dailyExport.rowCount,
               classificationCount: dailyExport.classificationCount,
+              auditedAt: getAuditTimestamp(latestAudit),
             };
           } catch (e) {
             log.warn(`Failed to read audit for site ${siteId}: ${e.message}`);
@@ -256,20 +286,26 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const projectionMap = new Map();
       const postgrestClient = dataAccess?.services?.postgrestClient;
+      let projectionCheckStatus = 'ok';
 
-      if (projectionCorrelationIds.length > 0 && postgrestClient?.from) {
-        const { data: projRows, error: projError } = await postgrestClient
-          .from('projection_audit')
-          .select('correlation_id,scope_prefix,handler_name,output_count,projected_at,skipped,metadata')
-          .in('correlation_id', projectionCorrelationIds)
-          .in('handler_name', AGENTIC_TRAFFIC_HANDLERS)
-          .order('projected_at', { ascending: false });
-
-        if (projError) {
-          log.warn(`projection_audit query failed: ${projError.message}`);
+      if (projectionCorrelationIds.length > 0) {
+        if (!postgrestClient?.from) {
+          projectionCheckStatus = 'unavailable';
         } else {
-          for (const row of projRows || []) {
-            projectionMap.set(projectionKey(row.handler_name, row.correlation_id), row);
+          const { data: projRows, error: projError } = await postgrestClient
+            .from('projection_audit')
+            .select('correlation_id,scope_prefix,handler_name,output_count,projected_at,skipped,metadata')
+            .in('correlation_id', projectionCorrelationIds)
+            .in('handler_name', AGENTIC_TRAFFIC_HANDLERS)
+            .order('projected_at', { ascending: false });
+
+          if (projError) {
+            projectionCheckStatus = 'error';
+            log.warn(`projection_audit query failed: ${projError.message}`);
+          } else {
+            for (const row of projRows || []) {
+              projectionMap.set(projectionKey(row.handler_name, row.correlation_id), row);
+            }
           }
         }
       }
@@ -282,71 +318,94 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const noAudit = [];
       const failed = [];
       const dateMismatch = [];
+      const unknown = [];
       let rawImportsProjected = 0;
       let dailyRefreshProjected = 0;
       let weeklyRefreshProjected = 0;
       let weeklyRefreshAvailableCount = 0;
+      let stalePendingSites = 0;
       const refreshEnabled = isRefreshEnabled(env);
       const weeklyRefreshExpected = refreshEnabled && isClosedSunday(targetDate);
+      const now = new Date();
 
       for (const s of siteExports) {
         if (s.status === 'exported') {
-          const importProjection = projectionMap.get(
-            projectionKey(AGENTIC_TRAFFIC_IMPORT_HANDLER, s.batchId),
-          );
-          if (importProjection && !importProjection.skipped) {
-            rawImportsProjected += 1;
-            const dailyRefreshProjection = refreshEnabled
-              ? projectionMap.get(projectionKey(
-                AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER,
-                `${s.batchId}:daily-refresh`,
-              ))
-              : null;
-            const weeklyRefreshProjection = projectionMap.get(projectionKey(
-              AGENTIC_TRAFFIC_WEEKLY_REFRESH_HANDLER,
-              `${s.batchId}:weekly-refresh`,
-            ));
-            const weeklyRefreshAvailable = weeklyRefreshExpected
-              || Boolean(weeklyRefreshProjection);
-            if (weeklyRefreshAvailable) {
-              weeklyRefreshAvailableCount += 1;
-            }
-
-            if (dailyRefreshProjection && !dailyRefreshProjection.skipped) {
-              dailyRefreshProjected += 1;
-            }
-            if (weeklyRefreshAvailable
-              && weeklyRefreshProjection
-              && !weeklyRefreshProjection.skipped) {
-              weeklyRefreshProjected += 1;
-            }
-
-            const missingRefreshes = [];
-            if (refreshEnabled && (!dailyRefreshProjection || dailyRefreshProjection.skipped)) {
-              missingRefreshes.push('daily refresh');
-            }
-            if (weeklyRefreshAvailable
-              && (!weeklyRefreshProjection || weeklyRefreshProjection.skipped)) {
-              missingRefreshes.push('weekly refresh');
-            }
-
-            const enrichedSite = {
-              ...s,
-              importProjection,
-              importOutputCount: importProjection.output_count,
-              importProjectedAt: formatProjectedAt(importProjection.projected_at),
-              dailyRefreshProjection,
-              weeklyRefreshProjection,
-              weeklyRefreshAvailable,
-            };
-
-            if (missingRefreshes.length > 0) {
-              refreshPending.push({ ...enrichedSite, missingRefreshes });
-            } else {
-              dashboardReady.push(enrichedSite);
-            }
+          if (projectionCheckStatus !== 'ok') {
+            unknown.push({ ...s, projectionCheckStatus });
           } else {
-            importPending.push(s);
+            const importProjection = projectionMap.get(
+              projectionKey(AGENTIC_TRAFFIC_IMPORT_HANDLER, s.batchId),
+            );
+            if (importProjection && !importProjection.skipped) {
+              rawImportsProjected += 1;
+              const dailyRefreshProjection = refreshEnabled
+                ? projectionMap.get(projectionKey(
+                  AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER,
+                  `${s.batchId}:daily-refresh`,
+                ))
+                : null;
+              const weeklyRefreshProjection = projectionMap.get(projectionKey(
+                AGENTIC_TRAFFIC_WEEKLY_REFRESH_HANDLER,
+                `${s.batchId}:weekly-refresh`,
+              ));
+              const weeklyRefreshAvailable = weeklyRefreshExpected
+                || Boolean(weeklyRefreshProjection);
+              if (weeklyRefreshAvailable) {
+                weeklyRefreshAvailableCount += 1;
+              }
+
+              if (dailyRefreshProjection && !dailyRefreshProjection.skipped) {
+                dailyRefreshProjected += 1;
+              }
+              if (weeklyRefreshAvailable
+                && weeklyRefreshProjection
+                && !weeklyRefreshProjection.skipped) {
+                weeklyRefreshProjected += 1;
+              }
+
+              const missingRefreshes = [];
+              const staleRefreshes = [];
+              if (refreshEnabled && (!dailyRefreshProjection || dailyRefreshProjection.skipped)) {
+                missingRefreshes.push('daily refresh');
+                if (!dailyRefreshProjection && isStalePending(importProjection.projected_at, now)) {
+                  staleRefreshes.push('daily refresh');
+                }
+              }
+              if (weeklyRefreshAvailable
+                && (!weeklyRefreshProjection || weeklyRefreshProjection.skipped)) {
+                missingRefreshes.push('weekly refresh');
+                if (!weeklyRefreshProjection
+                  && isStalePending(importProjection.projected_at, now)) {
+                  staleRefreshes.push('weekly refresh');
+                }
+              }
+
+              const enrichedSite = {
+                ...s,
+                importProjection,
+                importOutputCount: importProjection.output_count,
+                importProjectedAt: formatProjectedAt(importProjection.projected_at),
+                dailyRefreshProjection,
+                weeklyRefreshProjection,
+                weeklyRefreshAvailable,
+                staleRefreshes,
+              };
+
+              if (missingRefreshes.length > 0) {
+                if (staleRefreshes.length > 0) {
+                  stalePendingSites += 1;
+                }
+                refreshPending.push({ ...enrichedSite, missingRefreshes });
+              } else {
+                dashboardReady.push(enrichedSite);
+              }
+            } else {
+              const importStalePending = isStalePending(s.auditedAt, now);
+              if (importStalePending) {
+                stalePendingSites += 1;
+              }
+              importPending.push({ ...s, importStalePending });
+            }
           }
         } else if (s.status === 'skipped') {
           skipped.push(s);
@@ -361,7 +420,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const lines = [
         `*Agentic Traffic Export + Serving Status — ${dateStr}*`,
-        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*  :arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*  :hourglass_flowing_sand: Import Pending: *${importPending.length}*  :skip: Skipped: *${skipped.length}*  :x: Failed: *${failed.length}*  (${enabledSites.length} sites total)`,
+        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*  :arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*  :hourglass_flowing_sand: Import Pending: *${importPending.length}*  :warning: Stale Pending: *${stalePendingSites}*  :grey_question: Unknown: *${unknown.length}*  :skip: Skipped: *${skipped.length}*  :x: Failed: *${failed.length}*  (${enabledSites.length} sites total)`,
         `Import daily: *${rawImportsProjected}/${exportedSites.length}*  Refresh daily: *${dailyRefreshProjected}/${refreshEnabled ? rawImportsProjected : 0}*${weeklyRefreshAvailableCount > 0 ? `  Refresh weekly: *${weeklyRefreshProjected}/${weeklyRefreshAvailableCount}*` : ''}`,
       ];
 
@@ -386,12 +445,21 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         lines.push('', '*Refresh Pending (raw import projected, serving table refresh not yet seen):*');
         for (const s of refreshPending) {
           const daily = refreshEnabled
-            ? ` — daily refresh: ${formatRefreshStage(s.dailyRefreshProjection)}`
+            ? ` — daily refresh: ${formatRefreshStage(
+              s.dailyRefreshProjection,
+              s.staleRefreshes.includes('daily refresh'),
+            )}`
             : ' — daily refresh: disabled';
           const weekly = s.weeklyRefreshAvailable
-            ? ` — weekly refresh: ${formatRefreshStage(s.weeklyRefreshProjection)}`
+            ? ` — weekly refresh: ${formatRefreshStage(
+              s.weeklyRefreshProjection,
+              s.staleRefreshes.includes('weekly refresh'),
+            )}`
             : '';
-          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}${daily}${weekly} — missing: ${s.missingRefreshes.join(', ')} — batchId: \`${s.batchId}\``);
+          const missing = s.missingRefreshes
+            .map((name) => (s.staleRefreshes.includes(name) ? `${name} (stale)` : name))
+            .join(', ');
+          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}${daily}${weekly} — missing: ${missing} — batchId: \`${s.batchId}\``);
         }
       }
 
@@ -399,7 +467,14 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         lines.push('', '*Import Pending (export done, raw DB import not yet seen):*');
         for (const s of importPending) {
           const weekly = weeklyRefreshExpected ? ' — weekly refresh: waiting on import' : '';
-          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — import daily: pending — daily refresh: waiting on import${weekly} — batchId: \`${s.batchId}\` — export: ${formatExportCounts(s)}`);
+          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — import daily: ${formatPendingStatus(s.importStalePending)} — daily refresh: waiting on import${weekly} — batchId: \`${s.batchId}\` — export: ${formatExportCounts(s)}`);
+        }
+      }
+
+      if (unknown.length > 0) {
+        lines.push('', '*Unknown (projection_audit status could not be checked):*');
+        for (const s of unknown) {
+          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — projection audit check: ${s.projectionCheckStatus} — batchId: \`${s.batchId}\` — export: ${formatExportCounts(s)}`);
         }
       }
 
