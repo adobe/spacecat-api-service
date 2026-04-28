@@ -44,7 +44,7 @@ import {
   SUPPORTED_EDGE_ROUTING_CDN_TYPES,
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
-  detectCdnForDomain,
+  detectAemCsFastlyForDomain,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -1307,7 +1307,7 @@ function LlmoController(ctx) {
             const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
             const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : baseURL;
             const hostname = calculateForwardedHost(effectiveBaseUrl, log);
-            const detectedCdn = await detectCdnForDomain(hostname, log);
+            const detectedCdn = await detectAemCsFastlyForDomain(hostname, log);
             if (!detectedCdn || detectedCdn !== cdnTypeNormalized) {
               log.error(`[edge-optimize-routing-failed] ${baseURL} Requested cdnType: '${cdnTypeNormalized}', detected CDN: '${detectedCdn}'`);
               return badRequest(`Requested CDN type '${cdnTypeNormalized}' does not match the detected CDN for this domain`);

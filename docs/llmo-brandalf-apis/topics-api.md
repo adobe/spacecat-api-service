@@ -16,7 +16,7 @@ Two endpoints that power the **Data Insights table** in the Brand Presence dashb
 **Path parameters:**
 - `spaceCatId` — Organization ID (UUID)
 - `brandId` — `all` (all brands) or a specific brand UUID
-- `topicId` — URL-encoded topic name (e.g. `Merge%20PDF`)
+- `topicId` (topic prompts routes only) — URL-encoded **display topic name** (e.g. `Merge%20PDF`) or a **topic UUID** from `topics` / execution `topic_id`; same resolution as [Prompt Detail API](prompt-detail-api.md)
 
 ---
 
@@ -56,6 +56,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics?s
   "topicDetails": [
     {
       "topic": "PDF Editing",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "promptCount": 47,
       "brandMentions": 312,
       "brandCitations": 198,
@@ -70,11 +71,14 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics?s
 }
 ```
 
+`topicId` is the stable **topics table UUID** for that row’s topic group when `rpc_brand_presence_topics` returns `topic_id` (from executions in the window). It is JSON `null` when every matching execution has a null `topic_id`.
+
 ### Topic Object Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `topic` | string | Topic/keyword name |
+| `topicId` | string \| null | Stable topic UUID (`topics.id` / execution `topic_id`) for use in `…/topics/:topicId/prompts`, `…/detail`, and `…/prompt-detail` when non-null; otherwise fall back to URL-encoded `topic` |
 | `promptCount` | number | Number of unique prompts (deduplicated by `prompt\|region_code`, keeping latest execution) |
 | `brandMentions` | number | Total mention count across **all** execution rows in the date range |
 | `brandCitations` | number | Total citation count across **all** execution rows in the date range |
@@ -86,13 +90,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics?s
 
 ### Aggregation Logic
 
-1. Query all `brand_presence_executions` rows matching the filters, with embedded `brand_presence_sources(url_id)` via PostgREST
-2. Group rows by `topics` column
-3. **Per topic**, perform a single pass:
-   - **Prompt deduplication**: Track unique `prompt|region_code` keys, keeping only the row with the latest `execution_date` — used solely for `promptCount`
-   - **Metrics accumulation**: Count `brandMentions`, `brandCitations`, and collect unique `url_id`s for `sourceCount` from **every** raw execution row (not just deduplicated ones)
-   - **Averages**: Sum and count `visibility_score`, `position`, `sentiment`, `volume` across all rows
-4. Sort, then paginate server-side
+Topic summaries are produced in PostgreSQL via **`rpc_brand_presence_topics`** (PostgREST `rpc`): filters, `GROUP BY` topic label, metrics, `topic_id` per group, sort, and pagination are applied server-side. The API maps each RPC row to the camelCase response above (including `topicId` from `topic_id`).
 
 ---
 
