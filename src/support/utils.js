@@ -1676,6 +1676,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1684,6 +1685,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1738,7 +1740,15 @@ export const onboardSingleSite = async (
 
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
-      await site.save();
+      // Cap site.save() at 30 s — PostgREST calls have no built-in timeout and can hang
+      // indefinitely on network or DB issues, causing a silent stop in the onboarding flow.
+      const SAVE_TIMEOUT_MS = 30000;
+      await Promise.race([
+        site.save(),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(`site.save() timed out after ${SAVE_TIMEOUT_MS / 1000}s`)), SAVE_TIMEOUT_MS);
+        }),
+      ]);
     } catch (error) {
       log.error(`Failed to save site ${siteID} with updated config:`, error);
       reportLine.errors = error.message;
