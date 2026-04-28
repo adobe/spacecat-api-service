@@ -29,7 +29,10 @@ const DEFAULT_ORG_ID = 'default-org-id';
 const DEMO_ORG_ID = '66331367-70e6-4a49-8445-4f6d9c265af9';
 const OTHER_CUSTOMER_ORG_ID = 'other-customer-org-id';
 
-describe('PlgOnboardingController', () => {
+describe('PlgOnboardingController', function describePlgOnboarding() {
+  // esmock + extensive sinon stubs make individual tests slower than the 2000ms default.
+  this.timeout(10000);
+
   let sandbox;
   let PlgOnboardingController;
 
@@ -287,6 +290,12 @@ describe('PlgOnboardingController', () => {
       },
       Suggestion: {
         allByOpportunityId: sandbox.stub().resolves([]),
+        allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
+        bulkUpdateStatus: sandbox.stub().resolves(),
+      },
+      FixEntity: {
+        allByOpportunityId: sandbox.stub().resolves([]),
+        removeByIds: sandbox.stub().resolves(),
       },
     };
 
