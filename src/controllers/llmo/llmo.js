@@ -26,6 +26,7 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
+  detectBotBlocker,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -1304,12 +1305,24 @@ function LlmoController(ctx) {
           }
         }
 
+        let botBlocked = false;
+        let botBlockerType = '';
+        try {
+          const botCheck = await detectBotBlocker({ baseUrl: baseURL });
+          botBlocked = botCheck?.crawlable === false;
+          botBlockerType = botCheck?.type || '';
+        } catch (botErr) {
+          log.warn(`[cdn-opt-in-notification] Bot blocker check failed for ${baseURL}: ${botErr.message}`);
+        }
+
         notifyOptInIfNeeded(context, {
           siteId,
           siteBaseURL: baseURL,
-          cdnLogSource: currentConfig.getLlmoCdnBucketConfig()?.cdnProvider,
+          cdnType: currentConfig.getLlmoCdnBucketConfig()?.cdnProvider,
           orgId: site.getOrganizationId?.(),
           optedBy,
+          botBlocked,
+          botBlockerType,
         }).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
       }
 

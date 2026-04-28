@@ -11,8 +11,7 @@
  */
 
 /**
- * Fires an internal notification email when a customer opts into Tokowaka edge optimization,
- * so the LLMO team can proactively assist with CDN configuration and routing setup.
+ * Fires an opt-in notification email when a customer enables Tokowaka edge optimization.
  *
  * Design decisions:
  * - Triggered only on the first opt-in (isNewlyOpted=true) — not on subsequent config updates.
@@ -21,17 +20,18 @@
  * - Email failures never block the opt-in response — notification is fire-and-forget.
  * - Recipients must be set via OPT_IN_NOTIFICATION_RECIPIENTS in Vault (comma-separated
  *   @adobe.com addresses). If missing, notification is skipped with an error log.
- * - BYOCDN sites use llmo_cdn_opt_in_notification template (IT/CDN team action required).
- * - Adobe-managed CDN sites use llmo_cdn_opt_in_notification_adobe_managed template
- *   (no customer action required).
+ * - BYOCDN sites: customer-facing onboarding email (header shows To/cc with customer + org).
+ * - Adobe-managed sites: internal coordination email (header instructs LLMO team to reply-all
+ *   and loop in CSE / Commerce team).
  */
 
 import { sendEmail } from '../../support/email-service.js';
 import { CDN_TYPES, CDN_DISPLAY_NAMES } from './llmo-utils.js';
 
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
-const OPT_IN_NOTIFICATION_TEMPLATE_ADOBE_MANAGED = 'llmo_cdn_opt_in_notification_adobe_managed';
 const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
+
+const CSE_LOOKUP_TEAM = 'Customer CSE (run `/ams-whois <company-name>` in Slack to find them)';
 
 const CDN_CONFIG = {
   [CDN_TYPES.BYOCDN_FASTLY]: {
@@ -41,24 +41,21 @@ const CDN_CONFIG = {
   [CDN_TYPES.BYOCDN_AKAMAI]: {
     adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/akamai-byocdn',
-    note: 'Apply the routing rule only to agentic HTML page traffic (match html and extensionless URLs) — exclude API endpoints. If property activation fails, ensure the SSL verification mode on the Optimize at Edge rule matches your default rule.',
   },
   [CDN_TYPES.BYOCDN_CLOUDFLARE]: {
     adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/cloudflare-byocdn',
-    note: 'If an existing Cloudflare Worker is already deployed on this domain, use Option 2 (manual setup) to merge the Edge Optimize routing logic into it — do not use the one-click deploy. The worker route must be linked to the domain manually regardless of setup option.',
   },
   [CDN_TYPES.BYOCDN_CLOUDFRONT]: {
     adobeManaged: false,
     docLink: 'https://experienceleague.adobe.com/en/docs/llm-optimizer/using/resources/optimize-at-edge/cloudfront-byocdn',
-    note: 'Requires AWS IAM permissions for Lambda, IAM roles, CloudFront distributions, and cache policies. Cache policy setup varies by scenario (legacy/custom/managed) — follow the step-by-step guide closely.',
   },
   [CDN_TYPES.BYOCDN_IMPERVA]: { adobeManaged: false },
   [CDN_TYPES.BYOCDN_OTHER]: { adobeManaged: false },
-  [CDN_TYPES.AMS_CLOUDFRONT]: { adobeManaged: true },
-  [CDN_TYPES.AMS_FRONTDOOR]: { adobeManaged: true },
-  [CDN_TYPES.AEM_CS_FASTLY]: { adobeManaged: true },
-  [CDN_TYPES.COMMERCE_FASTLY]: { adobeManaged: true },
+  [CDN_TYPES.AMS_CLOUDFRONT]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
+  [CDN_TYPES.AMS_FRONTDOOR]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
+  [CDN_TYPES.AEM_CS_FASTLY]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
+  [CDN_TYPES.COMMERCE_FASTLY]: { adobeManaged: true, replyAllTeam: 'Adobe Commerce team' },
 };
 
 function parseRecipients(raw) {
@@ -119,6 +116,8 @@ async function getOrgMembersCsv(context, orgId) {
  * @param {string} [params.cdnType] - CDN type stored during provisioning.
  * @param {string} [params.orgId] - Organization ID used to load members email list.
  * @param {string} [params.optedBy] - Email of the customer user who triggered the opt-in.
+ * @param {boolean} [params.botBlocked] - Whether the site is currently blocking bot traffic.
+ * @param {string} [params.botBlockerType] - Detected blocker type (e.g. cloudflare, akamai).
  * @returns {Promise<{sent: boolean, reason?: string}>}
  */
 export async function notifyOptInIfNeeded(context, params) {
@@ -129,6 +128,8 @@ export async function notifyOptInIfNeeded(context, params) {
     cdnType,
     orgId,
     optedBy,
+    botBlocked = false,
+    botBlockerType = '',
   } = params || {};
 
   try {
@@ -141,28 +142,27 @@ export async function notifyOptInIfNeeded(context, params) {
     const cdnEntry = CDN_CONFIG[cdnType];
     const cdnDisplayName = CDN_DISPLAY_NAMES[cdnType] || cdnType || 'A CDN';
     const docLink = cdnEntry?.docLink || '';
-    const cdnNote = cdnEntry?.note || '';
-    const isAdobeManaged = cdnEntry?.adobeManaged === true;
+    const adobeManaged = cdnEntry?.adobeManaged === true;
+    const replyAllTeam = cdnEntry?.replyAllTeam || '';
     const orgMembers = await getOrgMembersCsv(context, orgId);
-
-    const templateName = isAdobeManaged
-      ? OPT_IN_NOTIFICATION_TEMPLATE_ADOBE_MANAGED
-      : OPT_IN_NOTIFICATION_TEMPLATE;
 
     const templateData = {
       siteBaseURL: siteBaseURL || '',
       cdnDisplayName,
       docLink,
-      cdnNote,
       optedBy: optedBy || '',
       orgMembers,
+      adobeManaged,
+      replyAllTeam,
+      botBlocked: botBlocked === true,
+      botBlockerType: botBlockerType || '',
     };
 
-    log.info(`[cdn-opt-in-notification] Sending ${templateName} for site=${siteId} cdnType=${cdnType}`);
+    log.info(`[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} cdnType=${cdnType}`);
 
     const result = await sendEmail(context, {
       recipients,
-      templateName,
+      templateName: OPT_IN_NOTIFICATION_TEMPLATE,
       templateData,
     });
 
