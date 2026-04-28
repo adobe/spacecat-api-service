@@ -10,8 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { sendFile } from '../../../utils/slack/base.js';
-
+export const DETAIL_ROW_LIMIT = 8;
 export const REPORT_CHUNK_LIMIT = 2800;
 export const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -103,20 +102,20 @@ function splitReportLine(line) {
   return parts;
 }
 
-export async function postReport(slackContext, lines, filenamePrefix, title, initialComment) {
+export function appendLimitedDetails(lines, rows, renderRow, renderOmitted) {
+  const visibleRows = rows.slice(0, DETAIL_ROW_LIMIT);
+  for (const row of visibleRows) {
+    lines.push(renderRow(row));
+  }
+  const omitted = rows.length - visibleRows.length;
+  if (omitted > 0) {
+    lines.push(renderOmitted(omitted));
+  }
+}
+
+export async function postReport(slackContext, lines) {
   const { say } = slackContext;
   const fullText = lines.join('\n');
-  if (fullText.length > REPORT_CHUNK_LIMIT && slackContext.client) {
-    await sendFile(
-      slackContext,
-      Buffer.from(fullText, 'utf8'),
-      `${filenamePrefix}-${Date.now()}.txt`,
-      title,
-      initialComment,
-    );
-    return;
-  }
-
   if (fullText.length <= REPORT_CHUNK_LIMIT) {
     await say(fullText);
     return;

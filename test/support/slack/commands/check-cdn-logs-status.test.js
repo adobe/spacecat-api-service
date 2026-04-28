@@ -14,7 +14,6 @@ import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
-import nock from 'nock';
 
 use(sinonChai);
 
@@ -43,8 +42,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     NextContinuationToken: nextToken,
   });
 
-  const attachSlackFileClient = () => {
-    nock('https://slack-upload.test').post('/cdn-report').reply(200);
+  const attachSlackClient = () => {
     slackContext.channelId = 'C123';
     slackContext.threadTs = '123.456';
     slackContext.client = {
@@ -96,7 +94,6 @@ describe('CheckCdnLogsStatusCommand', () => {
   });
 
   afterEach(() => {
-    nock.cleanAll();
     sinon.restore();
   });
 
@@ -246,7 +243,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include(`for site \`${TARGET_SITE_ID}\``);
     expect(output).to.include('Complete: *1*');
-    expect(output).to.include('(1 total sites)');
+    expect(output).to.include('Sites checked: *1*');
   });
 
   it('accepts a bare site UUID as single-site scope', async () => {
@@ -396,6 +393,32 @@ describe('CheckCdnLogsStatusCommand', () => {
     const summaryCall = slackContext.say.args.find((a) => a[0].includes('Incomplete: *1*'));
     expect(summaryCall).to.exist;
     expect(summaryCall[0]).to.include('fastly-site.com');
+  });
+
+  it('reports actionable ready count when complete and incomplete sites are mixed', async () => {
+    const completeSite = makeSite('site-ready', 'https://ready.com');
+    const incompleteSite = makeSite('site-blocked', 'https://blocked.com');
+    context.dataAccess.Site.all.resolves([completeSite, incompleteSite]);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'fastly' } } });
+    const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+    s3SendStub
+      .onFirstCall().resolves({
+        CommonPrefixes: allHours.map((h) => ({ Prefix: `aggregated/site-ready/2026/04/21/${h}/` })),
+      })
+      .onSecondCall().resolves({
+        CommonPrefixes: [],
+      });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('1 site(s) have inputs ready for DB import');
+    expect(output).to.include('1 site(s) have no aggregate hours');
   });
 
   it('shows all missing hours when <= 6 are absent (no truncation)', async () => {
@@ -687,8 +710,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(output).to.include('AccessDenied');
   });
 
-  it('chunks output when report exceeds the Slack message limit', async () => {
-    // 30 sites, all incomplete with many missing hours → long report
+  it('caps long all-site detail lists and points to site-scoped checks', async () => {
     const sites = Array.from({ length: 30 }, (_, i) => makeSite(
       `site-${i}`,
       `https://very-long-site-url-that-pads-output-number-${i}.example.com`,
@@ -705,12 +727,13 @@ describe('CheckCdnLogsStatusCommand', () => {
     const cmd = CheckCdnLogsStatusCommand(context);
     await cmd.handleExecution(['2026-04-21'], slackContext);
 
-    // Multiple say() calls due to chunking
-    expect(slackContext.say.callCount).to.be.greaterThan(2);
-    expect(slackContext.say.args.flat().every((message) => message.length <= 2800)).to.be.true;
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('30 hourly site(s) are missing one or more hourly aggregates');
+    expect(output).to.include('… 22 more. Re-run with `siteId=<siteId>` for focused details.');
+    expect(output).not.to.include('site-29');
   });
 
-  it('splits a single oversized report line when file upload is unavailable', async () => {
+  it('splits a single oversized message line', async () => {
     const site = makeSite('site-long-line', `https://${'a'.repeat(6200)}.example.com`);
     context.dataAccess.Site.all.resolves([site]);
     context.dataAccess.Configuration.findLatest.resolves({
@@ -727,8 +750,8 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(slackContext.say.args.flat().every((message) => message.length <= 2800)).to.be.true;
   });
 
-  it('uploads long all-site reports as a Slack file when a file client is available', async () => {
-    attachSlackFileClient();
+  it('keeps long all-site status output in Slack messages even when a file client is available', async () => {
+    attachSlackClient();
     const sites = Array.from({ length: 30 }, (_, i) => makeSite(
       `site-${i}`,
       `https://very-long-site-url-that-pads-output-number-${i}.example.com`,
@@ -744,10 +767,9 @@ describe('CheckCdnLogsStatusCommand', () => {
     const cmd = CheckCdnLogsStatusCommand(context);
     await cmd.handleExecution(['2026-04-21'], slackContext);
 
-    expect(slackContext.client.files.getUploadURLExternal).to.have.been.calledOnce;
-    expect(slackContext.client.files.completeUploadExternal).to.have.been.calledOnce;
-    expect(slackContext.client.files.completeUploadExternal.firstCall.args[0].initial_comment)
-      .to.equal('CDN logs aggregate status report for 2026-04-21');
+    expect(slackContext.say).to.have.been.called;
+    expect(slackContext.client.files.getUploadURLExternal).not.to.have.been.called;
+    expect(slackContext.client.files.completeUploadExternal).not.to.have.been.called;
   });
 
   it('handles unexpected top-level errors gracefully', async () => {

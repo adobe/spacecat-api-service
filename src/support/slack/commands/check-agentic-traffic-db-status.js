@@ -12,6 +12,7 @@
 
 import BaseCommand from './base.js';
 import {
+  appendLimitedDetails,
   formatUtcDate,
   isFutureUtcDate,
   parseStatusCommandArgs,
@@ -94,6 +95,10 @@ function formatPendingStatus(stale) {
 
 function getAuditTimestamp(latestAudit) {
   return latestAudit.getAuditedAt?.() || latestAudit.auditedAt;
+}
+
+function renderOmittedSites(omitted) {
+  return `… ${omitted} more. Re-run with \`siteId=<siteId>\` for focused details.`;
 }
 
 function formatExportCounts(siteExport) {
@@ -456,14 +461,70 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         }
       }
 
+      let outcome = 'ACTION_REQUIRED';
+      if (projectionCheckStatus !== 'ok') {
+        outcome = 'CHECKER_UNRELIABLE';
+      } else if (noAudit.length === enabledSites.length) {
+        outcome = 'NO_AUDITS_FOR_DATE';
+      } else if (dashboardReady.length === enabledSites.length) {
+        outcome = 'DASHBOARD_READY';
+      }
+
       const lines = [
         `*Agentic Traffic Export + Serving Status — ${dateStr}*`,
-        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*  :arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*  :hourglass_flowing_sand: Import Pending: *${importPending.length}*  :warning: Stale Pending: *${stalePendingSites}*  :grey_question: Unknown: *${unknown.length}*  :skip: Skipped: *${skipped.length}*  :x: Failed: *${failed.length}*  :warning: Missing batchId: *${missingBatchId.length}*  (${enabledSites.length} site${enabledSites.length === 1 ? '' : 's'} total)`,
+        `Outcome: *${outcome}*`,
+        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*`,
+        `:arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*`,
+        `:hourglass_flowing_sand: Import Pending: *${importPending.length}*`,
+        `:warning: Stale Pending: *${stalePendingSites}*`,
+        `:grey_question: Unknown: *${unknown.length}*`,
+        `:skip: Skipped: *${skipped.length}*`,
+        `:x: Failed: *${failed.length}*`,
+        `:warning: Missing batchId: *${missingBatchId.length}*`,
+        `Sites checked: *${enabledSites.length}*`,
       ];
       if (projectionCheckStatus === 'ok') {
-        lines.push(`Import daily: *${rawImportsProjected}/${exportedSites.length}*  Refresh daily: *${dailyRefreshProjected}/${refreshEnabled ? rawImportsProjected : 0}*${weeklyRefreshAvailableCount > 0 ? `  Refresh weekly: *${weeklyRefreshProjected}/${weeklyRefreshAvailableCount}*` : ''}`);
+        lines.push(`Import daily: *${rawImportsProjected}/${exportedSites.length}*`);
+        lines.push(`Refresh daily: *${dailyRefreshProjected}/${refreshEnabled ? rawImportsProjected : 0}*`);
+        if (weeklyRefreshAvailableCount > 0) {
+          lines.push(`Refresh weekly: *${weeklyRefreshProjected}/${weeklyRefreshAvailableCount}*`);
+        }
       } else {
         lines.push(`Import daily: unknown (projection audit check ${projectionCheckStatus})`);
+      }
+
+      lines.push('', '*Actionable insight:*');
+      if (noAudit.length === enabledSites.length) {
+        lines.push(`No \`${CDN_LOGS_REPORT_AUDIT}\` audit has run for any of the *${enabledSites.length}* enabled sites for ${dateStr}.`);
+        lines.push('Action: run the daily DB import backfill for the target site, or wait for the scheduled audit, then rerun this status check.');
+      } else {
+        if (dashboardReady.length > 0) {
+          lines.push(`${dashboardReady.length} site(s) are dashboard-ready. No action needed for those sites.`);
+        }
+        if (importPending.length > 0) {
+          lines.push(`${importPending.length} site(s) exported data but raw DB import is not visible yet. Action: check projector/import processing for the listed batchId(s).`);
+        }
+        if (refreshPending.length > 0) {
+          lines.push(`${refreshPending.length} site(s) completed raw import but serving refresh is missing. Action: check daily/weekly refresh projection for the listed batchId(s).`);
+        }
+        if (missingBatchId.length > 0) {
+          lines.push(`${missingBatchId.length} site(s) exported without a batchId. Action: check audit-worker dailyAgenticExport output before DB status can be correlated.`);
+        }
+        if (unknown.length > 0) {
+          lines.push(`${unknown.length} site(s) have unknown DB status because projection_audit could not be checked. Action: fix/check PostgREST before trusting pending counts.`);
+        }
+        if (failed.length > 0) {
+          lines.push(`${failed.length} export failure(s) found. Action: check the export error before retrying DB import.`);
+        }
+        if (dateMismatch.length > 0) {
+          lines.push(`${dateMismatch.length} site(s) have a latest audit for a different date. Action: run or wait for ${dateStr} before checking DB status.`);
+        }
+        if (skipped.length > 0) {
+          lines.push(`${skipped.length} site(s) were skipped because no traffic data was exported for ${dateStr}.`);
+        }
+        if (noAudit.length > 0) {
+          lines.push(`${noAudit.length} site(s) have no latest audit record. Action: run the daily DB import backfill for specific sites that need investigation.`);
+        }
       }
 
       if (!refreshEnabled) {
@@ -472,20 +533,27 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       if (dashboardReady.length > 0) {
         lines.push('', '*Dashboard-ready (raw import + required serving refresh complete):*');
-        for (const s of dashboardReady) {
+        appendLimitedDetails(lines, dashboardReady, (s) => {
           const daily = refreshEnabled
             ? ` — daily refresh: ${formatRefreshStage(s.dailyRefreshProjection)}`
             : ' — daily refresh: disabled';
           const weekly = s.weeklyRefreshAvailable
             ? ` — weekly refresh: ${formatRefreshStage(s.weeklyRefreshProjection)}`
             : '';
-          lines.push(`• \`${s.baseURL}\` — import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)} — export: ${formatExportCounts(s)}${daily}${weekly}`);
-        }
+          return [
+            `• \`${s.baseURL}\``,
+            `  siteId: \`${s.siteId}\``,
+            `  import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}`,
+            `  export: ${formatExportCounts(s)}`,
+            `  ${daily.replace(/^ — /, '')}`,
+            weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
+          ].filter(Boolean).join('\n');
+        }, renderOmittedSites);
       }
 
       if (refreshPending.length > 0) {
         lines.push('', '*Refresh Pending (raw import projected, serving table refresh not yet seen):*');
-        for (const s of refreshPending) {
+        appendLimitedDetails(lines, refreshPending, (s) => {
           const daily = refreshEnabled
             ? ` — daily refresh: ${formatRefreshStage(
               s.dailyRefreshProjection,
@@ -501,58 +569,86 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           const missing = s.missingRefreshes
             .map((name) => (s.staleRefreshes.includes(name) ? `${name} (stale)` : name))
             .join(', ');
-          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}${daily}${weekly} — missing: ${missing} — batchId: \`${s.batchId}\``);
-        }
+          return [
+            `• \`${s.baseURL}\``,
+            `  siteId: \`${s.siteId}\``,
+            `  import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}`,
+            `  ${daily.replace(/^ — /, '')}`,
+            weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
+            `  missing: ${missing}`,
+            `  batchId: \`${s.batchId}\``,
+          ].filter(Boolean).join('\n');
+        }, renderOmittedSites);
       }
 
       if (importPending.length > 0) {
         lines.push('', '*Import Pending (export done, raw DB import not yet seen):*');
-        for (const s of importPending) {
+        appendLimitedDetails(lines, importPending, (s) => {
           const weekly = weeklyRefreshExpected ? ' — weekly refresh: waiting on import' : '';
-          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — import daily: ${formatPendingStatus(s.importStalePending)} — daily refresh: waiting on import${weekly} — batchId: \`${s.batchId}\` — export: ${formatExportCounts(s)}`);
-        }
+          return [
+            `• \`${s.baseURL}\``,
+            `  siteId: \`${s.siteId}\``,
+            `  import daily: ${formatPendingStatus(s.importStalePending)}`,
+            '  daily refresh: waiting on import',
+            weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
+            `  batchId: \`${s.batchId}\``,
+            `  export: ${formatExportCounts(s)}`,
+          ].filter(Boolean).join('\n');
+        }, renderOmittedSites);
       }
 
       if (unknown.length > 0) {
         lines.push('', '*Unknown (projection_audit status could not be checked):*');
-        for (const s of unknown) {
-          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — projection audit check: ${s.projectionCheckStatus} — batchId: \`${s.batchId}\` — export: ${formatExportCounts(s)}`);
-        }
+        appendLimitedDetails(lines, unknown, (s) => [
+          `• \`${s.baseURL}\``,
+          `  siteId: \`${s.siteId}\``,
+          `  projection audit check: ${s.projectionCheckStatus}`,
+          `  batchId: \`${s.batchId}\``,
+          `  export: ${formatExportCounts(s)}`,
+        ].join('\n'), renderOmittedSites);
       }
 
       if (dateMismatch.length > 0) {
         lines.push('', `*Latest audit is for a different date (not ${dateStr}):*`);
-        for (const s of dateMismatch) {
-          lines.push(`• \`${s.baseURL}\` — latest export was for ${s.exportedDate}`);
-        }
+        appendLimitedDetails(lines, dateMismatch, (s) => [
+          `• \`${s.baseURL}\``,
+          `  siteId: \`${s.siteId}\``,
+          `  latest export was for ${s.exportedDate}`,
+        ].join('\n'), renderOmittedSites);
       }
 
       if (failed.length > 0) {
         lines.push('', '*Export failures:*');
-        for (const s of failed) {
-          lines.push(`• \`${s.baseURL}\` — ${s.error || 'unknown error'}`);
-        }
+        appendLimitedDetails(lines, failed, (s) => [
+          `• \`${s.baseURL}\``,
+          `  siteId: \`${s.siteId}\``,
+          `  error: ${s.error || 'unknown error'}`,
+        ].join('\n'), renderOmittedSites);
       }
 
       if (missingBatchId.length > 0) {
         lines.push('', '*Export missing batchId:*');
-        for (const s of missingBatchId) {
-          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — export: ${formatExportCounts(s)}`);
-        }
+        appendLimitedDetails(lines, missingBatchId, (s) => [
+          `• \`${s.baseURL}\``,
+          `  siteId: \`${s.siteId}\``,
+          `  export: ${formatExportCounts(s)}`,
+        ].join('\n'), renderOmittedSites);
       }
 
       if (skipped.length > 0) {
         lines.push('', `*Skipped (no traffic data for ${dateStr}):*`);
-        for (const s of skipped) {
-          lines.push(`• \`${s.baseURL}\``);
-        }
+        appendLimitedDetails(lines, skipped, (s) => [
+          `• \`${s.baseURL}\``,
+          `  siteId: \`${s.siteId}\``,
+        ].join('\n'), renderOmittedSites);
       }
 
       if (noAudit.length > 0) {
         lines.push('', '*No audit record found:*');
-        for (const s of noAudit) {
-          lines.push(`• \`${s.baseURL}\``);
-        }
+        appendLimitedDetails(lines, noAudit, (s) => [
+          `• \`${s.baseURL}\``,
+          `  siteId: \`${s.siteId}\``,
+        ].join('\n'), renderOmittedSites);
       }
 
       await postReport(

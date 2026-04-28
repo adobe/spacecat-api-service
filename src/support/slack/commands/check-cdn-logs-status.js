@@ -14,6 +14,7 @@ import { llmoConfig as llmo } from '@adobe/spacecat-shared-utils';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import BaseCommand from './base.js';
 import {
+  appendLimitedDetails,
   formatUtcDate,
   getUtcYMD,
   isFutureUtcDate,
@@ -89,6 +90,10 @@ function getSiteCdnBucketConfig(site) {
   return site.getConfig?.()?.getLlmoCdnBucketConfig?.()
     || getSiteLlmoConfig(site).cdnBucketConfig
     || {};
+}
+
+function renderOmittedSites(omitted) {
+  return `… ${omitted} more. Re-run with \`siteId=<siteId>\` for focused details.`;
 }
 
 /**
@@ -314,18 +319,56 @@ function CheckCdnLogsStatusCommand(context) {
       const incomplete = results.filter((r) => r.status === 'incomplete');
       const errors = results.filter((r) => r.status === 'error');
       const configReadFailures = results.filter((r) => r.configReadFailed);
+      const missingAll = incomplete.filter((r) => r.presentCount === 0);
+      const partialCoverage = incomplete.filter((r) => r.presentCount > 0);
+      const dailyOnlyMissing = incomplete.filter((r) => r.isDailyOnly);
+      const hourlyMissing = incomplete.filter((r) => !r.isDailyOnly);
+      const outcome = incomplete.length === 0 && errors.length === 0
+        ? 'READY_FOR_DB_IMPORT'
+        : 'ACTION_REQUIRED';
 
       const lines = [
         `*CDN Logs Aggregate Status — ${dateStr}*`,
-        `:white_check_mark: Complete: *${complete.length}*  :warning: Incomplete: *${incomplete.length}*  :x: Errors: *${errors.length}*  (${results.length} total sites)`,
+        `Outcome: *${outcome}*`,
+        `:white_check_mark: Complete: *${complete.length}*`,
+        `:warning: Incomplete: *${incomplete.length}*`,
+        `:x: Errors: *${errors.length}*`,
+        `Sites checked: *${results.length}*`,
       ];
       if (configReadFailures.length > 0) {
         lines.push(`:warning: LLMO config unavailable for *${configReadFailures.length}* site${configReadFailures.length === 1 ? '' : 's'}; using site/default config fallback.`);
       }
 
+      lines.push('', '*Actionable insight:*');
+      if (incomplete.length === 0 && errors.length === 0) {
+        lines.push(`All *${complete.length}* checked site(s) have expected CDN log aggregates. Action: proceed to DB import/status checks for ${dateStr}.`);
+      } else {
+        if (complete.length > 0) {
+          lines.push(`${complete.length} site(s) have inputs ready for DB import.`);
+        }
+        if (missingAll.length > 0) {
+          lines.push(`${missingAll.length} site(s) have no aggregate hours. Action: wait for or investigate upstream CDN aggregation before DB backfill.`);
+        }
+        if (partialCoverage.length > 0) {
+          lines.push(`${partialCoverage.length} site(s) have partial aggregate coverage. Action: rerun this check before backfill; only backfill after expected hours are present.`);
+        }
+        if (dailyOnlyMissing.length > 0) {
+          lines.push(`${dailyOnlyMissing.length} daily-only site(s) are missing hour 23.`);
+        }
+        if (hourlyMissing.length > 0) {
+          lines.push(`${hourlyMissing.length} hourly site(s) are missing one or more hourly aggregates.`);
+        }
+        if (configReadFailures.length > 0) {
+          lines.push(`${configReadFailures.length} site(s) used fallback config. Action: verify LLMO config/S3 access for those sites.`);
+        }
+        if (errors.length > 0) {
+          lines.push(`${errors.length} site check(s) errored. Action: check API logs before trusting the aggregate status.`);
+        }
+      }
+
       if (incomplete.length > 0) {
         lines.push('', '*Sites with missing aggregate hours:*');
-        for (const r of incomplete) {
+        appendLimitedDetails(lines, incomplete, (r) => {
           const providerName = r.cdnProvider === r.cdnFamily
             ? r.cdnProvider
             : `${r.cdnProvider} => ${r.cdnFamily}`;
@@ -337,17 +380,23 @@ function CheckCdnLogsStatusCommand(context) {
           } else {
             missingStr = `${r.missingHours.slice(0, 6).join(', ')} (+${r.missingHours.length - 6} more)`;
           }
-          lines.push(
-            `• \`${r.baseURL}\` (${r.siteId}) — CDN: ${providerTag}${configWarning} — missing: [${missingStr}] — present: ${r.presentCount}/${r.expectedCount}`,
-          );
-        }
+          return [
+            `• \`${r.baseURL}\``,
+            `  siteId: \`${r.siteId}\``,
+            `  CDN: ${providerTag}${configWarning}`,
+            `  missing: [${missingStr}]`,
+            `  present: ${r.presentCount}/${r.expectedCount}`,
+          ].join('\n');
+        }, renderOmittedSites);
       }
 
       if (errors.length > 0) {
         lines.push('', '*Sites with errors:*');
-        for (const r of errors) {
-          lines.push(`• \`${r.baseURL}\` (${r.siteId}) — ${r.error}`);
-        }
+        appendLimitedDetails(lines, errors, (r) => [
+          `• \`${r.baseURL}\``,
+          `  siteId: \`${r.siteId}\``,
+          `  error: ${r.error}`,
+        ].join('\n'), renderOmittedSites);
       }
 
       await postReport(
