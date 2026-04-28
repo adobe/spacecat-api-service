@@ -13,13 +13,14 @@
 import { llmoConfig as llmo } from '@adobe/spacecat-shared-utils';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import BaseCommand from './base.js';
-import { postErrorMessage } from '../../../utils/slack/base.js';
+import { postErrorMessage, sendFile } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check cdn logs status'];
 const CDN_LOGS_AUDIT = 'cdn-logs-analysis';
 const BATCH_SIZE = 10;
 const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
+const REPORT_CHUNK_LIMIT = 2800;
 
 // These CDN families only produce a single daily aggregate (hour 23).
 // All others produce 24 hourly aggregates (hours 00–23).
@@ -47,6 +48,14 @@ function getYMD(date) {
     month: pad2(date.getUTCMonth() + 1),
     day: pad2(date.getUTCDate()),
   };
+}
+
+function startOfUtcDay(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function isFutureUtcDate(date, now = new Date()) {
+  return startOfUtcDay(date) > startOfUtcDay(now);
 }
 
 function parseCommandArgs(args) {
@@ -163,11 +172,14 @@ async function listPresentHours(s3Client, bucket, prefix) {
  * @param {Object} env
  * @returns {Promise<Object>} Normalized CDN settings.
  */
-async function getCdnSettings(site, s3Client, s3Bucket, env) {
+async function getCdnSettings(site, s3Client, s3Bucket, env, log) {
   let s3Config;
+  let configReadFailed = false;
   try {
     ({ config: s3Config } = await llmo.readConfig(site.getId(), s3Client, { s3Bucket }));
-  } catch {
+  } catch (e) {
+    configReadFailed = true;
+    log.warn(`LLMO config read failed for site ${site.getId()}: ${e.message}`);
     s3Config = {};
   }
 
@@ -189,7 +201,41 @@ async function getCdnSettings(site, s3Client, s3Bucket, env) {
     cdnFamily,
     region,
     aggregateBucket: resolveAggregateBucket(env, region),
+    configReadFailed,
   };
+}
+
+async function postReport(slackContext, lines, filenamePrefix, title, initialComment) {
+  const { say } = slackContext;
+  const fullText = lines.join('\n');
+  if (fullText.length > REPORT_CHUNK_LIMIT && slackContext.client) {
+    await sendFile(
+      slackContext,
+      Buffer.from(fullText, 'utf8'),
+      `${filenamePrefix}-${Date.now()}.txt`,
+      title,
+      initialComment,
+    );
+    return;
+  }
+
+  if (fullText.length <= REPORT_CHUNK_LIMIT) {
+    await say(fullText);
+    return;
+  }
+
+  let chunk = '';
+  for (const line of lines) {
+    if (chunk.length + line.length + 1 > REPORT_CHUNK_LIMIT) {
+      // eslint-disable-next-line no-await-in-loop
+      await say(chunk.trim());
+      chunk = '';
+    }
+    chunk += `${line}\n`;
+  }
+  if (chunk.trim()) {
+    await say(chunk.trim());
+  }
 }
 
 /**
@@ -230,10 +276,6 @@ function CheckCdnLogsStatusCommand(context) {
       const { dateArg, siteId: requestedSiteId } = parsedArgs;
       let targetDate;
       if (dateArg) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
-          await say(':warning: Invalid date format. Use YYYY-MM-DD.');
-          return;
-        }
         targetDate = new Date(`${dateArg}T00:00:00Z`);
         if (Number.isNaN(targetDate.getTime())) {
           await say(':warning: Invalid date format. Use YYYY-MM-DD.');
@@ -242,6 +284,10 @@ function CheckCdnLogsStatusCommand(context) {
       } else {
         targetDate = new Date();
         targetDate.setUTCDate(targetDate.getUTCDate() - 1);
+      }
+      if (isFutureUtcDate(targetDate)) {
+        await say(':warning: Cannot check a future traffic date.');
+        return;
       }
 
       const dateStr = targetDate.toISOString().slice(0, 10);
@@ -299,7 +345,8 @@ function CheckCdnLogsStatusCommand(context) {
               cdnFamily,
               region,
               aggregateBucket,
-            } = await getCdnSettings(site, s3Client, s3.s3Bucket, env);
+              configReadFailed,
+            } = await getCdnSettings(site, s3Client, s3.s3Bucket, env, log);
             const isDailyOnly = DAILY_ONLY_CDN_FAMILIES.has(cdnFamily);
             const expectedHours = isDailyOnly ? ['23'] : ALL_HOURS;
 
@@ -320,6 +367,7 @@ function CheckCdnLogsStatusCommand(context) {
               presentCount: presentHours.length,
               missingHours,
               status: missingHours.length === 0 ? 'complete' : 'incomplete',
+              configReadFailed,
             };
           } catch (e) {
             log.warn(`CDN logs status check failed for site ${siteId}: ${e.message}`);
@@ -338,11 +386,15 @@ function CheckCdnLogsStatusCommand(context) {
       const complete = results.filter((r) => r.status === 'complete');
       const incomplete = results.filter((r) => r.status === 'incomplete');
       const errors = results.filter((r) => r.status === 'error');
+      const configReadFailures = results.filter((r) => r.configReadFailed);
 
       const lines = [
         `*CDN Logs Aggregate Status — ${dateStr}*`,
         `:white_check_mark: Complete: *${complete.length}*  :warning: Incomplete: *${incomplete.length}*  :x: Errors: *${errors.length}*  (${results.length} total sites)`,
       ];
+      if (configReadFailures.length > 0) {
+        lines.push(`:warning: LLMO config unavailable for *${configReadFailures.length}* site${configReadFailures.length === 1 ? '' : 's'}; using site/default config fallback.`);
+      }
 
       if (incomplete.length > 0) {
         lines.push('', '*Sites with missing aggregate hours:*');
@@ -351,6 +403,7 @@ function CheckCdnLogsStatusCommand(context) {
             ? r.cdnProvider
             : `${r.cdnProvider} => ${r.cdnFamily}`;
           const providerTag = r.isDailyOnly ? `${providerName} [daily-only]` : providerName;
+          const configWarning = r.configReadFailed ? ' — config unavailable, using fallback' : '';
           let missingStr;
           if (r.missingHours.length <= 6) {
             missingStr = r.missingHours.join(', ');
@@ -358,7 +411,7 @@ function CheckCdnLogsStatusCommand(context) {
             missingStr = `${r.missingHours.slice(0, 6).join(', ')} (+${r.missingHours.length - 6} more)`;
           }
           lines.push(
-            `• \`${r.baseURL}\` (${r.siteId}) — CDN: ${providerTag} — missing: [${missingStr}] — present: ${r.presentCount}/${r.expectedCount}`,
+            `• \`${r.baseURL}\` (${r.siteId}) — CDN: ${providerTag}${configWarning} — missing: [${missingStr}] — present: ${r.presentCount}/${r.expectedCount}`,
           );
         }
       }
@@ -370,25 +423,13 @@ function CheckCdnLogsStatusCommand(context) {
         }
       }
 
-      // Slack has a ~3000 char text limit; chunk if needed
-      const CHUNK_LIMIT = 2800;
-      const fullText = lines.join('\n');
-      if (fullText.length <= CHUNK_LIMIT) {
-        await say(fullText);
-      } else {
-        let chunk = '';
-        for (const line of lines) {
-          if (chunk.length + line.length + 1 > CHUNK_LIMIT) {
-            // eslint-disable-next-line no-await-in-loop
-            await say(chunk.trim());
-            chunk = '';
-          }
-          chunk += `${line}\n`;
-        }
-        if (chunk.trim()) {
-          await say(chunk.trim());
-        }
-      }
+      await postReport(
+        slackContext,
+        lines,
+        `cdn-logs-status-${dateStr}`,
+        `CDN Logs Status ${dateStr}`,
+        `CDN logs aggregate status report for ${dateStr}`,
+      );
     } catch (error) {
       log.error('Error in check-cdn-logs-status:', error);
       await postErrorMessage(say, error);

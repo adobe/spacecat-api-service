@@ -11,7 +11,7 @@
  */
 
 import BaseCommand from './base.js';
-import { postErrorMessage } from '../../../utils/slack/base.js';
+import { postErrorMessage, sendFile } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check agentic traffic db status'];
 const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
@@ -29,6 +29,7 @@ const STALE_PENDING_THRESHOLD_HOURS = 4;
 const STALE_PENDING_THRESHOLD_MS = STALE_PENDING_THRESHOLD_HOURS * 60 * 60 * 1000;
 const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
+const REPORT_CHUNK_LIMIT = 2800;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -38,15 +39,19 @@ function addUtcDays(date, days) {
   return next;
 }
 
+function startOfUtcDay(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
 function startOfUtcIsoWeek(date) {
-  const midnight = new Date(Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate(),
-  ));
+  const midnight = startOfUtcDay(date);
   const day = midnight.getUTCDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const diffToMonday = -((day + 6) % 7);
   return addUtcDays(midnight, diffToMonday);
+}
+
+function isFutureUtcDate(date, now = new Date()) {
+  return startOfUtcDay(date) > startOfUtcDay(now);
 }
 
 function isClosedSunday(date, now = new Date()) {
@@ -131,9 +136,6 @@ function formatExportCounts(siteExport) {
 }
 
 function formatRefreshRow(row) {
-  if (!row) {
-    return 'missing';
-  }
   const meta = row.metadata || {};
   if (Array.isArray(meta.dailyRefreshDates) && meta.dailyRefreshDates.length > 0) {
     return `${row.output_count} rows (${meta.dailyRefreshDates.join(', ')})`;
@@ -156,14 +158,47 @@ function formatProjectedStage(row, projectedAt) {
 }
 
 function formatRefreshStage(row, stale = false) {
-  if (!row) {
+  const status = getRefreshStatus(row);
+  if (status === 'pending') {
     return formatPendingStatus(stale);
   }
-  const status = getRefreshStatus(row);
   if (status !== 'projected') {
     return status;
   }
   return `${status} (${formatRefreshRow(row)})`;
+}
+
+async function postReport(slackContext, lines, filenamePrefix, title, initialComment) {
+  const { say } = slackContext;
+  const fullText = lines.join('\n');
+  if (fullText.length > REPORT_CHUNK_LIMIT && slackContext.client) {
+    await sendFile(
+      slackContext,
+      Buffer.from(fullText, 'utf8'),
+      `${filenamePrefix}-${Date.now()}.txt`,
+      title,
+      initialComment,
+    );
+    return;
+  }
+
+  if (fullText.length <= REPORT_CHUNK_LIMIT) {
+    await say(fullText);
+    return;
+  }
+
+  let chunk = '';
+  for (const line of lines) {
+    if (chunk.length + line.length + 1 > REPORT_CHUNK_LIMIT) {
+      // eslint-disable-next-line no-await-in-loop
+      await say(chunk.trim());
+      chunk = '';
+    }
+    chunk += `${line}\n`;
+  }
+  if (chunk.trim()) {
+    await say(chunk.trim());
+  }
 }
 
 /**
@@ -203,10 +238,6 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const { dateArg, siteId: requestedSiteId } = parsedArgs;
       let targetDate;
       if (dateArg) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
-          await say(':warning: Invalid date format. Use YYYY-MM-DD.');
-          return;
-        }
         targetDate = new Date(`${dateArg}T00:00:00Z`);
         if (Number.isNaN(targetDate.getTime())) {
           await say(':warning: Invalid date format. Use YYYY-MM-DD.');
@@ -215,6 +246,10 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       } else {
         targetDate = new Date();
         targetDate.setUTCDate(targetDate.getUTCDate() - 1);
+      }
+      if (isFutureUtcDate(targetDate)) {
+        await say(':warning: Cannot check a future traffic date.');
+        return;
       }
 
       const dateStr = `${targetDate.getUTCFullYear()}-${pad2(targetDate.getUTCMonth() + 1)}-${pad2(targetDate.getUTCDate())}`;
@@ -296,6 +331,16 @@ function CheckAgenticTrafficDbStatusCommand(context) {
                 batchId: dailyExport.batchId,
               };
             }
+            if (!dailyExport.batchId) {
+              return {
+                siteId,
+                baseURL,
+                status: 'no-batchid',
+                trafficDate: dailyExport.trafficDate,
+                rowCount: dailyExport.rowCount,
+                classificationCount: dailyExport.classificationCount,
+              };
+            }
 
             return {
               siteId,
@@ -363,6 +408,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const noAudit = [];
       const failed = [];
       const dateMismatch = [];
+      const missingBatchId = [];
       const unknown = [];
       let rawImportsProjected = 0;
       let dailyRefreshProjected = 0;
@@ -456,6 +502,8 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           skipped.push(s);
         } else if (s.status === 'date-mismatch') {
           dateMismatch.push(s);
+        } else if (s.status === 'no-batchid') {
+          missingBatchId.push(s);
         } else if (s.status === 'export-failed' || s.status === 'error') {
           failed.push(s);
         } else {
@@ -465,9 +513,13 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const lines = [
         `*Agentic Traffic Export + Serving Status — ${dateStr}*`,
-        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*  :arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*  :hourglass_flowing_sand: Import Pending: *${importPending.length}*  :warning: Stale Pending: *${stalePendingSites}*  :grey_question: Unknown: *${unknown.length}*  :skip: Skipped: *${skipped.length}*  :x: Failed: *${failed.length}*  (${enabledSites.length} sites total)`,
-        `Import daily: *${rawImportsProjected}/${exportedSites.length}*  Refresh daily: *${dailyRefreshProjected}/${refreshEnabled ? rawImportsProjected : 0}*${weeklyRefreshAvailableCount > 0 ? `  Refresh weekly: *${weeklyRefreshProjected}/${weeklyRefreshAvailableCount}*` : ''}`,
+        `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*  :arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*  :hourglass_flowing_sand: Import Pending: *${importPending.length}*  :warning: Stale Pending: *${stalePendingSites}*  :grey_question: Unknown: *${unknown.length}*  :skip: Skipped: *${skipped.length}*  :x: Failed: *${failed.length}*  :warning: Missing batchId: *${missingBatchId.length}*  (${enabledSites.length} sites total)`,
       ];
+      if (projectionCheckStatus === 'ok') {
+        lines.push(`Import daily: *${rawImportsProjected}/${exportedSites.length}*  Refresh daily: *${dailyRefreshProjected}/${refreshEnabled ? rawImportsProjected : 0}*${weeklyRefreshAvailableCount > 0 ? `  Refresh weekly: *${weeklyRefreshProjected}/${weeklyRefreshAvailableCount}*` : ''}`);
+      } else {
+        lines.push(`Import daily: unknown (projection audit check ${projectionCheckStatus})`);
+      }
 
       if (!refreshEnabled) {
         lines.push('_Projector refresh enqueue appears disabled via MYSTICAT_AGENTIC_REFRESH_ENABLED=false._');
@@ -537,6 +589,13 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         }
       }
 
+      if (missingBatchId.length > 0) {
+        lines.push('', '*Export missing batchId:*');
+        for (const s of missingBatchId) {
+          lines.push(`• \`${s.baseURL}\` (${s.siteId}) — export: ${formatExportCounts(s)}`);
+        }
+      }
+
       if (skipped.length > 0) {
         lines.push('', `*Skipped (no traffic data for ${dateStr}):*`);
         for (const s of skipped) {
@@ -551,25 +610,13 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         }
       }
 
-      // Chunk output to respect Slack's message length limits
-      const CHUNK_LIMIT = 2800;
-      const fullText = lines.join('\n');
-      if (fullText.length <= CHUNK_LIMIT) {
-        await say(fullText);
-      } else {
-        let chunk = '';
-        for (const line of lines) {
-          if (chunk.length + line.length + 1 > CHUNK_LIMIT) {
-            // eslint-disable-next-line no-await-in-loop
-            await say(chunk.trim());
-            chunk = '';
-          }
-          chunk += `${line}\n`;
-        }
-        if (chunk.trim()) {
-          await say(chunk.trim());
-        }
-      }
+      await postReport(
+        slackContext,
+        lines,
+        `agentic-traffic-db-status-${dateStr}`,
+        `Agentic Traffic DB Status ${dateStr}`,
+        `Agentic traffic DB status report for ${dateStr}`,
+      );
     } catch (error) {
       log.error('Error in check-agentic-traffic-db-status:', error);
       await postErrorMessage(say, error);
