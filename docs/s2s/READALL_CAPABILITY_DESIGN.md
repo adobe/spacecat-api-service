@@ -289,6 +289,71 @@ enumerate all sites and then call individual site APIs would hold:
 
 ---
 
+## Consumer Discovery Flow
+
+This capability is specifically designed for services that have no prior knowledge of site base
+URLs or IMS org IDs — they need to discover them before they can operate. The intended flow is:
+
+### Step 1 — Mint a token using the SpaceCat internal org
+
+S2S tokens are signed with a `client_id` + `imsOrgId` pair. A service that hasn't yet discovered
+any customer org can use the SpaceCat platform internal org to mint its initial token:
+
+| Environment | Internal imsOrgId |
+|---|---|
+| Production | `908936ED5D35CC220A495CD4@AdobeOrg` |
+| Dev / Stage | `8C6043F15F43B6390A49401A@AdobeOrg` |
+
+The Consumer record for the service is registered against this internal org and granted
+`site:readAll` and/or `organization:readAll`.
+
+### Step 2 — Discover sites / organizations
+
+Using the token from Step 1, call the list endpoints:
+
+```
+GET /sites           → returns all sites (DTO, no sensitive internals)
+GET /organizations   → returns all organizations
+```
+
+The service now has the site IDs, base URLs, and IMS org IDs it needs to scope further operations.
+
+### Step 3 — Mint a scoped token for the target site / org
+
+With a known `imsOrgId` for the target customer, the service mints a scoped S2S token for that
+org and uses it for all subsequent operations (`GET /sites/:siteId`, audit reads, opportunity
+writes, etc.). Those calls go through the standard tenant-scoped `hasAccess(entity)` checks.
+
+### Flow Summary
+
+```
+Service (no prior context)
+        │
+        ▼
+[1] Mint token with internal org
+    (Prod: 908936ED5D35CC220A495CD4@AdobeOrg)
+    (Dev:  8C6043F15F43B6390A49401A@AdobeOrg)
+        │
+        ▼
+[2] GET /sites  or  GET /organizations
+    → s2sAuthWrapper validates token + site:readAll capability
+    → controller gate: hasS2SCapability('site:readAll') → fresh DB fetch
+    → returns full site/org list
+        │
+        ▼
+[3] Mint scoped token for target imsOrgId
+        │
+        ▼
+[4] Operate on specific site/org
+    GET /sites/:siteId, POST /audits, etc.
+    → standard tenant-scoped hasAccess() checks apply
+```
+
+This keeps the discovery step explicit and auditable — the internal-org token is used only
+for enumeration; all write and site-scoped operations require a customer-org-scoped token.
+
+---
+
 ## What Does Not Change
 
 - Human admin flows (`hasAdminAccess()`) — completely unaffected.
