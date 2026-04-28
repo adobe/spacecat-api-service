@@ -152,6 +152,75 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('No sites have cdn-logs-report enabled');
   });
 
+  it('filters the check to one requested siteId', async () => {
+    const targetSite = makeSite('site-target', 'https://target.com', makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-target',
+        rowCount: 50,
+        classificationCount: 10,
+      },
+    }));
+    const otherSite = makeSite('site-other', 'https://other.com', makeAudit({
+      dailyAgenticExport: {
+        success: true,
+        trafficDate: '2026-04-22',
+        batchId: 'batch-other',
+        rowCount: 75,
+        classificationCount: 15,
+      },
+    }));
+    context.dataAccess.Site.all.resolves([targetSite, otherSite]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-target',
+          scopePrefix: 'site-target',
+          outputCount: 60,
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-target:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-target',
+          outputCount: 20,
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22', 'siteId=site-target'], slackContext);
+
+    expect(targetSite.getLatestAuditByAuditType).to.have.been.calledOnce;
+    expect(otherSite.getLatestAuditByAuditType).not.to.have.been.called;
+    expect(chain.in.firstCall.args[1]).to.deep.equal([
+      'batch-target',
+      'batch-target:daily-refresh',
+      'batch-target:weekly-refresh',
+    ]);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('for site `site-target`');
+    expect(output).to.include('https://target.com');
+    expect(output).not.to.include('https://other.com');
+    expect(output).to.include('(1 sites total)');
+  });
+
+  it('reports when the requested siteId is not found', async () => {
+    context.dataAccess.Site.all.resolves([makeSite('site-1', 'https://example.com', null)]);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22', 'siteId=missing-site'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: No site found with siteId `missing-site`.',
+    );
+    expect(postgrestStub.from).not.to.have.been.called;
+  });
+
   // ─── Per-site audit status paths ──────────────────────────────────────────
 
   it('reports no-audit for a site with no latest audit record', async () => {
