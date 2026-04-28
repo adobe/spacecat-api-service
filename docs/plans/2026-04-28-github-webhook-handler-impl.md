@@ -6,7 +6,7 @@
 
 **Architecture:** Custom `GitHubWebhookHmacHandler` auth handler plugged into the existing `authHandlers` array validates HMAC-SHA256 signatures. A factory-function controller applies trigger rules from the webhook payload (no GitHub API calls) and enqueues accepted events to SQS. Trigger rules and event-to-job-type mapping are extracted to a utility module for testability.
 
-**Tech Stack:** Node.js 22+, Mocha, Chai, Sinon, esmock, `@adobe/helix-shared-wrap`, `@adobe/spacecat-shared-http-utils` (AbstractHandler, AuthInfo), OpenAPI 3.1.
+**Tech Stack:** Node.js 24.x, Mocha, Chai, Sinon, esmock, `@adobe/helix-shared-wrap`, `@adobe/spacecat-shared-http-utils` (AbstractHandler, AuthInfo), OpenAPI 3.1.
 
 **Spec:** `docs/specs/2026-04-22-github-webhook-handler.md` (authoritative — all code in this plan is derived from that spec)
 
@@ -30,6 +30,31 @@
 - Create: `test/support/github-webhook-hmac-handler.test.js` — auth handler unit tests
 - Create: `test/utils/github-trigger-rules.test.js` — trigger rules unit tests
 - Create: `test/controllers/webhooks.test.js` — controller unit tests
+
+---
+
+## Cross-repo Contract: Dispatcher `_ALLOWED_KEYS` Alignment
+
+The Dispatcher Lambda (deployed via spacecat-infrastructure PR #469) enforces a strict key whitelist on job payloads:
+
+```python
+_ALLOWED_KEYS = frozenset(("job_type", "owner", "repo", "event_ref", "retry_count", "source_task_arn"))
+```
+
+The webhook handler's job payload includes 5 additional fields not in this whitelist: `event_type`, `event_action`, `installation_id`, `delivery_id`, `workspace_repos`. Messages with these fields will be **rejected by the Dispatcher** and land in the DLQ.
+
+**Resolution (option A — recommended):** Expand the Dispatcher's `_ALLOWED_KEYS` in a companion PR on `adobe/spacecat-infrastructure` to include:
+
+```python
+_ALLOWED_KEYS = frozenset((
+    "job_type", "owner", "repo", "event_ref", "retry_count", "source_task_arn",
+    "event_type", "event_action", "installation_id", "delivery_id", "workspace_repos",
+))
+```
+
+Add validation: `workspace_repos` is an array of `namespace/repo` strings, `installation_id` is a numeric string.
+
+**Deployment order:** The Dispatcher whitelist expansion must be deployed **before** the webhook handler goes live. The API Gateway feature flag (`enable_github_webhook_route`) should only be enabled after both the Dispatcher update and the webhook handler are deployed.
 
 ---
 

@@ -65,4 +65,5 @@ github-webhook:
               $ref: './schemas.yaml#/WebhookUnauthorized'
       '500':
         $ref: './responses.yaml#/500'
-    security: []
+    security:
+      - github_webhook_signature: []
