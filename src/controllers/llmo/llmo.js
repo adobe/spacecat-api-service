@@ -476,7 +476,7 @@ function LlmoController(ctx) {
         return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
       }
 
-      return cachedOk({ config, version: configVersion || null }, {
+      return ok({ config, version: configVersion || null }, {
         'Content-Encoding': 'br',
       });
     } catch (error) {
@@ -602,7 +602,7 @@ function LlmoController(ctx) {
       return siteValidation;
     }
     const { llmoConfig } = siteValidation;
-    return cachedOk(llmoConfig.questions || {});
+    return ok(llmoConfig.questions || {});
   };
 
   // Handles requests to the LLMO questions endpoint, adds a new question
@@ -713,7 +713,7 @@ function LlmoController(ctx) {
         return siteValidation;
       }
       const { llmoConfig } = siteValidation;
-      return cachedOk(llmoConfig.customerIntent || []);
+      return ok(llmoConfig.customerIntent || []);
     } catch (error) {
       return badRequest(cleanupHeaderValue(error.message));
     }
@@ -1483,7 +1483,7 @@ function LlmoController(ctx) {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
-      return cachedOk({
+      return ok({
         ...metaconfig,
       });
     } catch (error) {
@@ -1518,7 +1518,7 @@ function LlmoController(ctx) {
         return notFound(`LLMO strategy not found for site '${siteId}'${version != null ? ` with version '${version}'` : ''}`);
       }
 
-      return cachedOk({ data, version: strategyVersion }, {
+      return ok({ data, version: strategyVersion }, {
         'Content-Encoding': 'br',
       });
     } catch (error) {
@@ -1632,7 +1632,7 @@ function LlmoController(ctx) {
     try {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const result = await tokowakaClient.checkEdgeOptimizeStatus(site, path);
-      return cachedOk(result);
+      return ok(result);
     } catch (error) {
       log.error(`Error checking edge optimize status: ${error.message} for site: ${siteId} and path: ${path}`);
       if (error.status) {
