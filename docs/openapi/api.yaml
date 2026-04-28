@@ -111,6 +111,8 @@ paths:
     $ref: './hooks-api.yaml#/site-detection-rum'
   /hooks/site-integration/analytics/{hookSecret}:
     $ref: './hooks-api.yaml#/site-integration-analytics'
+  /webhooks/github:
+    $ref: './webhooks-api.yaml#/github-webhook'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:

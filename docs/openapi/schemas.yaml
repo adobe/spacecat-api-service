@@ -8362,3 +8362,16 @@ UrlInspectorFilterDimensions:
           label: { type: string }
         required: [id, label]
   required: [categories, regions, content_types]
+WebhookAccepted:
+  type: object
+  properties:
+    status:
+      type: string
+      enum: [accepted]
+  required: [status]
+WebhookUnauthorized:
+  type: object
+  properties:
+    message:
+      type: string
+  required: [message]
