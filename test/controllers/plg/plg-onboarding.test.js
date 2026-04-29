@@ -3104,6 +3104,17 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
     });
 
+    it('reuses an existing site enrollment when one already matches the entitlement', async () => {
+      const existingEnrollment = { getId: () => 'enroll-existing', getEntitlementId: () => 'ent-1' };
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([existingEnrollment]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.SiteEnrollment.create).not.to.have.been.called;
+    });
+
     it('logs error when persisting entitlement waitlist state fails in full onboarding', async () => {
       const orgClientStub = {
         createEntitlement: sandbox.stub().rejects(new Error('service down')),
