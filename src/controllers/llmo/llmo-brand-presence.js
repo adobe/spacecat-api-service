@@ -11,13 +11,13 @@
  */
 
 import {
-  ok,
   badRequest,
   forbidden,
   internalServerError,
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -444,7 +444,7 @@ export function createRegionsHandler() {
     }
     try {
       const regions = await fetchRegionsForConfig(Site.postgrestService);
-      return ok(regions);
+      return cachedOk(regions);
     } catch (error) {
       log.error(`Regions handler error: ${error.message}`);
       return badRequest(error.message);
@@ -704,7 +704,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         siteIdsForPageIntents,
       );
 
-      return ok({
+      return cachedOk({
         brands: brandOptions,
         categories,
         topics,
@@ -923,7 +923,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         };
       });
 
-      return ok({ weeks });
+      return cachedOk({ weeks });
     },
   );
 }
@@ -1077,7 +1077,7 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
 
       const weeklyTrends = reshapeMarketTrackingRows(data || []);
 
-      return ok({
+      return cachedOk({
         weeklyTrends,
         weeklyTrendsForComparison: weeklyTrends,
       });
@@ -1127,7 +1127,7 @@ export function createCompetitorSummaryHandler(getOrgAndValidateAccess) {
         return badRequest(error.message);
       }
 
-      return ok({
+      return cachedOk({
         competitors: (data || []).map((r) => ({
           name: r.competitor_name,
           mentions: r.total_mentions || 0,
@@ -1321,7 +1321,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       }
 
       const weeklyTrends = aggregateSentimentByWeek(data || []);
-      return ok({ weeklyTrends });
+      return cachedOk({ weeklyTrends });
     },
   );
 }
@@ -1683,7 +1683,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         popularityVolume: row.popularity_volume || 'N/A',
       }));
 
-      return ok({ topicDetails, totalCount });
+      return cachedOk({ topicDetails, totalCount });
     },
   );
 }
@@ -1780,7 +1780,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
-      return ok({
+      return cachedOk({
         items: paged,
         totalCount,
         topic: topicResponseLabel,
@@ -1831,7 +1831,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 
       const query = (ctx.data?.query ?? '').trim();
       if (!query) {
-        return ok({ topicDetails: [], totalCount: 0 });
+        return cachedOk({ topicDetails: [], totalCount: 0 });
       }
 
       if (query.length < MIN_SEARCH_QUERY_LENGTH) {
@@ -1933,7 +1933,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = topicDetails.slice(start, start + pagination.pageSize);
 
-      return ok({ topicDetails: paged, totalCount });
+      return cachedOk({ topicDetails: paged, totalCount });
     },
   );
 }
@@ -2383,7 +2383,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
       const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
-        return ok({
+        return cachedOk({
           topic: topicResponseLabel,
           topicId: topicIdResponse,
           stats: {
@@ -2425,7 +2425,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
       const sources = aggregateDetailSources(flatSources);
 
-      return ok({
+      return cachedOk({
         topic: topicResponseLabel,
         topicId: topicIdResponse,
         /* c8 ignore start */
@@ -2511,7 +2511,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
       const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
-        return ok({
+        return cachedOk({
           topic: topicResponseLabel,
           topicId: topicIdResponse,
           prompt: promptText,
@@ -2592,7 +2592,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
       const sources = aggregateDetailSources(flatSources);
 
-      return ok({
+      return cachedOk({
         topic: topicResponseLabel,
         topicId: topicIdResponse,
         prompt: promptText,
@@ -2688,7 +2688,7 @@ export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
 
       const sources = (sourceRows || []).map(mapExecutionSourceRowToResponse);
 
-      return ok({
+      return cachedOk({
         execution: {
           ...mapExecutionSummaryForSources(execRow),
           executionDate: execDate,
@@ -2987,7 +2987,7 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
         brandName,
       );
 
-      return ok({ shareOfVoiceData });
+      return cachedOk({ shareOfVoiceData });
     },
   );
 }
@@ -3084,7 +3084,7 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         executionCount: row.execution_count,
       }));
 
-      return ok({ movers });
+      return cachedOk({ movers });
     },
   );
 }
@@ -3222,7 +3222,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      return ok(response);
+      return cachedOk(response);
     },
   );
 }

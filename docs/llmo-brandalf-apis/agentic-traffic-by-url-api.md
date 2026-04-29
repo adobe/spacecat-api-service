@@ -64,6 +64,7 @@ Returns a **paginated** per-URL breakdown with traffic volume, performance, and 
       "urlPath": "/blog/ai-tools",
       "totalHits": 4200,
       "uniqueAgents": 8,
+      "uniqueAgentNames": ["GPTBot", "ChatGPT-User", "ClaudeBot"],
       "topAgent": "GPTBot",
       "topAgentType": "crawler",
       "responseCodes": [200, 301],
@@ -84,7 +85,8 @@ Returns a **paginated** per-URL breakdown with traffic volume, performance, and 
 | `rows[].host` | string | Hostname (e.g. `www.example.com`) |
 | `rows[].urlPath` | string | URL path (e.g. `/blog/ai-tools`) |
 | `rows[].totalHits` | number | Total AI-crawler requests to this URL |
-| `rows[].uniqueAgents` | number | Number of distinct user-agent strings |
+| `rows[].uniqueAgents` | number | Number of distinct user-agent strings (true count from DB; may exceed `uniqueAgentNames.length` when the RPC caps names) |
+| `rows[].uniqueAgentNames` | string[] | Agent name strings for tooltip display (capped at 20 by the RPC) |
 | `rows[].topAgent` | string | Most frequent user-agent string |
 | `rows[].topAgentType` | string | Agent type of `topAgent` |
 | `rows[].responseCodes` | number[] | Distinct HTTP status codes seen for this URL |
@@ -121,12 +123,14 @@ Returns traffic grouped by `(pageType, agentType)`. Useful for understanding whi
     "pageType": "article",
     "agentType": "crawler",
     "uniqueAgents": 5,
+    "uniqueAgentNames": ["GPTBot", "ChatGPT-User", "ClaudeBot"],
     "totalHits": 18400
   },
   {
     "pageType": "product",
     "agentType": "assistant",
     "uniqueAgents": 2,
+    "uniqueAgentNames": ["Claude-User"],
     "totalHits": 6100
   }
 ]
@@ -136,7 +140,8 @@ Returns traffic grouped by `(pageType, agentType)`. Useful for understanding whi
 |-------|------|-------------|
 | `pageType` | string | Page type (e.g. `article`, `product`) |
 | `agentType` | string | Agent type (e.g. `crawler`, `assistant`) |
-| `uniqueAgents` | number | Number of distinct user-agent strings in this group |
+| `uniqueAgents` | number | Number of distinct user-agent strings in this group (true count from DB; may exceed `uniqueAgentNames.length` when the RPC caps names) |
+| `uniqueAgentNames` | string[] | Agent name strings for tooltip display (capped at 20 by the RPC) |
 | `totalHits` | number | Total hits for this `(pageType, agentType)` combination |
 
 ---

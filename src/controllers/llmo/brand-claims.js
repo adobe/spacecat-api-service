@@ -11,8 +11,9 @@
  */
 
 import {
-  ok, badRequest, notFound,
+  badRequest, notFound,
 } from '@adobe/spacecat-shared-http-utils';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * Handles the brand claims retrieval by generating a presigned S3 URL.
@@ -52,7 +53,7 @@ export async function handleBrandClaims(context) {
     const expiresIn = 60 * 60; // 1 hour
     const url = await getSignedUrl(s3.s3Client, command, { expiresIn });
 
-    return ok({
+    return cachedOk({
       siteId,
       model: model || 'default',
       presignedUrl: url,

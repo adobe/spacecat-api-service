@@ -35,6 +35,12 @@ const CATEGORY_ID = '123e4567-e89b-12d3-a456-426614174000';
 const TOPIC_ID = '456e7890-e89b-12d3-a456-426614174001';
 const EXTERNAL_API_BASE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
+/** Matches HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS / isHlxSheetDataAccessBlocked in llmo.js */
+const HLX_PG_MIGRATION_SITE_ID_PROD = '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3';
+const HLX_PG_MIGRATION_SITE_ID_STAGE = 'c2473d89-e997-458d-a86d-b4096649c12b';
+const HLX_SHEET_TYPE_BRAND_PRESENCE = 'brand-presence';
+const HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE = 'Access to HLX sheet data has been blocked for this site due to PG migration';
+
 const createMockResponse = (data, ok = true, status = 200) => ({
   ok,
   status,
@@ -94,6 +100,19 @@ describe('LlmoController', () => {
   let edgeRoutingAuthReal;
   let detectCdnForDomainStub;
   let authorizeEdgeCdnRoutingStub;
+
+  // Passthrough mock for cachedOk: defers to the same fake `ok` shape that the
+  // tests already rely on (no real brotli compression / no real Response).
+  const mockCachedResponse = {
+    cachedOk: (data, additionalHeaders = {}) => ({
+      status: 200,
+      headers: new Map(Object.entries({
+        'Cache-Control': 'private, max-age=7200',
+        ...additionalHeaders,
+      })),
+      json: async () => data,
+    }),
+  };
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -202,6 +221,7 @@ describe('LlmoController', () => {
         updateModifiedByDetails: updateModifiedByDetailsStub,
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -336,6 +356,7 @@ describe('LlmoController', () => {
         default: createMockAccessControlUtil(false),
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -379,6 +400,7 @@ describe('LlmoController', () => {
         },
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -419,6 +441,7 @@ describe('LlmoController', () => {
         },
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -887,6 +910,96 @@ describe('LlmoController', () => {
       );
     });
 
+    describe('HLX PG migration blocking (brand-presence)', () => {
+      it('should return 403 for prod PG migration site when sheetType is brand-presence', async () => {
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+
+      it('should return 403 for stage PG migration site when sheetType is brand-presence', async () => {
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_STAGE;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+
+      it('should proxy HLX for PG migration site when sheetType is not brand-presence', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'ok' }));
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = 'analytics';
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledOnce;
+      });
+
+      it('should proxy HLX for PG migration site when sheetType is omitted', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'ok' }));
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.dataSource = 'test-data';
+        delete mockContext.params.sheetType;
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledWith(
+          `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json`,
+          sinon.match.object,
+        );
+      });
+
+      it('should proxy HLX for non-migrated site when sheetType is brand-presence', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'ok' }));
+        mockContext.params.siteId = TEST_SITE_ID;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledOnce;
+      });
+    });
+
+    describe('HLX sheet guard when siteId is absent', () => {
+      it('should return 403 when siteId is falsy on the HLX guard read (defensive)', async () => {
+        let siteIdReadCount = 0;
+        Object.defineProperty(mockContext.params, 'siteId', {
+          configurable: true,
+          enumerable: true,
+          get() {
+            siteIdReadCount += 1;
+            return siteIdReadCount === 1 ? TEST_SITE_ID : '';
+          },
+        });
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+    });
+
     it('should return 404 when site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.getLlmoSheetData(mockContext);
@@ -979,6 +1092,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(testUrl, sinon.match.object);
+    });
+
+    describe('HLX PG migration blocking (brand-presence)', () => {
+      it('should return 403 for PG migration site when sheetType is brand-presence', async () => {
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.queryLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+
+      it('should proxy HLX for PG migration site when sheetType is not brand-presence', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'test-data' }));
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = 'analytics';
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.queryLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledOnce;
+      });
     });
 
     it('should handle POST request with filters successfully', async () => {
@@ -2031,6 +2171,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
@@ -2125,6 +2266,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2179,6 +2321,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2212,6 +2355,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2375,6 +2519,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2607,6 +2752,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2674,6 +2820,7 @@ describe('LlmoController', () => {
         const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
           '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           ...getCommonMocks(),
         });
 
@@ -3085,6 +3232,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -3431,6 +3579,36 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
+    });
+
+    describe('HLX PG migration blocking (brand-presence)', () => {
+      it('should return 403 for PG migration site when sheetType is brand-presence', async () => {
+        const queryLlmoFilesStub = sinon.stub().resolves({ data: {}, headers: {} });
+        const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+          '../../../src/controllers/llmo/llmo-query-handler.js': {
+            queryLlmoFiles: queryLlmoFilesStub,
+          },
+          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          ...getCommonMocks(),
+        });
+        const pgContext = {
+          ...mockContext,
+          params: {
+            ...mockContext.params,
+            siteId: HLX_PG_MIGRATION_SITE_ID_PROD,
+            sheetType: HLX_SHEET_TYPE_BRAND_PRESENCE,
+            dataSource: 'test-data',
+          },
+        };
+        const cacheController = LlmoControllerWithCache(pgContext);
+
+        const result = await cacheController.queryFiles(pgContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(queryLlmoFilesStub).to.not.have.been.called;
+      });
     });
 
     it('should return 404 when site is not found', async () => {
@@ -4709,6 +4887,7 @@ describe('LlmoController', () => {
       const LlmoControllerNotOwner = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -4837,6 +5016,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await NonAdminController(mockContext)
@@ -4967,6 +5147,7 @@ describe('LlmoController', () => {
           updateModifiedByDetails: updateModifiedByDetailsStub,
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: TEST_USER_AGENT,
           tracingFetch: (...args) => tracingFetchStub(...args),
@@ -5075,6 +5256,7 @@ describe('LlmoController', () => {
           updateModifiedByDetails: updateModifiedByDetailsStub,
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: TEST_USER_AGENT,
           tracingFetch: (...args) => tracingFetchStub(...args),
@@ -5212,6 +5394,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5282,6 +5465,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5349,6 +5533,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5710,6 +5895,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await OrderedController(mockContext)
@@ -5837,6 +6023,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -6009,6 +6196,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await OrderedController(mockContext)
@@ -6085,6 +6273,7 @@ describe('LlmoController', () => {
           default: createMockAccessControlUtil(true, true, false),
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
@@ -6445,6 +6634,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
@@ -6743,6 +6933,7 @@ describe('LlmoController', () => {
             previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           '@adobe/spacecat-shared-utils': {
             tracingFetch: sinon.stub(),
             composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
@@ -6798,6 +6989,7 @@ describe('LlmoController', () => {
             previewAndPublishQueryIndex: sinon.stub(),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           '@adobe/spacecat-shared-utils': {
             tracingFetch: sinon.stub(),
             composeBaseURL: (d) => `https://${d}`,
