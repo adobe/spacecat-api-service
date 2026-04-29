@@ -16,19 +16,19 @@ import {
 import wrap from '@adobe/helix-shared-wrap';
 import { getSkipReason, EVENT_JOB_MAP } from '../utils/github-trigger-rules.js';
 
-function errorHandler(fn) {
-  return async (context) => {
-    try {
-      return await fn(context);
-    } catch (e) {
-      context.log.error('GitHub webhook handler error', e);
-      return internalServerError('Internal error');
-    }
-  };
-}
-
 function WebhooksController(context) {
   const { sqs, log, env } = context;
+
+  function errorHandler(fn) {
+    return async (ctx) => {
+      try {
+        return await fn(ctx);
+      } catch (e) {
+        log.error('GitHub webhook handler error', e);
+        return internalServerError('Internal error');
+      }
+    };
+  }
 
   const processGitHubWebhook = wrap(async (ctx) => {
     const event = ctx.headers?.['x-github-event'];

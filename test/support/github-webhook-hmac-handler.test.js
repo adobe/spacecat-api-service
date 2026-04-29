@@ -42,7 +42,11 @@ describe('GitHubWebhookHmacHandler', () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-    const log = sandbox.stub();
+    const log = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+    };
     handler = new GitHubWebhookHmacHandler(log);
   });
 
