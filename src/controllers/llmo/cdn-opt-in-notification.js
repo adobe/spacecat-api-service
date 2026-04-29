@@ -31,7 +31,7 @@ import { CDN_TYPES, CDN_DISPLAY_NAMES } from './llmo-utils.js';
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
 const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
 
-const CSE_LOOKUP_TEAM = 'Customer CSE (run `/ams-whois <company-name>` in Slack to find them)';
+const CSE_LOOKUP_TEAM = 'Customer CSE (run `/ams-whois &lt;customer-name&gt;` in Slack to find them)';
 
 const CDN_CONFIG = {
   [CDN_TYPES.BYOCDN_FASTLY]: {
