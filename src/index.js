@@ -99,6 +99,8 @@ import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
+import WebhooksController from './controllers/webhooks.js';
+import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -250,6 +252,7 @@ async function run(request, context) {
     const pageRelationshipsController = PageRelationshipsController(context);
     const plgOnboardingController = PlgOnboardingController(context);
     const drsBpPgAuditController = DrsBpPgAuditController(context);
+    const webhooksController = WebhooksController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -302,6 +305,7 @@ async function run(request, context) {
       autofixChecksController,
       plgOnboardingController,
       drsBpPgAuditController,
+      webhooksController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -354,7 +358,7 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 const wrappedMain = wrap(run)
   .with(authWrapper, {
     authHandlers: [
-      SkipAuthHandler, JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler,
+      SkipAuthHandler, GitHubWebhookHmacHandler, JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler,
     ],
   })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
