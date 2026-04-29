@@ -296,7 +296,6 @@ async function ensureAsoEntitlement(site, organization, context) {
     throw new EntitlementWaitlistError(`Unable to create or fetch ASO entitlement for org ${organizationId}`);
   }
   const entitlementOrgId = entitlement.getOrganizationId();
-  const entitlementTier = entitlement.getTier?.();
 
   if (entitlementOrgId !== organizationId) {
     log.warn(
@@ -305,18 +304,20 @@ async function ensureAsoEntitlement(site, organization, context) {
     );
   }
 
-  // Step 2: ensure site enrollment binding the site to the entitlement above.
-  const siteClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
+  // Step 2: create site enrollment bound directly to the entitlement ID above.
+  // We bypass TierClient.createForSite to avoid re-deriving org from site.getOrganizationId(),
+  // which may lag behind the DB if org reassignment just happened.
+  const { SiteEnrollment } = context.dataAccess;
   let siteEnrollment;
   try {
-    ({ siteEnrollment } = await siteClient.createEntitlement(entitlementTier ?? ASO_TIER));
-  } catch (createError) {
-    log.warn(`ensureAsoEntitlement: createEntitlement failed for site ${siteId}: ${createError.message}, fetching existing`);
-    try {
-      ({ siteEnrollment } = await siteClient.checkValidEntitlement());
-    } catch (fetchError) {
-      log.warn(`ensureAsoEntitlement: checkValidEntitlement also failed for site ${siteId}: ${fetchError.message}`);
+    const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
+    const entitlementId = entitlement.getId();
+    siteEnrollment = existingEnrollments.find((se) => se.getEntitlementId() === entitlementId);
+    if (!siteEnrollment) {
+      siteEnrollment = await SiteEnrollment.create({ siteId, entitlementId });
     }
+  } catch (enrollError) {
+    log.warn(`ensureAsoEntitlement: site enrollment failed for site ${siteId}: ${enrollError.message}`);
   }
   if (!siteEnrollment) {
     throw new EntitlementWaitlistError(`Unable to create or fetch ASO enrollment for site ${siteId}`);
