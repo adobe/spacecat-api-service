@@ -498,6 +498,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/global-sheet-data/:configName': 'site:read',
   'GET /sites/:siteId/llmo/rationale': 'site:read',
   'GET /sites/:siteId/llmo/edge-optimize-config': 'site:read',
+  'GET /sites/:siteId/llmo/edge-optimize-config/akamai-papi': 'site:read',
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
