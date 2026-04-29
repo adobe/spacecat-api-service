@@ -353,9 +353,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
         '@adobe/spacecat-shared-tier-client': {
           default: {
-              createForSite: tierClientCreateForSiteStub,
-              createForOrg: tierClientCreateForOrgStub,
-            },
+            createForSite: tierClientCreateForSiteStub,
+            createForOrg: tierClientCreateForOrgStub,
+          },
         },
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: configToDynamoItemStub },
@@ -3806,7 +3806,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         organizationId: TEST_ORG_ID,
       });
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
 
       const orgClientStub = {
         createEntitlement: sandbox.stub().rejects(new Error('service down')),
@@ -3828,7 +3829,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         organizationId: TEST_ORG_ID,
       });
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
       preonboardedOnboarding.save.rejects(new Error('db write failed'));
 
       const orgClientStub = {
@@ -3850,7 +3852,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         organizationId: TEST_ORG_ID,
       });
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
       // Not an entitlement error — e.g. revocation throws unexpectedly.
       mockDataAccess.SiteEnrollment = { allBySiteId: sandbox.stub().rejects(new Error('db error')) };
 
