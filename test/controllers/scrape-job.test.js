@@ -778,6 +778,27 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error').length).to.be.at.most(500);
     });
 
+    it('should fall back to default x-error message when error has empty message', async () => {
+      // Force the decode step to throw an empty-message Error so it reaches
+      // createErrorResponse before any caller (e.g. scrape-client) can wrap it
+      // with a non-empty prefix.
+      const originalBufferFrom = Buffer.from;
+      sandbox.stub(Buffer, 'from').callsFake((...args) => {
+        if (args[1] === 'base64') {
+          throw new Error('');
+        }
+        return originalBufferFrom(...args);
+      });
+
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Internal server error');
+    });
+
     it('should decode base64 URL correctly', async () => {
       const allRecentByUrlAndProcessingTypeStub = sandbox.stub().resolves([]);
       // eslint-disable-next-line max-len
