@@ -262,12 +262,6 @@ async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
   return refreshed ?? site;
 }
 
-function isAlreadyExistsError(error) {
-  /* c8 ignore next */
-  const msg = error?.message ?? '';
-  return msg.includes('already exists') || msg.includes('Already enrolled');
-}
-
 // Resolves entitlement against the IMS-derived organization (passed in by the caller),
 // then enrollment for the site. Step 1 deliberately ignores site.getOrganizationId()
 // so the entitlement is bound to the customer org we resolved from imsOrgId — not to
@@ -284,19 +278,13 @@ async function ensureAsoEntitlement(site, organization, context) {
   try {
     ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));
   } catch (error) {
-    if (!isAlreadyExistsError(error)) {
-      throw error;
-    }
     log.info(`ensureAsoEntitlement: entitlement exists for org ${organizationId}, fetching existing`);
     ({ entitlement } = await orgClient.checkValidEntitlement());
-    if (!entitlement) {
-      throw error;
-    }
   }
-  const entitlementOrgId = entitlement.getOrganizationId();
-  const entitlementTier = entitlement.getTier?.();
+  const entitlementOrgId = entitlement?.getOrganizationId();
+  const entitlementTier = entitlement?.getTier?.();
 
-  if (entitlementOrgId !== organizationId) {
+  if (entitlementOrgId && entitlementOrgId !== organizationId) {
     log.warn(
       `ensureAsoEntitlement: entitlement org drift — expected ${organizationId}, `
       + `got ${entitlementOrgId} (site ${siteId})`,
@@ -309,9 +297,6 @@ async function ensureAsoEntitlement(site, organization, context) {
   try {
     ({ siteEnrollment } = await siteClient.createEntitlement(entitlementTier ?? ASO_TIER));
   } catch (error) {
-    if (!isAlreadyExistsError(error)) {
-      throw error;
-    }
     log.info(`ensureAsoEntitlement: enrollment exists for site ${siteId}, fetching existing`);
     ({ siteEnrollment } = await siteClient.checkValidEntitlement());
   }
