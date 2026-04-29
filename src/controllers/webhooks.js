@@ -50,8 +50,7 @@ function WebhooksController(context) {
       return noContent();
     }
 
-    const action = data.action;
-    const pr = data.pull_request;
+    const { action, pull_request: pr } = data;
 
     // Apply trigger rules
     const skipReason = getSkipReason(data, action, env);

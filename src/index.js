@@ -358,7 +358,12 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 const wrappedMain = wrap(run)
   .with(authWrapper, {
     authHandlers: [
-      SkipAuthHandler, GitHubWebhookHmacHandler, JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler,
+      SkipAuthHandler,
+      GitHubWebhookHmacHandler,
+      JwtHandler,
+      AdobeImsHandler,
+      ScopedApiKeyHandler,
+      LegacyApiKeyHandler,
     ],
   })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
