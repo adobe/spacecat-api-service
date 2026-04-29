@@ -6014,7 +6014,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       // Stub is called fire-and-forget; give the microtask queue a tick to flush
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.siteId).to.equal(TEST_SITE_ID);
@@ -6129,7 +6129,7 @@ describe('LlmoController', () => {
       const result = await controllerWithNotify.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.optedBy).to.be.undefined;
@@ -6236,7 +6236,7 @@ describe('LlmoController', () => {
       const result = await controllerBlocked.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(detectBotBlockerStub).to.have.been.calledOnceWith({ baseUrl: 'https://www.example.com' });
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
@@ -6340,7 +6340,7 @@ describe('LlmoController', () => {
       const result = await controllerNoType.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.botBlocked).to.be.true;
@@ -6443,7 +6443,7 @@ describe('LlmoController', () => {
       const result = await controllerBotErr.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.botBlocked).to.be.false;
@@ -6542,7 +6542,7 @@ describe('LlmoController', () => {
       const result = await controllerS3Err.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.cdnType).to.be.undefined;
@@ -6654,7 +6654,7 @@ describe('LlmoController', () => {
       });
 
       expect(result.status).to.equal(200);
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.cdnType).to.equal('byocdn-akamai');
@@ -6754,7 +6754,7 @@ describe('LlmoController', () => {
       });
 
       expect(result.status).to.equal(200);
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(notifyOptInStub).to.have.been.calledOnce;
       const [, params] = notifyOptInStub.firstCall.args;
       expect(params.cdnType).to.be.undefined;
@@ -6854,7 +6854,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       // Wait for the fire-and-forget .catch() handler to run
-      await Promise.resolve();
+      await new Promise(setImmediate);
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/\[cdn-opt-in-notification\] Unhandled error/),
         sinon.match.instanceOf(Error),

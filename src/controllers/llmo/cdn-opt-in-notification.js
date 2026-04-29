@@ -31,6 +31,8 @@ import { CDN_TYPES, CDN_DISPLAY_NAMES } from './llmo-utils.js';
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
 const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
 
+// Pre-encoded HTML entities — the Post Office template renders this string
+// as HTML, so raw < / > would be stripped or treated as a tag.
 const CSE_LOOKUP_TEAM = 'Customer CSE (run `/ams-whois &lt;customer-name&gt;` in Slack to find them)';
 
 const CDN_CONFIG = {
@@ -143,7 +145,7 @@ export async function notifyOptInIfNeeded(context, params) {
     const cdnDisplayName = CDN_DISPLAY_NAMES[cdnType] || '';
     const cdnKnown = Boolean(cdnDisplayName);
     const docLink = cdnEntry?.docLink || '';
-    const adobeManaged = cdnEntry?.adobeManaged === true;
+    const adobeManaged = Boolean(cdnEntry?.adobeManaged);
     const replyAllTeam = cdnEntry?.replyAllTeam || '';
     const orgMembers = await getOrgMembersCsv(context, orgId);
 
