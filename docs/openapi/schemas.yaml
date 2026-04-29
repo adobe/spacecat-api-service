@@ -7557,17 +7557,6 @@ SiteDetectionJobResponse:
         reason:
           type: string
           description: Human-readable reason for the action (present for rejected/duplicate).
-        imsOrgId:
-          description: |
-            IMS Org ID associated with the discovered site. Resolved by an
-            internal Slack approval flow that runs after the job terminates,
-            so this field starts as `null` and becomes non-null on a later
-            poll once an admin approves the SiteCandidate and the detected
-            organization. Only populated when `status: COMPLETED` and a
-            site record has been created and linked to an organization.
-          oneOf:
-            - type: string
-            - type: 'null'
     error:
       type: object
       description: The error of the site detection job if it failed with an exception. Absent when no exception occurred.
