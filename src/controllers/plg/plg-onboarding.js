@@ -776,8 +776,8 @@ async function performAsoPlgOnboarding({
     let site = await Site.findById(onboarding.getSiteId());
     if (site) {
       try {
-      // Resolve customer's organization from imsOrgId
-      const organization = await createOrFindOrganization(imsOrgId, context);
+        // Resolve customer's organization from imsOrgId
+        const organization = await createOrFindOrganization(imsOrgId, context);
         const customerOrgId = organization.getId();
         // Anchor the onboarding record to the resolved customer org up-front, regardless of
         // whether the site itself needs to be reassigned. Preonboarding records created earlier
