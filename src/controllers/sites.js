@@ -1312,6 +1312,32 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const patchPageCitabilityStatus = async (context) => {
+    const { siteId } = context.params;
+    const { url, httpStatus } = context.data || {};
+
+    if (!hasText(url)) {
+      return badRequest('url is required');
+    }
+
+    if (httpStatus !== 404) {
+      return ok({ url, httpStatus, updated: false });
+    }
+
+    const { PageCitability } = dataAccess;
+    const record = await PageCitability.findByUrl(url);
+    if (!record) {
+      return ok({ url, httpStatus, updated: false });
+    }
+
+    record.setIsDeployedAtEdge(false);
+    record.setCitabilityScore(0);
+    await record.save();
+
+    log.info(`Cleared edge deployment status for 404 page: ${url} (site: ${siteId})`);
+    return ok({ url, httpStatus, updated: true });
+  };
+
   return {
     createSite,
     getAll,
@@ -1326,6 +1352,7 @@ function SitesController(ctx, log, env) {
     updateSite,
     updateCdnLogsConfig,
     getPageCitabilityCounts,
+    patchPageCitabilityStatus,
     getTopPages,
     resolveSite,
     getBrandProfile,
