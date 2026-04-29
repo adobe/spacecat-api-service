@@ -36,13 +36,13 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
 
     const secret = context.env?.GITHUB_WEBHOOK_SECRET;
     if (!secret) {
-      this.log.error('GITHUB_WEBHOOK_SECRET not configured');
+      this.log('GITHUB_WEBHOOK_SECRET not configured', 'error');
       return null;
     }
 
     // Validate signature format before timingSafeEqual (prevents throw on length mismatch)
     if (!SIGNATURE_PATTERN.test(signature)) {
-      this.log.warn('Malformed X-Hub-Signature-256 header');
+      this.log('Malformed X-Hub-Signature-256 header', 'warn');
       return null;
     }
 
@@ -52,7 +52,7 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     // returns the cached body via @adobe/helix-universal's Request implementation.
     const rawBody = await request.text();
     if (!rawBody) {
-      this.log.warn('Empty request body for webhook');
+      this.log('Empty request body for webhook', 'warn');
       return null;
     }
 
@@ -66,7 +66,7 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     const sigBuffer = Buffer.from(signature);
     const expectedBuffer = Buffer.from(expected);
     if (!crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
-      this.log.warn('HMAC signature mismatch');
+      this.log('HMAC signature mismatch', 'warn');
       return null;
     }
 
