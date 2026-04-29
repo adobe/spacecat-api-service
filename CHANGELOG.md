@@ -1,3 +1,10 @@
+# [1.459.0](https://github.com/adobe/spacecat-api-service/compare/v1.458.1...v1.459.0) (2026-04-29)
+
+
+### Features
+
+* **plg:** clean up stale FIXED suggestions and FixEntities on PLG onboarding ([#2283](https://github.com/adobe/spacecat-api-service/issues/2283)) ([104d584](https://github.com/adobe/spacecat-api-service/commit/104d584124b44a59764bb1fdc07d23cb774d4a25))
+
 ## [1.458.1](https://github.com/adobe/spacecat-api-service/compare/v1.458.0...v1.458.1) (2026-04-29)
 
 
