@@ -12,7 +12,7 @@
 
 import crypto from 'crypto';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
-import { AuthInfo } from '@adobe/spacecat-shared-http-utils';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 const SIGNATURE_PATTERN = /^sha256=[a-f0-9]{64}$/;
 
