@@ -26,6 +26,7 @@ import {
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
 } from '../../../src/controllers/llmo/llmo-agentic-traffic.js';
 
 use(sinonChai);
@@ -557,7 +558,11 @@ describe('llmo-agentic-traffic', () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: {
           data: [{
-            page_type: 'article', agent_type: 'Chatbots', unique_agents: 5, total_hits: 200,
+            page_type: 'article',
+            agent_type: 'Chatbots',
+            unique_agents: 5,
+            unique_agent_names: ['ChatGPT-User', 'GPTBot'],
+            total_hits: 200,
           }],
           error: null,
         },
@@ -569,13 +574,18 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].pageType).to.equal('article');
       expect(body[0].agentType).to.equal('Chatbots');
       expect(body[0].uniqueAgents).to.equal(5);
+      expect(body[0].uniqueAgentNames).to.deep.equal(['ChatGPT-User', 'GPTBot']);
     });
 
     it('handles null row fields with safe defaults', async () => {
       const client = createMockClient({
         rpc_agentic_traffic_by_user_agent: {
           data: [{
-            page_type: null, agent_type: null, unique_agents: null, total_hits: null,
+            page_type: null,
+            agent_type: null,
+            unique_agents: null,
+            unique_agent_names: null,
+            total_hits: null,
           }],
           error: null,
         },
@@ -588,6 +598,7 @@ describe('llmo-agentic-traffic', () => {
       expect(body[0].agentType).to.equal('');
       expect(body[0].uniqueAgents).to.equal(0);
       expect(body[0].totalHits).to.equal(0);
+      expect(body[0].uniqueAgentNames).to.deep.equal([]);
     });
 
     it('does not include p_user_agent in the RPC call', async () => {
@@ -644,6 +655,7 @@ describe('llmo-agentic-traffic', () => {
             total_count: 1,
             total_hits: 150,
             unique_agents: 3,
+            unique_agent_names: ['ChatGPT-User', 'GPTBot'],
             top_agent: 'ChatGPT-User',
             top_agent_type: 'Chatbots',
             response_codes: [200, 301],
@@ -663,6 +675,7 @@ describe('llmo-agentic-traffic', () => {
       expect(body.totalCount).to.equal(1);
       expect(body.rows[0].host).to.equal('example.com');
       expect(body.rows[0].urlPath).to.equal('/page');
+      expect(body.rows[0].uniqueAgentNames).to.deep.equal(['ChatGPT-User', 'GPTBot']);
       expect(body.rows[0].topAgent).to.equal('ChatGPT-User');
       expect(body.rows[0].topAgentType).to.equal('Chatbots');
       expect(body.rows[0].responseCodes).to.deep.equal([200, 301]);
@@ -795,6 +808,7 @@ describe('llmo-agentic-traffic', () => {
             url_path: null,
             total_hits: null,
             unique_agents: null,
+            unique_agent_names: null,
             top_agent: null,
             top_agent_type: null,
             response_codes: null,
@@ -813,6 +827,7 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(body.rows[0].host).to.equal('');
       expect(body.rows[0].urlPath).to.equal('');
+      expect(body.rows[0].uniqueAgentNames).to.deep.equal([]);
       expect(body.rows[0].topAgent).to.equal('');
       expect(body.rows[0].responseCodes).to.deep.equal([]);
       expect(body.rows[0].successRate).to.be.null;
@@ -1195,6 +1210,57 @@ describe('llmo-agentic-traffic', () => {
       const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── Has Data ───────────────────────────────────────────────────────────────
+
+  describe('createAgenticTrafficHasDataHandler', () => {
+    it('returns hasData: true when agentic_traffic has rows for the site', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [{ traffic_date: '2026-01-05' }], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+    });
+
+    it('returns hasData: false when no rows exist for the site', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(false);
+    });
+
+    it('returns 500 when the PostgREST query errors', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: null, error: { message: 'db error' } },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('queries the agentic_traffic table with the site id and a limit of 1', async () => {
+      const client = createMockClient({}, {
+        agentic_traffic: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficHasDataHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.from).to.have.been.calledWith('agentic_traffic');
+      const chain = client.from.firstCall.returnValue;
+      expect(chain.eq).to.have.been.calledWith('site_id', SITE_ID);
+      expect(chain.limit).to.have.been.calledWith(1);
     });
   });
 });
