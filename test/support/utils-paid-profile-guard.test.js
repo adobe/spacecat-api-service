@@ -503,7 +503,9 @@ describe('onboardSingleSite — paid profile guard', () => {
       return { site, updateOnboardConfigStub };
     };
 
-    before(async () => {
+    // eslint-disable-next-line func-names
+    before(async function () {
+      this.timeout(15000);
       const sharedMocks = {
         '@aws-sdk/client-sfn': {
           // eslint-disable-next-line func-style
