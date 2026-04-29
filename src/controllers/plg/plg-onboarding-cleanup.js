@@ -12,12 +12,7 @@
 
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 
-/**
- * Opportunity types that participate in the PLG auto-fix lifecycle.
- * Kept in sync with the LD auto-fix flags and the displacement check
- * in plg-onboarding.js (PLG_OPPORTUNITY_TYPES).
- */
-export const PLG_CLEANUP_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
+import { PLG_OPPORTUNITY_TYPES } from './plg-constants.js';
 
 /**
  * Suggestions in any of these statuses are transitioned to OUTDATED on re-onboarding
@@ -191,9 +186,18 @@ async function removeFixEntitiesForOpportunity(opportunity, FixEntity, log) {
  * because callers (onboarding flow) cannot afford to be blocked by cleanup —
  * orphaned fix/suggestion rows can be reconciled out-of-band.
  *
+ * Authorization contract: `siteId` is treated as a trusted, already-authorized input.
+ * The function performs cross-site mutations (status flips + deletes) without any
+ * tenant/ownership check — callers (currently only `performAsoPlgOnboarding`) must
+ * ensure the `siteId` belongs to the IMS-org being onboarded before invoking this.
+ *
+ * The summary totals are also written to the log for ops visibility, so callers may
+ * safely discard the return value.
+ *
  * @param {string} siteId - The site being (re-)onboarded.
  * @param {object} context - Request context (provides dataAccess + log).
  * @returns {Promise<{outdatedCount: number, resetToNewCount: number, removedFixCount: number}>}
+ *   Per-bucket totals. Currently used only for logging; safe to ignore at call sites.
  */
 export async function cleanupPlgSiteSuggestionsAndFixes(siteId, context) {
   const { dataAccess, log } = context;
@@ -202,7 +206,9 @@ export async function cleanupPlgSiteSuggestionsAndFixes(siteId, context) {
   const emptyResult = { outdatedCount: 0, resetToNewCount: 0, removedFixCount: 0 };
 
   if (!siteId) {
-    log.info('PLG cleanup: no siteId provided, skipping');
+    // Missing siteId here means the caller passed a bad argument — surface it as a
+    // warn so it is visible in log monitoring rather than buried in info noise.
+    log.warn('PLG cleanup: no siteId provided, skipping');
     return emptyResult;
   }
 
@@ -215,7 +221,7 @@ export async function cleanupPlgSiteSuggestionsAndFixes(siteId, context) {
   }
 
   const plgOpportunities = opportunities.filter(
-    (o) => PLG_CLEANUP_OPPORTUNITY_TYPES.includes(o.getType()),
+    (o) => PLG_OPPORTUNITY_TYPES.includes(o.getType()),
   );
 
   if (plgOpportunities.length === 0) {
@@ -242,10 +248,14 @@ export async function cleanupPlgSiteSuggestionsAndFixes(siteId, context) {
     { ...emptyResult },
   );
 
+  // Distinct, structured summary line so ops can grep / aggregate (e.g. in Coralogix)
+  // for cleanup runs that actually found stale rows. The "found=true|false" tag makes
+  // it easy to filter out the no-op majority.
+  const found = totals.outdatedCount + totals.resetToNewCount + totals.removedFixCount > 0;
   log.info(
-    `PLG cleanup complete for site ${siteId}: marked ${totals.outdatedCount} suggestions OUTDATED, `
-    + `reset ${totals.resetToNewCount} suggestions to NEW, removed ${totals.removedFixCount} fix `
-    + `entities across ${plgOpportunities.length} opportunities`,
+    `PLG cleanup summary [found=${found}] for site ${siteId}: `
+    + `outdated=${totals.outdatedCount}, resetToNew=${totals.resetToNewCount}, `
+    + `removedFixes=${totals.removedFixCount}, opportunities=${plgOpportunities.length}`,
   );
 
   return totals;
