@@ -20,12 +20,12 @@ import {
   isValidUrl,
   isObject,
   isNonEmptyObject,
-  resolveCanonicalUrl,
   isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
   wwwUrlResolver as sharedWwwUrlResolver,
   getLastNumberOfWeeks,
+  resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import RUMAPIClient, { RUM_BUNDLER_API_HOST } from '@adobe/spacecat-shared-rum-api-client';
@@ -1676,6 +1676,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1684,6 +1685,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1702,12 +1704,22 @@ export const onboardSingleSite = async (
       }
     }
 
-    // Resolve canonical URL for the site from the base URL
-    let resolvedUrl = await resolveCanonicalUrl(baseURL);
-    if (resolvedUrl === null) {
-      log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+    log.info(`[onboard] step: imports configured for site ${siteID}, starting canonical URL resolution`);
+    await say(`:hourglass: Resolving canonical URL for ${baseURL}...`);
+
+    const CANONICAL_TIMEOUT_MS = 8000;
+    const canonicalStart = Date.now();
+    let resolvedUrl = await Promise.race([
+      resolveCanonicalUrl(baseURL),
+      new Promise((resolve) => { setTimeout(() => resolve(null), CANONICAL_TIMEOUT_MS); }),
+    ]);
+    const canonicalElapsed = Date.now() - canonicalStart;
+    if (!resolvedUrl) {
+      log.warn(`Unable to resolve canonical URL for site ${siteID} after ${canonicalElapsed}ms, using base URL: ${baseURL}`);
       resolvedUrl = baseURL;
     }
+    log.info(`[onboard] step: canonical URL resolved in ${canonicalElapsed}ms for site ${siteID}`);
+
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
     log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
@@ -1731,9 +1743,22 @@ export const onboardSingleSite = async (
       ...(additionalParams.force ? { forcedOverride: true } : {}),
     }, { maxHistory: MAX_ONBOARD_HISTORY });
 
+    log.info(`[onboard] step: saving site config for ${siteID}`);
+    await say(':floppy_disk: Saving site configuration...');
+
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
-      await site.save();
+      // Cap site.save() at 30 s — PostgREST calls have no built-in timeout and can hang
+      // indefinitely on network or DB issues, causing a silent stop in the onboarding flow.
+      const SAVE_TIMEOUT_MS = 30000;
+      const saveStart = Date.now();
+      await Promise.race([
+        site.save(),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(`site.save() timed out after ${SAVE_TIMEOUT_MS / 1000}s`)), SAVE_TIMEOUT_MS);
+        }),
+      ]);
+      log.info(`[onboard] step: site.save() completed in ${Date.now() - saveStart}ms for ${siteID}`);
     } catch (error) {
       log.error(`Failed to save site ${siteID} with updated config:`, error);
       reportLine.errors = error.message;
@@ -1742,6 +1767,7 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    log.info(`[onboard] step: queuing delivery config writer for ${siteID}`);
     const deliveryConfigResult = await queueDeliveryConfigWriter(
       {
         site,
@@ -1760,6 +1786,7 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    log.info(`[onboard] step: triggering import runs for ${siteID}`);
     for (const importType of importTypes) {
       /* eslint-disable no-await-in-loop */
       await triggerImportRun(
@@ -1783,7 +1810,9 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
+    log.info('[onboard] step: fetching latest configuration for audit enablement');
     const latestConfiguration = await Configuration.findLatest();
+    log.info('[onboard] step: Configuration.findLatest() completed');
 
     // Check which audits are not already enabled
     const auditsEnabled = [];
@@ -1795,6 +1824,7 @@ export const onboardSingleSite = async (
         auditsEnabled.push(auditType);
       }
     }
+    log.info(`[onboard] step: audit enablement done — enabled: [${auditsEnabled.join(', ')}]`);
 
     if (auditsEnabled.length > 0) {
       try {

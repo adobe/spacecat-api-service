@@ -596,8 +596,15 @@ export function onboardSiteModal(lambdaContext) {
   const { Site, Configuration } = dataAccess;
 
   return async ({ ack, body, client }) => {
+    let siteUrl;
+    let responseChannel;
+    let responseThreadTs;
+    let user;
+    let profile;
+    let imsOrgId;
     try {
-      const { view, user } = body;
+      let view;
+      ({ view, user } = body);
       const { values } = view.state;
 
       // Extract original channel and thread context from private metadata
@@ -611,9 +618,9 @@ export function onboardSiteModal(lambdaContext) {
         log.warn('Failed to parse private metadata:', error);
       }
 
-      const siteUrl = values.site_url_input.site_url.value;
-      const imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
-      const profile = values.profile_input.profile.selected_option?.value || 'demo';
+      siteUrl = values.site_url_input.site_url.value;
+      imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
+      profile = values.profile_input.profile.selected_option?.value || 'demo';
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
       const authoringType = values.authoring_type_input.authoring_type.selected_option?.value;
       const waitTime = values.wait_time_input.wait_time.value;
@@ -641,8 +648,8 @@ export function onboardSiteModal(lambdaContext) {
 
       // Create a slack context for the onboarding process
       // Use original channel/thread if available, otherwise fall back to DM
-      const responseChannel = originalChannel || body.user.id;
-      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+      responseChannel = originalChannel || body.user.id;
+      responseThreadTs = originalChannel ? originalThreadTs : undefined;
 
       const slackContext = {
         say: async (message) => {
@@ -683,8 +690,9 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
-      const configuration = await Configuration.findLatest();
       await ack();
+
+      const configuration = await Configuration.findLatest();
 
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
@@ -725,7 +733,13 @@ export function onboardSiteModal(lambdaContext) {
         thread_ts: responseThreadTs,
       });
 
-      const botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
+      let botProtectionResult = { crawlable: true, type: 'unknown', confidence: 0 };
+      try {
+        botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
+        log.info(`[onboard] bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable}, type=${botProtectionResult.type}`);
+      } catch (e) {
+        log.warn(`[onboard] bot blocker detection failed for ${siteUrl}: ${e.message}, proceeding with onboarding`);
+      }
 
       // Send warning if bot protection is detected
       if (!botProtectionResult.crawlable) {
@@ -743,6 +757,7 @@ export function onboardSiteModal(lambdaContext) {
         });
       }
 
+      log.info(`[onboard] starting onboardSingleSiteFromModal for ${siteUrl}`);
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,
         imsOrgId,
@@ -753,6 +768,7 @@ export function onboardSiteModal(lambdaContext) {
         lambdaContext,
         additionalParams,
       );
+      log.info(`[onboard] onboardSingleSiteFromModal completed for ${siteUrl} status=${reportLine.status}`);
 
       // Note: Configuration is already saved by sharedOnboardSingleSite in utils.js
       // No need to call configuration.save() here as it would overwrite the changes
@@ -813,12 +829,17 @@ ${deliveryConfigInfo}${previewConfigInfo}
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
     } catch (error) {
       log.error('Error handling onboard site modal:', error);
-      await ack({
-        response_action: 'errors',
-        errors: {
-          site_url_input: 'There was an error processing the onboarding request.',
-        },
-      });
+      try {
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: `:x: Onboarding failed for \`${siteUrl}\``
+            + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile} | *IMS Org:* ${imsOrgId || 'unknown'}`
+            + `\n*Error:* ${error.message}`,
+          thread_ts: responseThreadTs,
+        });
+      } catch (postError) {
+        log.error('Failed to notify channel of onboarding error:', postError);
+      }
     }
   };
 }
