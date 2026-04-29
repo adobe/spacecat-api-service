@@ -162,6 +162,37 @@ sites-by-delivery-type:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+sites-by-tier:
+  parameters:
+    - $ref: './parameters.yaml#/tier'
+    - $ref: './parameters.yaml#/productCodeQuery'
+  get:
+    tags:
+      - site
+    summary: Retrieve all sites enrolled at a given entitlement tier
+    description: |
+      Returns sites whose organization has an entitlement at the requested tier
+      (PAID, FREE_TRIAL, or PLG) and that are enrolled into that entitlement.
+      Optionally restrict to a single product via the `productCode` query
+      parameter (e.g. LLMO). Admin-only.
+    operationId: getSitesByEnrollmentAndTier
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteList'
+      '400':
+        $ref: './responses.yaml#/400-no-tier'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 sites-with-latest-audit:
   parameters:
     - $ref: './parameters.yaml#/auditType'

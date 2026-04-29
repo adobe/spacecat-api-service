@@ -244,6 +244,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
+    'GET /sites/by-tier/:tier': sitesController.getAllByEnrollmentAndTier,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,

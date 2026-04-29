@@ -585,6 +585,7 @@ describe('PlgOnboardingController', () => {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
@@ -1547,6 +1548,7 @@ describe('PlgOnboardingController', () => {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
@@ -4633,6 +4635,7 @@ describe('PlgOnboardingController', () => {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,

@@ -42,6 +42,7 @@ describe('getRouteHandlers', () => {
   const mockSitesController = {
     getAll: sinon.stub(),
     getAllByDeliveryType: sinon.stub(),
+    getAllByEnrollmentAndTier: sinon.stub(),
     getAllAsCsv: sinon.stub(),
     getAllAsExcel: sinon.stub(),
     getAllWithLatestAudit: sinon.stub(),
@@ -685,6 +686,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/latest-metrics',
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/by-delivery-type/:deliveryType',
+      'GET /sites/by-tier/:tier',
       'GET /sites/with-latest-audit/:auditType',
       'GET /sites/:siteId/opportunities',
       'GET /sites/:siteId/opportunities/top-paid',
@@ -950,6 +952,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].handler).to.equal(mockSitesController.getAllByDeliveryType);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].paramNames).to.deep.equal(['deliveryType']);
+    expect(dynamicRoutes['GET /sites/by-tier/:tier'].handler).to.equal(mockSitesController.getAllByEnrollmentAndTier);
+    expect(dynamicRoutes['GET /sites/by-tier/:tier'].paramNames).to.deep.equal(['tier']);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].handler).to.equal(mockSitesController.getByBaseURL);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].paramNames).to.deep.equal(['baseURL']);
     expect(dynamicRoutes['GET /sites/with-latest-audit/:auditType'].handler).to.equal(mockSitesController.getAllWithLatestAudit);
