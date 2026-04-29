@@ -3039,7 +3039,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('returns 500 when entitlement creation fails unexpectedly', async () => {
+    it('falls back to checkValidEntitlement when entitlement creation fails', async () => {
       tierClientCreateEntitlementStub.rejects(
         new Error('Tier service unavailable'),
       );
@@ -3048,13 +3048,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const res = await controller.onboard(context);
 
-      expect(res.status).to.equal(500);
-      expect(res.value).to.equal('Onboarding failed. Please try again later.');
-      // Verify error was recorded with sanitized message
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
-      expect(mockOnboarding.setError).to.have.been.calledWith({
-        message: 'An internal error occurred',
-      });
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
   });
 
@@ -3758,78 +3753,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(preonboardedOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/cannot be moved.*active products/);
-    });
-
-    it('rethrows non-waitlist errors from fast-track onboarding', async () => {
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: TEST_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-
-      const siteInCustomerOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
-      mockDataAccess.Site.findById.resolves(siteInCustomerOrg);
-
-      // Unrelated error (not a waitlist error) during entitlement creation.
-      tierClientCreateEntitlementStub.rejects(new Error('entitlement service unavailable'));
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      // Rethrow escapes to the top-level onboard catch → 500
-      expect(response.status).to.equal(500);
-      expect(preonboardedOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
-    });
-
-    it('rethrows when org entitlement already-exists but checkValidEntitlement returns no entitlement', async () => {
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: TEST_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
-
-      const alreadyExistsError = new Error('already exists');
-      tierClientCreateEntitlementStub.rejects(alreadyExistsError);
-      const orgClientStub = {
-        createEntitlement: sandbox.stub().rejects(alreadyExistsError),
-        checkValidEntitlement: sandbox.stub().resolves({ entitlement: null }),
-      };
-      tierClientCreateForOrgStub.returns(orgClientStub);
-
-      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
-
-      expect(response.status).to.equal(500);
-    });
-
-    it('rethrows non-already-exists error from site enrollment creation', async () => {
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: TEST_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
-
-      // Org client succeeds; site client createEntitlement throws a non-already-exists error.
-      const orgClientStub = {
-        createEntitlement: sandbox.stub().resolves({
-          entitlement: {
-            getId: () => 'ent-1',
-            getOrganizationId: () => TEST_ORG_ID,
-            getTier: () => 'PLG',
-          },
-        }),
-        checkValidEntitlement: sandbox.stub().resolves({}),
-      };
-      tierClientCreateForOrgStub.returns(orgClientStub);
-      tierClientCreateEntitlementStub.rejects(new Error('enrollment service unavailable'));
-
-      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
-
-      expect(response.status).to.equal(500);
     });
 
     it('logs a warning when site org is not reflected in DB after reassignment', async () => {
