@@ -26,6 +26,15 @@ import {
   createRegionsHandler,
 } from './llmo-brand-presence.js';
 import {
+  createUrlInspectorStatsHandler,
+  createUrlInspectorOwnedUrlsHandler,
+  createUrlInspectorTrendingUrlsHandler,
+  createUrlInspectorCitedDomainsHandler,
+  createUrlInspectorDomainUrlsHandler,
+  createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
+} from './llmo-url-inspector.js';
+import {
   createAgenticTrafficGlobalGetHandler,
   createAgenticTrafficGlobalPostHandler,
 } from './llmo-agentic-traffic-global.js';
@@ -42,6 +51,7 @@ import {
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
 } from './llmo-agentic-traffic.js';
 
 /**
@@ -111,6 +121,23 @@ function LlmoMysticatController(ctx) {
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorStats = createUrlInspectorStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorOwnedUrls = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorTrendingUrls = createUrlInspectorTrendingUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorCitedDomains = createUrlInspectorCitedDomainsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorDomainUrls = createUrlInspectorDomainUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorUrlPrompts = createUrlInspectorUrlPromptsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorFilterDimensions = createUrlInspectorFilterDimensionsHandler(
+    getOrgAndValidateAccess,
+  );
   const getRegions = createRegionsHandler();
   const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
     validateGlobalAgenticTrafficReadAccess,
@@ -158,6 +185,7 @@ function LlmoMysticatController(ctx) {
   const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
     getSiteAndValidateAccess,
   );
+  const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -174,6 +202,13 @@ function LlmoMysticatController(ctx) {
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
+    getUrlInspectorStats,
+    getUrlInspectorOwnedUrls,
+    getUrlInspectorTrendingUrls,
+    getUrlInspectorCitedDomains,
+    getUrlInspectorDomainUrls,
+    getUrlInspectorUrlPrompts,
+    getUrlInspectorFilterDimensions,
     getRegions,
     getAgenticTrafficGlobal,
     postAgenticTrafficGlobal,
@@ -189,6 +224,7 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
+    getAgenticTrafficHasData,
   };
 }
 

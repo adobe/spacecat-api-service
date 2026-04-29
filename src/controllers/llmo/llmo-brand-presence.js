@@ -11,13 +11,13 @@
  */
 
 import {
-  ok,
   badRequest,
   forbidden,
   internalServerError,
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -51,6 +51,7 @@ const DEFAULT_MODEL = 'chatgpt-free';
 const MODEL_QUERY_ALIASES = new Map([
   ['all', 'chatgpt-paid'],
   ['chatgpt', 'chatgpt-free'],
+  ['openai', 'chatgpt-paid'], // UI PLATFORM_CODES.ChatGPTPaid sends 'openai'
 ]);
 
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
@@ -75,7 +76,8 @@ const ERR_NOT_FOUND = 'not found';
  * @param {Function} handlerFn - Async (context, client) => response. Receives PostgREST client.
  * @returns {Promise<Response>}
  */
-async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
+// eslint-disable-next-line max-len
+export async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
   const { log, dataAccess } = context;
   const { Site } = dataAccess;
 
@@ -103,7 +105,7 @@ async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerNa
 /** @internal Exported for testing null/undefined fallbacks */
 export const strCompare = (a, b) => (a || '').localeCompare(b || '');
 
-function shouldApplyFilter(value) {
+export function shouldApplyFilter(value) {
   if (value == null) {
     return false;
   }
@@ -471,7 +473,7 @@ export function topicIdForDetailResponse(rows, decodedTopicParam) {
   return null;
 }
 
-function parseFilterDimensionsParams(context) {
+export function parseFilterDimensionsParams(context) {
   const q = context.data || {};
   const { categoryUuidIds, categoryNames, regionCodesList } = extractCategoryRegionFromQuery(q);
   const categoryCount = categoryUuidIds.length + categoryNames.length;
@@ -501,7 +503,7 @@ function parseFilterDimensionsParams(context) {
   };
 }
 
-function defaultDateRange() {
+export function defaultDateRange() {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - 28);
@@ -711,7 +713,7 @@ export function createRegionsHandler() {
     }
     try {
       const regions = await fetchRegionsForConfig(Site.postgrestService);
-      return ok(regions);
+      return cachedOk(regions);
     } catch (error) {
       log.error(`Regions handler error: ${error.message}`);
       return badRequest(error.message);
@@ -971,7 +973,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
         siteIdsForPageIntents,
       );
 
-      return ok({
+      return cachedOk({
         brands: brandOptions,
         categories,
         topics,
@@ -1190,7 +1192,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         };
       });
 
-      return ok({ weeks });
+      return cachedOk({ weeks });
     },
   );
 }
@@ -1353,7 +1355,7 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
 
       const weeklyTrends = reshapeMarketTrackingRows(data || []);
 
-      return ok({
+      return cachedOk({
         weeklyTrends,
         weeklyTrendsForComparison: weeklyTrends,
       });
@@ -1407,7 +1409,7 @@ export function createCompetitorSummaryHandler(getOrgAndValidateAccess) {
         return badRequest(error.message);
       }
 
-      return ok({
+      return cachedOk({
         competitors: (data || []).map((r) => ({
           name: r.competitor_name,
           mentions: r.total_mentions || 0,
@@ -1554,7 +1556,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const model = resolveModelFromRequest(params.model);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select('execution_date, sentiment, prompt, region_code, topics')
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -1595,7 +1597,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       }
 
       const weeklyTrends = aggregateSentimentByWeek(data || []);
-      return ok({ weeklyTrends });
+      return cachedOk({ weeklyTrends });
     },
   );
 }
@@ -1649,6 +1651,37 @@ function volumeToCategory(volumeSum, volumeCount) {
 }
 
 /**
+ * Trims a PostgREST / RPC UUID string for JSON; null when missing or blank.
+ * PostgREST returns UUID columns as strings; non-strings are rejected.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function normalizeRpcUuid(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const s = value.trim();
+  return s || null;
+}
+
+/**
+ * Picks the lexicographically greatest non-null topic UUID in a group,
+ * matching `rpc_brand_presence_topics` (`topic_id ORDER BY ... DESC NULLS LAST`).
+ * @param {string|null} current
+ * @param {string|null} candidate
+ * @returns {string|null}
+ */
+function maxTopicIdForAggregate(current, candidate) {
+  if (!candidate) {
+    return current;
+  }
+  if (!current || candidate > current) {
+    return candidate;
+  }
+  return current;
+}
+
+/**
  * Aggregates raw execution rows into topic-level summary objects.
  * Groups by topic name, deduplicates prompts by prompt|region_code within
  * each topic, keeps the latest execution per unique prompt, and computes
@@ -1657,7 +1690,7 @@ function volumeToCategory(volumeSum, volumeCount) {
  *
  * @param {Array<Object>} rows - Raw brand_presence_executions rows
  *   (with embedded brand_presence_sources)
- * @returns {Array<Object>} TopicDetail-compatible objects (without items)
+ * @returns {Array<Object>} TopicDetail-compatible objects (without items); each includes `topicId`
  * @internal Exported for testing
  */
 export function aggregateTopicData(rows) {
@@ -1670,6 +1703,7 @@ export function aggregateTopicData(rows) {
     if (!topicAgg.has(topicName)) {
       topicAgg.set(topicName, {
         promptMap: new Map(),
+        maxTopicId: null,
         totalMentions: 0,
         totalCitations: 0,
         uniqueSourceUrlIds: new Set(),
@@ -1684,6 +1718,8 @@ export function aggregateTopicData(rows) {
       });
     }
     const agg = topicAgg.get(topicName);
+
+    agg.maxTopicId = maxTopicIdForAggregate(agg.maxTopicId, normalizeRpcUuid(row.topic_id));
 
     // Dedup prompts (keep latest execution) — used only for promptCount
     const key = buildTopicPromptKey(row);
@@ -1749,6 +1785,7 @@ export function aggregateTopicData(rows) {
 
     return {
       topic: topicName,
+      topicId: agg.maxTopicId,
       promptCount: agg.promptMap.size,
       brandMentions: agg.totalMentions,
       brandCitations: agg.totalCitations,
@@ -1817,7 +1854,7 @@ export function buildPromptDetails(rows) {
   });
 }
 
-function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
+export function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
   const q = context.data || {};
   return {
     sortBy: q.sortBy || 'name',
@@ -1845,7 +1882,7 @@ function sortTopicDetails(topicDetails, sortBy, sortOrder) {
 }
 
 // eslint-disable-next-line max-len
-const TOPICS_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
+const TOPICS_SELECT = 'id, topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
 
 /**
  * Creates the getTopics handler.
@@ -1914,6 +1951,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
 
       const topicDetails = rows.map((row) => ({
         topic: row.topic,
+        topicId: normalizeRpcUuid(row.topic_id),
         promptCount: Number(row.prompt_count ?? 0),
         brandMentions: Number(row.brand_mentions ?? 0),
         brandCitations: Number(row.brand_citations ?? 0),
@@ -1924,7 +1962,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         popularityVolume: row.popularity_volume || 'N/A',
       }));
 
-      return ok({ topicDetails, totalCount });
+      return cachedOk({ topicDetails, totalCount });
     },
   );
 }
@@ -1965,7 +2003,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       }
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(PROMPTS_SELECT)
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -2023,7 +2061,7 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
-      return ok({
+      return cachedOk({
         items: paged,
         totalCount,
         topic: topicResponseLabel,
@@ -2074,7 +2112,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 
       const query = (ctx.data?.query ?? '').trim();
       if (!query) {
-        return ok({ topicDetails: [], totalCount: 0 });
+        return cachedOk({ topicDetails: [], totalCount: 0 });
       }
 
       if (query.length < MIN_SEARCH_QUERY_LENGTH) {
@@ -2089,7 +2127,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const pattern = buildSearchPattern(bounded);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(TOPICS_SELECT)
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -2170,7 +2208,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = topicDetails.slice(start, start + pagination.pageSize);
 
-      return ok({ topicDetails: paged, totalCount });
+      return cachedOk({ topicDetails: paged, totalCount });
     },
   );
 }
@@ -2179,6 +2217,12 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 
 // eslint-disable-next-line max-len
 const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
+
+/** PostgREST select for topic detail: `DETAIL_SELECT` without `answer`. */
+const TOPIC_DETAIL_SELECT = DETAIL_SELECT
+  .split(', ')
+  .filter((col) => col !== 'answer')
+  .join(', ');
 
 /** Minimal columns for execution-sources execution row (summary + execution_date partition key). */
 const EXECUTION_SOURCES_EXEC_SELECT = 'id, execution_date, brand_id, site_id, model';
@@ -2195,12 +2239,14 @@ function weekFromExecDate(execDate) {
 }
 
 /**
- * Maps a `brand_presence_executions` detail row (`DETAIL_SELECT`) to one `executions[]` entry.
- * Shared by topic-detail and prompt-detail handlers.
+ * Maps a `brand_presence_executions` detail row to one `executions[]` entry.
+ * Used for prompt detail (`DETAIL_SELECT`) and topic detail (`TOPIC_DETAIL_SELECT`).
  * @param {Object} r - Raw PostgREST row
+ * @param {{ includeAnswer?: boolean }} [options]
+ * @param {boolean} [options.includeAnswer=true] - When false, `answer` is omitted (topic detail).
  * @returns {Object}
  */
-function mapBrandPresenceDetailExecutionRow(r) {
+function mapBrandPresenceDetailExecutionRow(r, { includeAnswer = true } = {}) {
   const mentioned = r.mentions === true || r.mentions === 'true';
   const cited = r.citations === true || r.citations === 'true';
   const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
@@ -2211,7 +2257,7 @@ function mapBrandPresenceDetailExecutionRow(r) {
     region: r.region_code || '',
     executionDate: r.execution_date || '',
     week: weekFromExecDate(r.execution_date),
-    answer: r.answer || '',
+    ...(includeAnswer ? { answer: r.answer || '' } : {}),
     mentions: mentioned,
     citations: cited,
     visibilityScore: Number.isNaN(vs) ? 0 : vs,
@@ -2225,6 +2271,14 @@ function mapBrandPresenceDetailExecutionRow(r) {
     businessCompetitors: r.business_competitors || '',
     detectedBrandMentions: r.detected_brand_mentions || '',
   };
+}
+
+/**
+ * @param {Object} r - Raw PostgREST row (`TOPIC_DETAIL_SELECT`)
+ * @returns {Object}
+ */
+function mapBrandPresenceTopicDetailExecutionRow(r) {
+  return mapBrandPresenceDetailExecutionRow(r, { includeAnswer: false });
 }
 
 /**
@@ -2356,15 +2410,24 @@ export function aggregateDetailSources(sourceRows) {
 /**
  * Shared query builder for topic/prompt detail endpoints.
  * Returns the base PostgREST query on brand_presence_executions.
+ * @param {string} [selectColumns=DETAIL_SELECT] - PostgREST select list
+ *   (`TOPIC_DETAIL_SELECT` omits answer)
  */
-function buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId) {
+function buildDetailExecQuery(
+  client,
+  organizationId,
+  params,
+  defaults,
+  filterByBrandId,
+  selectColumns = DETAIL_SELECT,
+) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const model = resolveModelFromRequest(params.model);
 
   let q = client
-    .from('brand_presence_executions')
-    .select(DETAIL_SELECT)
+    .from('brand_presence_executions_active')
+    .select(selectColumns)
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
@@ -2428,7 +2491,7 @@ function buildSingleExecutionSourcesExecQuery(
   const model = resolveModelFromRequest(modelParam);
 
   let q = client
-    .from('brand_presence_executions')
+    .from('brand_presence_executions_active')
     .select(EXECUTION_SOURCES_EXEC_SELECT)
     .eq('organization_id', organizationId)
     .eq('id', executionId)
@@ -2573,7 +2636,14 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      let q = buildDetailExecQuery(
+        client,
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
+        TOPIC_DETAIL_SELECT,
+      );
       q = applyTopicPathFilter(q, topicName);
 
       const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
@@ -2587,7 +2657,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
       const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
-        return ok({
+        return cachedOk({
           topic: topicResponseLabel,
           topicId: topicIdResponse,
           stats: {
@@ -2613,10 +2683,10 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       // Weekly stats for mini-charts
       const weeklyStats = aggregateWeeklyDetailStats(rows);
 
-      // Build execution entries (all rows, newest first)
+      // Build execution entries (all rows, newest first; no answer field)
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map(mapBrandPresenceDetailExecutionRow);
+        .map(mapBrandPresenceTopicDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));
@@ -2629,7 +2699,7 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
       const sources = aggregateDetailSources(flatSources);
 
-      return ok({
+      return cachedOk({
         topic: topicResponseLabel,
         topicId: topicIdResponse,
         /* c8 ignore start */
@@ -2715,7 +2785,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
       const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
-        return ok({
+        return cachedOk({
           topic: topicResponseLabel,
           topicId: topicIdResponse,
           prompt: promptText,
@@ -2796,7 +2866,7 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
       const sources = aggregateDetailSources(flatSources);
 
-      return ok({
+      return cachedOk({
         topic: topicResponseLabel,
         topicId: topicIdResponse,
         prompt: promptText,
@@ -2892,7 +2962,7 @@ export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
 
       const sources = (sourceRows || []).map(mapExecutionSourceRowToResponse);
 
-      return ok({
+      return cachedOk({
         execution: {
           ...mapExecutionSummaryForSources(execRow),
           executionDate: execDate,
@@ -3197,7 +3267,7 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
         brandName,
       );
 
-      return ok({ shareOfVoiceData });
+      return cachedOk({ shareOfVoiceData });
     },
   );
 }
@@ -3297,7 +3367,7 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         executionCount: row.execution_count,
       }));
 
-      return ok({ movers });
+      return cachedOk({ movers });
     },
   );
 }
@@ -3505,7 +3575,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      return ok(response);
+      return cachedOk(response);
     },
   );
 }
