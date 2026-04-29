@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, forbidden, internalServerError,
+  badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 
 import {
@@ -23,6 +23,7 @@ import {
   validateSiteBelongsToOrg,
   validateModel,
 } from './llmo-brand-presence.js';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * URL Inspector handlers for org-based routes.
@@ -182,7 +183,7 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
 
       const weeklyTrends = [...weeklyByKey.values()].sort((a, b) => a.week.localeCompare(b.week));
 
-      return ok({ stats, weeklyTrends });
+      return cachedOk({ stats, weeklyTrends });
     },
   );
 }
@@ -254,7 +255,7 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
         weeklyPromptsCited: r.weekly_prompts_cited || [],
       }));
 
-      return ok({ urls, totalCount });
+      return cachedOk({ urls, totalCount });
     },
   );
 }
@@ -346,7 +347,7 @@ export function createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess) {
         totalCitations: entry.prompts.reduce((sum, p) => sum + p.citationCount, 0),
       }));
 
-      return ok({ urls, totalNonOwnedUrls });
+      return cachedOk({ urls, totalNonOwnedUrls });
     },
   );
 }
@@ -419,7 +420,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         regions: r.regions || '',
       }));
 
-      return ok({ domains, totalCount });
+      return cachedOk({ domains, totalCount });
     },
   );
 }
@@ -503,7 +504,7 @@ export function createUrlInspectorDomainUrlsHandler(
         regions: r.regions || '',
       }));
 
-      return ok({ urls, totalCount });
+      return cachedOk({ urls, totalCount });
     },
   );
 }
@@ -575,7 +576,7 @@ export function createUrlInspectorUrlPromptsHandler(
         citations: Number(r.citations ?? 0),
       }));
 
-      return ok({ prompts });
+      return cachedOk({ prompts });
     },
   );
 }
@@ -680,7 +681,7 @@ export function createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAcces
         return internalServerError('Internal error processing URL Inspector filter dimensions');
       }
 
-      return ok(data);
+      return cachedOk(data);
     },
   );
 }
