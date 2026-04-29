@@ -276,29 +276,24 @@ async function reassignSiteOrganization(site, organizationId, dataAccess, log = 
   return refreshed;
 }
 
-// Resolves entitlement at the org level first, then enrollment at the site level.
-// Splitting the two writes ensures the entitlement is bound to the org we resolved
-// here — not to whatever org the site happens to read back as inside TierClient.
+// Resolves entitlement against the IMS-derived organization (passed in by the caller),
+// then enrollment for the site. Step 1 deliberately ignores site.getOrganizationId()
+// so the entitlement is bound to the customer org we resolved from imsOrgId — not to
+// whatever org the site currently points at (which may still be an internal/demo org
+// pre-reassignment).
 function isAlreadyExistsError(error) {
   const msg = error?.message ?? '';
   return msg.includes('already exists') || msg.includes('Already enrolled');
 }
 
-async function ensureAsoEntitlement(site, context) {
-  const { log, dataAccess } = context;
+async function ensureAsoEntitlement(site, organization, context) {
+  const { log } = context;
   const siteId = site.getId();
-  const organizationId = site.getOrganizationId();
+  const organizationId = organization.getId();
 
-  log.info(`ensureAsoEntitlement: start — site ${siteId}, org ${organizationId}`);
+  log.info(`ensureAsoEntitlement: start — site ${siteId}, org ${organizationId} (from IMS)`);
 
-  const organization = await dataAccess.Organization.findById(organizationId);
-  if (!organization) {
-    throw new Error(
-      `ensureAsoEntitlement: organization ${organizationId} not found (site ${siteId})`,
-    );
-  }
-
-  // Step 1: ensure entitlement on the resolved organization (no site bound).
+  // Step 1: ensure entitlement on the IMS-resolved organization (no site bound).
   const orgClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
   let entitlement;
   try {
@@ -850,21 +845,17 @@ async function performAsoPlgOnboarding({
           }
         }
 
-        // Set new org in-memory BEFORE entitlement so TierClient resolves the customer org,
-        // but defer the site.save() until after entitlement/revoke/LD to avoid intermediate
-        // saves clobbering the org change within the same request.
+        // Set new org in-memory BEFORE entitlement; defer site.save() until after
+        // entitlement/revoke/LD to avoid intermediate saves clobbering the org change.
+        // The entitlement is bound to the IMS-resolved organization passed explicitly
+        // into ensureAsoEntitlement, so the in-memory readback no longer gates that step.
         if (needsOrgReassignment) {
           const previousOrgId = site.getOrganizationId();
           site.setOrganizationId(customerOrgId);
-          site.record.organizationId = customerOrgId;
-          const inMemoryOrgId = site.getOrganizationId();
-          log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${customerOrgId} (save deferred), readback: ${inMemoryOrgId}`);
-          if (inMemoryOrgId !== customerOrgId) {
-            throw new OnboardingWaitlistError(`Site ${site.getId()} in-memory org set failed: expected ${customerOrgId}, got ${inMemoryOrgId}. Aborting before entitlement.`);
-          }
+          log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${customerOrgId} (save deferred)`);
         }
 
-        const { entitlement } = await ensureAsoEntitlement(site, context);
+        const { entitlement } = await ensureAsoEntitlement(site, organization, context);
         await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
         await updateLaunchDarklyFlags(site, organization, context);
 
@@ -1294,11 +1285,7 @@ async function performAsoPlgOnboarding({
     if (needsOrgReassignment) {
       const previousOrgId = site.getOrganizationId();
       site.setOrganizationId(organizationId);
-      const inMemoryOrgId = site.getOrganizationId();
-      log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${organizationId} (save deferred until after entitlement), readback: ${inMemoryOrgId}`);
-      if (inMemoryOrgId !== organizationId) {
-        throw new OnboardingWaitlistError(`Site ${site.getId()} in-memory org set failed: expected ${organizationId}, got ${inMemoryOrgId}. Aborting before entitlement.`);
-      }
+      log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${organizationId} (save deferred until after entitlement)`);
       // Anchor onboarding record to target org now (independent record, safe to save).
       onboarding.setOrganizationId(organizationId);
     }
@@ -1306,7 +1293,7 @@ async function performAsoPlgOnboarding({
     // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.
     // Revocation is guarded by entitlement.organizationId === organization.getId() and an
     // internal-org check, so cross-org mass-revokes are blocked on any resolution drift.
-    const { entitlement } = await ensureAsoEntitlement(site, context);
+    const { entitlement } = await ensureAsoEntitlement(site, organization, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
     await updateLaunchDarklyFlags(site, organization, context);
 

@@ -3955,65 +3955,6 @@ describe('PlgOnboardingController', () => {
       expect(tierClientCreateEntitlementStub).to.have.been.called;
     });
 
-    it('waitlists in fast-track when in-memory org readback does not match (aborts before entitlement)', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-readback-fast';
-
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-
-      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      // Force setOrganizationId to be a no-op so getOrganizationId still returns the old id —
-      // exercises the non-null branch of the `?? 'undefined'` readback error.
-      siteInInternalOrg.setOrganizationId = sandbox.stub();
-      mockDataAccess.Site.findById.resolves(siteInInternalOrg);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        /in-memory org set failed/,
-      );
-      // Aborts BEFORE entitlement.
-      expect(tierClientCreateForSiteStub).to.not.have.been.called;
-    });
-
-    it('waitlists in full onboarding when in-memory org readback does not match (aborts before entitlement)', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-readback-full';
-
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
-
-      const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      // Broken setter: after set, getOrganizationId returns undefined — exercises the
-      // `?? 'undefined'` nullish branch in the readback error message.
-      existingSite.setOrganizationId = sandbox.stub().callsFake(() => {
-        existingSite.getOrganizationId.returns(undefined);
-      });
-      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        /in-memory org set failed/,
-      );
-      // Aborts BEFORE entitlement.
-      expect(tierClientCreateEntitlementStub).to.not.have.been.called;
-    });
-
     it('logs and continues when persisting waitlist state fails during full onboarding', async () => {
       const INTERNAL_ORG_ID = 'internal-org-full-save-err';
 
