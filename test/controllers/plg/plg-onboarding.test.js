@@ -216,7 +216,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     // TierClient — entitlement.organizationId matches the resolved customer org so the
     // revocation guard in revokePreviousAsoEnrollmentsForOrg sees a consistent state.
     tierClientCreateEntitlementStub = sandbox.stub().resolves({
-      entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
+      entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID, getTier: () => 'PLG' },
       siteEnrollment: { getId: () => 'enroll-1' },
     });
     tierClientCreateForSiteStub = sandbox.stub().resolves({

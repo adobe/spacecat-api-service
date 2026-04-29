@@ -286,7 +286,7 @@ async function ensureAsoEntitlement(site, organization, context) {
   const siteId = site.getId();
   const organizationId = organization.getId();
 
-  log.info(`[DEBUG] ensureAsoEntitlement: START — siteId=${siteId} siteOrgId=${site.getOrganizationId()} imsResolvedOrgId=${organizationId} orgName=${organization.getName() ?? 'n/a'}`);
+  log.info(`[DEBUG] ensureAsoEntitlement: START — siteId=${siteId} siteOrgId=${site.getOrganizationId()} imsResolvedOrgId=${organizationId} orgName=${organization.getName()}`);
 
   // Step 1: ensure entitlement on the IMS-resolved organization (no site bound).
   const orgClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
