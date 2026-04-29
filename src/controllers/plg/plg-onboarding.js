@@ -276,20 +276,77 @@ async function reassignSiteOrganization(site, organizationId, dataAccess, log = 
   return refreshed;
 }
 
+// Resolves entitlement at the org level first, then enrollment at the site level.
+// Splitting the two writes ensures the entitlement is bound to the org we resolved
+// here — not to whatever org the site happens to read back as inside TierClient.
+function isAlreadyExistsError(error) {
+  const msg = error?.message ?? '';
+  return msg.includes('already exists') || msg.includes('Already enrolled');
+}
+
 async function ensureAsoEntitlement(site, context) {
-  const { log } = context;
-  const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
-  try {
-    const result = await tierClient.createEntitlement(ASO_TIER);
-    log.info(`ASO entitlement ${result.entitlement.getId()} and enrollment ${result.siteEnrollment?.getId()} ensured for site ${site.getId()}`);
-    return result;
-  } catch (error) {
-    if (error.message?.includes('already exists') || error.message?.includes('Already enrolled')) {
-      log.info(`ASO entitlement already exists for site ${site.getId()}, fetching existing`);
-      return tierClient.checkValidEntitlement();
-    }
-    throw error;
+  const { log, dataAccess } = context;
+  const siteId = site.getId();
+  const organizationId = site.getOrganizationId();
+
+  log.info(`ensureAsoEntitlement: start — site ${siteId}, org ${organizationId}`);
+
+  const organization = await dataAccess.Organization.findById(organizationId);
+  if (!organization) {
+    throw new Error(
+      `ensureAsoEntitlement: organization ${organizationId} not found (site ${siteId})`,
+    );
   }
+
+  // Step 1: ensure entitlement on the resolved organization (no site bound).
+  const orgClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
+  let entitlement;
+  try {
+    ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));
+  } catch (error) {
+    if (!isAlreadyExistsError(error)) {
+      throw error;
+    }
+    log.info(`ensureAsoEntitlement: entitlement exists for org ${organizationId}, fetching existing`);
+    ({ entitlement } = await orgClient.checkValidEntitlement());
+    if (!entitlement) {
+      throw error;
+    }
+  }
+  const entitlementId = entitlement.getId();
+  const entitlementOrgId = entitlement.getOrganizationId();
+  const entitlementTier = entitlement.getTier?.();
+  log.info(
+    `ensureAsoEntitlement: entitlement ${entitlementId} — org ${entitlementOrgId}, `
+    + `tier ${entitlementTier} (requested ${ASO_TIER})`,
+  );
+
+  if (entitlementOrgId !== organizationId) {
+    log.warn(
+      `ensureAsoEntitlement: entitlement org drift — expected ${organizationId}, `
+      + `got ${entitlementOrgId} (site ${siteId})`,
+    );
+  }
+
+  // Step 2: ensure site enrollment binding the site to the entitlement above.
+  const siteClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
+  let siteEnrollment;
+  try {
+    ({ siteEnrollment } = await siteClient.createEntitlement(entitlementTier ?? ASO_TIER));
+  } catch (error) {
+    if (!isAlreadyExistsError(error)) {
+      throw error;
+    }
+    log.info(`ensureAsoEntitlement: enrollment exists for site ${siteId}, fetching existing`);
+    ({ siteEnrollment } = await siteClient.checkValidEntitlement());
+  }
+  const enrollmentEntitlementId = siteEnrollment?.getEntitlementId?.() ?? entitlementId;
+  log.info(
+    `ensureAsoEntitlement: enrollment ${siteEnrollment?.getId()} — site ${siteId}, `
+    + `entitlement ${enrollmentEntitlementId}`,
+  );
+
+  return { entitlement, siteEnrollment };
 }
 /**
  * Disables the summit-plg config handler for a given site. Non-fatal.
@@ -799,6 +856,7 @@ async function performAsoPlgOnboarding({
         if (needsOrgReassignment) {
           const previousOrgId = site.getOrganizationId();
           site.setOrganizationId(customerOrgId);
+          site.record.organizationId = customerOrgId;
           const inMemoryOrgId = site.getOrganizationId();
           log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${customerOrgId} (save deferred), readback: ${inMemoryOrgId}`);
           if (inMemoryOrgId !== customerOrgId) {

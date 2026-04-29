@@ -52,6 +52,7 @@ describe('PlgOnboardingController', () => {
   let queueDeliveryConfigWriterStub;
   let triggerBrandProfileAgentStub;
   let tierClientCreateForSiteStub;
+  let tierClientCreateForOrgStub;
   let tierClientCreateEntitlementStub;
   let ldGetFeatureFlagStub;
   let ldUpdateVariationValueStub;
@@ -216,14 +217,38 @@ describe('PlgOnboardingController', () => {
     // TierClient — entitlement.organizationId matches the resolved customer org so the
     // revocation guard in revokePreviousAsoEnrollmentsForOrg sees a consistent state.
     tierClientCreateEntitlementStub = sandbox.stub().resolves({
-      entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
-      siteEnrollment: { getId: () => 'enroll-1' },
+      entitlement: {
+        getId: () => 'ent-1',
+        getOrganizationId: () => TEST_ORG_ID,
+        getTier: () => 'PLG',
+      },
+      siteEnrollment: {
+        getId: () => 'enroll-1',
+        getEntitlementId: () => 'ent-1',
+      },
     });
     tierClientCreateForSiteStub = sandbox.stub().resolves({
       createEntitlement: tierClientCreateEntitlementStub,
       checkValidEntitlement: sandbox.stub().resolves({
-        entitlement: { getId: () => 'ent-1', getOrganizationId: () => TEST_ORG_ID },
-        siteEnrollment: { getId: () => 'enroll-1' },
+        entitlement: {
+          getId: () => 'ent-1',
+          getOrganizationId: () => TEST_ORG_ID,
+          getTier: () => 'PLG',
+        },
+        siteEnrollment: {
+          getId: () => 'enroll-1',
+          getEntitlementId: () => 'ent-1',
+        },
+      }),
+    });
+    tierClientCreateForOrgStub = sandbox.stub().returns({
+      createEntitlement: tierClientCreateEntitlementStub,
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getOrganizationId: () => TEST_ORG_ID,
+          getTier: () => 'PLG',
+        },
       }),
     });
 
@@ -337,7 +362,10 @@ describe('PlgOnboardingController', () => {
           },
         },
         '@adobe/spacecat-shared-tier-client': {
-          default: { createForSite: tierClientCreateForSiteStub },
+          default: {
+            createForSite: tierClientCreateForSiteStub,
+            createForOrg: tierClientCreateForOrgStub,
+          },
         },
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: configToDynamoItemStub },
@@ -547,7 +575,10 @@ describe('PlgOnboardingController', () => {
             default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -1518,7 +1549,10 @@ describe('PlgOnboardingController', () => {
             },
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -1776,7 +1810,7 @@ describe('PlgOnboardingController', () => {
               createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
             },
           },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub } },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
           },
@@ -1886,7 +1920,7 @@ describe('PlgOnboardingController', () => {
               createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
             },
           },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub } },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
           },
@@ -4168,7 +4202,10 @@ describe('PlgOnboardingController', () => {
             default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -4658,7 +4695,10 @@ describe('PlgOnboardingController', () => {
             default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -4751,7 +4791,7 @@ describe('PlgOnboardingController', () => {
               default: ldCreateFromStub,
             },
             '@adobe/spacecat-shared-tier-client': {
-              default: { createForSite: sandbox.stub() },
+              default: { createForSite: sandbox.stub(), createForOrg: sandbox.stub() },
             },
             '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
               Config: { toDynamoItem: sandbox.stub() },
