@@ -145,6 +145,7 @@ describe('onboardSingleSite — paid profile guard', () => {
         updateOnboardConfig: updateOnboardConfigStub,
         updateFetchConfig: sinon.stub(),
         getFetchConfig: () => undefined,
+        enableImport: sinon.stub(),
       }),
       setConfig: sinon.stub(),
       setProjectId: sinon.stub(),
@@ -482,6 +483,7 @@ describe('onboardSingleSite — paid profile guard', () => {
         updateOnboardConfig: updateOnboardConfigStub,
         updateFetchConfig: updateFetchConfigStub,
         getFetchConfig: () => undefined,
+        enableImport: sinon.stub(),
       };
       const site = {
         getId: () => 'site-123',
