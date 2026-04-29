@@ -48,6 +48,7 @@ import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
 
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
@@ -805,6 +806,10 @@ async function performAsoPlgOnboarding({
         if (needsOrgReassignment) {
           steps.siteOrgReassigned = true;
         }
+        // Best-effort: clear out any stale FIXED suggestions and FixEntity rows from a
+        // prior onboarding lifecycle so the newly onboarded site starts from a clean slate.
+        // Never fatal — orphans can be reconciled out-of-band.
+        await cleanupPlgSiteSuggestionsAndFixes(site.getId(), context);
         onboarding.setStatus(STATUSES.ONBOARDED);
         onboarding.setWaitlistReason(null);
         onboarding.setBotBlocker(null);
@@ -1242,6 +1247,11 @@ async function performAsoPlgOnboarding({
     } catch (error) {
       log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
     }
+
+    // Best-effort: clear out any stale FIXED suggestions and FixEntity rows from a
+    // prior onboarding lifecycle so the newly onboarded site starts from a clean slate.
+    // Never fatal — orphans can be reconciled out-of-band.
+    await cleanupPlgSiteSuggestionsAndFixes(site.getId(), context);
 
     // Mark as completed
     onboarding.setStatus(STATUSES.ONBOARDED);
