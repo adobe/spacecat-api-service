@@ -385,6 +385,148 @@ describe('llmo-agentic-traffic', () => {
     });
   });
 
+  // ── agentTypes additive inclusion list ────────────────────────────────────
+
+  describe('agentTypes inclusion list', () => {
+    it('forwards a comma-separated list to kpis-trend as canonical TEXT[]', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('forwards an array passed directly without re-splitting', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: ['Chatbots', 'Research'] },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('drops unknown agent types silently and dedupes case-insensitively', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'chatbots, RESEARCH , unknown ,Chatbots',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+    });
+
+    it('omits p_agent_types entirely when the parameter is missing', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({ client });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      // The key must be absent (not null) so PostgREST falls back to the RPC's
+      // own DEFAULT NULL — same back-compat contract every other consumer relies on.
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('accepts the snake_case alias agent_types and trims whitespace', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agent_types: ' Chatbots , Training bots ',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Chatbots', 'Training bots'],
+      });
+    });
+
+    it('collapses an all-unknown list to omitted (null behaviour)', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'foo,bar' },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('forwards p_agent_types to by-url alongside paging/sort params', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_by_url: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: 'Chatbots,Research',
+          pageSize: 25,
+          sortBy: 'success_rate',
+          sortOrder: 'asc',
+        },
+      });
+      const handler = createAgenticTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_by_url', {
+        p_agent_types: ['Chatbots', 'Research'],
+        p_page_limit: 25,
+        p_sort_by: 'success_rate',
+        p_sort_order: 'asc',
+      });
+    });
+
+    it('does not leak p_agent_types into RPCs that do not accept it', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: { startDate: '2026-01-01', endDate: '2026-01-28', agentTypes: 'Chatbots,Research' },
+      });
+      const handler = createAgenticTrafficKpisHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const call = client.rpc.getCall(0);
+      expect(call).to.not.be.null;
+      // kpis (non-trend) hasn't been extended yet so the key must still be absent.
+      expect(call.args[1]).to.not.have.property('p_agent_types');
+    });
+  });
+
   // ── By Region ──────────────────────────────────────────────────────────────
 
   describe('createAgenticTrafficByRegionHandler', () => {
