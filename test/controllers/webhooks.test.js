@@ -114,7 +114,7 @@ describe('WebhooksController', () => {
     const response = await controller.processGitHubWebhook(context);
 
     expect(response.status).to.equal(400);
-    const body = await (await controller.processGitHubWebhook(context)).json();
+    const body = await response.json();
     expect(body.message).to.include('action');
   });
 
@@ -127,7 +127,7 @@ describe('WebhooksController', () => {
     const response = await controller.processGitHubWebhook(context);
 
     expect(response.status).to.equal(400);
-    const body = await (await controller.processGitHubWebhook(context)).json();
+    const body = await response.json();
     expect(body.message).to.include('installation.id');
   });
 
