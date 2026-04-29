@@ -469,4 +469,148 @@ describe('onboardSingleSite — paid profile guard', () => {
       expect(options).to.deep.equal({ maxHistory: 10 });
     });
   });
+
+  describe('canonical URL resolution', () => {
+    let onboardSingleSiteWithDifferentUrl;
+    let onboardSingleSiteWithNullUrl;
+
+    const makeCanonicalSite = (updateFetchConfigStub) => {
+      const updateOnboardConfigStub = sinon.stub();
+      const config = {
+        getImports: () => [],
+        getOnboardConfig: () => undefined,
+        updateOnboardConfig: updateOnboardConfigStub,
+        updateFetchConfig: updateFetchConfigStub,
+        getFetchConfig: () => undefined,
+      };
+      const site = {
+        getId: () => 'site-123',
+        getBaseURL: () => SITE_URL,
+        getOrganizationId: () => 'org-123',
+        getProjectId: () => undefined,
+        getLanguage: () => undefined,
+        getRegion: () => undefined,
+        getCode: () => undefined,
+        getAuthoringType: () => undefined,
+        getDeliveryType: () => undefined,
+        getConfig: () => config,
+        setConfig: sinon.stub(),
+        setProjectId: sinon.stub(),
+        setLanguage: sinon.stub(),
+        setRegion: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      return { site, updateOnboardConfigStub };
+    };
+
+    before(async () => {
+      const sharedMocks = {
+        '@aws-sdk/client-sfn': {
+          // eslint-disable-next-line func-style
+          SFNClient: function SFNClient() { this.send = () => Promise.resolve({ executionArn: 'arn:test' }); },
+          // eslint-disable-next-line func-style
+          StartExecutionCommand: function StartExecutionCommand() {},
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          // eslint-disable-next-line func-style
+          default: {
+            createForSite: async () => ({
+              createEntitlement: async () => ({
+                entitlement: { getId: () => 'ent-test' },
+                siteEnrollment: { getId: () => 'enr-test' },
+              }),
+            }),
+          },
+        },
+      };
+
+      const sharedUtils = {
+        isValidUrl: () => true,
+        isValidIMSOrgId: () => true,
+        hasText: (s) => !!(s && s.trim && s.trim().length > 0),
+        isObject: (o) => o !== null && typeof o === 'object',
+        isNonEmptyObject: (o) => o !== null && typeof o === 'object' && Object.keys(o).length > 0,
+        detectLocale: sinon.stub().resolves({ language: 'en', region: 'US' }),
+        detectAEMVersion: sinon.stub().resolves(null),
+        tracingFetch: sinon.stub().resolves({ ok: false }),
+        wwwUrlResolver: sinon.stub().returns(SITE_URL),
+        getLastNumberOfWeeks: sinon.stub().returns([]),
+      };
+
+      ({ onboardSingleSite: onboardSingleSiteWithDifferentUrl } = await esmock(
+        '../../src/support/utils.js',
+        {
+          ...sharedMocks,
+          '@adobe/spacecat-shared-utils': {
+            ...sharedUtils,
+            resolveCanonicalUrl: sinon.stub().resolves('https://www.example.com'),
+          },
+        },
+      ));
+
+      ({ onboardSingleSite: onboardSingleSiteWithNullUrl } = await esmock(
+        '../../src/support/utils.js',
+        {
+          ...sharedMocks,
+          '@adobe/spacecat-shared-utils': {
+            ...sharedUtils,
+            resolveCanonicalUrl: sinon.stub().resolves(null),
+          },
+        },
+      ));
+    });
+
+    it('calls updateFetchConfig when resolveCanonicalUrl returns a different origin', async () => {
+      const updateFetchConfigStub = sinon.stub();
+      const { site } = makeCanonicalSite(updateFetchConfigStub);
+      const ctx = makeContext(site);
+      ctx.dataAccess.Site.findByBaseURL = sandbox.stub().resolves(site);
+
+      try {
+        await onboardSingleSiteWithDifferentUrl(
+          SITE_URL,
+          IMS_ORG_ID,
+          {},
+          demoProfile,
+          300,
+          slackContext(),
+          ctx,
+          {},
+          { profileName: 'demo' },
+        );
+      } catch {
+        // Downstream deps not fully mocked — expected.
+      }
+
+      expect(updateFetchConfigStub).to.have.been.calledOnceWith(
+        sinon.match({ overrideBaseURL: 'https://www.example.com' }),
+      );
+    });
+
+    it('falls back to baseURL and skips updateFetchConfig when resolveCanonicalUrl returns null', async () => {
+      const updateFetchConfigStub = sinon.stub();
+      const { site, updateOnboardConfigStub } = makeCanonicalSite(updateFetchConfigStub);
+      const ctx = makeContext(site);
+      ctx.dataAccess.Site.findByBaseURL = sandbox.stub().resolves(site);
+
+      try {
+        await onboardSingleSiteWithNullUrl(
+          SITE_URL,
+          IMS_ORG_ID,
+          {},
+          demoProfile,
+          300,
+          slackContext(),
+          ctx,
+          {},
+          { profileName: 'demo' },
+        );
+      } catch {
+        // Downstream deps not fully mocked — expected.
+      }
+
+      expect(updateFetchConfigStub).not.to.have.been.called;
+      expect(updateOnboardConfigStub).to.have.been.calledOnce;
+    });
+  });
 });

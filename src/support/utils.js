@@ -20,12 +20,12 @@ import {
   isValidUrl,
   isObject,
   isNonEmptyObject,
-  resolveCanonicalUrl,
   isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
   wwwUrlResolver as sharedWwwUrlResolver,
   getLastNumberOfWeeks,
+  resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import RUMAPIClient, { RUM_BUNDLER_API_HOST } from '@adobe/spacecat-shared-rum-api-client';
@@ -1707,16 +1707,14 @@ export const onboardSingleSite = async (
     log.info(`[onboard] step: imports configured for site ${siteID}, starting canonical URL resolution`);
     await say(`:hourglass: Resolving canonical URL for ${baseURL}...`);
 
-    // Resolve canonical URL for the site from the base URL.
-    // Cap at 25 s — bot-blocked or slow sites can hang indefinitely otherwise.
-    const CANONICAL_TIMEOUT_MS = 25000;
+    const CANONICAL_TIMEOUT_MS = 8000;
     const canonicalStart = Date.now();
     let resolvedUrl = await Promise.race([
       resolveCanonicalUrl(baseURL),
       new Promise((resolve) => { setTimeout(() => resolve(null), CANONICAL_TIMEOUT_MS); }),
     ]);
     const canonicalElapsed = Date.now() - canonicalStart;
-    if (resolvedUrl === null) {
+    if (!resolvedUrl) {
       log.warn(`Unable to resolve canonical URL for site ${siteID} after ${canonicalElapsed}ms, using base URL: ${baseURL}`);
       resolvedUrl = baseURL;
     }
