@@ -51,6 +51,7 @@ import {
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
 } from './llmo-agentic-traffic.js';
 
 /**
@@ -184,6 +185,7 @@ function LlmoMysticatController(ctx) {
   const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
     getSiteAndValidateAccess,
   );
+  const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -222,6 +224,7 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
+    getAgenticTrafficHasData,
   };
 }
 
