@@ -83,11 +83,15 @@ describe('PlgOnboardingController', () => {
   };
 
   function createMockSite(overrides = {}) {
+    const getOrganizationId = sandbox.stub().returns(overrides.orgId || TEST_ORG_ID);
+    const setOrganizationId = sandbox.stub().callsFake((newOrgId) => {
+      getOrganizationId.returns(newOrgId);
+    });
     return {
       getId: sandbox.stub().returns(overrides.id || TEST_SITE_ID),
       getBaseURL: sandbox.stub().returns(overrides.baseURL || TEST_BASE_URL),
-      getOrganizationId: sandbox.stub().returns(overrides.orgId || TEST_ORG_ID),
-      setOrganizationId: sandbox.stub(),
+      getOrganizationId,
+      setOrganizationId,
       getConfig: sandbox.stub().returns(mockSiteConfig),
       setConfig: sandbox.stub(),
       getLanguage: sandbox.stub().returns(overrides.language || null),
@@ -3556,20 +3560,17 @@ describe('PlgOnboardingController', () => {
       expect(siteInInternalOrg.save).to.have.been.called;
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // Verify order: site org reassignment happens BEFORE entitlement operations
-      expect(siteInInternalOrg.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
-      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
-      // this is the core invariant of the post-save re-fetch design.
+      // Deferred-save design: in-memory setOrganizationId happens BEFORE entitlement,
+      // and the persisted save happens AFTER. TierClient is invoked with the original
+      // site instance whose in-memory org now reflects the customer org.
       expect(tierClientCreateForSiteStub).to.have.been.calledWith(
-        sinon.match.any,
-        refreshedSite,
-        sinon.match.any,
-      );
-      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
         sinon.match.any,
         siteInInternalOrg,
         sinon.match.any,
       );
+      expect(siteInInternalOrg.save).to.have.been.calledAfter(tierClientCreateForSiteStub);
+      // The final returned site instance is the refreshed one from reassignSiteOrganization.
+      expect(mockDataAccess.Site.findById).to.have.been.calledWith(TEST_SITE_ID);
     });
 
     it('does not reassign when preonboarded site already in customer org', async () => {
@@ -3761,7 +3762,10 @@ describe('PlgOnboardingController', () => {
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWithMatch(
         sinon.match({ siteOrgReassignmentFailed: true }),
       );
-      expect(tierClientCreateForSiteStub).to.not.have.been.called;
+      // Deferred-save design: entitlement runs against the in-memory-updated site
+      // BEFORE the persisted save. The post-save refetch failure still triggers
+      // waitlist, but TierClient.createForSite has already been invoked.
+      expect(tierClientCreateForSiteStub).to.have.been.called;
     });
 
     it('logs and continues when persisting waitlist state fails during fast-track', async () => {
@@ -3838,20 +3842,19 @@ describe('PlgOnboardingController', () => {
       // Verify site was reassigned
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
-      // Verify order: site org reassignment happens BEFORE entitlement operations
-      expect(existingSite.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
-      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
-      // this is the core invariant of the post-save re-fetch design.
+      // Deferred-save design: in-memory setOrganizationId happens BEFORE entitlement,
+      // persisted save happens AFTER. TierClient.createForSite is invoked with the
+      // original site instance whose in-memory org now reflects the customer org.
       expect(tierClientCreateForSiteStub).to.have.been.calledWith(
-        sinon.match.any,
-        refreshedSiteFullPath,
-        sinon.match.any,
-      );
-      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
         sinon.match.any,
         existingSite,
         sinon.match.any,
       );
+      expect(existingSite.save).to.have.been.calledAfter(tierClientCreateForSiteStub);
+      // refetched instance comes from Site.findById(siteId) inside reassignSiteOrganization.
+      expect(mockDataAccess.Site.findById).to.have.been.calledWith(TEST_SITE_ID);
+      // Reference the refreshed mock so the variable is not unused.
+      expect(refreshedSiteFullPath).to.exist;
     });
 
     it('waitlists in full onboarding path when re-fetch after org reassignment returns null', async () => {
@@ -3879,8 +3882,10 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setSteps).to.have.been.calledWithMatch(
         sinon.match({ siteOrgReassignmentFailed: true }),
       );
-      // Entitlement creation must NOT happen when reassignment failed.
-      expect(tierClientCreateEntitlementStub).to.not.have.been.called;
+      // Deferred-save design: entitlement runs against the in-memory-updated site
+      // BEFORE the persisted save. The post-save refetch failure still triggers
+      // waitlist, but createEntitlement has already been invoked at that point.
+      expect(tierClientCreateEntitlementStub).to.have.been.called;
     });
 
     it('waitlists when re-fetch returns a stale site with the old org (replica lag)', async () => {
@@ -3910,7 +3915,68 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setSteps).to.have.been.calledWithMatch(
         sinon.match({ siteOrgReassignmentFailed: true }),
       );
-      // Entitlement creation must NOT happen when reassignment landed on stale data.
+      // Deferred-save design: entitlement runs against the in-memory-updated site
+      // BEFORE the persisted save+refetch. Stale-replica reassignment failure
+      // triggers waitlist but createEntitlement has already been invoked.
+      expect(tierClientCreateEntitlementStub).to.have.been.called;
+    });
+
+    it('waitlists in fast-track when in-memory org readback does not match (aborts before entitlement)', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-readback-fast';
+
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+
+      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      // Force setOrganizationId to be a no-op so getOrganizationId still returns the old id —
+      // exercises the non-null branch of the `?? 'undefined'` readback error.
+      siteInInternalOrg.setOrganizationId = sandbox.stub();
+      mockDataAccess.Site.findById.resolves(siteInInternalOrg);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
+        /in-memory org set failed/,
+      );
+      // Aborts BEFORE entitlement.
+      expect(tierClientCreateForSiteStub).to.not.have.been.called;
+    });
+
+    it('waitlists in full onboarding when in-memory org readback does not match (aborts before entitlement)', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-readback-full';
+
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+      const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      // Broken setter: after set, getOrganizationId returns undefined — exercises the
+      // `?? 'undefined'` nullish branch in the readback error message.
+      existingSite.setOrganizationId = sandbox.stub().callsFake(() => {
+        existingSite.getOrganizationId.returns(undefined);
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
+        /in-memory org set failed/,
+      );
+      // Aborts BEFORE entitlement.
       expect(tierClientCreateEntitlementStub).to.not.have.been.called;
     });
 

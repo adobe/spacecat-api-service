@@ -802,7 +802,7 @@ async function performAsoPlgOnboarding({
           const inMemoryOrgId = site.getOrganizationId();
           log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${customerOrgId} (save deferred), readback: ${inMemoryOrgId}`);
           if (inMemoryOrgId !== customerOrgId) {
-            throw new OnboardingWaitlistError(`Site ${site.getId()} in-memory org set failed: expected ${customerOrgId}, got ${inMemoryOrgId ?? 'undefined'}. Aborting before entitlement.`);
+            throw new OnboardingWaitlistError(`Site ${site.getId()} in-memory org set failed: expected ${customerOrgId}, got ${inMemoryOrgId}. Aborting before entitlement.`);
           }
         }
 
@@ -1239,7 +1239,7 @@ async function performAsoPlgOnboarding({
       const inMemoryOrgId = site.getOrganizationId();
       log.info(`Set site ${site.getId()} org in-memory: ${previousOrgId} -> ${organizationId} (save deferred until after entitlement), readback: ${inMemoryOrgId}`);
       if (inMemoryOrgId !== organizationId) {
-        throw new OnboardingWaitlistError(`Site ${site.getId()} in-memory org set failed: expected ${organizationId}, got ${inMemoryOrgId ?? 'undefined'}. Aborting before entitlement.`);
+        throw new OnboardingWaitlistError(`Site ${site.getId()} in-memory org set failed: expected ${organizationId}, got ${inMemoryOrgId}. Aborting before entitlement.`);
       }
       // Anchor onboarding record to target org now (independent record, safe to save).
       onboarding.setOrganizationId(organizationId);
