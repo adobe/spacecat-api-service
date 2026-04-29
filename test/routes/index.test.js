@@ -441,6 +441,10 @@ describe('getRouteHandlers', () => {
     getProjectionAudit: sinon.stub(),
   };
 
+  const mockWebhooksController = {
+    processGitHubWebhook: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -493,6 +497,7 @@ describe('getRouteHandlers', () => {
       mockAutofixChecksController,
       mockPlgOnboardingController,
       mockDrsBpPgAuditController,
+      mockWebhooksController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -518,6 +523,7 @@ describe('getRouteHandlers', () => {
       'POST /slack/events',
       'GET /trigger',
       'POST /event/fulfillment',
+      'POST /webhooks/github',
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/api-keys',
       'GET /tools/api-keys',
