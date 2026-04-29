@@ -35,7 +35,7 @@ describe('edge-routing-auth', () => {
   let log;
   let getCookieValueStub;
   let exchangePromiseTokenStub;
-  let getImsTokenFromCookie;
+  let getImsTokenFromPromiseToken;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -58,22 +58,22 @@ describe('edge-routing-auth', () => {
         },
       },
     });
-    getImsTokenFromCookie = authMocked.getImsTokenFromCookie;
+    getImsTokenFromPromiseToken = authMocked.getImsTokenFromPromiseToken;
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
-  describe('getImsTokenFromCookie', () => {
-    it('throws 400 when promiseToken cookie is missing', async () => {
+  describe('getImsTokenFromPromiseToken', () => {
+    it('throws 400 when neither cookie nor x-promise-token header is present', async () => {
       getCookieValueStub.returns(null);
       try {
-        await getImsTokenFromCookie({ pathInfo: { headers: {} } });
+        await getImsTokenFromPromiseToken({ pathInfo: { headers: {} } });
         expect.fail('expected throw');
       } catch (e) {
         expect(e.status).to.equal(400);
-        expect(e.message).to.include('promiseToken cookie is required');
+        expect(e.message).to.include('Authentication failed: mandatory token missing');
       }
     });
 
@@ -82,7 +82,7 @@ describe('edge-routing-auth', () => {
       exchangePromiseTokenStub.rejects(new Error('ims down'));
       const ctxLog = { error: sandbox.stub() };
       try {
-        await getImsTokenFromCookie({
+        await getImsTokenFromPromiseToken({
           pathInfo: { headers: { cookie: 'promiseToken=ptok' } },
           log: ctxLog,
         });
@@ -97,24 +97,58 @@ describe('edge-routing-auth', () => {
       }
     });
 
-    it('returns access token when exchange succeeds', async () => {
+    it('returns access token when cookie is present', async () => {
       getCookieValueStub.returns('ptok');
       exchangePromiseTokenStub.resolves('user-token');
-      const token = await getImsTokenFromCookie({});
+      const ctxLog = { info: sandbox.stub(), error: sandbox.stub() };
+      const token = await getImsTokenFromPromiseToken({
+        pathInfo: { headers: {} },
+        log: ctxLog,
+      });
       expect(token).to.equal('user-token');
+      expect(ctxLog.info).to.have.been.calledWith(sinon.match(/cookie/));
+    });
+
+    it('returns access token from x-promise-token header when cookie is absent', async () => {
+      getCookieValueStub.returns(null);
+      exchangePromiseTokenStub.resolves('user-token-from-header');
+      const ctxLog = { info: sandbox.stub(), error: sandbox.stub() };
+      const token = await getImsTokenFromPromiseToken({
+        pathInfo: { headers: { 'x-promise-token': 'header-ptok' } },
+        log: ctxLog,
+      });
+      expect(token).to.equal('user-token-from-header');
+      expect(exchangePromiseTokenStub).to.have.been.calledWith(sinon.match.any, 'header-ptok');
+      expect(ctxLog.info).to.have.been.calledWith(sinon.match(/header/));
+    });
+
+    it('prefers cookie over x-promise-token header when both are present', async () => {
+      getCookieValueStub.returns('cookie-ptok');
+      exchangePromiseTokenStub.resolves('user-token-from-cookie');
+      const token = await getImsTokenFromPromiseToken({
+        pathInfo: { headers: { 'x-promise-token': 'header-ptok' } },
+      });
+      expect(token).to.equal('user-token-from-cookie');
+      expect(exchangePromiseTokenStub).to.have.been.calledWith(sinon.match.any, 'cookie-ptok');
     });
   });
 
   describe('hasPaidLlmoProductContext', () => {
-    it('returns false when productContexts missing or empty', () => {
+    it('returns false when projectedProductContext missing or empty', () => {
       expect(hasPaidLlmoProductContext({})).to.equal(false);
-      expect(hasPaidLlmoProductContext({ productContexts: [] })).to.equal(false);
+      expect(hasPaidLlmoProductContext({ projectedProductContext: [] })).to.equal(false);
     });
 
     it('returns true when dx_llmo service code is present', () => {
       expect(hasPaidLlmoProductContext({
-        productContexts: [{ serviceCode: 'dx_llmo' }],
+        projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }],
       })).to.equal(true);
+    });
+
+    it('returns false when service code does not match', () => {
+      expect(hasPaidLlmoProductContext({
+        projectedProductContext: [{ prodCtx: { serviceCode: 'other' } }],
+      })).to.equal(false);
     });
   });
 
@@ -129,7 +163,9 @@ describe('edge-routing-auth', () => {
         },
       },
       imsClient: {
-        getImsUserProfile: sandbox.stub().resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] }),
+        getImsUserProfile: sandbox.stub().resolves({
+          projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }],
+        }),
         getImsUserOrganizations: sandbox.stub().resolves([]),
       },
     });
@@ -164,12 +200,14 @@ describe('edge-routing-auth', () => {
 
     it('rejects paid users without LLMO product context', async () => {
       const ctx = baseCtx();
-      ctx.imsClient.getImsUserProfile.resolves({ productContexts: [{ serviceCode: 'other' }] });
+      ctx.imsClient.getImsUserProfile.resolves({
+        projectedProductContext: [{ prodCtx: { serviceCode: 'other' } }],
+      });
       await expect(
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('User does not have LLMO product access');
+      ).to.be.rejectedWith('Adobe LLM Optimizer Users\' IMS Product Profile access');
     });
 
     it('rejects trial when ims org id is missing', async () => {
@@ -197,7 +235,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('rejects trial when matching org has no groups array', async () => {
@@ -212,7 +250,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('allows trial users in LLMO Admin group for matching org', async () => {
@@ -241,7 +279,7 @@ describe('edge-routing-auth', () => {
         authorizeEdgeCdnRouting(ctx, {
           org, imsOrgId: '12345@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
-      ).to.be.rejectedWith('Only LLMO Admin group members can configure CDN routing');
+      ).to.be.rejectedWith("'LLMO Admin' IMS Group members can configure CDN routing");
     });
 
     it('rejects unknown entitlement tier', async () => {

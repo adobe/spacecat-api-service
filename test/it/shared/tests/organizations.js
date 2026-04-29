@@ -56,8 +56,9 @@ export default function organizationTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/organizations');
         expect(res.status).to.equal(200);
-        // ORG_1 + ORG_2 + ORG_3 (delegate agency org)
-        expect(res.body).to.be.an('array').with.lengthOf(3);
+        // ORG_1 + ORG_2 + ORG_3 (delegate agency org) +
+        // ORG_LEGACY_LLMO + ORG_NEW_LLMO (LLMO-4176 mode-resolution test fixtures)
+        expect(res.body).to.be.an('array').with.lengthOf(5);
         const sorted = sortById(res.body);
         sorted.forEach((org) => expectOrgDto(org));
         const ids = sorted.map((org) => org.id);

@@ -35,6 +35,12 @@ const CATEGORY_ID = '123e4567-e89b-12d3-a456-426614174000';
 const TOPIC_ID = '456e7890-e89b-12d3-a456-426614174001';
 const EXTERNAL_API_BASE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
+/** Matches HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS / isHlxSheetDataAccessBlocked in llmo.js */
+const HLX_PG_MIGRATION_SITE_ID_PROD = '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3';
+const HLX_PG_MIGRATION_SITE_ID_STAGE = 'c2473d89-e997-458d-a86d-b4096649c12b';
+const HLX_SHEET_TYPE_BRAND_PRESENCE = 'brand-presence';
+const HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE = 'Access to HLX sheet data has been blocked for this site due to PG migration';
+
 const createMockResponse = (data, ok = true, status = 200) => ({
   ok,
   status,
@@ -90,10 +96,23 @@ describe('LlmoController', () => {
   let getImsUserOrganizationsStub;
   let probeSiteAndResolveDomainStub;
   let callCdnRoutingApiStub;
-  let getImsTokenFromCookieStub;
+  let getImsTokenFromPromiseTokenStub;
   let edgeRoutingAuthReal;
   let detectCdnForDomainStub;
   let authorizeEdgeCdnRoutingStub;
+
+  // Passthrough mock for cachedOk: defers to the same fake `ok` shape that the
+  // tests already rely on (no real brotli compression / no real Response).
+  const mockCachedResponse = {
+    cachedOk: (data, additionalHeaders = {}) => ({
+      status: 200,
+      headers: new Map(Object.entries({
+        'Cache-Control': 'private, max-age=7200',
+        ...additionalHeaders,
+      })),
+      json: async () => data,
+    }),
+  };
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -190,7 +209,7 @@ describe('LlmoController', () => {
     });
 
     edgeRoutingAuthReal = await import('../../../src/support/edge-routing-auth.js');
-    getImsTokenFromCookieStub = sinon.stub().resolves('test-ims-user-token');
+    getImsTokenFromPromiseTokenStub = sinon.stub().resolves('test-ims-user-token');
     detectCdnForDomainStub = sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY);
     authorizeEdgeCdnRoutingStub = sinon.stub().callsFake((ctx, params, log) => (
       edgeRoutingAuthReal.authorizeEdgeCdnRouting(ctx, params, log)
@@ -202,6 +221,7 @@ describe('LlmoController', () => {
         updateModifiedByDetails: updateModifiedByDetailsStub,
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -231,7 +251,7 @@ describe('LlmoController', () => {
         fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
       },
       '../../../src/support/edge-routing-auth.js': {
-        getImsTokenFromCookie: (...args) => getImsTokenFromCookieStub(...args),
+        getImsTokenFromPromiseToken: (...args) => getImsTokenFromPromiseTokenStub(...args),
         authorizeEdgeCdnRouting: (...args) => authorizeEdgeCdnRoutingStub(...args),
       },
       '@adobe/spacecat-shared-ims-client': {
@@ -293,7 +313,7 @@ describe('LlmoController', () => {
       '../../../src/support/edge-routing-utils.js': {
         probeSiteAndResolveDomain: (...args) => probeSiteAndResolveDomainStub(...args),
         callCdnRoutingApi: (...args) => callCdnRoutingApiStub(...args),
-        detectCdnForDomain: (...args) => detectCdnForDomainStub(...args),
+        detectAemCsFastlyForDomain: (...args) => detectCdnForDomainStub(...args),
         getHostnameWithoutWww(url, log) {
           try {
             const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -336,6 +356,7 @@ describe('LlmoController', () => {
         default: createMockAccessControlUtil(false),
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -379,6 +400,7 @@ describe('LlmoController', () => {
         },
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -419,6 +441,7 @@ describe('LlmoController', () => {
         },
       },
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/cached-response.js': mockCachedResponse,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -645,10 +668,10 @@ describe('LlmoController', () => {
     getServicePrincipalTokenStub = sinon.stub().resolves({ access_token: 'sp-access-token' });
     isUserInImsGroupStub = sinon.stub().resolves(false);
     getOrgGroupsStub = sinon.stub().resolves([{ groupName: 'LLMO Admin', ident: 99999 }]);
-    getImsUserProfileStub = sinon.stub().resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] });
+    getImsUserProfileStub = sinon.stub().resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
     getImsUserOrganizationsStub = sinon.stub().resolves([]);
-    getImsTokenFromCookieStub.reset();
-    getImsTokenFromCookieStub.resolves('test-ims-user-token');
+    getImsTokenFromPromiseTokenStub.reset();
+    getImsTokenFromPromiseTokenStub.resolves('test-ims-user-token');
     probeSiteAndResolveDomainStub = sinon.stub().resolves('www.example.com');
     detectCdnForDomainStub.reset();
     detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY);
@@ -887,6 +910,96 @@ describe('LlmoController', () => {
       );
     });
 
+    describe('HLX PG migration blocking (brand-presence)', () => {
+      it('should return 403 for prod PG migration site when sheetType is brand-presence', async () => {
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+
+      it('should return 403 for stage PG migration site when sheetType is brand-presence', async () => {
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_STAGE;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+
+      it('should proxy HLX for PG migration site when sheetType is not brand-presence', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'ok' }));
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = 'analytics';
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledOnce;
+      });
+
+      it('should proxy HLX for PG migration site when sheetType is omitted', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'ok' }));
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.dataSource = 'test-data';
+        delete mockContext.params.sheetType;
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledWith(
+          `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json`,
+          sinon.match.object,
+        );
+      });
+
+      it('should proxy HLX for non-migrated site when sheetType is brand-presence', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'ok' }));
+        mockContext.params.siteId = TEST_SITE_ID;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledOnce;
+      });
+    });
+
+    describe('HLX sheet guard when siteId is absent', () => {
+      it('should return 403 when siteId is falsy on the HLX guard read (defensive)', async () => {
+        let siteIdReadCount = 0;
+        Object.defineProperty(mockContext.params, 'siteId', {
+          configurable: true,
+          enumerable: true,
+          get() {
+            siteIdReadCount += 1;
+            return siteIdReadCount === 1 ? TEST_SITE_ID : '';
+          },
+        });
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.getLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+    });
+
     it('should return 404 when site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
       const result = await controller.getLlmoSheetData(mockContext);
@@ -979,6 +1092,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(testUrl, sinon.match.object);
+    });
+
+    describe('HLX PG migration blocking (brand-presence)', () => {
+      it('should return 403 for PG migration site when sheetType is brand-presence', async () => {
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = HLX_SHEET_TYPE_BRAND_PRESENCE;
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.queryLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(tracingFetchStub).to.not.have.been.called;
+      });
+
+      it('should proxy HLX for PG migration site when sheetType is not brand-presence', async () => {
+        tracingFetchStub.resolves(createMockResponse({ data: 'test-data' }));
+        mockContext.params.siteId = HLX_PG_MIGRATION_SITE_ID_PROD;
+        mockContext.params.sheetType = 'analytics';
+        mockContext.params.dataSource = 'test-data';
+
+        const result = await controller.queryLlmoSheetData(mockContext);
+
+        expect(result.status).to.equal(200);
+        expect(tracingFetchStub).to.have.been.calledOnce;
+      });
     });
 
     it('should handle POST request with filters successfully', async () => {
@@ -2031,6 +2171,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
@@ -2125,6 +2266,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2179,6 +2321,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2212,6 +2355,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2375,6 +2519,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2607,6 +2752,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -2674,6 +2820,7 @@ describe('LlmoController', () => {
         const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
           '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           ...getCommonMocks(),
         });
 
@@ -3085,6 +3232,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -3431,6 +3579,36 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
+    });
+
+    describe('HLX PG migration blocking (brand-presence)', () => {
+      it('should return 403 for PG migration site when sheetType is brand-presence', async () => {
+        const queryLlmoFilesStub = sinon.stub().resolves({ data: {}, headers: {} });
+        const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+          '../../../src/controllers/llmo/llmo-query-handler.js': {
+            queryLlmoFiles: queryLlmoFilesStub,
+          },
+          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          ...getCommonMocks(),
+        });
+        const pgContext = {
+          ...mockContext,
+          params: {
+            ...mockContext.params,
+            siteId: HLX_PG_MIGRATION_SITE_ID_PROD,
+            sheetType: HLX_SHEET_TYPE_BRAND_PRESENCE,
+            dataSource: 'test-data',
+          },
+        };
+        const cacheController = LlmoControllerWithCache(pgContext);
+
+        const result = await cacheController.queryFiles(pgContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+        expect(queryLlmoFilesStub).to.not.have.been.called;
+      });
     });
 
     it('should return 404 when site is not found', async () => {
@@ -4383,7 +4561,7 @@ describe('LlmoController', () => {
     const trialEdgeRoutingUtilsForCdnAuth = () => ({
       probeSiteAndResolveDomain: sinon.stub().resolves('www.example.com'),
       callCdnRoutingApi: sinon.stub().resolves(),
-      detectCdnForDomain: sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY),
+      detectAemCsFastlyForDomain: sinon.stub().resolves(LOG_SOURCES.AEM_CS_FASTLY),
       getHostnameWithoutWww(url, log) {
         try {
           const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -4709,6 +4887,7 @@ describe('LlmoController', () => {
       const LlmoControllerNotOwner = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
 
@@ -4837,6 +5016,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await NonAdminController(mockContext)
@@ -4861,7 +5041,7 @@ describe('LlmoController', () => {
         getProductCode: sinon.stub().returns('LLMO'),
         getTier: sinon.stub().returns('PAID'),
       });
-      getImsUserProfileStub.resolves({ productContexts: [{ serviceCode: 'other_product' }] });
+      getImsUserProfileStub.resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'other_product' } }] });
       mockTokowakaClient.fetchMetaconfig.resolves({ apiKeys: ['k'] });
       mockTokowakaClient.updateMetaconfig.resolves({ apiKeys: ['k'] });
       mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: Date.now() });
@@ -4877,7 +5057,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLMO product access');
+      expect(responseBody.message).to.include('Adobe LLM Optimizer Users\' IMS Product Profile access');
     });
 
     // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
@@ -4967,6 +5147,7 @@ describe('LlmoController', () => {
           updateModifiedByDetails: updateModifiedByDetailsStub,
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: TEST_USER_AGENT,
           tracingFetch: (...args) => tracingFetchStub(...args),
@@ -5075,6 +5256,7 @@ describe('LlmoController', () => {
           updateModifiedByDetails: updateModifiedByDetailsStub,
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: TEST_USER_AGENT,
           tracingFetch: (...args) => tracingFetchStub(...args),
@@ -5212,6 +5394,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5229,7 +5412,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5244,7 +5427,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include('LLMO Admin group members');
+      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
     });
 
     it('returns 403 when trial user has no matching IMS org in organization list', async () => {
@@ -5282,6 +5465,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5299,7 +5483,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5314,7 +5498,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include('LLMO Admin group members');
+      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
     });
 
     it('returns 403 when getImsUserOrganizations throws (trial admin path)', async () => {
@@ -5349,6 +5533,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -5366,7 +5551,7 @@ describe('LlmoController', () => {
         },
         '../../../src/utils/slack/base.js': { postSlackMessage: sinon.stub().resolves() },
         '../../../src/support/edge-routing-auth.js': {
-          getImsTokenFromCookie: sinon.stub().resolves('test-ims-user-token'),
+          getImsTokenFromPromiseToken: sinon.stub().resolves('test-ims-user-token'),
           authorizeEdgeCdnRouting: edgeRoutingAuthReal.authorizeEdgeCdnRouting,
         },
         '@adobe/spacecat-shared-ims-client': {
@@ -5392,7 +5577,7 @@ describe('LlmoController', () => {
       });
       expect(result.status).to.equal(200);
       expect(callCdnRoutingApiStub).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWith(
+      expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/not eligible for automated routing/),
       );
     });
@@ -5455,7 +5640,7 @@ describe('LlmoController', () => {
           getProductCode: sinon.stub().returns('LLMO'),
           getTier: sinon.stub().returns('PAID'),
         });
-        getImsUserProfileStub.resolves({ productContexts: [{ serviceCode: 'dx_llmo' }] });
+        getImsUserProfileStub.resolves({ projectedProductContext: [{ prodCtx: { serviceCode: 'dx_llmo' } }] });
         detectCdnForDomainStub.resetHistory();
         detectCdnForDomainStub.resolves(LOG_SOURCES.AEM_CS_FASTLY);
       });
@@ -5484,7 +5669,7 @@ describe('LlmoController', () => {
         mockSite.getBaseURL = sinon.stub().returns('https://[');
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(200);
-        expect(mockLog.info).to.have.been.calledWith(
+        expect(mockLog.error).to.have.been.calledWith(
           sinon.match(/CDN auto-detection failed/),
         );
       });
@@ -5564,14 +5749,14 @@ describe('LlmoController', () => {
       });
 
       it('returns 400 when promiseToken cookie is missing for CDN routing', async () => {
-        getImsTokenFromCookieStub.callsFake((ctx) => (
-          edgeRoutingAuthReal.getImsTokenFromCookie(ctx)
+        getImsTokenFromPromiseTokenStub.callsFake((ctx) => (
+          edgeRoutingAuthReal.getImsTokenFromPromiseToken(ctx)
         ));
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ pathInfo: { headers: { cookie: '' } } }),
         );
         expect(result.status).to.equal(400);
-        expect((await result.json()).message).to.include('promiseToken cookie is required');
+        expect((await result.json()).message).to.include('Authentication failed: mandatory token missing');
       });
 
       it('returns 200 with routing data when CDN routing succeeds', async () => {
@@ -5590,6 +5775,9 @@ describe('LlmoController', () => {
           { type: 'optimize-at-edge-enabled-marking' },
           undefined,
           { delaySeconds: 300 },
+        );
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/CDN routing enabled successfully/),
         );
       });
 
@@ -5617,6 +5805,9 @@ describe('LlmoController', () => {
           enabled: false,
         });
         expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/CDN routing disabled successfully/),
+        );
       });
 
       it('uses valid overrideBaseURL from fetch config for CDN probe URL', async () => {
@@ -5640,10 +5831,10 @@ describe('LlmoController', () => {
         );
       });
 
-      it('uses tokenError.status when getImsTokenFromCookie fails with a status', async () => {
+      it('uses tokenError.status when getImsTokenFromPromiseToken fails with a status', async () => {
         const tokenErr = new Error('IMS cookie exchange failed');
         tokenErr.status = 503;
-        getImsTokenFromCookieStub.rejects(tokenErr);
+        getImsTokenFromPromiseTokenStub.rejects(tokenErr);
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(503);
         expect((await result.json()).message).to.equal('IMS cookie exchange failed');
@@ -5658,8 +5849,8 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.equal('Custom auth failure');
       });
 
-      it('returns 401 when getImsTokenFromCookie fails without a status', async () => {
-        getImsTokenFromCookieStub.rejects(new Error('token failure'));
+      it('returns 401 when getImsTokenFromPromiseToken fails without a status', async () => {
+        getImsTokenFromPromiseTokenStub.rejects(new Error('token failure'));
         const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
         expect(result.status).to.equal(401);
       });
@@ -5704,6 +5895,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await OrderedController(mockContext)
@@ -5831,6 +6023,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -6003,6 +6196,7 @@ describe('LlmoController', () => {
           },
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
       });
       const result = await OrderedController(mockContext)
@@ -6079,6 +6273,7 @@ describe('LlmoController', () => {
           default: createMockAccessControlUtil(true, true, false),
         },
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
@@ -6439,6 +6634,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/cached-response.js': mockCachedResponse,
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
@@ -6737,6 +6933,7 @@ describe('LlmoController', () => {
             previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           '@adobe/spacecat-shared-utils': {
             tracingFetch: sinon.stub(),
             composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
@@ -6792,6 +6989,7 @@ describe('LlmoController', () => {
             previewAndPublishQueryIndex: sinon.stub(),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          '../../../src/support/cached-response.js': mockCachedResponse,
           '@adobe/spacecat-shared-utils': {
             tracingFetch: sinon.stub(),
             composeBaseURL: (d) => `https://${d}`,

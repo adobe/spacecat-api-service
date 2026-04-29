@@ -46,4 +46,15 @@ export const organizations = [
       slack: { channel: 'C0FAKE0ORG3', workspace: 'WORKSPACE_TEST' },
     },
   },
+  // TEMPORARY: LLMO mode-resolution test orgs — remove with resolveLlmoOnboardingMode legacy check
+  {
+    id: 'fe111111-1111-4111-b111-111111111111',
+    name: 'Legacy LLMO Org',
+    ims_org_id: 'LEGACYLLLMOOOOOOOOOOOOOO@AdobeOrg',
+  },
+  {
+    id: 'fe222222-2222-4222-a222-222222222222',
+    name: 'New LLMO Org',
+    ims_org_id: 'NEWWWLLMOOOOOOOOOOOOOOOO@AdobeOrg',
+  },
 ];

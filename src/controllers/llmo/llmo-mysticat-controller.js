@@ -19,14 +19,40 @@ import {
   createSearchHandler,
   createTopicDetailHandler,
   createPromptDetailHandler,
+  createExecutionSourcesHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
   createBrandPresenceStatsHandler,
+  createRegionsHandler,
 } from './llmo-brand-presence.js';
+import {
+  createUrlInspectorStatsHandler,
+  createUrlInspectorOwnedUrlsHandler,
+  createUrlInspectorTrendingUrlsHandler,
+  createUrlInspectorCitedDomainsHandler,
+  createUrlInspectorDomainUrlsHandler,
+  createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
+} from './llmo-url-inspector.js';
 import {
   createAgenticTrafficGlobalGetHandler,
   createAgenticTrafficGlobalPostHandler,
 } from './llmo-agentic-traffic-global.js';
+import {
+  createAgenticTrafficKpisHandler,
+  createAgenticTrafficKpisTrendHandler,
+  createAgenticTrafficByRegionHandler,
+  createAgenticTrafficByCategoryHandler,
+  createAgenticTrafficByPageTypeHandler,
+  createAgenticTrafficByStatusHandler,
+  createAgenticTrafficByUserAgentHandler,
+  createAgenticTrafficByUrlHandler,
+  createAgenticTrafficFilterDimensionsHandler,
+  createAgenticTrafficWeeksHandler,
+  createAgenticTrafficMoversHandler,
+  createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
+} from './llmo-agentic-traffic.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -91,13 +117,75 @@ function LlmoMysticatController(ctx) {
   const getSearch = createSearchHandler(getOrgAndValidateAccess);
   const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
   const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getExecutionSources = createExecutionSourcesHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
   const getBrandPresenceStats = createBrandPresenceStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorStats = createUrlInspectorStatsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorOwnedUrls = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess);
+  const getUrlInspectorTrendingUrls = createUrlInspectorTrendingUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorCitedDomains = createUrlInspectorCitedDomainsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorDomainUrls = createUrlInspectorDomainUrlsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorUrlPrompts = createUrlInspectorUrlPromptsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getUrlInspectorFilterDimensions = createUrlInspectorFilterDimensionsHandler(
+    getOrgAndValidateAccess,
+  );
+  const getRegions = createRegionsHandler();
   const getAgenticTrafficGlobal = createAgenticTrafficGlobalGetHandler(
     validateGlobalAgenticTrafficReadAccess,
   );
   const postAgenticTrafficGlobal = createAgenticTrafficGlobalPostHandler(accessControlUtil);
+
+  const getSiteAndValidateAccess = async (context) => {
+    const { siteId } = context.params;
+    const { dataAccess } = context;
+    const { Site, Organization } = dataAccess;
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      throw new Error(`Site not found: ${siteId}`);
+    }
+    const organization = await Organization.findById(site.getOrganizationId());
+    if (!organization) {
+      throw new Error(`Organization not found for site: ${siteId}`);
+    }
+    if (!await hasLlmoOrganizationAccess(organization)) {
+      throw new Error('Only users belonging to the organization can view agentic traffic data');
+    }
+    return { site, organization };
+  };
+
+  const getAgenticTrafficKpis = createAgenticTrafficKpisHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficKpisTrend = createAgenticTrafficKpisTrendHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByRegion = createAgenticTrafficByRegionHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByCategory = createAgenticTrafficByCategoryHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByPageType = createAgenticTrafficByPageTypeHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByStatus = createAgenticTrafficByStatusHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficByUserAgent = createAgenticTrafficByUserAgentHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficByUrl = createAgenticTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficFilterDimensions = createAgenticTrafficFilterDimensionsHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficWeeks = createAgenticTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficMovers = createAgenticTrafficMoversHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
+    getSiteAndValidateAccess,
+  );
+  const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -110,11 +198,33 @@ function LlmoMysticatController(ctx) {
     getSearch,
     getTopicDetail,
     getPromptDetail,
+    getExecutionSources,
     getSentimentMovers,
     getShareOfVoice,
     getBrandPresenceStats,
+    getUrlInspectorStats,
+    getUrlInspectorOwnedUrls,
+    getUrlInspectorTrendingUrls,
+    getUrlInspectorCitedDomains,
+    getUrlInspectorDomainUrls,
+    getUrlInspectorUrlPrompts,
+    getUrlInspectorFilterDimensions,
+    getRegions,
     getAgenticTrafficGlobal,
     postAgenticTrafficGlobal,
+    getAgenticTrafficKpis,
+    getAgenticTrafficKpisTrend,
+    getAgenticTrafficByRegion,
+    getAgenticTrafficByCategory,
+    getAgenticTrafficByPageType,
+    getAgenticTrafficByStatus,
+    getAgenticTrafficByUserAgent,
+    getAgenticTrafficByUrl,
+    getAgenticTrafficFilterDimensions,
+    getAgenticTrafficWeeks,
+    getAgenticTrafficMovers,
+    getAgenticTrafficUrlBrandPresence,
+    getAgenticTrafficHasData,
   };
 }
 

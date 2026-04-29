@@ -33,6 +33,7 @@ import {
   LLMO_BRANDALF_FLAG,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
+import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
 
 // LLMO Constants
@@ -133,58 +134,8 @@ export async function triggerBrandalfOnboardingJob({
   return drsJob;
 }
 
-function buildPromptGenerationMetadata({
-  siteId,
-  imsOrgId,
-  baseUrl,
-  brandName,
-  region,
-  onboardingMode,
-}) {
-  return buildOnboardingMetadata({
-    siteId,
-    imsOrgId,
-    brandName,
-    onboardingMode,
-    extra: {
-      base_url: baseUrl,
-      region,
-    },
-  });
-}
-
-export async function submitOnboardingPromptGenerationJob({
-  drsClient,
-  baseUrl,
-  brandName,
-  audience,
-  region = 'US',
-  numPrompts = 50,
-  siteId,
-  imsOrgId,
-  onboardingMode,
-}) {
-  return drsClient.submitJob({
-    provider_id: 'prompt_generation_base_url',
-    source: 'onboarding',
-    parameters: {
-      base_url: baseUrl,
-      brand: brandName,
-      audience,
-      region,
-      num_prompts: numPrompts,
-      model: 'gpt-5-nano',
-      metadata: buildPromptGenerationMetadata({
-        siteId,
-        imsOrgId,
-        baseUrl,
-        brandName,
-        region,
-        onboardingMode,
-      }),
-    },
-  });
-}
+// submitOnboardingPromptGenerationJob removed — prompt generation is now
+// triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
 export function buildInitialCustomerConfigV2({
   brandName,
@@ -215,7 +166,7 @@ export function buildInitialCustomerConfigV2({
   brand.baseUrl = primaryUrl;
   brand.updatedAt = timestamp;
   brand.updatedBy = updatedBy;
-  brand.urls = [{ value: primaryUrl, type: 'url' }];
+  brand.urls = [{ value: primaryUrl, type: 'base' }];
   brand.brandAliases = [{ name: brandName, regions: ['gl'] }];
 
   config.customer.customerName = brandName;
@@ -275,7 +226,7 @@ export async function ensureInitialCustomerConfigV2({
       regions: ['gl'],
       updatedAt: timestamp,
       updatedBy: resolveUpdatedBy(context),
-      urls: [{ value: primaryUrl, type: 'url' }],
+      urls: [{ value: primaryUrl, type: 'base' }],
       brandAliases: [{ name: trimmedName, regions: ['gl'] }],
     });
 
@@ -1013,6 +964,12 @@ export async function createOrFindSite(baseURL, organizationId, context, deliver
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
       site.setOrganizationId(organizationId);
+      // Persist the re-parent immediately. resolveLlmoOnboardingMode (called
+      // right after this in performLlmoOnboarding) reads sites by org_id, so
+      // the move must be visible to that query — otherwise a legacy site
+      // re-parented into a brand-new org would be classified as v2 and create
+      // an instant mixed v1/v2 state. (LLMO-4176)
+      await site.save();
     }
 
     return site;
@@ -1254,15 +1211,22 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
   const dataFolder = generateDataFolder(baseURL, env.ENV);
 
   let site;
+  let detectedCdn = null;
   try {
     log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}, brand ${brandName}`);
 
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
-    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
-    // Create site
+    // Create site BEFORE resolving the onboarding mode. createOrFindSite may
+    // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
+    // reads Site.allByOrganizationId, so the re-parent has to be persisted first
+    // (createOrFindSite saves the site in that branch). Otherwise a legacy
+    // pre-cutoff site moved into a brand-new org would be misclassified as v2
+    // and instantly create the mixed state LLMO-4176 was filed to prevent.
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
+
+    const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
 
     log.info(`Created site ${site.getId()} for ${baseURL} using LLMO onboarding mode ${onboardingMode}`);
 
@@ -1323,6 +1287,19 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
     }
 
+    try {
+      detectedCdn = await detectCdnForDomain(new URL(baseURL).hostname, log);
+      if (detectedCdn) {
+        siteConfig.updateLlmoDetectedCdn?.(detectedCdn);
+        log.info(`Detected CDN ${detectedCdn} for site ${site.getId()}`);
+        say(`:mag: Detected CDN: ${detectedCdn}`);
+      } else {
+        log.info(`CDN detection inconclusive for site ${site.getId()}`);
+      }
+    } catch (cdnError) {
+      log.warn(`CDN detection failed for site ${site.getId()}: ${cdnError.message}`);
+    }
+
     // update the site config object
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
@@ -1363,7 +1340,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
             name: brandName.trim(),
             status: 'active',
             baseSiteId: site.getId(),
-            urls: [{ value: baseURL, type: 'url' }],
+            urls: [{ value: baseURL, type: 'base' }],
             brandAliases: [{ name: brandName.trim(), regions: ['gl'] }],
           },
           postgrestClient,
@@ -1400,41 +1377,48 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       }
     } else {
       log.info(`Skipping v2 customer config initialization and Brandalf flow for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
+
+      // V1 has no Brandalf trigger, so DRS will not submit prompt generation
+      // automatically. Submit it directly here so v1 onboardings still get
+      // prompts written to the legacy LLMO config (LLMO-4534).
+      try {
+        const drsClient = DrsClient.createFrom(context);
+        if (drsClient.isConfigured()) {
+          const trimmedBrand = brandName.trim();
+          const brandProfile = siteConfig.getBrandProfile?.();
+          // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
+          // locale-aware audience from brand_profile.main_profile.target_audience.
+          const audience = brandProfile?.main_profile?.target_audience
+            || `General consumers interested in ${trimmedBrand} products and services`;
+
+          // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
+          // config write path when `onboarding_mode` is absent from the DRS job
+          // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
+          // prompts to the v2 customer-config storage and break v1 onboardings.
+          const drsJob = await drsClient.submitPromptGenerationJob({
+            baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
+            brandName: trimmedBrand,
+            audience,
+            siteId: site.getId(),
+            imsOrgId,
+          });
+          if (!drsJob?.job_id) {
+            throw new Error('DRS submitPromptGenerationJob returned no job_id');
+          }
+          log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+          say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+        } else {
+          log.debug('DRS client not configured, skipping prompt generation');
+        }
+      } catch (drsError) {
+        log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+        say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
+      }
     }
 
     // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
     // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
     await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
-
-    // Submit DRS prompt generation job (non-blocking)
-    try {
-      const drsClient = DrsClient.createFrom(context);
-      if (drsClient.isConfigured()) {
-        // Try to get audience from brand profile, fall back to default
-        const brandProfile = siteConfig.getBrandProfile?.();
-        const audience = brandProfile?.main_profile?.target_audience
-          || `General consumers interested in ${brandName} products and services`;
-
-        const drsJob = await submitOnboardingPromptGenerationJob({
-          drsClient,
-          baseUrl: baseURL,
-          brandName: brandName.trim(),
-          audience,
-          region: 'US',
-          numPrompts: 50,
-          siteId: site.getId(),
-          imsOrgId,
-          onboardingMode,
-        });
-        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
-        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
-      } else {
-        log.debug('DRS client not configured, skipping prompt generation');
-      }
-    } catch (drsError) {
-      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
-    }
 
     return {
       site,
@@ -1442,6 +1426,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       organizationId: organization.getId(),
       baseURL,
       dataFolder,
+      detectedCdn,
       message: 'LLMO onboarding completed successfully',
     };
   } catch (error) {

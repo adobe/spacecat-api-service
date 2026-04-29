@@ -273,7 +273,7 @@ describe('edge-routing-utils', () => {
     });
   });
 
-  describe('detectCdnForDomain', () => {
+  describe('detectAemCsFastlyForDomain', () => {
     let dnsPromises;
     let edgeUtilsDns;
 
@@ -304,28 +304,44 @@ describe('edge-routing-utils', () => {
     it('returns null when DNS yields no AEM CS Fastly signals', async () => {
       dnsPromises.resolveCname.resolves([]);
       dnsPromises.resolve4.resolves([]);
-      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
       expect(result).to.equal(null);
     });
 
     it('returns aem-cs-fastly when host CNAME matches Adobe AEM cloud pattern', async () => {
       dnsPromises.resolveCname.withArgs('example.com').resolves(['origin.example.cdn.adobeaemcloud.com']);
       dnsPromises.resolve4.resolves([]);
-      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
 
     it('returns aem-cs-fastly when A record matches known Fastly IP', async () => {
       dnsPromises.resolveCname.resolves([]);
-      dnsPromises.resolve4.withArgs('example.com').resolves(['146.75.123.10']);
-      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      dnsPromises.resolve4.withArgs('example.com').resolves(['151.101.195.10']);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
 
     it('returns aem-cs-fastly when A record matches 151.101.131.10', async () => {
       dnsPromises.resolveCname.resolves([]);
       dnsPromises.resolve4.withArgs('example.com').resolves(['151.101.131.10']);
-      const result = await edgeUtilsDns.detectCdnForDomain('example.com');
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
+      expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
+    });
+
+    it('does not match when CNAME embeds the pattern as a non-suffix substring (suffix-anchored match)', async () => {
+      dnsPromises.resolveCname.withArgs('example.com').resolves(['attacker.cdn.adobeaemcloud.com.evil.example.com']);
+      dnsPromises.resolve4.resolves([]);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
+      expect(result).to.equal(null);
+    });
+
+    it('tolerates falsy CNAME entries in the resolveCname response and still matches valid ones', async () => {
+      dnsPromises.resolveCname
+        .withArgs('example.com')
+        .resolves([null, undefined, '', 'origin.example.cdn.adobeaemcloud.com']);
+      dnsPromises.resolve4.resolves([]);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com');
       expect(result).to.equal(CDN_TYPES.AEM_CS_FASTLY);
     });
 
@@ -333,7 +349,7 @@ describe('edge-routing-utils', () => {
       const dnsLog = { info: sandbox.stub() };
       dnsPromises.resolveCname.withArgs('example.com').resolves(['unrelated-cname.example.com']);
       dnsPromises.resolve4.withArgs('example.com').resolves(['8.8.8.8']);
-      const result = await edgeUtilsDns.detectCdnForDomain('example.com', dnsLog);
+      const result = await edgeUtilsDns.detectAemCsFastlyForDomain('example.com', dnsLog);
       expect(result).to.equal(null);
       expect(dnsLog.info).to.have.been.calledThrice;
       expect(dnsLog.info.secondCall.args[0]).to.include('CNAMES');
@@ -341,7 +357,7 @@ describe('edge-routing-utils', () => {
     });
   });
 
-  describe('detectCdnForDomain (integration)', () => {
+  describe('detectAemCsFastlyForDomain (integration)', () => {
     const badDomain = () => ({
       toString() {
         throw new Error('bad domain');
@@ -350,17 +366,17 @@ describe('edge-routing-utils', () => {
 
     it('returns null when domain stringification throws', async () => {
       const mod = await import('../../src/support/edge-routing-utils.js');
-      const result = await mod.detectCdnForDomain(badDomain());
+      const result = await mod.detectAemCsFastlyForDomain(badDomain());
       expect(result).to.equal(null);
     });
 
     it('logs and returns null when domain stringification throws and log is provided', async () => {
       const mod = await import('../../src/support/edge-routing-utils.js');
       const errLog = { error: sandbox.stub() };
-      const result = await mod.detectCdnForDomain(badDomain(), errLog);
+      const result = await mod.detectAemCsFastlyForDomain(badDomain(), errLog);
       expect(result).to.equal(null);
       expect(errLog.error).to.have.been.calledOnceWith(
-        'detectCdnForDomain error',
+        'detectAemCsFastlyForDomain error',
         sinon.match.instanceOf(Error),
       );
     });
