@@ -2114,19 +2114,21 @@ llmo-probe-edge-optimize:
       endpoint here.
 
       **How it works**:
-      The request is proxied through the Tokowaka edge worker
-      (`live.edgeoptimize.net`) so the origin fetch originates from the real
-      Fastly edge IPs with the production `AdobeEdgeOptimize/1.0` UA.  This is
-      critical because WAFs that combine UA-matching with IP-reputation (e.g.
-      Akamai BOTMAN) only fire on traffic from the optimizer's actual edge IPs.
+      The request is proxied through the Optimize at Edge worker
+      (`live.edgeoptimize.net`), which originates the fetch using the
+      production `AdobeEdgeOptimize/1.0` user-agent from the same edge IPs
+      as real optimizer traffic. This is critical because WAFs that combine
+      UA-matching with IP-reputation (e.g. Akamai BOTMAN) only trigger on
+      traffic from the optimizer's actual edge IPs.
 
       **Detection logic**:
       | Outcome | Condition | Result |
       |---------|-----------|--------|
-      | Hard block | HTTP 403, 406, or 429 | `reachable: false, blocked: true` |
-      | Soft block | 2xx + tiny HTML (≤ 2 KB) with challenge keywords | `reachable: false, blocked: true` |
-      | Clean pass | 2xx + real content | `reachable: true, blocked: false` |
-      | Network/timeout | Fetch fails or times out | `reachable: false, blocked: null, reason: "timeout"\|"error"` |
+      | Hard block | HTTP 401, 403, 406, 429, or 503 | `reachable: false, blocked: true` |
+      | CF challenge | `cf-mitigated: challenge` header (any status) | `reachable: false, blocked: true` |
+      | Soft block | 2xx HTML body containing WAF/bot-challenge keywords | `reachable: false, blocked: true` |
+      | Clean pass | 2xx with real content | `reachable: true, blocked: false` |
+      | Network/timeout | Fetch fails or times out | `reachable: false, blocked: null` |
     operationId: probeEdgeOptimizeConnectivity
     parameters:
       - $ref: './parameters.yaml#/siteId'
@@ -2162,20 +2164,6 @@ llmo-probe-edge-optimize:
                   type: string
                   description: The URL that was probed.
                   example: 'https://www.acme.com/'
-                reason:
-                  type: string
-                  enum: [timeout, error]
-                  description: Present only when `blocked` is null — explains why the probe failed.
-                edgeOptimizeEnabled:
-                  type:
-                    - boolean
-                    - 'null'
-                  description: >
-                    Present only when the probe is not a clean pass. Cross-checks with the
-                    edge-optimize-status API to handle the case where a customer has fixed
-                    their WAF but the low-level probe still returns a non-clean result.
-                    `true` — edge optimize is active (WAF was fixed); `false` — not active;
-                    `null` — status could not be determined.
             examples:
               hardBlock:
                 summary: WAF hard block (403)
@@ -2184,7 +2172,6 @@ llmo-probe-edge-optimize:
                   blocked: true
                   statusCode: 403
                   probedUrl: 'https://www.acme.com/'
-                  edgeOptimizeEnabled: false
               softBlock:
                 summary: Soft block — bot-challenge page (200)
                 value:
@@ -2192,7 +2179,6 @@ llmo-probe-edge-optimize:
                   blocked: true
                   statusCode: 200
                   probedUrl: 'https://www.acme.com/'
-                  edgeOptimizeEnabled: false
               cleanPass:
                 summary: No WAF blocking
                 value:
@@ -2201,21 +2187,11 @@ llmo-probe-edge-optimize:
                   statusCode: 200
                   probedUrl: 'https://www.acme.com/'
               networkTimeout:
-                summary: Origin unreachable (timeout)
+                summary: Origin unreachable (network/timeout)
                 value:
                   reachable: false
                   blocked: null
-                  reason: timeout
                   probedUrl: 'https://www.acme.com/'
-                  edgeOptimizeEnabled: false
-              blockedButFixed:
-                summary: Probe blocked but edge optimize confirms WAF was fixed
-                value:
-                  reachable: false
-                  blocked: true
-                  statusCode: 403
-                  probedUrl: 'https://www.acme.com/'
-                  edgeOptimizeEnabled: true
       '400':
         $ref: './responses.yaml#/400'
       '401':
