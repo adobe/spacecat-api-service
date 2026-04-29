@@ -254,7 +254,8 @@ function getReviewerIdentity(context) {
  * @param {object} site - The site to reassign.
  * @param {string} organizationId - Target org id.
  * @param {object} dataAccess - Data access layer.
- * @returns {Promise<object>} Fresh site instance from DB.
+ * @returns {Promise<object>} Site instance from DB, or the original in-memory site if
+ *   re-fetch was unavailable.
  */
 async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
   site.setOrganizationId(organizationId);
@@ -285,11 +286,11 @@ async function ensureAsoEntitlement(site, organization, context) {
   try {
     ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));
   } catch (createError) {
-    log.warn(`ensureAsoEntitlement: createEntitlement failed for org ${organizationId}: ${createError.message}, fetching existing`);
+    log.error(`ensureAsoEntitlement: createEntitlement failed for org ${organizationId}: ${createError.message}, fetching existing`);
     try {
       ({ entitlement } = await orgClient.checkValidEntitlement());
     } catch (fetchError) {
-      log.warn(`ensureAsoEntitlement: checkValidEntitlement also failed for org ${organizationId}: ${fetchError.message}`);
+      log.error(`ensureAsoEntitlement: checkValidEntitlement also failed for org ${organizationId}: ${fetchError.message}`);
     }
   }
   if (!entitlement) {
@@ -298,9 +299,8 @@ async function ensureAsoEntitlement(site, organization, context) {
   const entitlementOrgId = entitlement.getOrganizationId();
 
   if (entitlementOrgId !== organizationId) {
-    log.warn(
-      `ensureAsoEntitlement: entitlement org drift — expected ${organizationId}, `
-      + `got ${entitlementOrgId} (site ${siteId})`,
+    throw new EntitlementWaitlistError(
+      `ASO entitlement org drift: expected ${organizationId}, got ${entitlementOrgId} (site ${siteId})`,
     );
   }
 
@@ -423,6 +423,7 @@ async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitle
   // Guard 2: tight invariant — the entitlement we got back must belong to the expected customer
   // org. If TierClient ever drifts and hands back an entitlement for a different org, abort.
   const entitlementOrgId = entitlement.getOrganizationId();
+  /* c8 ignore next 4 */
   if (entitlementOrgId !== expectedOrgId) {
     log.error(`Refusing to revoke sibling ASO enrollments: entitlement ${entitlement.getId()} belongs to org ${entitlementOrgId} but expected ${expectedOrgId} (resolved from request imsOrgId). Possible entitlement-resolution drift.`);
     return;
@@ -861,6 +862,7 @@ async function performAsoPlgOnboarding({
         if (error instanceof EntitlementWaitlistError) {
           onboarding.setStatus(STATUSES.WAITLISTED);
           onboarding.setWaitlistReason(error.message);
+          onboarding.setSteps({ ...(onboarding.getSteps() || {}), entitlementFailed: true });
           if (updatedBy) {
             onboarding.setUpdatedBy(updatedBy);
           }
@@ -1297,8 +1299,10 @@ async function performAsoPlgOnboarding({
     return onboarding;
   } catch (error) {
     if (error instanceof EntitlementWaitlistError) {
+      steps.entitlementFailed = true;
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(error.message);
+      onboarding.setSteps(steps);
       if (updatedBy) {
         onboarding.setUpdatedBy(updatedBy);
       }

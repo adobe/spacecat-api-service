@@ -3059,6 +3059,29 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO entitlement/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
+      expect(mockLog.error).to.have.been.calledWithMatch(/createEntitlement failed/);
+    });
+
+    it('waitlists when tier service returns entitlement for wrong org', async () => {
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'ent-drift',
+            getOrganizationId: () => 'different-org-id',
+          },
+        }),
+        checkValidEntitlement: sandbox.stub(),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/entitlement org drift/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
     });
 
     it('waitlists when enrollment creation and fetch both fail', async () => {
@@ -3070,6 +3093,7 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO enrollment/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
     });
 
     it('logs error when persisting entitlement waitlist state fails in full onboarding', async () => {
@@ -3229,24 +3253,24 @@ describe('PlgOnboardingController', () => {
       expect(sibling2.remove).to.have.been.called;
     });
 
-    it('aborts when entitlement.organizationId disagrees with resolved customer org', async () => {
+    it('waitlists when entitlement.organizationId disagrees with resolved customer org', async () => {
       const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);
 
       // Drift: entitlement belongs to a different org than the one resolved from imsOrgId.
       tierClientCreateEntitlementStub.resolves({
         entitlement: { getId: () => 'ent-drift', getOrganizationId: () => 'drifted-org' },
-        siteEnrollment: { getId: () => 'enroll-1' },
       });
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/entitlement org drift/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
+      // Enrollment was never created so there is nothing to revoke
       expect(sibling.remove).to.not.have.been.called;
-      expect(mockLog.error).to.have.been.calledWithMatch(
-        /Refusing to revoke sibling ASO enrollments.*Possible entitlement-resolution drift/,
-      );
     });
 
     it('refuses revocation when the resolved customer org is internal/demo', async () => {
@@ -3803,7 +3827,10 @@ describe('PlgOnboardingController', () => {
 
       expect(response.status).to.equal(200);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO entitlement/);
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/Unable to create or fetch ASO entitlement/);
+      expect(preonboardedOnboarding.setSteps)
+        .to.have.been.calledWithMatch({ entitlementFailed: true });
     });
 
     it('logs error when persisting entitlement waitlist state fails in fast-track', async () => {
