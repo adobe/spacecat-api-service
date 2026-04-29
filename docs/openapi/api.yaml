@@ -58,10 +58,7 @@ tags:
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
   - name: llmo-probes
-    description: >
-      Diagnostic probes for LLMO features. Each probe validates that a specific
-      LLMO capability (edge-optimize, prerender, etc.) can reach the customer's
-      origin without being blocked by WAFs, bot managers, or network issues.
+    description: Connectivity probes for LLMO features. Currently covers edge-optimize WAF/Bot Manager detection.
   - name: entitlements
     description: Entitlement management operations
   - name: site-enrollments
