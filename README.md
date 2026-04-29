@@ -18,6 +18,73 @@ $ npm run docs
 $ npm run docs:serve
 ```
 
+## Brand Presence Endpoints
+
+### `POST /sites/:siteId/brand-presence/metrics`
+
+Ingests a batch of brand presence execution metrics for a site into ClickHouse.
+
+**Auth:** requires the `brand-presence.write` scope.
+
+**Request body:**
+```json
+{
+  "metrics": [
+    {
+      "site_id": "6221ce8b-40cd-4a80-8d97-b15e4f75de5e",
+      "week": "2025-W38",
+      "platform": "perplexity",
+      "category": "brand",
+      "topic": "product",
+      "prompt": "What is the best product for X?",
+      "visibility_score": 75.0,
+      "mention_count": 5
+    }
+  ]
+}
+```
+
+**Response `201`:** batch accepted. Records that fail ClickHouse validation are reported in `failures` without rejecting the whole batch.
+```json
+{
+  "metadata": { "total": 3, "success": 2, "failure": 1 },
+  "items": [ ... ],
+  "failures": [ { "index": 2, "error": "visibility_score must be between 0 and 100" } ]
+}
+```
+
+`visibility_score` must be between `0` and `100`. Requests with a missing or non-array `metrics` field return `400`.
+
+---
+
+### `GET /sites/:siteId/brand-presence/data`
+
+Queries brand presence execution records for a site from ClickHouse.
+
+**Auth:** standard API key.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `start_week` | `string` | — | Start of week range, inclusive. Format: `YYYY-Www` (e.g. `2025-W01`). |
+| `end_week` | `string` | — | End of week range, inclusive. Format: `YYYY-Www`. Must be ≥ `start_week`. |
+| `platform` | `string` | — | Filter by platform. Omit or pass `all` to return all platforms. |
+| `limit` | `integer` | `1000` | Maximum records to return. Must be ≥ 1. |
+| `offset` | `integer` | `0` | Number of records to skip. Must be ≥ 0. |
+
+**Response `200`:**
+```json
+{
+  "metadata": { "total": 42, "limit": 100, "offset": 0 },
+  "data": [ ... ]
+}
+```
+
+Invalid week formats, `start_week` after `end_week`, or out-of-range `limit`/`offset` return `400` with a descriptive message.
+
+---
+
 ## Installation
 
 ```bash
@@ -163,6 +230,31 @@ $ npm install
 
 ```bash
 $ npm test
+```
+
+To run a single test file:
+
+```bash
+npx mocha test/path/to/file.test.js
+```
+
+To run a single test file with a filter pattern:
+
+```bash
+npx mocha test/path/to/file.test.js -g "pattern"
+```
+
+Examples:
+
+```bash
+# Run all brand presence controller tests
+npx mocha test/controllers/brand-presence.test.js
+
+# Run only the ingest endpoint tests
+npx mocha test/controllers/brand-presence.test.js -g "ingest endpoint"
+
+# Run a specific test case by ID
+npx mocha test/controllers/brand-presence.test.js -g "P-01"
 ```
 
 ### E2E Tests
