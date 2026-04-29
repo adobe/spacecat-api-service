@@ -1,0 +1,149 @@
+brand-presence-metrics: # Claude Code, Model Opus 4.7, "Generate a detailed OpenAPI specification for the brand-presence-metrics endpoint based on the implementation and the existing OpenAPI specification and this documentation: [Pasted text #1 +253 lines]"
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Ingest brand presence metrics
+    description: |
+      Accepts a batch of brand presence execution metrics for a site and writes them to ClickHouse.
+      Returns a 201 with per-record success/failure metadata. Records that fail ClickHouse validation
+      are reported individually in the `failures` array while successfully written records are returned
+      in `items`. The request is accepted even when some records fail (partial success).
+
+      Requires the `brand-presence.write` scope.
+    operationId: ingestBrandPresenceMetrics
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/BrandPresenceMetricsIngestRequest'
+          example:
+            metrics:
+              - site_id: '6221ce8b-40cd-4a80-8d97-b15e4f75de5e'
+                week: '2025-W38'
+                platform: perplexity
+                category: brand
+                topic: product
+                prompt: 'What is the best product for X?'
+                visibility_score: 75.0
+                mention_count: 5
+    responses:
+      '201':
+        description: Metrics ingested. Check `metadata.failure` and `failures` for partial failures.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandPresenceMetricsIngestResponse'
+            example:
+              metadata:
+                total: 3
+                success: 2
+                failure: 1
+              items:
+                - site_id: '6221ce8b-40cd-4a80-8d97-b15e4f75de5e'
+                  week: '2025-W38'
+                  platform: perplexity
+                  category: brand
+                  topic: product
+                  prompt: 'What is the best product for X?'
+                  visibility_score: 75.0
+                  mention_count: 5
+              failures:
+                - index: 2
+                  error: 'visibility_score must be between 0 and 100'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - scoped_api_key: [ ]
+
+brand-presence-data:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: start_week
+      in: query
+      required: false
+      description: 'Start of the week range to query, inclusive. Format: YYYY-Www (e.g. 2025-W01).'
+      schema:
+        type: string
+        pattern: '^\d{4}-W\d{2}$'
+        example: '2025-W01'
+    - name: end_week
+      in: query
+      required: false
+      description: 'End of the week range to query, inclusive. Format: YYYY-Www (e.g. 2025-W52). Must be greater than or equal to start_week.'
+      schema:
+        type: string
+        pattern: '^\d{4}-W\d{2}$'
+        example: '2025-W52'
+    - name: platform
+      in: query
+      required: false
+      description: 'Filter by platform. Use `all` or omit to return all platforms.'
+      schema:
+        type: string
+        example: perplexity
+    - name: limit
+      in: query
+      required: false
+      description: 'Maximum number of records to return. Defaults to 1000.'
+      schema:
+        type: integer
+        minimum: 1
+        default: 1000
+        example: 100
+    - name: offset
+      in: query
+      required: false
+      description: 'Number of records to skip. Defaults to 0.'
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+        example: 0
+  get:
+    tags:
+      - llmo
+    summary: Query brand presence data
+    description: |
+      Returns brand presence execution records for a site from ClickHouse, filtered by the provided
+      query parameters. Supports week range filtering, platform filtering, and limit/offset pagination.
+    operationId: queryBrandPresenceData
+    responses:
+      '200':
+        description: Brand presence data retrieved successfully.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandPresenceDataQueryResponse'
+            example:
+              metadata:
+                total: 42
+                limit: 100
+                offset: 0
+              data:
+                - site_id: '6221ce8b-40cd-4a80-8d97-b15e4f75de5e'
+                  week: '2025-W38'
+                  platform: perplexity
+                  category: brand
+                  topic: product
+                  prompt: 'What is the best product for X?'
+                  visibility_score: 75.0
+                  mention_count: 5
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

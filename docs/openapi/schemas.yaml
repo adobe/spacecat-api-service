@@ -7444,3 +7444,151 @@ PageRelationshipsSearchResponse:
       $ref: '#/PageRelationshipsMapping'
     errors:
       $ref: '#/PageRelationshipsErrorMapping'
+
+BrandPresenceMetric:
+  type: object
+  description: A single brand presence execution metric record.
+  required:
+    - site_id
+    - week
+    - platform
+    - category
+    - topic
+    - prompt
+    - visibility_score
+    - mention_count
+  properties:
+    site_id:
+      type: string
+      format: uuid
+      description: The site this metric belongs to.
+      example: '6221ce8b-40cd-4a80-8d97-b15e4f75de5e'
+    week:
+      type: string
+      pattern: '^\d{4}-W\d{2}$'
+      description: 'ISO week identifier. Format: YYYY-Www.'
+      example: '2025-W38'
+    platform:
+      type: string
+      description: The AI platform queried (e.g. google, chatgpt, perplexity).
+      example: google
+    category:
+      type: string
+      description: The brand presence category.
+      example: brand
+    topic:
+      type: string
+      description: The topic within the category.
+      example: product
+    prompt:
+      type: string
+      description: The prompt text used for the brand presence query.
+      example: 'What is the best product for X?'
+    visibility_score:
+      type: number
+      format: float
+      minimum: 0
+      maximum: 100
+      description: Brand visibility score between 0 and 100.
+      example: 75.0
+    mention_count:
+      type: integer
+      minimum: 0
+      description: Number of brand mentions in the response.
+      example: 5
+
+BrandPresenceIngestFailure:
+  type: object
+  description: Describes a single record that failed during the ClickHouse write.
+  required:
+    - index
+    - error
+  properties:
+    index:
+      type: integer
+      description: Zero-based index of the failed record in the submitted `metrics` array.
+      example: 2
+    error:
+      type: string
+      description: Human-readable description of why the record failed.
+      example: 'visibility_score must be between 0 and 100'
+
+BrandPresenceMetricsIngestRequest:
+  type: object
+  required:
+    - metrics
+  properties:
+    metrics:
+      type: array
+      description: One or more brand presence metric records to ingest.
+      minItems: 1
+      items:
+        $ref: '#/BrandPresenceMetric'
+
+BrandPresenceMetricsIngestResponse:
+  type: object
+  required:
+    - metadata
+    - items
+    - failures
+  properties:
+    metadata:
+      type: object
+      required:
+        - total
+        - success
+        - failure
+      properties:
+        total:
+          type: integer
+          description: Total number of records submitted.
+          example: 3
+        success:
+          type: integer
+          description: Number of records successfully written.
+          example: 2
+        failure:
+          type: integer
+          description: Number of records that failed to write.
+          example: 1
+    items:
+      type: array
+      description: Successfully written records.
+      items:
+        $ref: '#/BrandPresenceMetric'
+    failures:
+      type: array
+      description: Records that failed to write, with index and error details.
+      items:
+        $ref: '#/BrandPresenceIngestFailure'
+
+BrandPresenceDataQueryResponse:
+  type: object
+  required:
+    - metadata
+    - data
+  properties:
+    metadata:
+      type: object
+      required:
+        - total
+        - limit
+        - offset
+      properties:
+        total:
+          type: integer
+          description: Total number of matching records in ClickHouse.
+          example: 42
+        limit:
+          type: integer
+          description: Maximum records returned per page.
+          example: 100
+        offset:
+          type: integer
+          description: Number of records skipped.
+          example: 0
+    data:
+      type: array
+      description: Brand presence records matching the query filters.
+      items:
+        $ref: '#/BrandPresenceMetric'
