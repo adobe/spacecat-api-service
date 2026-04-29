@@ -71,6 +71,13 @@ const REVIEW_REASONS = {
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 
+class EntitlementWaitlistError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'EntitlementWaitlistError';
+  }
+}
+
 /**
  * Derives the review check key from the onboarding record's current state.
  * @param {object} onboarding - The PlgOnboarding record.
@@ -278,14 +285,21 @@ async function ensureAsoEntitlement(site, organization, context) {
   let entitlement;
   try {
     ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));
-  } catch (error) {
-    log.info(`ensureAsoEntitlement: entitlement exists for org ${organizationId}, fetching existing`);
-    ({ entitlement } = await orgClient.checkValidEntitlement());
+  } catch (createError) {
+    log.warn(`ensureAsoEntitlement: createEntitlement failed for org ${organizationId}: ${createError.message}, fetching existing`);
+    try {
+      ({ entitlement } = await orgClient.checkValidEntitlement());
+    } catch (fetchError) {
+      log.warn(`ensureAsoEntitlement: checkValidEntitlement also failed for org ${organizationId}: ${fetchError.message}`);
+    }
   }
-  const entitlementOrgId = entitlement?.getOrganizationId();
-  const entitlementTier = entitlement?.getTier?.();
+  if (!entitlement) {
+    throw new EntitlementWaitlistError(`Unable to create or fetch ASO entitlement for org ${organizationId}`);
+  }
+  const entitlementOrgId = entitlement.getOrganizationId();
+  const entitlementTier = entitlement.getTier?.();
 
-  if (entitlementOrgId && entitlementOrgId !== organizationId) {
+  if (entitlementOrgId !== organizationId) {
     log.warn(
       `ensureAsoEntitlement: entitlement org drift — expected ${organizationId}, `
       + `got ${entitlementOrgId} (site ${siteId})`,
@@ -297,9 +311,16 @@ async function ensureAsoEntitlement(site, organization, context) {
   let siteEnrollment;
   try {
     ({ siteEnrollment } = await siteClient.createEntitlement(entitlementTier ?? ASO_TIER));
-  } catch (error) {
-    log.info(`ensureAsoEntitlement: enrollment exists for site ${siteId}, fetching existing`);
-    ({ siteEnrollment } = await siteClient.checkValidEntitlement());
+  } catch (createError) {
+    log.warn(`ensureAsoEntitlement: createEntitlement failed for site ${siteId}: ${createError.message}, fetching existing`);
+    try {
+      ({ siteEnrollment } = await siteClient.checkValidEntitlement());
+    } catch (fetchError) {
+      log.warn(`ensureAsoEntitlement: checkValidEntitlement also failed for site ${siteId}: ${fetchError.message}`);
+    }
+  }
+  if (!siteEnrollment) {
+    throw new EntitlementWaitlistError(`Unable to create or fetch ASO enrollment for site ${siteId}`);
   }
 
   return { entitlement, siteEnrollment };
@@ -755,6 +776,7 @@ async function performAsoPlgOnboarding({
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
     let site = await Site.findById(onboarding.getSiteId());
     if (site) {
+      try {
       // Resolve customer's organization from imsOrgId
       const organization = await createOrFindOrganization(imsOrgId, context);
         const customerOrgId = organization.getId();
@@ -839,6 +861,23 @@ async function performAsoPlgOnboarding({
         await onboarding.save();
         await postPlgOnboardingNotification(onboarding, context);
         return onboarding;
+      } catch (error) {
+        if (error instanceof EntitlementWaitlistError) {
+          onboarding.setStatus(STATUSES.WAITLISTED);
+          onboarding.setWaitlistReason(error.message);
+          if (updatedBy) {
+            onboarding.setUpdatedBy(updatedBy);
+          }
+          try {
+            await onboarding.save();
+            await postPlgOnboardingNotification(onboarding, context);
+          } catch (saveError) {
+            log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+          }
+          return onboarding;
+        }
+        throw error;
+      }
     }
     log.warn(`Preonboarded site ${onboarding.getSiteId()} not found, falling through to full onboarding`);
   }
@@ -1266,6 +1305,20 @@ async function performAsoPlgOnboarding({
 
     return onboarding;
   } catch (error) {
+    if (error instanceof EntitlementWaitlistError) {
+      onboarding.setStatus(STATUSES.WAITLISTED);
+      onboarding.setWaitlistReason(error.message);
+      if (updatedBy) {
+        onboarding.setUpdatedBy(updatedBy);
+      }
+      try {
+        await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
+      } catch (saveError) {
+        log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+      }
+      return onboarding;
+    }
     // Persist the error in the onboarding record
     onboarding.setStatus(STATUSES.ERROR);
     onboarding.setSteps(steps);

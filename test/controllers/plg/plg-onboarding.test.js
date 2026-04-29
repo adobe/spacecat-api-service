@@ -3051,6 +3051,50 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
+
+    it('waitlists when both createEntitlement and checkValidEntitlement fail', async () => {
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO entitlement/);
+    });
+
+    it('waitlists when enrollment creation and fetch both fail', async () => {
+      const siteClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('enrollment down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('enrollment down')),
+      };
+      tierClientCreateForSiteStub.resolves(siteClientStub);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO enrollment/);
+    });
+
+    it('logs error when persisting entitlement waitlist state fails in full onboarding', async () => {
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+      mockOnboarding.save.rejects(new Error('db write failed'));
+
+      const res = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to persist waitlist state/);
+    });
   });
 
   // --- LaunchDarkly feature flag update ---
@@ -3753,6 +3797,66 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(preonboardedOnboarding.setWaitlistReason)
         .to.have.been.calledWithMatch(/cannot be moved.*active products/);
+    });
+
+    it('waitlists fast-track when both entitlement create and fetch fail', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
+
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO entitlement/);
+    });
+
+    it('logs error when persisting entitlement waitlist state fails in fast-track', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
+      preonboardedOnboarding.save.rejects(new Error('db write failed'));
+
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to persist waitlist state/);
+    });
+
+    it('rethrows non-entitlement errors from fast-track', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID }));
+      // Not an entitlement error — e.g. revocation throws unexpectedly.
+      mockDataAccess.SiteEnrollment = { allBySiteId: sandbox.stub().rejects(new Error('db error')) };
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(500);
     });
 
     it('logs a warning when site org is not reflected in DB after reassignment', async () => {
