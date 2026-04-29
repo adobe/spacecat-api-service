@@ -286,14 +286,14 @@ async function ensureAsoEntitlement(site, organization, context) {
   const siteId = site.getId();
   const organizationId = organization.getId();
 
-  log.info(`[DEBUG] ensureAsoEntitlement: START — siteId=${siteId} siteOrgId=${site.getOrganizationId()} imsResolvedOrgId=${organizationId} orgName=${organization.getName?.() ?? 'n/a'}`);
+  log.info(`[DEBUG] ensureAsoEntitlement: START — siteId=${siteId} siteOrgId=${site.getOrganizationId()} imsResolvedOrgId=${organizationId} orgName=${organization.getName() ?? 'n/a'}`);
 
   // Step 1: ensure entitlement on the IMS-resolved organization (no site bound).
   const orgClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
   let entitlement;
   try {
     ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));
-    log.info(`[DEBUG] ensureAsoEntitlement: Step1 createEntitlement OK — entitlementId=${entitlement?.getId()} entitlementOrgId=${entitlement?.getOrganizationId()} tier=${entitlement?.getTier?.()}`);
+    log.info(`[DEBUG] ensureAsoEntitlement: Step1 createEntitlement OK — entitlementId=${entitlement.getId()} entitlementOrgId=${entitlement.getOrganizationId()} tier=${entitlement.getTier?.()}`);
   } catch (createError) {
     log.error(`ensureAsoEntitlement: createEntitlement failed for org ${organizationId}: ${createError.message}, fetching existing`);
     try {
