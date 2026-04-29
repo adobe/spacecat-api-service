@@ -26,6 +26,7 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
+  detectBotBlocker,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -69,6 +70,7 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
@@ -1203,7 +1205,9 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log, dataAccess, env } = context;
+    const {
+      log, dataAccess, env, s3,
+    } = context;
     const { siteId } = context.params;
     const { authInfo: { profile } } = context.attributes;
     const { Site } = dataAccess;
@@ -1326,6 +1330,66 @@ function LlmoController(ctx) {
           // Log error but don't fail the request
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
+
+        // Detached from the response path so the UI's enable click is not blocked
+        // by the IMS lookup, bot-blocker probe (5s timeout), S3 read, and email
+        // send. Lambda's default callbackWaitsForEmptyEventLoop=true keeps the
+        // invocation alive until this promise settles, so the email still goes out.
+        ((async () => {
+          // profile.email holds the IMS userId (sub claim) for IMS-authenticated
+          // callers, so we resolve the real email via IMS. Best-effort: non-IMS
+          // auth modes leave optedBy unset, which the email helper handles.
+          let optedBy;
+          const imsUserId = profile?.email;
+          if (imsUserId && context.imsClient) {
+            try {
+              const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
+              optedBy = adminProfile?.email;
+            } catch (imsErr) {
+              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
+            }
+          }
+
+          let botBlocked = false;
+          let botBlockerType = '';
+          try {
+            const botCheck = await detectBotBlocker({ baseUrl: baseURL });
+            botBlocked = botCheck?.crawlable === false;
+            botBlockerType = botCheck?.type || '';
+          } catch (botErr) {
+            log.warn(`[cdn-opt-in-notification] Bot blocker check failed for ${baseURL}: ${botErr.message}`);
+          }
+
+          /* CDN provider is managed by log-infra and stored in the S3 LLMO config
+          during provisioning. Site DynamoDB cdnBucketConfig does not store it,
+          so S3 is the primary source.
+          Fallback to request cdnType (e.g. AEM CS Fastly self-service)
+          when S3 config is not yet available. */
+          let notificationCdnType;
+          try {
+            if (s3?.s3Client) {
+              const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
+                s3Bucket: s3.s3Bucket,
+              });
+              notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
+            }
+          } catch (s3Err) {
+            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+          }
+          if (!hasText(notificationCdnType) && hasText(cdnType)) {
+            notificationCdnType = cdnType;
+          }
+
+          await notifyOptInIfNeeded(context, {
+            siteId,
+            siteBaseURL: baseURL,
+            cdnType: notificationCdnType,
+            orgId: site.getOrganizationId?.(),
+            optedBy,
+            botBlocked,
+            botBlockerType,
+          });
+        })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
       }
 
       let cdnTypeNormalized = null;
