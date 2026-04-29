@@ -1354,9 +1354,11 @@ function LlmoController(ctx) {
           log.warn(`[cdn-opt-in-notification] Bot blocker check failed for ${baseURL}: ${botErr.message}`);
         }
 
-        // CDN selection is owned by the log-infra team and persisted in the S3 LLMO config
-        // (auth-service writes it during CDN provisioning). Site DynamoDB cdnBucketConfig
-        // does not carry cdnProvider, so we read from the canonical source here.
+        /* CDN provider is managed by log-infra and stored in the S3 LLMO config
+        during provisioning. Site DynamoDB cdnBucketConfig does not store it,
+        so S3 is the primary source.
+        Fallback to request cdnType (e.g. AEM CS Fastly self-service)
+        when S3 config is not yet available. */
         let notificationCdnType;
         try {
           if (s3?.s3Client) {
@@ -1367,6 +1369,9 @@ function LlmoController(ctx) {
           }
         } catch (s3Err) {
           log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+        }
+        if (!hasText(notificationCdnType) && hasText(cdnType)) {
+          notificationCdnType = cdnType;
         }
 
         notifyOptInIfNeeded(context, {

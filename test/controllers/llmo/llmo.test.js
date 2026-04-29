@@ -6551,6 +6551,115 @@ describe('LlmoController', () => {
       );
     });
 
+    it('should fall back to request-body cdnType when S3 LLMO config has no cdnProvider', async () => {
+      // Defensive fallback for AEM CS Fastly self-service flows and any caller that supplies
+      // cdnType in the request body before S3 has been populated by auth-service provisioning.
+      const notifyOptInStub = sinon.stub().resolves({ sent: true });
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
+      mockSite.getOrganizationId = sinon.stub().returns(TEST_ORG_ID);
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+      // S3 LLMO config exists but has no cdnProvider (e.g. provisioning hasn't run yet)
+      readConfigStub.resolves({
+        config: { cdnBucketConfig: {} },
+        exists: true,
+        version: 'v1',
+      });
+
+      const LlmoControllerFallback = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-config-metadata.js': {
+          updateModifiedByDetails: updateModifiedByDetailsStub,
+        },
+        '../../../src/controllers/llmo/cdn-opt-in-notification.js': {
+          notifyOptInIfNeeded: (...args) => notifyOptInStub(...args),
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: (...args) => tracingFetchStub(...args),
+          llmoConfig: {
+            defaultConfig: llmoConfig.defaultConfig,
+            readConfig: (...args) => readConfigStub(...args),
+            writeConfig: (...args) => writeConfigStub(...args),
+          },
+          llmoStrategy: {
+            readStrategy: (...args) => readStrategyStub(...args),
+            writeStrategy: (...args) => writeStrategyStub(...args),
+          },
+          schemas: {
+            llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
+          },
+          hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          isValidUUID: (uuid) => {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            return uuidRegex.test(uuid);
+          },
+          isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 1 }),
+        },
+        '../../../src/support/utils.js': {
+          exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
+          fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: { createFrom: () => mockTokowakaClient },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: sinon.stub().resolves(),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: (...args) => postSlackMessageStub(...args),
+        },
+      });
+
+      const controllerFallback = LlmoControllerFallback({
+        ...mockContext,
+        env: { ...mockEnv },
+      });
+
+      // Use byocdn-akamai (not in SUPPORTED_EDGE_ROUTING_CDN_TYPES) to avoid triggering
+      // the routing path; the fallback for the email is independent of routing eligibility.
+      const result = await controllerFallback.createOrUpdateEdgeConfig({
+        ...edgeConfigContext,
+        data: { ...edgeConfigContext.data, cdnType: 'byocdn-akamai' },
+      });
+
+      expect(result.status).to.equal(200);
+      await Promise.resolve();
+      expect(notifyOptInStub).to.have.been.calledOnce;
+      const [, params] = notifyOptInStub.firstCall.args;
+      expect(params.cdnType).to.equal('byocdn-akamai');
+    });
+
     it('should skip the S3 LLMO config read when s3Client is not configured on the context', async () => {
       const notifyOptInStub = sinon.stub().resolves({ sent: true });
       const newMetaconfig = {
