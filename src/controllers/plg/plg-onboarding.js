@@ -249,27 +249,9 @@ function getReviewerIdentity(context) {
   return hasText(profile?.email) ? profile.email : 'admin';
 }
 
-/**
- * Assigns a site to the given organization, persists, and returns a fresh instance
- * fetched from DB so downstream consumers (e.g. TierClient) read the updated org.
- * @param {object} site - The site to reassign.
- * @param {string} organizationId - Target org id.
- * @param {object} dataAccess - Data access layer.
- * @returns {Promise<object>} Site instance from DB, or the original in-memory site if
- *   re-fetch was unavailable.
- */
-async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
-  const siteId = site.getId();
+async function reassignSiteOrganization(site, organizationId) {
   site.setOrganizationId(organizationId);
-  await site.save();
-
-  // Re-fetch to get a fresh instance where this.record reflects the DB value.
-  const refreshed = await dataAccess.Site.findById(siteId);
-  const refreshedOrgId = refreshed?.getOrganizationId();
-  if (!refreshed || refreshedOrgId !== organizationId) {
-    log?.warn?.(`Site ${siteId} org not reflected in DB after save: expected ${organizationId}, got ${refreshedOrgId ?? 'undefined'}`);
-  }
-  return refreshed ?? site;
+  return site.save();
 }
 
 // Resolves entitlement against the IMS-derived organization (passed in by the caller),
@@ -834,7 +816,7 @@ async function performAsoPlgOnboarding({
         // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
         // The onboarding record's organizationId was already anchored above.
         if (needsOrgReassignment) {
-          site = await reassignSiteOrganization(site, customerOrgId, dataAccess, log);
+          site = await reassignSiteOrganization(site, customerOrgId);
           log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
         }
 
@@ -1263,7 +1245,7 @@ async function performAsoPlgOnboarding({
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      site = await reassignSiteOrganization(site, organizationId, dataAccess, log);
+      site = await reassignSiteOrganization(site, organizationId);
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
@@ -1825,7 +1807,7 @@ function PlgOnboardingController(ctx) {
             if (existingDeliveryConfig.imsOrgId) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
-            site = await reassignSiteOrganization(site, currentOrgId, da, context.log);
+            site = await reassignSiteOrganization(site, currentOrgId);
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
             await onboarding.save();

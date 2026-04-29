@@ -87,7 +87,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   };
 
   function createMockSite(overrides = {}) {
-    return {
+    const mock = {
       getId: sandbox.stub().returns(overrides.id || TEST_SITE_ID),
       getBaseURL: sandbox.stub().returns(overrides.baseURL || TEST_BASE_URL),
       getOrganizationId: sandbox.stub().returns(overrides.orgId || TEST_ORG_ID),
@@ -110,8 +110,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       getDeliveryType: sandbox.stub().returns(overrides.deliveryType ?? null),
       setDeliveryType: sandbox.stub(),
       getSiteEnrollments: sandbox.stub().resolves(overrides.siteEnrollments ?? []),
-      save: sandbox.stub().resolves(),
     };
+    mock.save = sandbox.stub().resolves(mock);
+    return mock;
   }
 
   function createMockOnboarding(overrides = {}) {
@@ -3890,53 +3891,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
 
       expect(response.status).to.equal(500);
-    });
-
-    it('logs a warning when site org is not reflected in DB after reassignment', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-123';
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-
-      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      // Re-fetch returns null — warn path in reassignSiteOrganization.
-      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(null);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
-
-      expect(response.status).to.equal(200);
-      expect(mockLog.warn).to.have.been.calledWithMatch(/org not reflected in DB after save/);
-    });
-
-    it('logs a warning when refetched site still has the old org (replica lag)', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-stale';
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-
-      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      // Re-fetch returns a site still pointing at the old org.
-      const staleRefetch = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(staleRefetch);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
-
-      expect(response.status).to.equal(200);
-      expect(mockLog.warn).to.have.been.calledWithMatch(/org not reflected in DB after save/);
     });
 
     it('reassigns site from internal org before entitlement in full onboarding path', async () => {
