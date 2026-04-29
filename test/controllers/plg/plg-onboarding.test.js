@@ -52,6 +52,7 @@ describe('PlgOnboardingController', () => {
   let queueDeliveryConfigWriterStub;
   let triggerBrandProfileAgentStub;
   let tierClientCreateForSiteStub;
+  let tierClientCreateForOrgStub;
   let tierClientCreateEntitlementStub;
   let ldGetFeatureFlagStub;
   let ldUpdateVariationValueStub;
@@ -222,6 +223,16 @@ describe('PlgOnboardingController', () => {
         siteEnrollment: { getId: () => 'enroll-1' },
       }),
     });
+    tierClientCreateForOrgStub = sandbox.stub().returns({
+      createEntitlement: tierClientCreateEntitlementStub,
+      checkValidEntitlement: sandbox.stub().resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getOrganizationId: () => TEST_ORG_ID,
+          getTier: () => 'PLG',
+        },
+      }),
+    });
 
     // Config
     configToDynamoItemStub = sandbox.stub().returns({ config: 'dynamo' });
@@ -278,6 +289,8 @@ describe('PlgOnboardingController', () => {
       },
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
+        allBySiteId: sandbox.stub().resolves([]),
+        create: sandbox.stub().resolves({ getId: () => 'enroll-1', getEntitlementId: () => 'ent-1' }),
       },
       Entitlement: {
         allByOrganizationId: sandbox.stub().resolves([]),
@@ -333,7 +346,10 @@ describe('PlgOnboardingController', () => {
           },
         },
         '@adobe/spacecat-shared-tier-client': {
-          default: { createForSite: tierClientCreateForSiteStub },
+          default: {
+            createForSite: tierClientCreateForSiteStub,
+            createForOrg: tierClientCreateForOrgStub,
+          },
         },
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: configToDynamoItemStub },
@@ -543,7 +559,10 @@ describe('PlgOnboardingController', () => {
             default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -854,7 +873,7 @@ describe('PlgOnboardingController', () => {
       expect(mockDataAccess.Site.create).to.have.been.called;
       expect(enableImportsStub).to.have.been.called;
       expect(enableAuditsStub).to.have.been.called;
-      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
       expect(triggerAuditsStub).to.have.been.called;
       expect(triggerBrandProfileAgentStub).to.have.been.called;
       expect(configToDynamoItemStub).to.have.been.called;
@@ -1514,7 +1533,10 @@ describe('PlgOnboardingController', () => {
             },
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -1772,7 +1794,7 @@ describe('PlgOnboardingController', () => {
               createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
             },
           },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub } },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
           },
@@ -1882,7 +1904,7 @@ describe('PlgOnboardingController', () => {
               createFrom: sandbox.stub().returns({ retrieveDomainkey: rumRetrieveDomainkeyStub }),
             },
           },
-          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub } },
+          '@adobe/spacecat-shared-tier-client': { default: { createForSite: tierClientCreateForSiteStub, createForOrg: tierClientCreateForOrgStub } },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
           },
@@ -2006,7 +2028,7 @@ describe('PlgOnboardingController', () => {
       // Should still enable audits, imports, entitlement
       expect(enableAuditsStub).to.have.been.called;
       expect(enableImportsStub).to.have.been.called;
-      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
       // Verify onboarding record completed
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
@@ -3011,7 +3033,7 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('returns 500 when entitlement creation fails unexpectedly', async () => {
+    it('falls back to checkValidEntitlement when entitlement creation fails', async () => {
       tierClientCreateEntitlementStub.rejects(
         new Error('Tier service unavailable'),
       );
@@ -3020,13 +3042,72 @@ describe('PlgOnboardingController', () => {
 
       const res = await controller.onboard(context);
 
-      expect(res.status).to.equal(500);
-      expect(res.value).to.equal('Onboarding failed. Please try again later.');
-      // Verify error was recorded with sanitized message
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
-      expect(mockOnboarding.setError).to.have.been.calledWith({
-        message: 'An internal error occurred',
-      });
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('waitlists when both createEntitlement and checkValidEntitlement fail', async () => {
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO entitlement/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
+      expect(mockLog.error).to.have.been.calledWithMatch(/createEntitlement failed/);
+    });
+
+    it('waitlists when tier service returns entitlement for wrong org', async () => {
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().resolves({
+          entitlement: {
+            getId: () => 'ent-drift',
+            getOrganizationId: () => 'different-org-id',
+          },
+        }),
+        checkValidEntitlement: sandbox.stub(),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/entitlement org drift/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
+    });
+
+    it('waitlists when enrollment creation and fetch both fail', async () => {
+      mockDataAccess.SiteEnrollment.allBySiteId.rejects(new Error('enrollment down'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/Unable to create or fetch ASO enrollment/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
+    });
+
+    it('logs error when persisting entitlement waitlist state fails in full onboarding', async () => {
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+      mockOnboarding.save.rejects(new Error('db write failed'));
+
+      const res = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to persist waitlist state/);
     });
   });
 
@@ -3172,24 +3253,24 @@ describe('PlgOnboardingController', () => {
       expect(sibling2.remove).to.have.been.called;
     });
 
-    it('aborts when entitlement.organizationId disagrees with resolved customer org', async () => {
+    it('waitlists when entitlement.organizationId disagrees with resolved customer org', async () => {
       const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);
 
       // Drift: entitlement belongs to a different org than the one resolved from imsOrgId.
       tierClientCreateEntitlementStub.resolves({
         entitlement: { getId: () => 'ent-drift', getOrganizationId: () => 'drifted-org' },
-        siteEnrollment: { getId: () => 'enroll-1' },
       });
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/entitlement org drift/);
+      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch({ entitlementFailed: true });
+      // Enrollment was never created so there is nothing to revoke
       expect(sibling.remove).to.not.have.been.called;
-      expect(mockLog.error).to.have.been.calledWithMatch(
-        /Refusing to revoke sibling ASO enrollments.*Possible entitlement-resolution drift/,
-      );
     });
 
     it('refuses revocation when the resolved customer org is internal/demo', async () => {
@@ -3453,7 +3534,7 @@ describe('PlgOnboardingController', () => {
       const response = await controller.onboard(context);
 
       expect(response.status).to.equal(200);
-      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
       expect(triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
@@ -3556,19 +3637,12 @@ describe('PlgOnboardingController', () => {
       expect(siteInInternalOrg.save).to.have.been.called;
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // Verify order: site org reassignment happens BEFORE entitlement operations
-      expect(siteInInternalOrg.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
-      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
-      // this is the core invariant of the post-save re-fetch design.
-      expect(tierClientCreateForSiteStub).to.have.been.calledWith(
-        sinon.match.any,
-        refreshedSite,
-        sinon.match.any,
-      );
-      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
-        sinon.match.any,
-        siteInInternalOrg,
-        sinon.match.any,
+      // Verify order: site org reassignment happens BEFORE enrollment creation
+      const { create: enrollCreate } = mockDataAccess.SiteEnrollment;
+      expect(siteInInternalOrg.save).to.have.been.calledBefore(enrollCreate);
+      // Enrollment is bound directly to the entitlement ID — org is not re-derived from site
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.calledWith(
+        sinon.match({ entitlementId: 'ent-1' }),
       );
     });
 
@@ -3656,8 +3730,9 @@ describe('PlgOnboardingController', () => {
       // PlgOnboarding org is anchored to the requesting customer's resolved org up-front,
       // even when we then waitlist — the record is the trace of the request attempt.
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      // Should NOT create entitlement
-      expect(tierClientCreateForSiteStub).to.not.have.been.called;
+      // Should NOT create entitlement or enrollment
+      expect(tierClientCreateForOrgStub).to.not.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.not.have.been.called;
     });
 
     it('waitlists with "safely moved" hint when preonboarded site in different org has no enrollments', async () => {
@@ -3732,88 +3807,117 @@ describe('PlgOnboardingController', () => {
         .to.have.been.calledWithMatch(/cannot be moved.*active products/);
     });
 
-    it('waitlists when re-fetch after org reassignment returns null', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-123';
-
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-
-      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      // first call: initial fetch; second call: re-fetch returns null (DB not yet consistent)
-      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(null);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(preonboardedOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        /org not reflected in DB after save/,
-      );
-      expect(preonboardedOnboarding.setSteps).to.have.been.calledWithMatch(
-        sinon.match({ siteOrgReassignmentFailed: true }),
-      );
-      expect(tierClientCreateForSiteStub).to.not.have.been.called;
-    });
-
-    it('logs and continues when persisting waitlist state fails during fast-track', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-123';
-
-      const preonboardedOnboarding = createMockOnboarding({
-        status: 'PRE_ONBOARDING',
-        siteId: TEST_SITE_ID,
-        organizationId: INTERNAL_ORG_ID,
-      });
-      // onboarding.save() fails while persisting the WAITLISTED transition.
-      preonboardedOnboarding.save.rejects(new Error('db write failed'));
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
-
-      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      // null re-fetch drives reassignSiteOrganization to throw a waitlist error.
-      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
-        .onSecondCall().resolves(null);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockLog.error).to.have.been.calledWithMatch(
-        /Failed to persist waitlist state/,
-      );
-    });
-
-    it('rethrows non-waitlist errors from fast-track onboarding', async () => {
+    it('waitlists fast-track when both entitlement create and fetch fail', async () => {
       const preonboardedOnboarding = createMockOnboarding({
         status: 'PRE_ONBOARDING',
         siteId: TEST_SITE_ID,
         organizationId: TEST_ORG_ID,
       });
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
 
-      const siteInCustomerOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
-      mockDataAccess.Site.findById.resolves(siteInCustomerOrg);
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
 
-      // Unrelated error (not a waitlist error) during entitlement creation.
-      tierClientCreateEntitlementStub.rejects(new Error('entitlement service unavailable'));
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
 
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(preonboardedOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/Unable to create or fetch ASO entitlement/);
+      expect(preonboardedOnboarding.setSteps)
+        .to.have.been.calledWithMatch({ entitlementFailed: true });
+    });
 
-      // Rethrow escapes to the top-level onboard catch → 500
+    it('logs error when persisting entitlement waitlist state fails in fast-track', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
+      preonboardedOnboarding.save.rejects(new Error('db write failed'));
+
+      const orgClientStub = {
+        createEntitlement: sandbox.stub().rejects(new Error('service down')),
+        checkValidEntitlement: sandbox.stub().rejects(new Error('service down')),
+      };
+      tierClientCreateForOrgStub.returns(orgClientStub);
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to persist waitlist state/);
+    });
+
+    it('rethrows non-entitlement errors from fast-track', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
+      // Not an EntitlementWaitlistError — revocation throws unexpectedly → should 500.
+      mockDataAccess.SiteEnrollment.allByEntitlementId.rejects(new Error('db error'));
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
       expect(response.status).to.equal(500);
-      expect(preonboardedOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
+    });
+
+    it('logs a warning when site org is not reflected in DB after reassignment', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-123';
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+
+      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      // Re-fetch returns null — warn path in reassignSiteOrganization.
+      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
+        .onSecondCall().resolves(null);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/org not reflected in DB after save/);
+    });
+
+    it('logs a warning when refetched site still has the old org (replica lag)', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-stale';
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+
+      const siteInInternalOrg = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      // Re-fetch returns a site still pointing at the old org.
+      const staleRefetch = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
+      mockDataAccess.Site.findById.onFirstCall().resolves(siteInInternalOrg)
+        .onSecondCall().resolves(staleRefetch);
+
+      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/org not reflected in DB after save/);
     });
 
     it('reassigns site from internal org before entitlement in full onboarding path', async () => {
@@ -3838,104 +3942,11 @@ describe('PlgOnboardingController', () => {
       // Verify site was reassigned
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
-      // Verify order: site org reassignment happens BEFORE entitlement operations
-      expect(existingSite.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
-      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
-      // this is the core invariant of the post-save re-fetch design.
-      expect(tierClientCreateForSiteStub).to.have.been.calledWith(
-        sinon.match.any,
-        refreshedSiteFullPath,
-        sinon.match.any,
-      );
-      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
-        sinon.match.any,
-        existingSite,
-        sinon.match.any,
-      );
-    });
-
-    it('waitlists in full onboarding path when re-fetch after org reassignment returns null', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-full-null';
-
-      // Full onboarding (not PRE_ONBOARDING)
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
-
-      const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-      // Re-fetch after reassignment returns null → reassignSiteOrganization throws waitlist error.
-      mockDataAccess.Site.findById.resolves(null);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        /org not reflected in DB after save/,
-      );
-      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch(
-        sinon.match({ siteOrgReassignmentFailed: true }),
-      );
-      // Entitlement creation must NOT happen when reassignment failed.
-      expect(tierClientCreateEntitlementStub).to.not.have.been.called;
-    });
-
-    it('waitlists when re-fetch returns a stale site with the old org (replica lag)', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-stale';
-
-      // Full onboarding (not PRE_ONBOARDING)
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
-
-      const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-      // Re-fetch returns a site whose org still reflects the OLD internal org id —
-      // simulates replica lag. reassignSiteOrganization must throw a waitlist error.
-      const staleRefreshed = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findById.resolves(staleRefreshed);
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(
-        new RegExp(`expected ${TEST_ORG_ID}, got ${INTERNAL_ORG_ID}`),
-      );
-      expect(mockOnboarding.setSteps).to.have.been.calledWithMatch(
-        sinon.match({ siteOrgReassignmentFailed: true }),
-      );
-      // Entitlement creation must NOT happen when reassignment landed on stale data.
-      expect(tierClientCreateEntitlementStub).to.not.have.been.called;
-    });
-
-    it('logs and continues when persisting waitlist state fails during full onboarding', async () => {
-      const INTERNAL_ORG_ID = 'internal-org-full-save-err';
-
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
-
-      const existingSite = createMockSite({ id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID });
-      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-      mockDataAccess.Site.findById.resolves(null);
-
-      // onboarding.save() fails while persisting the WAITLISTED transition.
-      mockOnboarding.save.rejects(new Error('db write failed'));
-
-      mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
-      mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const response = await controller.onboard(context);
-
-      expect(response.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
-      expect(mockLog.error).to.have.been.calledWithMatch(
-        /Failed to persist waitlist state/,
+      // Verify order: site org reassignment happens BEFORE enrollment creation
+      expect(existingSite.save).to.have.been.calledBefore(mockDataAccess.SiteEnrollment.create);
+      // Enrollment is bound directly to the entitlement ID — org is not re-derived from site
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.calledWith(
+        sinon.match({ entitlementId: 'ent-1' }),
       );
     });
   });
@@ -4102,7 +4113,10 @@ describe('PlgOnboardingController', () => {
             default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -4592,7 +4606,10 @@ describe('PlgOnboardingController', () => {
             default: ldCreateFromStub,
           },
           '@adobe/spacecat-shared-tier-client': {
-            default: { createForSite: tierClientCreateForSiteStub },
+            default: {
+              createForSite: tierClientCreateForSiteStub,
+              createForOrg: tierClientCreateForOrgStub,
+            },
           },
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: configToDynamoItemStub },
@@ -4685,7 +4702,7 @@ describe('PlgOnboardingController', () => {
               default: ldCreateFromStub,
             },
             '@adobe/spacecat-shared-tier-client': {
-              default: { createForSite: sandbox.stub() },
+              default: { createForOrg: sandbox.stub() },
             },
             '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
               Config: { toDynamoItem: sandbox.stub() },
@@ -6363,82 +6380,6 @@ describe('PlgOnboardingController', () => {
         // Non-waitlist errors propagate to the outer admin catch → 500.
         expect(res.status).to.equal(500);
         expect(record.setStatus).to.not.have.been.calledWith('WAITLISTED');
-      });
-
-      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: waitlists when re-fetch after reassignment returns null', async () => {
-        const record = createMockOnboarding({
-          status: 'WAITLISTED',
-          waitlistReason: 'Domain example.com is already assigned to another organization',
-          siteId: TEST_SITE_ID,
-          organizationId: TEST_ORG_ID,
-        });
-        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
-        const existingOrg = {
-          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
-          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
-          getName: sandbox.stub().returns('Other Org'),
-        };
-
-        mockDataAccess.PlgOnboarding.findById.resolves(record);
-        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-        // Re-fetch returns null → reassignSiteOrganization throws waitlist error.
-        mockDataAccess.Site.findById.resolves(null);
-        mockDataAccess.Organization.findById.resolves(existingOrg);
-
-        const res = await AdminAccessPlgController({ log: mockLog }).update({
-          dataAccess: mockDataAccess,
-          params: { onboardingId: TEST_ONBOARDING_ID },
-          data: { decision: 'BYPASSED', justification: 'Move site', siteConfig: { moveSite: true } },
-          attributes: adminAuthAttributes,
-          env: mockEnv,
-          log: mockLog,
-        });
-
-        expect(res.status).to.equal(200);
-        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
-        expect(record.setWaitlistReason).to.have.been.calledWithMatch(
-          /org not reflected in DB after save/,
-        );
-        // Onboarding flow must NOT be triggered when reassignment failed.
-        expect(tierClientCreateEntitlementStub).to.not.have.been.called;
-      });
-
-      it('BYPASS DOMAIN_ALREADY_ASSIGNED moveSite: logs and continues when persisting waitlist state fails', async () => {
-        const record = createMockOnboarding({
-          status: 'WAITLISTED',
-          waitlistReason: 'Domain example.com is already assigned to another organization',
-          siteId: TEST_SITE_ID,
-          organizationId: TEST_ORG_ID,
-        });
-        const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
-        const existingOrg = {
-          getId: sandbox.stub().returns(OTHER_CUSTOMER_ORG_ID),
-          getImsOrgId: sandbox.stub().returns('OTHERORG123@AdobeOrg'),
-          getName: sandbox.stub().returns('Other Org'),
-        };
-
-        mockDataAccess.PlgOnboarding.findById.resolves(record);
-        mockDataAccess.Site.findByBaseURL.resolves(existingSite);
-        // Re-fetch returns null → reassignSiteOrganization throws waitlist error.
-        mockDataAccess.Site.findById.resolves(null);
-        mockDataAccess.Organization.findById.resolves(existingOrg);
-        // Persisting the WAITLISTED transition fails inside the moveSite handler.
-        record.save.rejects(new Error('db write failed'));
-
-        const res = await AdminAccessPlgController({ log: mockLog }).update({
-          dataAccess: mockDataAccess,
-          params: { onboardingId: TEST_ONBOARDING_ID },
-          data: { decision: 'BYPASSED', justification: 'Move site', siteConfig: { moveSite: true } },
-          attributes: adminAuthAttributes,
-          env: mockEnv,
-          log: mockLog,
-        });
-
-        expect(res.status).to.equal(200);
-        expect(record.setStatus).to.have.been.calledWith('WAITLISTED');
-        expect(mockLog.error).to.have.been.calledWithMatch(
-          /Failed to persist waitlist state/,
-        );
       });
 
       it('returns 400 for unknown waitlist reason', async () => {
