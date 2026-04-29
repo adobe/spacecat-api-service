@@ -309,6 +309,7 @@ async function ensureAsoEntitlement(site, organization, context) {
 
   return { entitlement, siteEnrollment };
 }
+
 /**
  * Disables the summit-plg config handler for a given site. Non-fatal.
  * @param {object} site - The site to disable the handler for.
