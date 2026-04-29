@@ -359,6 +359,33 @@ function SitesController(ctx, log, env) {
   };
 
   /**
+   * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
+   * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
+   * code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of sites response.
+   */
+  const getAllByEnrollmentAndTier = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
+    const tier = context.params?.tier;
+    const productCode = context.data?.productCode;
+
+    if (!hasText(tier)) {
+      return badRequest('Tier required');
+    }
+    if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
+      return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
+    }
+
+    const sites = (await Site.allByEnrollmentAndTier(tier, productCode))
+      .map((site) => SiteDto.toJSON(site));
+    return ok(sites);
+  };
+
+  /**
    * Gets all sites with their latest audit. Sites without a latest audit will be included
    * in the result, but will have an empty audits array. The sites are sorted by their latest
    * audit scores in ascending order by default. The sortAuditsAscending parameter can be used
@@ -1321,6 +1348,7 @@ function SitesController(ctx, log, env) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    getAllByEnrollmentAndTier,
     getByID,
     removeSite,
     updateSite,
