@@ -17,11 +17,15 @@ import sinonChai from 'sinon-chai';
 import {
   cleanupPlgSiteSuggestionsAndFixes,
   PLG_CLEANUP_OPPORTUNITY_TYPES,
+  STATUSES_TO_OUTDATE,
+  STATUSES_TO_RESET_TO_NEW,
 } from '../../../src/controllers/plg/plg-onboarding-cleanup.js';
 
 use(sinonChai);
 
 const SITE_ID = 'site-uuid-1';
+
+const EMPTY_RESULT = { outdatedCount: 0, resetToNewCount: 0, removedFixCount: 0 };
 
 function createMockOpportunity(id, type) {
   return {
@@ -62,7 +66,7 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
         allBySiteId: sandbox.stub().resolves([]),
       },
       Suggestion: {
-        allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
+        allByOpportunityId: sandbox.stub().resolves([]),
         bulkUpdateStatus: sandbox.stub().resolves(),
       },
       FixEntity: {
@@ -85,10 +89,21 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
     ]);
   });
 
+  it('exports the status sets the cleanup transitions', () => {
+    expect([...STATUSES_TO_OUTDATE]).to.have.members([
+      'FIXED',
+      'IN_PROGRESS',
+      'SKIPPED',
+      'ERROR',
+      'REJECTED',
+    ]);
+    expect([...STATUSES_TO_RESET_TO_NEW]).to.deep.equal(['PENDING_VALIDATION']);
+  });
+
   it('skips when no siteId is provided', async () => {
     const result = await cleanupPlgSiteSuggestionsAndFixes(null, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 0, removedFixCount: 0 });
+    expect(result).to.deep.equal(EMPTY_RESULT);
     expect(dataAccess.Opportunity.allBySiteId).to.not.have.been.called;
     expect(log.info).to.have.been.calledWithMatch(/no siteId provided, skipping/);
   });
@@ -98,7 +113,7 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 0, removedFixCount: 0 });
+    expect(result).to.deep.equal(EMPTY_RESULT);
     expect(log.warn).to.have.been.calledWithMatch(/failed to list opportunities/);
   });
 
@@ -110,13 +125,13 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 0, removedFixCount: 0 });
-    expect(dataAccess.Suggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+    expect(result).to.deep.equal(EMPTY_RESULT);
+    expect(dataAccess.Suggestion.allByOpportunityId).to.not.have.been.called;
     expect(dataAccess.FixEntity.allByOpportunityId).to.not.have.been.called;
     expect(log.info).to.have.been.calledWithMatch(/no PLG opportunities found/);
   });
 
-  it('outdates FIXED suggestions and removes fix entities for PLG opportunities only', async () => {
+  it('outdates configured statuses, resets PENDING_VALIDATION to NEW, and removes fix entities for PLG opportunities only', async () => {
     const cwvOppty = createMockOpportunity('o-cwv', 'cwv');
     const altTextOppty = createMockOpportunity('o-alt', 'alt-text');
     const brokenBacklinksOppty = createMockOpportunity('o-bb', 'broken-backlinks');
@@ -126,15 +141,30 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
       cwvOppty, altTextOppty, brokenBacklinksOppty, otherOppty,
     ]);
 
-    const cwvFixed = [createMockSuggestion('s1', 'FIXED'), createMockSuggestion('s2', 'FIXED')];
-    const altFixed = [createMockSuggestion('s3', 'FIXED')];
-    dataAccess.Suggestion.allByOpportunityIdAndStatus
-      .withArgs('o-cwv', 'FIXED').resolves(cwvFixed)
-      .withArgs('o-alt', 'FIXED').resolves(altFixed)
-      .withArgs('o-bb', 'FIXED')
-      .resolves([]);
+    // cwv: mix of statuses across both buckets and statuses that should be left alone.
+    const cwvFixed = createMockSuggestion('s-cwv-fixed', 'FIXED');
+    const cwvInProgress = createMockSuggestion('s-cwv-inprog', 'IN_PROGRESS');
+    const cwvSkipped = createMockSuggestion('s-cwv-skip', 'SKIPPED');
+    const cwvPending = createMockSuggestion('s-cwv-pending', 'PENDING_VALIDATION');
+    const cwvNew = createMockSuggestion('s-cwv-new', 'NEW'); // untouched
+    const cwvApproved = createMockSuggestion('s-cwv-app', 'APPROVED'); // untouched
+    const altError = createMockSuggestion('s-alt-err', 'ERROR');
+    const altRejected = createMockSuggestion('s-alt-rej', 'REJECTED');
+    const altPending = createMockSuggestion('s-alt-pending', 'PENDING_VALIDATION');
+    // broken-backlinks has only NEW suggestions → no transitions, but fix entities exist.
+    const bbNew = createMockSuggestion('s-bb-new', 'NEW');
 
-    const cwvFixes = [createMockFixEntity('f1'), createMockFixEntity('f2'), createMockFixEntity('f3')];
+    dataAccess.Suggestion.allByOpportunityId
+      .withArgs('o-cwv').resolves([
+        cwvFixed, cwvInProgress, cwvSkipped, cwvPending, cwvNew, cwvApproved,
+      ])
+      .withArgs('o-alt').resolves([altError, altRejected, altPending])
+      .withArgs('o-bb')
+      .resolves([bbNew]);
+
+    const cwvFixes = [
+      createMockFixEntity('f1'), createMockFixEntity('f2'), createMockFixEntity('f3'),
+    ];
     const bbFixes = [createMockFixEntity('f4')];
     dataAccess.FixEntity.allByOpportunityId
       .withArgs('o-cwv').resolves(cwvFixes)
@@ -144,20 +174,46 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 3, removedFixCount: 4 });
+    expect(result).to.deep.equal({
+      outdatedCount: 5, // cwv: 3 (FIXED, IN_PROGRESS, SKIPPED) + alt: 2 (ERROR, REJECTED)
+      resetToNewCount: 2, // cwv: 1 + alt: 1
+      removedFixCount: 4, // cwv: 3 + bb: 1
+    });
 
     // Non-PLG opportunity is skipped entirely.
-    expect(dataAccess.Suggestion.allByOpportunityIdAndStatus)
-      .to.not.have.been.calledWith('o-other', sinon.match.any);
+    expect(dataAccess.Suggestion.allByOpportunityId)
+      .to.not.have.been.calledWith('o-other');
     expect(dataAccess.FixEntity.allByOpportunityId)
       .to.not.have.been.calledWith('o-other');
 
-    // bulkUpdateStatus called once per opportunity that had FIXED suggestions.
-    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledTwice;
-    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledWith(cwvFixed, 'OUTDATED');
-    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledWith(altFixed, 'OUTDATED');
+    // OUTDATED bulk updates (one per opportunity that had outdate-worthy suggestions).
+    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledWith(
+      [cwvFixed, cwvInProgress, cwvSkipped],
+      'OUTDATED',
+    );
+    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledWith(
+      [altError, altRejected],
+      'OUTDATED',
+    );
 
-    // removeByIds called once per opportunity that had fix entities.
+    // PENDING_VALIDATION → NEW resets.
+    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledWith(
+      [cwvPending],
+      'NEW',
+    );
+    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledWith(
+      [altPending],
+      'NEW',
+    );
+
+    // NEW / APPROVED suggestions are never passed to bulkUpdateStatus.
+    const allBulkCalls = dataAccess.Suggestion.bulkUpdateStatus.getCalls();
+    const allUpdatedSuggestions = allBulkCalls.flatMap((call) => call.args[0]);
+    expect(allUpdatedSuggestions).to.not.include(cwvNew);
+    expect(allUpdatedSuggestions).to.not.include(cwvApproved);
+    expect(allUpdatedSuggestions).to.not.include(bbNew);
+
+    // Fix entity removals.
     expect(dataAccess.FixEntity.removeByIds).to.have.been.calledTwice;
     expect(dataAccess.FixEntity.removeByIds).to.have.been.calledWith(['f1', 'f2', 'f3']);
     expect(dataAccess.FixEntity.removeByIds).to.have.been.calledWith(['f4']);
@@ -165,45 +221,83 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
     expect(log.info).to.have.been.calledWithMatch(/PLG cleanup complete for site/);
   });
 
-  it('logs and continues when outdating FIXED suggestions fails for one opportunity', async () => {
+  it('logs and continues when listing suggestions fails for one opportunity', async () => {
     const cwvOppty = createMockOpportunity('o-cwv', 'cwv');
     const altTextOppty = createMockOpportunity('o-alt', 'alt-text');
     dataAccess.Opportunity.allBySiteId.resolves([cwvOppty, altTextOppty]);
 
-    dataAccess.Suggestion.allByOpportunityIdAndStatus
-      .withArgs('o-cwv', 'FIXED').rejects(new Error('lookup boom'))
-      .withArgs('o-alt', 'FIXED')
-      .resolves([createMockSuggestion('s1', 'FIXED')]);
+    dataAccess.Suggestion.allByOpportunityId
+      .withArgs('o-cwv').rejects(new Error('lookup boom'))
+      .withArgs('o-alt')
+      .resolves([
+        createMockSuggestion('s-alt-fixed', 'FIXED'),
+        createMockSuggestion('s-alt-pending', 'PENDING_VALIDATION'),
+      ]);
 
     dataAccess.FixEntity.allByOpportunityId.resolves([]);
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 1, removedFixCount: 0 });
-    expect(log.warn).to.have.been.calledWithMatch(/failed to mark FIXED suggestions OUTDATED for cwv/);
-    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledOnce;
+    expect(result).to.deep.equal({
+      outdatedCount: 1,
+      resetToNewCount: 1,
+      removedFixCount: 0,
+    });
+    expect(log.warn).to.have.been.calledWithMatch(/failed to list suggestions for cwv/);
+    expect(dataAccess.Suggestion.bulkUpdateStatus).to.have.been.calledTwice;
   });
 
-  it('logs and continues when bulkUpdateStatus rejects', async () => {
+  it('logs and continues when the OUTDATED transition fails but the NEW reset succeeds', async () => {
     dataAccess.Opportunity.allBySiteId.resolves([
       createMockOpportunity('o-cwv', 'cwv'),
     ]);
-    dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+    dataAccess.Suggestion.allByOpportunityId.resolves([
       createMockSuggestion('s1', 'FIXED'),
+      createMockSuggestion('s2', 'PENDING_VALIDATION'),
     ]);
-    dataAccess.Suggestion.bulkUpdateStatus.rejects(new Error('save failed'));
+    dataAccess.Suggestion.bulkUpdateStatus
+      .withArgs(sinon.match.any, 'OUTDATED').rejects(new Error('save failed'))
+      .withArgs(sinon.match.any, 'NEW')
+      .resolves();
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 0, removedFixCount: 0 });
-    expect(log.warn).to.have.been.calledWithMatch(/save failed/);
+    expect(result).to.deep.equal({
+      outdatedCount: 0,
+      resetToNewCount: 1,
+      removedFixCount: 0,
+    });
+    expect(log.warn).to.have.been.calledWithMatch(/failed to transition cwv suggestions to OUTDATED/);
+  });
+
+  it('logs and continues when the NEW reset fails but the OUTDATED transition succeeds', async () => {
+    dataAccess.Opportunity.allBySiteId.resolves([
+      createMockOpportunity('o-cwv', 'cwv'),
+    ]);
+    dataAccess.Suggestion.allByOpportunityId.resolves([
+      createMockSuggestion('s1', 'FIXED'),
+      createMockSuggestion('s2', 'PENDING_VALIDATION'),
+    ]);
+    dataAccess.Suggestion.bulkUpdateStatus
+      .withArgs(sinon.match.any, 'NEW').rejects(new Error('reset failed'))
+      .withArgs(sinon.match.any, 'OUTDATED')
+      .resolves();
+
+    const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
+
+    expect(result).to.deep.equal({
+      outdatedCount: 1,
+      resetToNewCount: 0,
+      removedFixCount: 0,
+    });
+    expect(log.warn).to.have.been.calledWithMatch(/failed to transition cwv suggestions to NEW/);
   });
 
   it('logs and continues when removing fix entities fails', async () => {
     dataAccess.Opportunity.allBySiteId.resolves([
       createMockOpportunity('o-cwv', 'cwv'),
     ]);
-    dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
+    dataAccess.Suggestion.allByOpportunityId.resolves([]);
 
     dataAccess.FixEntity.allByOpportunityId.resolves([
       createMockFixEntity('f1'),
@@ -212,7 +306,7 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 0, removedFixCount: 0 });
+    expect(result).to.deep.equal(EMPTY_RESULT);
     expect(log.warn).to.have.been.calledWithMatch(/failed to remove fix entities for cwv/);
   });
 
@@ -220,26 +314,30 @@ describe('cleanupPlgSiteSuggestionsAndFixes', () => {
     dataAccess.Opportunity.allBySiteId.resolves([
       createMockOpportunity('o-cwv', 'cwv'),
     ]);
-    dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
+    dataAccess.Suggestion.allByOpportunityId.resolves([]);
     dataAccess.FixEntity.allByOpportunityId.rejects(new Error('list boom'));
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 0, removedFixCount: 0 });
+    expect(result).to.deep.equal(EMPTY_RESULT);
     expect(log.warn).to.have.been.calledWithMatch(/list boom/);
     expect(dataAccess.FixEntity.removeByIds).to.not.have.been.called;
   });
 
-  it('skips bulkUpdateStatus when no FIXED suggestions exist for the opportunity', async () => {
+  it('skips bulkUpdateStatus calls when no suggestions match either transition set', async () => {
     dataAccess.Opportunity.allBySiteId.resolves([
       createMockOpportunity('o-cwv', 'cwv'),
     ]);
-    dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
+    // Only NEW + APPROVED → neither bucket should match.
+    dataAccess.Suggestion.allByOpportunityId.resolves([
+      createMockSuggestion('s1', 'NEW'),
+      createMockSuggestion('s2', 'APPROVED'),
+    ]);
     dataAccess.FixEntity.allByOpportunityId.resolves([]);
 
     const result = await cleanupPlgSiteSuggestionsAndFixes(SITE_ID, context);
 
-    expect(result).to.deep.equal({ outdatedCount: 0, removedFixCount: 0 });
+    expect(result).to.deep.equal(EMPTY_RESULT);
     expect(dataAccess.Suggestion.bulkUpdateStatus).to.not.have.been.called;
     expect(dataAccess.FixEntity.removeByIds).to.not.have.been.called;
   });

@@ -290,7 +290,6 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       },
       Suggestion: {
         allByOpportunityId: sandbox.stub().resolves([]),
-        allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
         bulkUpdateStatus: sandbox.stub().resolves(),
       },
       FixEntity: {
