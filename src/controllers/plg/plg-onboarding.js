@@ -260,16 +260,12 @@ function getReviewerIdentity(context) {
  */
 async function reassignSiteOrganization(site, organizationId, dataAccess, log) {
   const siteId = site.getId();
-  log?.info?.(`[DEBUG] reassignSiteOrganization: siteId=${siteId} currentOrgId=${site.getOrganizationId()} targetOrgId=${organizationId}`);
   site.setOrganizationId(organizationId);
-  log?.info?.(`[DEBUG] reassignSiteOrganization: AFTER setOrganizationId() site.getOrganizationId()=${site.getOrganizationId()}`);
-  const saveResult = await site.save();
-  log?.info?.(`[DEBUG] reassignSiteOrganization: site.save() returned — ${JSON.stringify(saveResult)}`);
+  await site.save();
 
   // Re-fetch to get a fresh instance where this.record reflects the DB value.
   const refreshed = await dataAccess.Site.findById(siteId);
   const refreshedOrgId = refreshed?.getOrganizationId();
-  log?.info?.(`[DEBUG] reassignSiteOrganization: re-fetch — refreshedOrgId=${refreshedOrgId ?? 'null'} expected=${organizationId}`);
   if (!refreshed || refreshedOrgId !== organizationId) {
     log?.warn?.(`Site ${siteId} org not reflected in DB after save: expected ${organizationId}, got ${refreshedOrgId ?? 'undefined'}`);
   }
@@ -286,19 +282,15 @@ async function ensureAsoEntitlement(site, organization, context) {
   const siteId = site.getId();
   const organizationId = organization.getId();
 
-  log.info(`[DEBUG] ensureAsoEntitlement: START — siteId=${siteId} siteOrgId=${site.getOrganizationId()} imsResolvedOrgId=${organizationId} orgName=${organization.getName()}`);
-
   // Step 1: ensure entitlement on the IMS-resolved organization (no site bound).
   const orgClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
   let entitlement;
   try {
     ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));
-    log.info(`[DEBUG] ensureAsoEntitlement: Step1 createEntitlement OK — entitlementId=${entitlement.getId()} entitlementOrgId=${entitlement.getOrganizationId()} tier=${entitlement.getTier?.()}`);
   } catch (createError) {
     log.error(`ensureAsoEntitlement: createEntitlement failed for org ${organizationId}: ${createError.message}, fetching existing`);
     try {
       ({ entitlement } = await orgClient.checkValidEntitlement());
-      log.info(`[DEBUG] ensureAsoEntitlement: Step1 checkValidEntitlement OK — entitlementId=${entitlement?.getId()} entitlementOrgId=${entitlement?.getOrganizationId()} tier=${entitlement?.getTier?.()}`);
     } catch (fetchError) {
       log.error(`ensureAsoEntitlement: checkValidEntitlement also failed for org ${organizationId}: ${fetchError.message}`);
     }
@@ -322,13 +314,9 @@ async function ensureAsoEntitlement(site, organization, context) {
   const entitlementId = entitlement.getId();
   try {
     const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
-    log.info(`[DEBUG] ensureAsoEntitlement: Step2 allBySiteId — siteId=${siteId} count=${existingEnrollments.length} entitlementIds=${existingEnrollments.map((se) => se.getEntitlementId()).join(',') || 'none'}`);
     siteEnrollment = existingEnrollments.find((se) => se.getEntitlementId() === entitlementId);
-    if (siteEnrollment) {
-      log.info(`[DEBUG] ensureAsoEntitlement: Step2 reusing existing enrollment — enrollmentId=${siteEnrollment.getId()} siteId=${siteId} entitlementId=${entitlementId} orgId=${organizationId}`);
-    } else {
+    if (!siteEnrollment) {
       siteEnrollment = await SiteEnrollment.create({ siteId, entitlementId });
-      log.info(`[DEBUG] ensureAsoEntitlement: Step2 created enrollment — enrollmentId=${siteEnrollment?.getId()} siteId=${siteId} entitlementId=${entitlementId} orgId=${organizationId}`);
     }
   } catch (enrollError) {
     log.warn(`ensureAsoEntitlement: site enrollment failed for site ${siteId}: ${enrollError.message}`);
@@ -337,7 +325,6 @@ async function ensureAsoEntitlement(site, organization, context) {
     throw new EntitlementWaitlistError(`Unable to create or fetch ASO enrollment for site ${siteId}`);
   }
 
-  log.info(`[DEBUG] ensureAsoEntitlement: DONE — siteId=${siteId} orgId=${organizationId} entitlementId=${entitlementId} enrollmentId=${siteEnrollment.getId()}`);
   return { entitlement, siteEnrollment };
 }
 /**
