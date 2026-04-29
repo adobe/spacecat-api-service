@@ -46,8 +46,13 @@ function ScrapeJobController(context) {
   const MAX_JOBS_BY_BASEURL = 100;
 
   function createErrorResponse(error) {
+    // HTTP headers can't contain CR/LF; Node throws ERR_INVALID_CHAR otherwise.
+    // Also bound the length so a runaway error message can't bloat the response.
+    const safeMessage = (error.message || 'Internal server error')
+      .replace(/[\r\n]+/g, ' ')
+      .slice(0, 500);
     return createResponse({}, error.status || 500, {
-      [HEADER_ERROR]: error.message,
+      [HEADER_ERROR]: safeMessage,
     });
   }
 
@@ -208,6 +213,11 @@ function ScrapeJobController(context) {
     let decodedUrl = encodedUrl;
     try {
       decodedUrl = Buffer.from(encodedUrl, 'base64').toString('utf-8').trim();
+
+      if (!isValidUrl(decodedUrl)) {
+        return badRequest('Invalid request: url must be a valid URL');
+      }
+
       const scrapeUrls = await scrapeClient.getScrapeUrlsByProcessingType(
         decodedUrl,
         requestedProcessingType,

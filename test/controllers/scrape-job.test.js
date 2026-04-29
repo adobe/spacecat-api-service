@@ -658,6 +658,27 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error')).to.equal('A valid URL is required');
     });
 
+    it('should return 400 when decoded URL is not a valid URL', async () => {
+      baseContext.params.url = Buffer.from('not-a-url').toString('base64');
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: url must be a valid URL');
+    });
+
+    it('should return 400 when decoded URL contains multi-line content', async () => {
+      const multiLine = 'httpsvw-karrier.de-section\nsecond line\nthird line';
+      baseContext.params.url = Buffer.from(multiLine).toString('base64');
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: url must be a valid URL');
+    });
+
     it('should return empty array when no scrape URLs are found', async () => {
       // eslint-disable-next-line max-len
       baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox.stub().resolves([]);
@@ -722,6 +743,39 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape URL by URL: https://www.example.com/page1 and processing type: form, Database connection failed');
+    });
+
+    it('should strip CR/LF from x-error header so multi-line errors do not crash the Lambda', async () => {
+      const multiLineErrorMessage = 'Boom\nstack trace line 1\r\nstack trace line 2';
+      baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox
+        .stub()
+        .rejects(new Error(multiLineErrorMessage));
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      const errorHeader = response.headers.get('x-error');
+      expect(errorHeader).to.be.a('string');
+      expect(errorHeader).to.not.match(/[\r\n]/);
+      expect(errorHeader).to.include('Boom');
+      expect(errorHeader).to.include('stack trace line 1');
+      expect(errorHeader).to.include('stack trace line 2');
+    });
+
+    it('should truncate very long error messages in x-error header to 500 chars', async () => {
+      const longTail = 'x'.repeat(2000);
+      baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox
+        .stub()
+        .rejects(new Error(longTail));
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error').length).to.be.at.most(500);
     });
 
     it('should decode base64 URL correctly', async () => {
