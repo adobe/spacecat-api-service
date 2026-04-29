@@ -83,6 +83,7 @@ describe('cdn-opt-in-notification', () => {
       expect(opts.templateName).to.equal('llmo_cdn_opt_in_notification');
       expect(opts.templateData.siteBaseURL).to.equal('https://www.example.com');
       expect(opts.templateData.cdnDisplayName).to.equal('Akamai (BYOCDN)');
+      expect(opts.templateData.cdnKnown).to.be.true;
       expect(opts.templateData.optedBy).to.equal('user@adobe.com');
       expect(opts.templateData.docLink).to.be.a('string');
       expect(opts.templateData.orgMembers).to.equal('');
@@ -276,15 +277,19 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.replyAllTeam).to.equal('Adobe Commerce team');
     });
 
-    it('handles unknown CDN type gracefully (treats as BYOCDN, no replyAllTeam)', async () => {
+    it('handles unknown CDN type gracefully (cdnKnown=false, no replyAllTeam, warns)', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'some-unknown-cdn' });
 
       const { templateName, templateData } = sendEmailStub.firstCall.args[1];
       expect(templateName).to.equal('llmo_cdn_opt_in_notification');
-      expect(templateData.cdnDisplayName).to.equal('some-unknown-cdn');
+      expect(templateData.cdnDisplayName).to.equal('');
+      expect(templateData.cdnKnown).to.be.false;
       expect(templateData.docLink).to.equal('');
       expect(templateData.adobeManaged).to.be.false;
       expect(templateData.replyAllTeam).to.equal('');
+      expect(mockContext.log.warn).to.have.been.calledWithMatch(
+        /Unknown CDN type for site=.*cdnType="some-unknown-cdn"/,
+      );
     });
 
     it('skips and logs error when OPT_IN_NOTIFICATION_RECIPIENTS is not configured', async () => {
@@ -374,11 +379,15 @@ describe('cdn-opt-in-notification', () => {
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.siteBaseURL).to.equal('https://www.example.com');
       expect(templateData.optedBy).to.equal('');
-      expect(templateData.cdnDisplayName).to.equal('A CDN');
+      expect(templateData.cdnDisplayName).to.equal('');
+      expect(templateData.cdnKnown).to.be.false;
       expect(templateData.docLink).to.equal('');
       expect(templateData.adobeManaged).to.be.false;
       expect(templateData.replyAllTeam).to.equal('');
       expect(templateData.orgMembers).to.equal('');
+      expect(mockContext.log.warn).to.have.been.calledWithMatch(
+        /Unknown CDN type for site=/,
+      );
     });
 
     it('handles null params object without throwing', async () => {
