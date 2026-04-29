@@ -292,6 +292,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       },
       SiteEnrollment: {
         allByEntitlementId: sandbox.stub().resolves([]),
+        allBySiteId: sandbox.stub().resolves([]),
+        create: sandbox.stub().resolves({ getId: () => 'enroll-1', getEntitlementId: () => 'ent-1' }),
       },
       Entitlement: {
         allByOrganizationId: sandbox.stub().resolves([]),
@@ -879,7 +881,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockDataAccess.Site.create).to.have.been.called;
       expect(enableImportsStub).to.have.been.called;
       expect(enableAuditsStub).to.have.been.called;
-      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
       expect(triggerAuditsStub).to.have.been.called;
       expect(triggerBrandProfileAgentStub).to.have.been.called;
       expect(configToDynamoItemStub).to.have.been.called;
@@ -2034,7 +2036,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       // Should still enable audits, imports, entitlement
       expect(enableAuditsStub).to.have.been.called;
       expect(enableImportsStub).to.have.been.called;
-      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
       // Verify onboarding record completed
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
@@ -3068,11 +3070,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     });
 
     it('waitlists when enrollment creation and fetch both fail', async () => {
-      const siteClientStub = {
-        createEntitlement: sandbox.stub().rejects(new Error('enrollment down')),
-        checkValidEntitlement: sandbox.stub().rejects(new Error('enrollment down')),
-      };
-      tierClientCreateForSiteStub.resolves(siteClientStub);
+      mockDataAccess.SiteEnrollment.allBySiteId.rejects(new Error('enrollment down'));
 
       const context = buildContext({ domain: TEST_DOMAIN });
       const res = await controller.onboard(context);
@@ -3520,7 +3518,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const response = await controller.onboard(context);
 
       expect(response.status).to.equal(200);
-      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
       expect(triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
@@ -3623,19 +3621,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(siteInInternalOrg.save).to.have.been.called;
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      // Verify order: site org reassignment happens BEFORE entitlement operations
-      expect(siteInInternalOrg.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
-      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
-      // this is the core invariant of the post-save re-fetch design.
-      expect(tierClientCreateForSiteStub).to.have.been.calledWith(
-        sinon.match.any,
-        refreshedSite,
-        sinon.match.any,
-      );
-      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
-        sinon.match.any,
-        siteInInternalOrg,
-        sinon.match.any,
+      // Verify order: site org reassignment happens BEFORE enrollment creation
+      const { create: enrollCreate } = mockDataAccess.SiteEnrollment;
+      expect(siteInInternalOrg.save).to.have.been.calledBefore(enrollCreate);
+      // Enrollment is bound directly to the entitlement ID — org is not re-derived from site
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.calledWith(
+        sinon.match({ entitlementId: 'ent-1' }),
       );
     });
 
@@ -3723,8 +3714,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       // PlgOnboarding org is anchored to the requesting customer's resolved org up-front,
       // even when we then waitlist — the record is the trace of the request attempt.
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
-      // Should NOT create entitlement
-      expect(tierClientCreateForSiteStub).to.not.have.been.called;
+      // Should NOT create entitlement or enrollment
+      expect(tierClientCreateForOrgStub).to.not.have.been.called;
+      expect(mockDataAccess.SiteEnrollment.create).to.not.have.been.called;
     });
 
     it('waitlists with "safely moved" hint when preonboarded site in different org has no enrollments', async () => {
@@ -3854,8 +3846,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
       const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
       mockDataAccess.Site.findById.resolves(mockSiteInOrg);
-      // Not an entitlement error — e.g. revocation throws unexpectedly.
-      mockDataAccess.SiteEnrollment = { allBySiteId: sandbox.stub().rejects(new Error('db error')) };
+      // Not an EntitlementWaitlistError — revocation throws unexpectedly → should 500.
+      mockDataAccess.SiteEnrollment.allByEntitlementId.rejects(new Error('db error'));
 
       const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
 
@@ -3931,19 +3923,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       // Verify site was reassigned
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
-      // Verify order: site org reassignment happens BEFORE entitlement operations
-      expect(existingSite.save).to.have.been.calledBefore(tierClientCreateForSiteStub);
-      // Verify TierClient.createForSite gets the REFRESHED instance, not the stale one —
-      // this is the core invariant of the post-save re-fetch design.
-      expect(tierClientCreateForSiteStub).to.have.been.calledWith(
-        sinon.match.any,
-        refreshedSiteFullPath,
-        sinon.match.any,
-      );
-      expect(tierClientCreateForSiteStub).to.not.have.been.calledWith(
-        sinon.match.any,
-        existingSite,
-        sinon.match.any,
+      // Verify order: site org reassignment happens BEFORE enrollment creation
+      expect(existingSite.save).to.have.been.calledBefore(mockDataAccess.SiteEnrollment.create);
+      // Enrollment is bound directly to the entitlement ID — org is not re-derived from site
+      expect(mockDataAccess.SiteEnrollment.create).to.have.been.calledWith(
+        sinon.match({ entitlementId: 'ent-1' }),
       );
     });
   });
@@ -4699,7 +4683,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               default: ldCreateFromStub,
             },
             '@adobe/spacecat-shared-tier-client': {
-              default: { createForSite: sandbox.stub() },
+              default: { createForOrg: sandbox.stub() },
             },
             '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
               Config: { toDynamoItem: sandbox.stub() },
