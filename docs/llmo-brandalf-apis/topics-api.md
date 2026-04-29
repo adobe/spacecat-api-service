@@ -31,8 +31,10 @@ Both endpoints share the same filter and pagination parameters:
 | `model` | `platform` | string | `chatgpt` | LLM model (e.g. chatgpt, google-ai-mode, copilot) |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site |
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category UUID or name |
+| `categoryIds` | `category_ids` | string or array | — | Multiple categories (comma-separated or repeated); merged with `categoryId` |
 | `topicIds` | — | string (UUID CSV or array) | — | Filter by topic UUID(s) |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, JP) |
+| `regionCodes` | `region_codes` | string or array | — | Multiple regions; merged with `regionCode` |
 | `origin` | — | string | — | Filter by origin (case-insensitive; e.g. `human`, `ai`) |
 | `page` | — | integer | `0` | Zero-based page index |
 | `pageSize` | — | integer | `20` | Number of items per page |
@@ -95,6 +97,8 @@ Topic summaries are produced in PostgreSQL via **`rpc_brand_presence_topics`** (
 ---
 
 ## 2. Topic Prompts Endpoint
+
+Topic prompts queries `brand_presence_executions` with the same **category** and **region** execution filters as sentiment overview, search, and drill-down routes (when those query params are present). Previously only `regionCode` was applied here; category filters now narrow prompts consistently with the rest of the dashboard.
 
 ### Sample URL
 
