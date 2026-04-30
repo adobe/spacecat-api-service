@@ -1704,21 +1704,15 @@ export const onboardSingleSite = async (
       }
     }
 
-    const CANONICAL_TIMEOUT_MS = 8000;
-    const canonicalStart = Date.now();
-    let resolvedUrl = await Promise.race([
-      resolveCanonicalUrl(baseURL),
-      new Promise((resolve) => { setTimeout(() => resolve(null), CANONICAL_TIMEOUT_MS); }),
-    ]);
-    const canonicalElapsed = Date.now() - canonicalStart;
+    let resolvedUrl = await resolveCanonicalUrl(baseURL);
     if (!resolvedUrl) {
-      log.warn(`Unable to resolve canonical URL for site ${siteID} after ${canonicalElapsed}ms, using base URL: ${baseURL}`);
-      await say(`:warning: Could not resolve canonical URL for ${baseURL} (timed out after ${Math.round(canonicalElapsed / 1000)}s). Using base URL as fallback.`);
+      log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+      await say(`:warning: Could not resolve canonical URL for ${baseURL}. Using base URL as fallback.`);
       resolvedUrl = baseURL;
     }
 
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
-    log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} in ${canonicalElapsed}ms for site ${siteID}`);
+    log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
 
     // Update the fetch configuration only if the pathname/origin is different from the resolved URL
@@ -1742,15 +1736,7 @@ export const onboardSingleSite = async (
 
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
-      // Cap site.save() at 30 s — PostgREST calls have no built-in timeout and can hang
-      // indefinitely on network or DB issues, causing a silent stop in the onboarding flow.
-      const SAVE_TIMEOUT_MS = 30000;
-      await Promise.race([
-        site.save(),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error(`site.save() timed out after ${SAVE_TIMEOUT_MS / 1000}s`)), SAVE_TIMEOUT_MS);
-        }),
-      ]);
+      await site.save();
     } catch (error) {
       log.error(`Failed to save site ${siteID} with updated config:`, error);
       reportLine.errors = error.message;
