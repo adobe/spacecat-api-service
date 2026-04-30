@@ -586,6 +586,7 @@ export default function getRouteHandlers(
     'POST /consumers/:consumerId/revoke': consumersController.revoke,
 
     // Tokens
+    'GET /sites/:siteId/tokens': tokensController.getAll,
     'GET /sites/:siteId/tokens/by-type/:tokenType': tokensController.getByTokenType,
     'GET /sites/:siteId/tokens/:tokenId/grants': tokensController.getGrants,
 

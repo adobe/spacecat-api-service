@@ -56,6 +56,7 @@ describe('Tokens Controller', () => {
         findById: sandbox.stub().resolves(mockSite),
       },
       Token: {
+        allBySiteId: sandbox.stub(),
         findBySiteIdAndTokenType: sandbox.stub().resolves(mockToken),
       },
     };
@@ -105,6 +106,222 @@ describe('Tokens Controller', () => {
 
     it('should throw error when dataAccess is empty object', () => {
       expect(() => TokensController({ dataAccess: {} })).to.throw('Data access required');
+    });
+  });
+
+  describe('getAll', () => {
+    const mockToken2 = {
+      getId: () => '323e4567-e89b-12d3-a456-426614174002',
+      getSiteId: () => siteId,
+      getTokenType: () => 'monthly_suggestion_lcp',
+      getCycle: () => '2025-02',
+      getTotal: () => 50,
+      getUsed: () => 10,
+      getRemaining: () => 40,
+      getCreatedAt: () => '2025-03-01T00:00:00Z',
+      getUpdatedAt: () => '2025-03-10T00:00:00Z',
+    };
+
+    beforeEach(() => {
+      mockDataAccess.Token.allBySiteId.resolves({ data: [mockToken, mockToken2], cursor: null });
+    });
+
+    it('passes only base options to allBySiteId when no filters are applied', async () => {
+      const context = {
+        params: { siteId },
+        data: { limit: 10 },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await tokensController.getAll(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.tokens).to.have.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        { limit: 10, cursor: undefined, returnCursor: true },
+      );
+    });
+
+    it('passes tokenTypes to allBySiteId when provided as comma-separated string', async () => {
+      const context = {
+        params: { siteId },
+        data: { tokenTypes: 'monthly_suggestion_cwv,monthly_suggestion_lcp' },
+        log: { error: sinon.stub() },
+      };
+
+      await tokensController.getAll(context);
+
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        sinon.match({ tokenTypes: ['monthly_suggestion_cwv', 'monthly_suggestion_lcp'] }),
+      );
+    });
+
+    it('passes tokenTypes to allBySiteId when provided as an array', async () => {
+      const context = {
+        params: { siteId },
+        data: { tokenTypes: ['monthly_suggestion_cwv', 'monthly_suggestion_lcp'] },
+        log: { error: sinon.stub() },
+      };
+
+      await tokensController.getAll(context);
+
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        sinon.match({ tokenTypes: ['monthly_suggestion_cwv', 'monthly_suggestion_lcp'] }),
+      );
+    });
+
+    it('passes cycle to allBySiteId when provided', async () => {
+      const context = {
+        params: { siteId },
+        data: { cycle: '2025-02' },
+        log: { error: sinon.stub() },
+      };
+
+      await tokensController.getAll(context);
+
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        sinon.match({ cycle: '2025-02' }),
+      );
+    });
+
+    it('passes both tokenTypes and cycle to allBySiteId when provided together', async () => {
+      const context = {
+        params: { siteId },
+        data: { tokenTypes: 'monthly_suggestion_lcp', cycle: '2025-03' },
+        log: { error: sinon.stub() },
+      };
+
+      await tokensController.getAll(context);
+
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        sinon.match({ tokenTypes: ['monthly_suggestion_lcp'], cycle: '2025-03' }),
+      );
+    });
+
+    it('forwards cursor to allBySiteId and returns it in pagination', async () => {
+      mockDataAccess.Token.allBySiteId.resolves({ data: [mockToken], cursor: 'next-page-token' });
+
+      const context = {
+        params: { siteId },
+        data: { limit: 1, cursor: 'some-cursor' },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await tokensController.getAll(context);
+
+      const body = await result.json();
+      expect(body.pagination).to.deep.equal({ limit: 1, cursor: 'next-page-token', hasMore: true });
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        sinon.match({ limit: 1, cursor: 'some-cursor', returnCursor: true }),
+      );
+    });
+
+    it('returns empty tokens array when no tokens exist for the site', async () => {
+      mockDataAccess.Token.allBySiteId.resolves({ data: [], cursor: null });
+
+      const result = await tokensController.getAll({
+        params: { siteId },
+        data: {},
+        log: { error: sinon.stub() },
+      });
+
+      const body = await result.json();
+      expect(body.tokens).to.deep.equal([]);
+      expect(body.pagination.hasMore).to.be.false;
+    });
+
+    it('caps limit at MAX_LIMIT (500)', async () => {
+      const context = {
+        params: { siteId },
+        data: { limit: 9999 },
+        log: { error: sinon.stub() },
+      };
+
+      await tokensController.getAll(context);
+
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        { limit: 500, cursor: undefined, returnCursor: true },
+      );
+    });
+
+    it('returns 400 for invalid site ID', async () => {
+      const result = await tokensController.getAll({
+        params: { siteId: 'invalid' },
+        data: {},
+      });
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Site ID required');
+    });
+
+    it('returns 400 for non-integer limit', async () => {
+      const result = await tokensController.getAll({
+        params: { siteId },
+        data: { limit: 'abc' },
+      });
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Limit must be a positive integer');
+    });
+
+    it('returns 400 for limit less than 1', async () => {
+      const result = await tokensController.getAll({
+        params: { siteId },
+        data: { limit: 0 },
+      });
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Limit must be a positive integer');
+    });
+
+    it('returns 404 when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await tokensController.getAll({
+        params: { siteId },
+        data: {},
+        log: { error: sinon.stub() },
+      });
+
+      expect(result.status).to.equal(404);
+      expect((await result.json()).message).to.equal('Site not found');
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const result = await tokensController.getAll({
+        params: { siteId },
+        data: {},
+        log: { error: sinon.stub() },
+      });
+
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.equal('Access denied to this site');
+    });
+
+    it('returns 500 on database failure', async () => {
+      mockDataAccess.Token.allBySiteId.rejects(new Error('DB down'));
+
+      const context = {
+        params: { siteId },
+        data: {},
+        log: { error: sinon.stub() },
+      };
+
+      const result = await tokensController.getAll(context);
+
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message).to.equal('DB down');
+      expect(context.log.error).to.have.been.calledWith(
+        `Error getting tokens for site ${siteId}: DB down`,
+      );
     });
   });
 

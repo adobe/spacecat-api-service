@@ -557,6 +557,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/sentiment/config': 'sentimentTopic:read',
 
   // Tokens
+  'GET /sites/:siteId/tokens': 'token:read',
   'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
   'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
 
