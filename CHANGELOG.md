@@ -1,3 +1,24 @@
+## [1.462.1](https://github.com/adobe/spacecat-api-service/compare/v1.462.0...v1.462.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* restore uuid PK in v2 prompts response (LLMO-4625) ([#2294](https://github.com/adobe/spacecat-api-service/issues/2294)) ([6dcdf0d](https://github.com/adobe/spacecat-api-service/commit/6dcdf0db9763ca29b81d7217ffd3c1839e4a2006)), closes [#2199](https://github.com/adobe/spacecat-api-service/issues/2199) [#2199](https://github.com/adobe/spacecat-api-service/issues/2199) [#1433](https://github.com/adobe/spacecat-api-service/issues/1433) [#1444](https://github.com/adobe/spacecat-api-service/issues/1444) [#1447](https://github.com/adobe/spacecat-api-service/issues/1447) [#1453](https://github.com/adobe/spacecat-api-service/issues/1453) [#1463](https://github.com/adobe/spacecat-api-service/issues/1463) [#1467](https://github.com/adobe/spacecat-api-service/issues/1467) [#2199](https://github.com/adobe/spacecat-api-service/issues/2199)
+
+# [1.462.0](https://github.com/adobe/spacecat-api-service/compare/v1.461.0...v1.462.0) (2026-04-30)
+
+
+### Features
+
+* referral traffic endpoints fetching data from Postgres | LLMO-4261 ([#2242](https://github.com/adobe/spacecat-api-service/issues/2242)) ([f06e8f7](https://github.com/adobe/spacecat-api-service/commit/f06e8f7d942b3da6350a677ce5c7883a1c146105))
+
+# [1.461.0](https://github.com/adobe/spacecat-api-service/compare/v1.460.0...v1.461.0) (2026-04-30)
+
+
+### Features
+
+* PLG bind aso entitlement to ims org ([#2287](https://github.com/adobe/spacecat-api-service/issues/2287)) ([8bbad55](https://github.com/adobe/spacecat-api-service/commit/8bbad558784673f292effafc97ff07b7754b697e))
+
 # [1.460.0](https://github.com/adobe/spacecat-api-service/compare/v1.459.0...v1.460.0) (2026-04-30)
 
 

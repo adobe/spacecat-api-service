@@ -54,6 +54,17 @@ import {
   createAgenticTrafficUrlBrandPresenceHandler,
   createAgenticTrafficHasDataHandler,
 } from './llmo-agentic-traffic.js';
+import {
+  createReferralTrafficFilterDimensionsHandler,
+  createReferralTrafficKpisHandler,
+  createReferralTrafficTrendHandler,
+  createReferralTrafficByPlatformHandler,
+  createReferralTrafficByRegionHandler,
+  createReferralTrafficByPageIntentHandler,
+  createReferralTrafficByUrlHandler,
+  createReferralTrafficBusinessImpactHandler,
+  createReferralTrafficWeeksHandler,
+} from './llmo-referral-traffic.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -189,6 +200,26 @@ function LlmoMysticatController(ctx) {
   );
   const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
 
+  const getReferralTrafficFilterDimensions = createReferralTrafficFilterDimensionsHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficKpis = createReferralTrafficKpisHandler(getSiteAndValidateAccess);
+  const getReferralTrafficTrend = createReferralTrafficTrendHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByPlatform = createReferralTrafficByPlatformHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByRegion = createReferralTrafficByRegionHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByPageIntent = createReferralTrafficByPageIntentHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByUrl = createReferralTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getReferralTrafficBusinessImpact = createReferralTrafficBusinessImpactHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
+
   return {
     getFilterDimensions,
     getBrandPresenceWeeks,
@@ -228,6 +259,15 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
     getAgenticTrafficHasData,
+    getReferralTrafficFilterDimensions,
+    getReferralTrafficKpis,
+    getReferralTrafficTrend,
+    getReferralTrafficByPlatform,
+    getReferralTrafficByRegion,
+    getReferralTrafficByPageIntent,
+    getReferralTrafficByUrl,
+    getReferralTrafficBusinessImpact,
+    getReferralTrafficWeeks,
   };
 }
 
