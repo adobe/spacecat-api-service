@@ -49,6 +49,24 @@ import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
+import {
+  AEM_CS_AUTHOR_URL_PATTERN,
+  EDS_HOST_PATTERN,
+  isSafeDomain,
+  isValidHostname,
+} from './plg-onboarding/validation.js';
+import {
+  getReviewerIdentity,
+  isInternalOrg,
+  isInternalOrgDemoSite,
+} from './plg-onboarding/internal-org.js';
+import {
+  DOMAIN_ALREADY_ASSIGNED,
+  DOMAIN_ALREADY_ONBOARDED_IN_ORG,
+  REVIEW_REASONS,
+  deriveCheckKey,
+} from './plg-onboarding/notifications.js';
+import { hasActiveSuggestions } from './plg-onboarding/displacement.js';
 
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
@@ -62,62 +80,12 @@ const LD_AUTO_FIX_FLAGS = [
   'FF_broken-backlinks-auto-fix',
 ];
 
-const REVIEW_REASONS = {
-  DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
-  AEM_SITE_CHECK: 'AEM_SITE_CHECK',
-  DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
-};
-
-const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
-const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
-
 class EntitlementWaitlistError extends Error {
   constructor(message) {
     super(message);
     this.name = 'EntitlementWaitlistError';
   }
 }
-
-/**
- * Derives the review check key from the onboarding record's current state.
- * @param {object} onboarding - The PlgOnboarding record.
- * @returns {string|null} The check key enum value, or null if unknown.
- */
-function deriveCheckKey(onboarding) {
-  /* c8 ignore next */
-  const waitlistReason = onboarding.getWaitlistReason() || '';
-  if (waitlistReason.includes(DOMAIN_ALREADY_ONBOARDED_IN_ORG)) {
-    return REVIEW_REASONS.DOMAIN_ALREADY_ONBOARDED_IN_ORG;
-  }
-  if (waitlistReason.includes('is not an AEM site')) {
-    return REVIEW_REASONS.AEM_SITE_CHECK;
-  }
-  if (waitlistReason.includes(DOMAIN_ALREADY_ASSIGNED)) {
-    return REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED;
-  }
-
-  return null;
-}
-
-function parseCommaSeparatedEnvList(value) {
-  return (value || '').split(',').map((id) => id.trim()).filter(Boolean);
-}
-
-function isInternalOrg(orgId, env) {
-  return parseCommaSeparatedEnvList(env.ASO_PLG_EXCLUDED_ORGS).includes(orgId);
-}
-
-/**
- * Site IDs that must not use the internal-org waitlist bypass, even when the site lives in an
- * org listed in ASO_PLG_EXCLUDED_ORGS (e.g. customer demo sites in a shared internal org).
- * Comma-separated UUIDs in env ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS.
- */
-function isInternalOrgDemoSite(siteId, env) {
-  return parseCommaSeparatedEnvList(env.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS).includes(siteId);
-}
-
-// EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
-const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
 
 const PLG_STATUS_NOTIFICATION_CONFIG = {
   [STATUSES.ONBOARDED]: { emoji: ':white_check_mark:', label: 'Onboarded' },
@@ -130,9 +98,6 @@ const PLG_STATUS_NOTIFICATION_CONFIG = {
 /**
  * Posts a PLG onboarding status notification to the configured ESE Slack channel.
  * Fires on terminal/actionable status transitions. Fails gracefully.
- * @param {object} onboarding - The PlgOnboarding record after save.
- * @param {object} context - The request context containing env and log.
- * @returns {Promise<void>}
  */
 async function postPlgOnboardingNotification(onboarding, context) {
   const { env, log } = context;
@@ -204,49 +169,6 @@ async function postPlgOnboardingNotification(onboarding, context) {
   } catch (slackError) {
     log.error(`Failed to post PLG onboarding notification to Slack: ${slackError.message}`);
   }
-}
-
-// AEM CS author URL pattern: https://author-p{programId}-e{environmentId}[-suffix].adobeaemcloud.com
-const AEM_CS_AUTHOR_URL_PATTERN = /^https?:\/\/author-p(\d+)-e(\d+)(?:-[^.]+)?\.adobeaemcloud\.(?:com|net)/i;
-
-// RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
-const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
-
-/**
- * Validates that a domain is a syntactically valid hostname (RFC 1123).
- * @param {string} domain - The domain to validate.
- * @returns {boolean} true if valid hostname, false otherwise.
- */
-function isValidHostname(domain) {
-  return HOSTNAME_RE.test(domain);
-}
-
-/**
- * Validates that a domain is not a private/internal address to prevent SSRF.
- * @param {string} domain - The domain to validate.
- * @returns {boolean} true if safe, false if potentially dangerous.
- */
-function isSafeDomain(domain) {
-  const blocked = [
-    /^localhost$/i,
-    /^127\./,
-    /^10\./,
-    /^172\.(1[6-9]|2\d|3[01])\./,
-    /^192\.168\./,
-    /^169\.254\./,
-    /^0\./,
-    /^\[::1\]/,
-    /\.local$/i,
-    /\.internal$/i,
-    /\.private\./i,
-  ];
-  return !blocked.some((pattern) => pattern.test(domain));
-}
-
-function getReviewerIdentity(context) {
-  const authInfo = context.attributes?.authInfo;
-  const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
-  return hasText(profile?.email) ? profile.email : 'admin';
 }
 
 async function reassignSiteOrganization(site, organizationId) {
@@ -532,52 +454,6 @@ async function updateLaunchDarklyFlags(site, organization, context) {
       log.error(`Failed to update LaunchDarkly flag ${LD_AUTO_FIX_FLAGS[i]}: ${result.reason?.message}`);
     }
   });
-}
-
-// The PLG opportunity types that are relevant for the displacement check.
-// Must stay in sync with LD_AUTO_FIX_FLAGS above, which enables auto-fix for the same types.
-const PLG_OPPORTUNITY_TYPES = ['cwv', 'alt-text', 'broken-backlinks'];
-
-/**
- * Returns true if the given site has suggestions that should block displacement.
- * Blocks displacement if any PLG opportunity (cwv, alt-text, broken-backlinks) has
- * suggestions in any status except PENDING_VALIDATION or OUTDATED — meaning the customer
- * has engaged with the suggestions (NEW, IN_PROGRESS, FIXED, SKIPPED, etc.).
- * Returns true (conservative) on any lookup failure so we never accidentally displace
- * a site that may still have active work.
- * @param {string} siteId - The site ID to check.
- * @param {object} dataAccess - Data access layer.
- * @param {object} log - Logger.
- * @returns {Promise<boolean>}
- */
-async function hasActiveSuggestions(siteId, dataAccess, log) {
-  const { Opportunity, Suggestion } = dataAccess;
-  try {
-    const opportunities = await Opportunity.allBySiteId(siteId);
-    const plgOpportunities = opportunities.filter(
-      (o) => PLG_OPPORTUNITY_TYPES.includes(o.getType()),
-    );
-
-    if (plgOpportunities.length === 0) {
-      return false;
-    }
-
-    const suggestionLists = await Promise.all(
-      plgOpportunities.map((o) => Suggestion.allByOpportunityId(o.getId())),
-    );
-
-    // Block displacement if any PLG opportunity has suggestions the customer engaged with.
-    // PENDING_VALIDATION and OUTDATED are excluded — they indicate stale/unconfirmed work.
-    const IGNORED_STATUSES = new Set(['PENDING_VALIDATION', 'OUTDATED']);
-    return suggestionLists.some(
-      (suggestions) => suggestions.some(
-        (s) => !IGNORED_STATUSES.has(s.getStatus()),
-      ),
-    );
-  } catch (error) {
-    log.warn(`Failed to check PLG suggestions for site ${siteId}: ${error.message}`);
-    return true; // conservative: do not displace if check fails
-  }
 }
 
 async function createOrFindProject(baseURL, organizationId, context) {
