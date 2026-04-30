@@ -385,6 +385,7 @@ export function createAgenticTrafficByUserAgentHandler(getSiteAndValidateAccess)
           pageType: row.page_type || '',
           agentType: row.agent_type || '',
           uniqueAgents: Number(row.unique_agents ?? 0),
+          uniqueAgentNames: Array.isArray(row.unique_agent_names) ? row.unique_agent_names : [],
           totalHits: Number(row.total_hits ?? 0),
         })));
       },
@@ -448,6 +449,7 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
             urlPath: row.url_path || '',
             totalHits: Number(row.total_hits ?? 0),
             uniqueAgents: Number(row.unique_agents ?? 0),
+            uniqueAgentNames: Array.isArray(row.unique_agent_names) ? row.unique_agent_names : [],
             topAgent: row.top_agent || '',
             topAgentType: row.top_agent_type || '',
             responseCodes: Array.isArray(row.response_codes) ? row.response_codes.map(Number) : [],
@@ -606,6 +608,41 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
         });
 
         return cachedOk({ weeks });
+      },
+    );
+  };
+}
+
+/**
+ * GET /sites/:siteId/agentic-traffic/has-data
+ *
+ * Fast existence check — returns { hasData: boolean } indicating whether any
+ * agentic traffic records exist for the site. Used by the PG dashboard to
+ * decide whether to show the no-data overlay without waiting for all parallel
+ * queries to settle.
+ *
+ * Runs a single PostgREST table query with limit(1) — no RPC required.
+ */
+export function createAgenticTrafficHasDataHandler(getSiteAndValidateAccess) {
+  return async function getAgenticTrafficHasData(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'has-data',
+      async (ctx, client, siteId) => {
+        const { data, error } = await client
+          .from('agentic_traffic')
+          .select('traffic_date')
+          .eq('site_id', siteId)
+          .limit(1);
+
+        if (error) {
+          ctx.log.error(`Agentic traffic has-data PostgREST error: ${error.message}`);
+          return internalServerError('Failed to check agentic traffic data');
+        }
+
+        /* c8 ignore next */
+        return cachedOk({ hasData: (data || []).length > 0 });
       },
     );
   };

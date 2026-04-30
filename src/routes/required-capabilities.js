@@ -101,6 +101,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/filter-dimensions',
   'GET /sites/:siteId/agentic-traffic/weeks',
   'GET /sites/:siteId/agentic-traffic/movers',
+  'GET /sites/:siteId/agentic-traffic/has-data',
 
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
@@ -266,6 +267,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',

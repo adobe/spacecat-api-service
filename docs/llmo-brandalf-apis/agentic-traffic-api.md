@@ -228,5 +228,6 @@ All site-scoped RPCs receive these parameters:
 - [Agentic Traffic by URL API](./agentic-traffic-by-url-api.md) — Per-URL breakdown, user-agent breakdown, URL movers
 - [Agentic Traffic Filter Dimensions API](./agentic-traffic-filter-dimensions-api.md) — Available filter values for the UI
 - [Agentic Traffic Weeks API](./agentic-traffic-weeks-api.md) — ISO weeks with data, for the date picker
+- [Agentic Traffic Has-Data API](./agentic-traffic-has-data-api.md) — Fast existence check for the no-data onboarding overlay
 - [Agentic Traffic URL Brand Presence API](./agentic-traffic-url-brand-presence-api.md) — Brand presence citation detail for a specific URL
 - [Agentic Traffic Global API](./agentic-traffic-global-api.md) — Cross-site global weekly hit totals
