@@ -804,78 +804,19 @@ describe('brands-storage', () => {
     });
 
     // ---------------------------------------------------------------------
-    // LLMO-4621 Pattern A regression coverage — the primary brand_sites row
-    // mirroring brands.site_id must be asserted unconditionally whenever
-    // brands.site_id is set, independent of whether the caller passed urls.
+    // LLMO-4621 Pattern A regression coverage — syncBrandSites must not wipe
+    // the primary brand_sites row that mirrors brands.site_id. The primary
+    // row's existence invariant is enforced DB-side by the
+    // brands_ensure_primary_brand_site trigger (mysticat-data-service); the
+    // non-destruction half of the invariant lives here in app code.
     // ---------------------------------------------------------------------
-
-    it('asserts primary brand_sites row when baseSiteId is set and urls is undefined', async () => {
-      const fullBrandRow = makeBrandRow({ name: 'Test', site_id: 'site-uuid-1' });
-      const postgrestClient = createTableMockClient({
-        brands: [
-          // existing brand lookup
-          { data: null, error: null },
-          // upsert returns id + site_id (extended select for ensurePrimaryBrandSite)
-          { data: { id: BRAND_ID, name: 'Test', site_id: 'site-uuid-1' }, error: null },
-          // getBrandById final read
-          { data: fullBrandRow, error: null },
-        ],
-        // ensurePrimaryBrandSite upsert
-        brand_sites: { data: null, error: null },
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', baseSiteId: 'site-uuid-1' },
-        postgrestClient,
-      });
-
-      // brand_sites was hit exactly once — by ensurePrimaryBrandSite. No
-      // syncBrandSites/syncBrandUrls path runs because brand.urls is undefined.
-      expect(postgrestClient.from.calledWith('brand_sites')).to.equal(true);
-    });
-
-    it('asserts primary brand_sites row when baseSiteId is set and urls is empty array', async () => {
-      // Pattern A regression case: pre-fix, a downstream caller passing
-      // urls=[] tripped the destructive DELETE in syncBrandSites without
-      // a re-INSERT, leaving the active root brand with zero brand_sites
-      // rows (and downstream prompt-gen attribution silently broken).
-      const fullBrandRow = makeBrandRow({ name: 'Test', site_id: 'site-uuid-1' });
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test', site_id: 'site-uuid-1' }, error: null },
-          // syncBrandSites step 1: SELECT brands.site_id by brand id
-          { data: { site_id: 'site-uuid-1' }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-        brand_sites: [
-          // 1. ensurePrimaryBrandSite upsert
-          { data: null, error: null },
-          // 2. syncBrandSites step 4 SELECT existing (only the primary row)
-          { data: [{ id: 'bs-row-primary', site_id: 'site-uuid-1' }], error: null },
-        ],
-        brand_urls: { data: null, error: null },
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', baseSiteId: 'site-uuid-1', urls: [] },
-        postgrestClient,
-      });
-
-      // ensurePrimaryBrandSite ran. The orphan-cleanup DELETE (3rd
-      // brand_sites call) is NOT issued because the only existing row is
-      // the protected primary — so the primary row is preserved end-to-end.
-      expect(postgrestClient.from.calledWith('brand_sites')).to.equal(true);
-    });
 
     it('preserves primary brand_sites row in syncBrandSites when caller urls do not match the primary site', async () => {
       const fullBrandRow = makeBrandRow({ name: 'Test', site_id: 'primary-site-id' });
       const postgrestClient = createTableMockClient({
         brands: [
           { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test', site_id: 'primary-site-id' }, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
           // syncBrandSites step 1: brand row resolves the primary site_id
           { data: { site_id: 'primary-site-id' }, error: null },
           { data: fullBrandRow, error: null },
@@ -883,11 +824,9 @@ describe('brands-storage', () => {
         // syncBrandSites step 3: caller's URL resolves to a DIFFERENT site
         sites: { data: [{ id: 'citation-site-id', base_url: 'https://citation.com' }], error: null },
         brand_sites: [
-          // 1. ensurePrimaryBrandSite upsert
+          // 1. syncBrandSites step 3 desired-set upsert
           { data: null, error: null },
-          // 2. syncBrandSites step 3 desired-set upsert
-          { data: null, error: null },
-          // 3. syncBrandSites step 4 SELECT existing returns BOTH primary
+          // 2. syncBrandSites step 4 SELECT existing returns BOTH primary
           //    (must be protected) and the new citation row that just got
           //    upserted. No orphans → step 5 DELETE is not issued.
           {
@@ -911,51 +850,11 @@ describe('brands-storage', () => {
         postgrestClient,
       });
 
-      // No assertion on the orphan-DELETE not firing — the absence of a 4th
+      // No assertion on the orphan-DELETE not firing — the absence of a 3rd
       // brand_sites mock entry would cause the test to error out if the
       // code did issue a DELETE here. Test passes ⇒ no orphan DELETE was
       // issued, which is the invariant we want.
       expect(postgrestClient.from.calledWith('brand_sites')).to.equal(true);
-    });
-
-    it('throws when ensurePrimaryBrandSite upsert fails', async () => {
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test', site_id: 'site-uuid-1' }, error: null },
-        ],
-        brand_sites: { data: null, error: { message: 'primary upsert failed' } },
-      });
-
-      await expect(upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', baseSiteId: 'site-uuid-1' },
-        postgrestClient,
-      })).to.be.rejectedWith('Failed to ensure primary brand_sites row: primary upsert failed');
-    });
-
-    it('does not assert primary brand_sites row when brands.site_id is null (pending brand)', async () => {
-      // Pending Brandalf siblings legitimately have site_id=NULL; the helper
-      // must no-op rather than insert a (brand_id, NULL site_id) row that
-      // would violate brand_sites.site_id NOT NULL.
-      const fullBrandRow = makeBrandRow({ name: 'Pending', status: 'pending', site_id: null });
-      const postgrestClient = createTableMockClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Pending', site_id: null }, error: null },
-          { data: fullBrandRow, error: null },
-        ],
-      });
-
-      const result = await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Pending', status: 'pending' },
-        postgrestClient,
-      });
-
-      expect(result).to.include({ name: 'Pending', status: 'pending' });
-      // brand_sites was never hit (no mock supplied, no error raised).
-      expect(postgrestClient.from.calledWith('brand_sites')).to.equal(false);
     });
 
     it('falls back to base URL when URL string is invalid in syncBrandSites', async () => {

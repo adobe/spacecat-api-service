@@ -173,46 +173,6 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
 }
 
 /**
- * Asserts the primary brand_sites row mirroring brands.site_id exists for a brand.
- *
- * The primary citation row links a brand to its canonical site via
- * (brand_id, site_id=brands.site_id, paths=['/'], type='base'). This helper
- * is idempotent (uses ON CONFLICT DO NOTHING) and is called unconditionally
- * after every upsertBrand / updateBrand whose resulting brand has a site_id.
- *
- * Closes the LLMO-4621 Pattern A bleed where a downstream caller passing
- * `urls=[]` to upsertBrand could trip the destructive DELETE in
- * syncBrandSites without a matching INSERT, leaving the active root brand
- * with zero brand_sites rows.
- *
- * No-op when primarySiteId is unset (e.g. pending Brandalf siblings whose
- * brand entity legitimately has site_id=NULL).
- */
-async function ensurePrimaryBrandSite({
-  organizationId, brandId, primarySiteId, postgrestClient, updatedBy,
-}) {
-  if (!hasText(primarySiteId)) {
-    return;
-  }
-  const { error } = await postgrestClient
-    .from('brand_sites')
-    .upsert(
-      {
-        organization_id: organizationId,
-        brand_id: brandId,
-        site_id: primarySiteId,
-        paths: ['/'],
-        type: 'base',
-        updated_by: updatedBy,
-      },
-      { onConflict: 'brand_id,site_id', ignoreDuplicates: true },
-    );
-  if (error) {
-    throw new Error(`Failed to ensure primary brand_sites row: ${error.message}`);
-  }
-}
-
-/**
  * Reconciles brand_sites for a brand against a caller-supplied URL list.
  *
  * Non-destructive to the primary citation row: rows whose site_id matches
@@ -560,7 +520,7 @@ export async function upsertBrand({
   const { data: upserted, error } = await postgrestClient
     .from('brands')
     .upsert(row, { onConflict: 'organization_id,name' })
-    .select('id, name, site_id')
+    .select('id, name')
     .single();
 
   if (error) {
@@ -573,7 +533,6 @@ export async function upsertBrand({
   }
 
   const brandId = upserted.id;
-  const primarySiteId = upserted.site_id;
 
   await Promise.all([
     syncAliases(brandId, organizationId, brand.brandAliases, postgrestClient, updatedBy),
@@ -582,14 +541,11 @@ export async function upsertBrand({
     syncEarnedSources(brandId, organizationId, brand.earnedContent, postgrestClient, updatedBy),
   ]);
 
-  // Always assert the primary brand_sites row when brands.site_id is set —
-  // independent of whether the caller passed brand.urls. Closes the
-  // LLMO-4621 Pattern A bleed (downstream caller passing urls=[] could
-  // wipe the primary citation row when syncBrandSites was destructive).
-  await ensurePrimaryBrandSite({
-    organizationId, brandId, primarySiteId, postgrestClient, updatedBy,
-  });
-
+  // The primary brand_sites row mirroring brands.site_id is asserted by a
+  // DB-side AFTER INSERT OR UPDATE OF site_id ON brands trigger
+  // (brands_ensure_primary_brand_site, mysticat-data-service). The
+  // application-level half of the LLMO-4621 invariant — preventing
+  // syncBrandSites from wiping the primary row — lives below.
   if (brand.urls !== undefined) {
     await Promise.all([
       syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
@@ -669,7 +625,7 @@ export async function updateBrand({
     .update(patch)
     .eq('organization_id', organizationId)
     .eq('id', brandId)
-    .select('id, site_id')
+    .select('id')
     .maybeSingle();
 
   if (error) {
@@ -709,18 +665,6 @@ export async function updateBrand({
   if (childSyncs.length > 0) {
     await Promise.all(childSyncs);
   }
-
-  // Re-assert the primary brand_sites row when brands.site_id is set. Cheap
-  // ON CONFLICT DO NOTHING upsert so update calls that don't touch site_id
-  // are no-ops. Catches the NULL→set transition when an operator finally
-  // assigns a base site to a previously-pending brand.
-  await ensurePrimaryBrandSite({
-    organizationId,
-    brandId,
-    primarySiteId: data.site_id,
-    postgrestClient,
-    updatedBy,
-  });
 
   if (updates.urls !== undefined) {
     await Promise.all([
