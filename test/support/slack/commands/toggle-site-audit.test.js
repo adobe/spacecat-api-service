@@ -299,7 +299,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(48); // 24 audits in demo profile × 2 sites
+        .to.equal(46); // 23 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -318,7 +318,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(48); // 24 audits in demo profile × 2 sites
+        .to.equal(46); // 23 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });

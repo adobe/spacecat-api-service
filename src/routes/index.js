@@ -445,6 +445,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
     'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
+    'GET /sites/:siteId/agentic-traffic/has-data': llmoMysticatController.getAgenticTrafficHasData,
 
     // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
     'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
@@ -479,6 +480,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
     'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,

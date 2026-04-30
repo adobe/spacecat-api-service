@@ -128,6 +128,12 @@ DeliveryConfig:
       description: The site ID
       type: string
       example: '1234'
+    contentSourcePath:
+      description: >-
+        AEM content root path for a site. Corresponds to `/content/<site-name>` in the AEM repository.
+        Used to disambiguate multiple sites that share the same Cloud Manager program and environment.
+      type: string
+      example: '/content/aboutus'
   additionalProperties: true
 AuditType:
   type: string
