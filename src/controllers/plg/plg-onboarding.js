@@ -477,6 +477,191 @@ async function createOrFindProject(baseURL, organizationId, context) {
   return newProject;
 }
 
+// PLG sites get this fixed set of config handlers turned on (summit-plg notifications +
+// per-opportunity auto-suggest/auto-fix). Failure is logged and swallowed — onboarding
+// continues even if the configuration table is briefly unwritable.
+const PLG_CONFIG_HANDLERS = [
+  'summit-plg',
+  'broken-backlinks-auto-suggest',
+  'broken-backlinks-auto-fix',
+  'alt-text-auto-fix',
+  'alt-text-auto-suggest-mystique',
+  'alt-text',
+  'cwv-auto-fix',
+  'cwv-auto-suggest',
+  'cwv',
+];
+
+async function enrollPlgConfigHandlers(site, context) {
+  const { dataAccess, log } = context;
+  try {
+    const { Configuration } = dataAccess;
+    const configuration = await Configuration.findLatest();
+    PLG_CONFIG_HANDLERS.forEach((handler) => {
+      configuration.enableHandlerForSite(handler, site);
+    });
+    await configuration.save();
+    log.info(`Enrolled site ${site.getId()} in config handlers: ${PLG_CONFIG_HANDLERS.join(', ')}`);
+  } catch (error) {
+    log.warn(`Failed to enroll site in config handlers: ${error.message}`);
+  }
+}
+
+/**
+ * Final-stage error handler for performAsoPlgOnboarding. Persists terminal state on the
+ * onboarding record (WAITLISTED for entitlement failures, ERROR for everything else),
+ * notifies, and either returns the record (waitlist case) or rethrows the original error.
+ *
+ * @returns {Promise<object>} the onboarding record (only on the EntitlementWaitlistError branch).
+ * @throws the original error in all other cases.
+ */
+/* eslint-disable no-param-reassign */
+async function handleTerminalError(error, { onboarding, steps, updatedBy }, context) {
+  const { log } = context;
+
+  if (error instanceof EntitlementWaitlistError) {
+    steps.entitlementFailed = true;
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(error.message);
+    onboarding.setSteps(steps);
+    if (updatedBy) {
+      onboarding.setUpdatedBy(updatedBy);
+    }
+    try {
+      await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
+    } catch (saveError) {
+      log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+    }
+    return onboarding;
+  }
+
+  onboarding.setStatus(STATUSES.ERROR);
+  onboarding.setSteps(steps);
+  onboarding.setError({
+    message: (error.clientError || error.conflict)
+      ? error.message : 'An internal error occurred',
+  });
+  if (updatedBy) {
+    onboarding.setUpdatedBy(updatedBy);
+  }
+  try {
+    await onboarding.save();
+    await postPlgOnboardingNotification(onboarding, context);
+  } catch (saveError) {
+    log.error(`Failed to persist error state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+  }
+  throw error;
+}
+/* eslint-enable no-param-reassign */
+
+/**
+ * Sets the site's delivery type and author URL.
+ *
+ * Two paths: when an ESE bypass passes a preset delivery type (AEM_CS/AEM_EDGE/AEM_AMS/other),
+ * apply that directly; otherwise auto-resolve from RUM. Mutates `site` and `steps` in place.
+ *
+ * @returns {Promise<string|null>} rumHost (only set on the auto path), or null.
+ */
+/* eslint-disable no-param-reassign */
+async function applyDeliveryConfig({
+  site, presetDeliveryType, presetAuthorUrl, presetProgramId, imsOrgId, steps,
+}, context) {
+  const { log } = context;
+
+  if (!presetDeliveryType) {
+    try {
+      const resolvedConfig = await autoResolveAuthorUrl(site, context);
+      const rumHost = resolvedConfig?.host || null;
+
+      // Only update deliveryConfig if authorURL is not already set
+      const existingDeliveryConfig = site.getDeliveryConfig() || {};
+      if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+        site.setDeliveryConfig({
+          ...existingDeliveryConfig,
+          authorURL: resolvedConfig.authorURL,
+          programId: resolvedConfig.programId,
+          environmentId: resolvedConfig.environmentId,
+          preferContentApi: true,
+          enableDAMAltTextUpdate: true,
+          imsOrgId,
+        });
+        log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
+        steps.authorUrlResolved = true;
+      }
+      return rumHost;
+    } catch (error) {
+      log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
+      return null;
+    }
+  }
+
+  // AEM_SITE_CHECK bypass: ESE provided delivery type and optional author URL
+  /* c8 ignore next */
+  const existingDeliveryConfig = site.getDeliveryConfig() || {};
+  site.setDeliveryType(presetDeliveryType);
+
+  if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_CS && presetAuthorUrl) {
+    // Derive programId and environmentId from AEM CS author URL
+    const csMatch = presetAuthorUrl.match(AEM_CS_AUTHOR_URL_PATTERN);
+    /* c8 ignore next */
+    const [, programId, environmentId] = csMatch || [];
+    site.setDeliveryConfig({
+      ...existingDeliveryConfig,
+      authorURL: presetAuthorUrl,
+      ...(programId && {
+        programId, environmentId, preferContentApi: true, enableDAMAltTextUpdate: true,
+      }),
+      imsOrgId,
+    });
+    log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
+    steps.authorUrlResolved = true;
+  } else if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE && presetAuthorUrl) {
+    const edsMatch = presetAuthorUrl.match(EDS_HOST_PATTERN);
+    if (edsMatch) {
+      const [, ref, repo, owner, tld] = edsMatch;
+      site.setHlxConfig({
+        hlxVersion: 5,
+        rso: {
+          ref, site: repo, owner, tld,
+        },
+      });
+      log.info(`Set EDS hlxConfig from preset author URL: ${presetAuthorUrl}`);
+      steps.hlxConfigSet = true;
+    }
+    steps.authorUrlResolved = true;
+  } else if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_AMS) {
+    /* c8 ignore next — nullish coalescing: bypass always sends programId for AEM_AMS */
+    const programIdStr = String(presetProgramId ?? '').trim();
+    const nextAmsDelivery = { ...existingDeliveryConfig, imsOrgId };
+    if (presetAuthorUrl) {
+      nextAmsDelivery.authorURL = presetAuthorUrl;
+    }
+    if (programIdStr !== '') {
+      nextAmsDelivery.programId = programIdStr;
+    }
+    site.setDeliveryConfig(nextAmsDelivery);
+    if (presetAuthorUrl) {
+      steps.authorUrlResolved = true;
+    }
+    const amsLogParts = ['Set AEM AMS delivery config'];
+    if (presetAuthorUrl) {
+      amsLogParts.push(`author URL: ${presetAuthorUrl}`);
+    }
+    if (programIdStr !== '') {
+      amsLogParts.push(`programId: ${programIdStr}`);
+    }
+    log.info(amsLogParts.join(', '));
+  } else if (presetAuthorUrl) {
+    // Other delivery types: set author URL as-is
+    site.setDeliveryConfig({ ...existingDeliveryConfig, authorURL: presetAuthorUrl, imsOrgId });
+    log.info(`Set author URL from preset: ${presetAuthorUrl}`);
+    steps.authorUrlResolved = true;
+  }
+  return null;
+}
+/* eslint-enable no-param-reassign */
+
 /**
  * Performs ASO PLG onboarding for a given domain and IMS org.
  * Creates and maintains a PlgOnboarding record to track the lifecycle.
@@ -914,94 +1099,9 @@ async function performAsoPlgOnboarding({
     }
 
     // Step 5c: Set delivery type and author URL
-    let rumHost = null;
-    if (presetDeliveryType) {
-      // AEM_SITE_CHECK bypass: ESE provided delivery type and optional author URL
-      /* c8 ignore next */
-      const existingDeliveryConfig = site.getDeliveryConfig() || {};
-      site.setDeliveryType(presetDeliveryType);
-
-      if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_CS && presetAuthorUrl) {
-        // Derive programId and environmentId from AEM CS author URL
-        const csMatch = presetAuthorUrl.match(AEM_CS_AUTHOR_URL_PATTERN);
-        /* c8 ignore next */
-        const [, programId, environmentId] = csMatch || [];
-        site.setDeliveryConfig({
-          ...existingDeliveryConfig,
-          authorURL: presetAuthorUrl,
-          ...(programId && {
-            programId, environmentId, preferContentApi: true, enableDAMAltTextUpdate: true,
-          }),
-          imsOrgId,
-        });
-        log.info(`Set AEM CS delivery config from preset author URL: ${presetAuthorUrl}`);
-        steps.authorUrlResolved = true;
-      } else if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE && presetAuthorUrl) {
-        const edsMatch = presetAuthorUrl.match(EDS_HOST_PATTERN);
-        if (edsMatch) {
-          const [, ref, repo, owner, tld] = edsMatch;
-          site.setHlxConfig({
-            hlxVersion: 5,
-            rso: {
-              ref, site: repo, owner, tld,
-            },
-          });
-          log.info(`Set EDS hlxConfig from preset author URL: ${presetAuthorUrl}`);
-          steps.hlxConfigSet = true;
-        }
-        steps.authorUrlResolved = true;
-      } else if (presetDeliveryType === SiteModel.DELIVERY_TYPES.AEM_AMS) {
-        /* c8 ignore next — nullish coalescing: bypass always sends programId for AEM_AMS */
-        const programIdStr = String(presetProgramId ?? '').trim();
-        const nextAmsDelivery = { ...existingDeliveryConfig, imsOrgId };
-        if (presetAuthorUrl) {
-          nextAmsDelivery.authorURL = presetAuthorUrl;
-        }
-        if (programIdStr !== '') {
-          nextAmsDelivery.programId = programIdStr;
-        }
-        site.setDeliveryConfig(nextAmsDelivery);
-        if (presetAuthorUrl) {
-          steps.authorUrlResolved = true;
-        }
-        const amsLogParts = ['Set AEM AMS delivery config'];
-        if (presetAuthorUrl) {
-          amsLogParts.push(`author URL: ${presetAuthorUrl}`);
-        }
-        if (programIdStr !== '') {
-          amsLogParts.push(`programId: ${programIdStr}`);
-        }
-        log.info(amsLogParts.join(', '));
-      } else if (presetAuthorUrl) {
-        // Other delivery types: set author URL as-is
-        site.setDeliveryConfig({ ...existingDeliveryConfig, authorURL: presetAuthorUrl, imsOrgId });
-        log.info(`Set author URL from preset: ${presetAuthorUrl}`);
-        steps.authorUrlResolved = true;
-      }
-    } else {
-      try {
-        const resolvedConfig = await autoResolveAuthorUrl(site, context);
-        rumHost = resolvedConfig?.host || null;
-
-        // Only update deliveryConfig if authorURL is not already set
-        const existingDeliveryConfig = site.getDeliveryConfig() || {};
-        if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
-          site.setDeliveryConfig({
-            ...existingDeliveryConfig,
-            authorURL: resolvedConfig.authorURL,
-            programId: resolvedConfig.programId,
-            environmentId: resolvedConfig.environmentId,
-            preferContentApi: true,
-            enableDAMAltTextUpdate: true,
-            imsOrgId,
-          });
-          log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
-          steps.authorUrlResolved = true;
-        }
-      } catch (error) {
-        log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
-      }
-    }
+    const rumHost = await applyDeliveryConfig({
+      site, presetDeliveryType, presetAuthorUrl, presetProgramId, imsOrgId, steps,
+    }, context);
 
     // Step 5d: Resolve EDS code config and hlxConfig from RUM host
     try {
@@ -1095,28 +1195,7 @@ async function performAsoPlgOnboarding({
     steps.auditsEnabled = true;
 
     // Step 8b: Enroll site in config handlers (summit-plg + auto-suggest/auto-fix)
-    try {
-      const { Configuration } = dataAccess;
-      const configuration = await Configuration.findLatest();
-      const configHandlers = [
-        'summit-plg',
-        'broken-backlinks-auto-suggest',
-        'broken-backlinks-auto-fix',
-        'alt-text-auto-fix',
-        'alt-text-auto-suggest-mystique',
-        'alt-text',
-        'cwv-auto-fix',
-        'cwv-auto-suggest',
-        'cwv',
-      ];
-      configHandlers.forEach((handler) => {
-        configuration.enableHandlerForSite(handler, site);
-      });
-      await configuration.save();
-      log.info(`Enrolled site ${site.getId()} in config handlers: ${configHandlers.join(', ')}`);
-    } catch (error) {
-      log.warn(`Failed to enroll site in config handlers: ${error.message}`);
-    }
+    await enrollPlgConfigHandlers(site, context);
 
     // Step 9: Reassign site org if it was previously in an internal/demo org
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
@@ -1168,39 +1247,7 @@ async function performAsoPlgOnboarding({
 
     return onboarding;
   } catch (error) {
-    if (error instanceof EntitlementWaitlistError) {
-      steps.entitlementFailed = true;
-      onboarding.setStatus(STATUSES.WAITLISTED);
-      onboarding.setWaitlistReason(error.message);
-      onboarding.setSteps(steps);
-      if (updatedBy) {
-        onboarding.setUpdatedBy(updatedBy);
-      }
-      try {
-        await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, context);
-      } catch (saveError) {
-        log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
-      }
-      return onboarding;
-    }
-    // Persist the error in the onboarding record
-    onboarding.setStatus(STATUSES.ERROR);
-    onboarding.setSteps(steps);
-    onboarding.setError({
-      message: (error.clientError || error.conflict)
-        ? error.message : 'An internal error occurred',
-    });
-    if (updatedBy) {
-      onboarding.setUpdatedBy(updatedBy);
-    }
-    try {
-      await onboarding.save();
-      await postPlgOnboardingNotification(onboarding, context);
-    } catch (saveError) {
-      log.error(`Failed to persist error state for onboarding ${onboarding.getId()}: ${saveError.message}`);
-    }
-    throw error;
+    return handleTerminalError(error, { onboarding, steps, updatedBy }, context);
   }
 }
 
