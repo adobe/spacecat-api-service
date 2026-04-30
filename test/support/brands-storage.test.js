@@ -803,6 +803,44 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('Failed to load brand_sites for syncBrandSites: select error');
     });
 
+    it('throws when brands SELECT fails during syncBrandSites primary lookup', async () => {
+      // Step 1 of syncBrandSites resolves brands.site_id to know which row
+      // the orphan-cleanup must protect. If that read errors, surface it.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // existing brand lookup at upsertBrand top
+          { data: null, error: null },
+          // brands upsert
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          // syncBrandSites step 1 — brand SELECT errors
+          { data: null, error: { message: 'brand fetch failed' } },
+        ],
+        brand_urls: { data: null, error: null },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to load brand for syncBrandSites: brand fetch failed');
+    });
+
+    it('throws when sites SELECT fails during syncBrandSites desired-set resolution', async () => {
+      // Step 3 of syncBrandSites looks up sites rows matching caller URLs to
+      // build the desired brand_sites set. If that read errors, surface it.
+      const postgrestClient = createTableMockClient({
+        brands: { data: { id: BRAND_ID, name: 'Test' }, error: null },
+        sites: { data: null, error: { message: 'sites fetch failed' } },
+        brand_urls: { data: null, error: null },
+      });
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+      })).to.be.rejectedWith('Failed to load sites for syncBrandSites: sites fetch failed');
+    });
+
     // ---------------------------------------------------------------------
     // LLMO-4621 Pattern A regression coverage — syncBrandSites must not wipe
     // the primary brand_sites row that mirrors brands.site_id. The primary
