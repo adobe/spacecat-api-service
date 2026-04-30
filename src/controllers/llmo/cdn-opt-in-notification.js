@@ -57,7 +57,7 @@ const CDN_CONFIG = {
   [CDN_TYPES.AMS_CLOUDFRONT]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
   [CDN_TYPES.AMS_FRONTDOOR]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
   [CDN_TYPES.AEM_CS_FASTLY]: { adobeManaged: true, replyAllTeam: CSE_LOOKUP_TEAM },
-  [CDN_TYPES.COMMERCE_FASTLY]: { adobeManaged: true, replyAllTeam: 'Adobe Commerce team' },
+  [CDN_TYPES.COMMERCE_FASTLY]: { adobeManaged: true, replyAllTeam: 'Adobe Commerce team', commerceManaged: true },
 };
 
 function parseRecipients(raw) {
@@ -118,8 +118,6 @@ async function getOrgMembersCsv(context, orgId) {
  * @param {string} [params.cdnType] - CDN type stored during provisioning.
  * @param {string} [params.orgId] - Organization ID used to load members email list.
  * @param {string} [params.optedBy] - Email of the customer user who triggered the opt-in.
- * @param {boolean} [params.botBlocked] - Whether the site is currently blocking bot traffic.
- * @param {string} [params.botBlockerType] - Detected blocker type (e.g. cloudflare, akamai).
  * @returns {Promise<{sent: boolean, reason?: string}>}
  */
 export async function notifyOptInIfNeeded(context, params) {
@@ -130,8 +128,6 @@ export async function notifyOptInIfNeeded(context, params) {
     cdnType,
     orgId,
     optedBy,
-    botBlocked = false,
-    botBlockerType = '',
   } = params || {};
 
   try {
@@ -146,6 +142,7 @@ export async function notifyOptInIfNeeded(context, params) {
     const cdnKnown = Boolean(cdnDisplayName);
     const docLink = cdnEntry?.docLink || '';
     const adobeManaged = Boolean(cdnEntry?.adobeManaged);
+    const commerceManaged = Boolean(cdnEntry?.commerceManaged);
     const replyAllTeam = cdnEntry?.replyAllTeam || '';
     const orgMembers = await getOrgMembersCsv(context, orgId);
 
@@ -161,9 +158,8 @@ export async function notifyOptInIfNeeded(context, params) {
       optedBy: optedBy || '',
       orgMembers,
       adobeManaged,
+      commerceManaged,
       replyAllTeam,
-      botBlocked: botBlocked === true,
-      botBlockerType: botBlockerType || '',
     };
 
     log.info(`[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} cdnType=${cdnType} cdnKnown=${cdnKnown}`);

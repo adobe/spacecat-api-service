@@ -88,21 +88,8 @@ describe('cdn-opt-in-notification', () => {
       expect(opts.templateData.docLink).to.be.a('string');
       expect(opts.templateData.orgMembers).to.equal('');
       expect(opts.templateData.adobeManaged).to.be.false;
+      expect(opts.templateData.commerceManaged).to.be.false;
       expect(opts.templateData.replyAllTeam).to.equal('');
-      expect(opts.templateData.botBlocked).to.be.false;
-      expect(opts.templateData.botBlockerType).to.equal('');
-    });
-
-    it('forwards botBlocked and botBlockerType to the template when provided', async () => {
-      await notifyOptInIfNeeded(mockContext, {
-        ...baseParams,
-        botBlocked: true,
-        botBlockerType: 'cloudflare',
-      });
-
-      const { templateData } = sendEmailStub.firstCall.args[1];
-      expect(templateData.botBlocked).to.be.true;
-      expect(templateData.botBlockerType).to.equal('cloudflare');
     });
 
     it('adds organization members as comma-separated emails', async () => {
@@ -253,27 +240,30 @@ describe('cdn-opt-in-notification', () => {
       expect(templateData.replyAllTeam).to.include('/ams-whois');
     });
 
-    it('flags ams-frontdoor as adobe-managed with CSE reply-all team', async () => {
+    it('flags ams-frontdoor as adobe-managed with CSE reply-all team and commerceManaged=false', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'ams-frontdoor' });
 
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.adobeManaged).to.be.true;
+      expect(templateData.commerceManaged).to.be.false;
       expect(templateData.replyAllTeam).to.include('Customer CSE');
     });
 
-    it('flags aem-cs-fastly as adobe-managed with CSE reply-all team', async () => {
+    it('flags aem-cs-fastly as adobe-managed with CSE reply-all team and commerceManaged=false', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'aem-cs-fastly' });
 
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.adobeManaged).to.be.true;
+      expect(templateData.commerceManaged).to.be.false;
       expect(templateData.replyAllTeam).to.include('Customer CSE');
     });
 
-    it('flags commerce-fastly as adobe-managed with Commerce team reply-all', async () => {
+    it('flags commerce-fastly as adobe-managed and commerceManaged=true with Commerce team reply-all', async () => {
       await notifyOptInIfNeeded(mockContext, { ...baseParams, cdnType: 'commerce-fastly' });
 
       const { templateData } = sendEmailStub.firstCall.args[1];
       expect(templateData.adobeManaged).to.be.true;
+      expect(templateData.commerceManaged).to.be.true;
       expect(templateData.replyAllTeam).to.equal('Adobe Commerce team');
     });
 

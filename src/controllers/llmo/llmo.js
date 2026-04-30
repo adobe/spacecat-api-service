@@ -26,7 +26,6 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
-  detectBotBlocker,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -1350,16 +1349,6 @@ function LlmoController(ctx) {
             }
           }
 
-          let botBlocked = false;
-          let botBlockerType = '';
-          try {
-            const botCheck = await detectBotBlocker({ baseUrl: baseURL });
-            botBlocked = botCheck?.crawlable === false;
-            botBlockerType = botCheck?.type || '';
-          } catch (botErr) {
-            log.warn(`[cdn-opt-in-notification] Bot blocker check failed for ${baseURL}: ${botErr.message}`);
-          }
-
           /* CDN provider is managed by log-infra and stored in the S3 LLMO config
           during provisioning. Site DynamoDB cdnBucketConfig does not store it,
           so S3 is the primary source.
@@ -1386,8 +1375,6 @@ function LlmoController(ctx) {
             cdnType: notificationCdnType,
             orgId: site.getOrganizationId?.(),
             optedBy,
-            botBlocked,
-            botBlockerType,
           });
         })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
       }
