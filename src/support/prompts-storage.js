@@ -219,7 +219,13 @@ function mapRowToPrompt(row) {
   const category = row.categories;
   const topic = row.topics;
   return {
+    // `id` is the TEXT business key (`prompts.prompt_id`) — used in URL paths
+    // (GET/PATCH/DELETE `/prompts/:promptId`) and as the human-readable handle.
+    // `uuid` is the UUID PK (`prompts.id`) — needed by DRS to populate the
+    // `brand_presence_executions.prompt_id` UUID FK column. Removing `uuid`
+    // (LLMO-4625 / PR #2199) caused 100% NULL prompt_id in BPE — keep both.
     id: row.prompt_id,
+    uuid: row.id,
     prompt: row.text,
     name: row.name,
     regions: row.regions || [],
