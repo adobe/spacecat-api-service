@@ -1,3 +1,25 @@
+# [1.462.0](https://github.com/adobe/spacecat-api-service/compare/v1.461.0...v1.462.0) (2026-04-30)
+
+
+### Features
+
+* referral traffic endpoints fetching data from Postgres | LLMO-4261 ([#2242](https://github.com/adobe/spacecat-api-service/issues/2242)) ([f06e8f7](https://github.com/adobe/spacecat-api-service/commit/f06e8f7d942b3da6350a677ce5c7883a1c146105))
+
+# [1.461.0](https://github.com/adobe/spacecat-api-service/compare/v1.460.0...v1.461.0) (2026-04-30)
+
+
+### Features
+
+* PLG bind aso entitlement to ims org ([#2287](https://github.com/adobe/spacecat-api-service/issues/2287)) ([8bbad55](https://github.com/adobe/spacecat-api-service/commit/8bbad558784673f292effafc97ff07b7754b697e))
+
+# [1.460.0](https://github.com/adobe/spacecat-api-service/compare/v1.459.0...v1.460.0) (2026-04-30)
+
+
+### Features
+
+* return topic + prompt ids in bp responses; add lookup by prompt id endpoint | LLMO-4440 ([#2248](https://github.com/adobe/spacecat-api-service/issues/2248)) ([face861](https://github.com/adobe/spacecat-api-service/commit/face861143e6a551deb190631ef3a70bdd7cc39d))
+* support multiple category ids and multiple topic ids as filters to llmo BP calls | LLMO-4297 ([#2221](https://github.com/adobe/spacecat-api-service/issues/2221)) ([c887a91](https://github.com/adobe/spacecat-api-service/commit/c887a9147f3355199262d733c171396231c18654))
+
 # [1.459.0](https://github.com/adobe/spacecat-api-service/compare/v1.458.1...v1.459.0) (2026-04-29)
 
 
