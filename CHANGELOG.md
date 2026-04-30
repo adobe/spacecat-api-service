@@ -1,3 +1,10 @@
+# [1.461.0](https://github.com/adobe/spacecat-api-service/compare/v1.460.0...v1.461.0) (2026-04-30)
+
+
+### Features
+
+* PLG bind aso entitlement to ims org ([#2287](https://github.com/adobe/spacecat-api-service/issues/2287)) ([8bbad55](https://github.com/adobe/spacecat-api-service/commit/8bbad558784673f292effafc97ff07b7754b697e))
+
 # [1.460.0](https://github.com/adobe/spacecat-api-service/compare/v1.459.0...v1.460.0) (2026-04-30)
 
 
