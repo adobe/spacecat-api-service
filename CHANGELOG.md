@@ -1,3 +1,10 @@
+# [1.464.0](https://github.com/adobe/spacecat-api-service/compare/v1.463.1...v1.464.0) (2026-04-30)
+
+
+### Features
+
+* notify  LLMO team when a customer opted in for optimise at edge ([#2256](https://github.com/adobe/spacecat-api-service/issues/2256)) ([30f64d9](https://github.com/adobe/spacecat-api-service/commit/30f64d961cea3c36c3609d24f430ea952de14bab))
+
 ## [1.463.1](https://github.com/adobe/spacecat-api-service/compare/v1.463.0...v1.463.1) (2026-04-30)
 
 
