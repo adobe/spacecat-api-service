@@ -176,6 +176,33 @@ async function reassignSiteOrganization(site, organizationId) {
   return site.save();
 }
 
+/**
+ * Persists the onboarding record (with optional updatedBy stamp) and posts the Slack
+ * notification. The caller is responsible for setting status, waitlistReason, steps, etc.
+ * before calling.
+ *
+ * @param {{ swallowSaveErrors?: boolean, errorLabel?: string }} [opts]
+ *   When `swallowSaveErrors` is true, save+notify failures are logged with `errorLabel`
+ *   ("waitlist state" or "error state") and not rethrown — used in catch handlers where
+ *   we must not lose the original error.
+ */
+async function persistAndNotify(onboarding, { updatedBy }, context, opts = {}) {
+  if (updatedBy) {
+    onboarding.setUpdatedBy(updatedBy);
+  }
+  if (opts.swallowSaveErrors) {
+    try {
+      await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
+    } catch (saveError) {
+      context.log.error(`Failed to persist ${opts.errorLabel} for onboarding ${onboarding.getId()}: ${saveError.message}`);
+    }
+    return;
+  }
+  await onboarding.save();
+  await postPlgOnboardingNotification(onboarding, context);
+}
+
 // Resolves entitlement against the IMS-derived organization (passed in by the caller),
 // then enrollment for the site. Step 1 deliberately ignores site.getOrganizationId()
 // so the entitlement is bound to the customer org we resolved from imsOrgId — not to
@@ -517,22 +544,14 @@ async function enrollPlgConfigHandlers(site, context) {
  */
 /* eslint-disable no-param-reassign */
 async function handleTerminalError(error, { onboarding, steps, updatedBy }, context) {
-  const { log } = context;
-
   if (error instanceof EntitlementWaitlistError) {
     steps.entitlementFailed = true;
     onboarding.setStatus(STATUSES.WAITLISTED);
     onboarding.setWaitlistReason(error.message);
     onboarding.setSteps(steps);
-    if (updatedBy) {
-      onboarding.setUpdatedBy(updatedBy);
-    }
-    try {
-      await onboarding.save();
-      await postPlgOnboardingNotification(onboarding, context);
-    } catch (saveError) {
-      log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
-    }
+    await persistAndNotify(onboarding, { updatedBy }, context, {
+      swallowSaveErrors: true, errorLabel: 'waitlist state',
+    });
     return onboarding;
   }
 
@@ -542,15 +561,9 @@ async function handleTerminalError(error, { onboarding, steps, updatedBy }, cont
     message: (error.clientError || error.conflict)
       ? error.message : 'An internal error occurred',
   });
-  if (updatedBy) {
-    onboarding.setUpdatedBy(updatedBy);
-  }
-  try {
-    await onboarding.save();
-    await postPlgOnboardingNotification(onboarding, context);
-  } catch (saveError) {
-    log.error(`Failed to persist error state for onboarding ${onboarding.getId()}: ${saveError.message}`);
-  }
+  await persistAndNotify(onboarding, { updatedBy }, context, {
+    swallowSaveErrors: true, errorLabel: 'error state',
+  });
   throw error;
 }
 /* eslint-enable no-param-reassign */
@@ -774,11 +787,7 @@ async function handleExistingOnboardedDomain({
   }
   onboarding.setStatus(STATUSES.WAITLISTED);
   onboarding.setWaitlistReason(`Domain ${alreadyOnboarded.getDomain()} is ${DOMAIN_ALREADY_ONBOARDED_IN_ORG} (org: ${existingOrgName}, id: ${imsOrgId})`);
-  if (updatedBy) {
-    onboarding.setUpdatedBy(updatedBy);
-  }
-  await onboarding.save();
-  await postPlgOnboardingNotification(onboarding, context);
+  await persistAndNotify(onboarding, { updatedBy }, context);
   return onboarding;
 }
 
@@ -846,11 +855,7 @@ async function handlePreonboardedFastPath({
         onboarding.setWaitlistReason(waitlistReason);
         const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
         onboarding.setSteps(steps);
-        if (updatedBy) {
-          onboarding.setUpdatedBy(updatedBy);
-        }
-        await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, context);
+        await persistAndNotify(onboarding, { updatedBy }, context);
         return onboarding;
       }
     }
@@ -883,26 +888,16 @@ async function handlePreonboardedFastPath({
     onboarding.setBotBlocker(null);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
-    if (updatedBy) {
-      onboarding.setUpdatedBy(updatedBy);
-    }
-    await onboarding.save();
-    await postPlgOnboardingNotification(onboarding, context);
+    await persistAndNotify(onboarding, { updatedBy }, context);
     return onboarding;
   } catch (error) {
     if (error instanceof EntitlementWaitlistError) {
       onboarding.setStatus(STATUSES.WAITLISTED);
       onboarding.setWaitlistReason(error.message);
       onboarding.setSteps({ ...(onboarding.getSteps() || {}), entitlementFailed: true });
-      if (updatedBy) {
-        onboarding.setUpdatedBy(updatedBy);
-      }
-      try {
-        await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, context);
-      } catch (saveError) {
-        log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
-      }
+      await persistAndNotify(onboarding, { updatedBy }, context, {
+        swallowSaveErrors: true, errorLabel: 'waitlist state',
+      });
       return onboarding;
     }
     throw error;
@@ -1035,11 +1030,7 @@ async function performAsoPlgOnboarding({
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(`Domain ${domain} is not an AEM site`);
         onboarding.setSteps(steps);
-        if (updatedBy) {
-          onboarding.setUpdatedBy(updatedBy);
-        }
-        await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, context);
+        await persistAndNotify(onboarding, { updatedBy }, context);
         return onboarding;
       }
     }
@@ -1073,11 +1064,7 @@ async function performAsoPlgOnboarding({
           onboarding.setWaitlistReason(waitlistReason);
           onboarding.setSiteId(site.getId());
           onboarding.setSteps(steps);
-          if (updatedBy) {
-            onboarding.setUpdatedBy(updatedBy);
-          }
-          await onboarding.save();
-          await postPlgOnboardingNotification(onboarding, context);
+          await persistAndNotify(onboarding, { updatedBy }, context);
           return onboarding;
         }
       }
@@ -1111,12 +1098,7 @@ async function performAsoPlgOnboarding({
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
-      if (updatedBy) {
-        onboarding.setUpdatedBy(updatedBy);
-      }
-      await onboarding.save();
-      await postPlgOnboardingNotification(onboarding, context);
-
+      await persistAndNotify(onboarding, { updatedBy }, context);
       return onboarding;
     }
 
@@ -1304,12 +1286,7 @@ async function performAsoPlgOnboarding({
     onboarding.setBotBlocker(null);
     onboarding.setSteps(steps);
     onboarding.setCompletedAt(new Date().toISOString());
-    if (updatedBy) {
-      onboarding.setUpdatedBy(updatedBy);
-    }
-    await onboarding.save();
-    await postPlgOnboardingNotification(onboarding, context);
-
+    await persistAndNotify(onboarding, { updatedBy }, context);
     return onboarding;
   } catch (error) {
     return handleTerminalError(error, { onboarding, steps, updatedBy }, context);
