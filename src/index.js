@@ -355,6 +355,16 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // Wrapper execution order (helix-shared-wrap: last .with() = outermost = runs first):
 // 1. s2sAuthWrapper — intercepts S2S JWT bearer tokens, passes through non-S2S to authWrapper
 // 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
+// authHandlers order contract:
+//  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
+//  - GitHubWebhookHmacHandler next: path-scoped to /webhooks/* and returns null
+//    for any other path, so non-webhook requests fall through cheaply. Must run
+//    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
+//    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
+//  - JwtHandler / AdobeImsHandler / ScopedApiKeyHandler / LegacyApiKeyHandler:
+//    standard auth paths for the rest of the API surface.
+// When adding a new path-scoped handler, place it in the same position (after
+// SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
 const wrappedMain = wrap(run)
   .with(authWrapper, {
     authHandlers: [

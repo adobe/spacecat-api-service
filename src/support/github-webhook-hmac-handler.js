@@ -45,7 +45,11 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
       return null;
     }
 
-    // Reject oversized payloads pre-auth to prevent resource exhaustion.
+    // Two-tier size check:
+    //   - Pre-read via Content-Length: honest-client-only (attacker can omit the
+    //     header to skip this branch). Saves the body read when the header is set.
+    //   - Post-read via rawBody.length (below): the actual enforcement, catches
+    //     missing or falsified Content-Length.
     const contentLength = Number(request.headers.get('content-length'));
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
       this.log(`Payload too large: ${contentLength} bytes`, 'warn');

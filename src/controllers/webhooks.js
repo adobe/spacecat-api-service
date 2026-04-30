@@ -72,22 +72,9 @@ function WebhooksController(context) {
 
     const { action, pull_request: pr } = data;
 
-    // Apply trigger rules (returns skip reason string or null)
-    const skipReason = getSkipReason(data, action, env);
-    if (skipReason) {
-      log.info('Skipping webhook', {
-        skipReason,
-        deliveryId,
-        event,
-        action,
-        owner: data.repository?.owner?.login,
-        repo: data.repository?.name,
-        prNumber: pr?.number,
-      });
-      return noContent();
-    }
-
-    // Validate pull_request-specific fields before building payload
+    // Validate pull_request-specific fields BEFORE getSkipReason. Doing so
+    // prevents a missing pull_request from surfacing as a misleading
+    // "non-default branch: undefined" 204 skip instead of a 400 bad request.
     if (!pr?.number) {
       return badRequest('Missing required field: pull_request.number');
     }
@@ -96,6 +83,21 @@ function WebhooksController(context) {
     }
     if (!data.repository?.name) {
       return badRequest('Missing required field: repository.name');
+    }
+
+    // Apply trigger rules (returns skip reason string or null)
+    const skipReason = getSkipReason(data, action, env);
+    if (skipReason) {
+      log.info('Skipping webhook', {
+        skipReason,
+        deliveryId,
+        event,
+        action,
+        owner: data.repository.owner.login,
+        repo: data.repository.name,
+        prNumber: pr.number,
+      });
+      return noContent();
     }
 
     // Build and enqueue job payload
