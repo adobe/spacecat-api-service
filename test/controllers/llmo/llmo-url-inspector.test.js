@@ -491,6 +491,47 @@ describe('URL Inspector Handlers', () => {
       expect(body.urls[1].agenticHitsTrend).to.deep.equal([]);
     });
 
+    // Defence-in-depth: PostgREST occasionally returns null on numeric / text
+    // columns when the underlying JSONB element omits a key. The handler
+    // collapses missing `week_start` to null and missing `value` to 0 so the
+    // dashboard's WoW indicator never NaN-explodes a sparkline. This pins
+    // both `??` fallback branches inside the trend `.map` callback.
+    it('coerces null fields inside agentic_hits_trend points (weekStart→null, value→0)', async () => {
+      const rpcData = [
+        {
+          url: 'https://example.com/page1',
+          citations: 1,
+          prompts_cited: 1,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
+          agentic_hits: 0,
+          agentic_hits_trend: [
+            { week_start: null, value: null },
+            { /* week_start missing entirely */ value: 5 },
+            { week_start: '2026-01-12' /* value missing entirely */ },
+          ],
+          total_count: 1,
+        },
+      ];
+
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_owned_urls: { data: rpcData, error: null } },
+      });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([
+        { weekStart: null, value: 0 },
+        { weekStart: null, value: 5 },
+        { weekStart: '2026-01-12', value: 0 },
+      ]);
+    });
+
     it('returns empty result when no data', async () => {
       const { context } = createContext({}, {}, {
         rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } },
