@@ -434,7 +434,7 @@ describe('URL Inspector Handlers', () => {
   });
 
   describe('createUrlInspectorOwnedUrlsHandler', () => {
-    it('returns paginated owned URLs', async () => {
+    it('returns paginated owned URLs with agentic fields mapped', async () => {
       const rpcData = [
         {
           url: 'https://example.com/page1',
@@ -444,6 +444,11 @@ describe('URL Inspector Handlers', () => {
           regions: ['US', 'DE'],
           weekly_citations: [{ week: '2026-W10', value: 20 }],
           weekly_prompts_cited: [{ week: '2026-W10', value: 5 }],
+          agentic_hits: 160,
+          agentic_hits_trend: [
+            { week_start: '2026-01-12', value: 100 },
+            { week_start: '2026-01-19', value: 60 },
+          ],
           total_count: 100,
         },
         {
@@ -454,6 +459,8 @@ describe('URL Inspector Handlers', () => {
           regions: ['US'],
           weekly_citations: [{ week: '2026-W10', value: 15 }],
           weekly_prompts_cited: [{ week: '2026-W10', value: 4 }],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
           total_count: 100,
         },
       ];
@@ -472,6 +479,16 @@ describe('URL Inspector Handlers', () => {
       expect(body.urls[0].url).to.equal('https://example.com/page1');
       expect(body.urls[0].citations).to.equal(42);
       expect(body.urls[0].weeklyCitations).to.deep.equal([{ week: '2026-W10', value: 20 }]);
+      // Server-side agentic merge (LLMO-4526 M2): the dashboard reads these
+      // straight off each row, so they must come through camelCased and the
+      // trend's snake_case `week_start` must be normalised to `weekStart`.
+      expect(body.urls[0].agenticHits).to.equal(160);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([
+        { weekStart: '2026-01-12', value: 100 },
+        { weekStart: '2026-01-19', value: 60 },
+      ]);
+      expect(body.urls[1].agenticHits).to.equal(0);
+      expect(body.urls[1].agenticHitsTrend).to.deep.equal([]);
     });
 
     it('returns empty result when no data', async () => {
@@ -544,7 +561,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
-    it('passes filters and handles null row fields', async () => {
+    it('passes filters and handles null row fields (agentic + brand-presence)', async () => {
       const rpcData = [{
         url: 'https://example.com/page1',
         citations: null,
@@ -553,6 +570,8 @@ describe('URL Inspector Handlers', () => {
         regions: null,
         weekly_citations: null,
         weekly_prompts_cited: null,
+        agentic_hits: null,
+        agentic_hits_trend: null,
         total_count: null,
       }];
 
@@ -573,12 +592,86 @@ describe('URL Inspector Handlers', () => {
       expect(body.urls[0].regions).to.deep.equal([]);
       expect(body.urls[0].weeklyCitations).to.deep.equal([]);
       expect(body.urls[0].weeklyPromptsCited).to.deep.equal([]);
+      // Defence-in-depth: null/undefined agentic columns must collapse to
+      // safe defaults so the UI's WoW trend / sparkline never NaNs.
+      expect(body.urls[0].agenticHits).to.equal(0);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
 
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
       expect(rpcCall.args[1].p_category).to.equal('cat-1');
       expect(rpcCall.args[1].p_region).to.equal('US');
+      // Without `agentTypes` in the query string the handler must NOT add
+      // p_agent_types to the RPC payload — keeps the contract compatible
+      // with internal tooling that still calls the older 9-arg signature.
+      expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('forwards comma-separated agentTypes as p_agent_types array', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { agentTypes: 'Chatbots,Research' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    it('also accepts agentTypes as an array (no extra serialisation)', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { agentTypes: ['Chatbots', 'Research'] },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    it('drops unknown agentTypes values and omits the param when empty', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // The first three are unknown; the parser drops them all and the
+        // resulting list collapses to null, which means the handler should
+        // omit p_agent_types entirely (rather than sending an empty array
+        // that the RPC would interpret as an empty inclusion list).
+        { agentTypes: 'NotAType,, ,unknown' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('canonicalises agentTypes casing before forwarding', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // Mixed-case + snake_case alias + an unknown filler — the canonical
+        // values must come back regardless of the input shape.
+        { agent_types: 'chatbots, RESEARCH, training-bots' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      // 'training-bots' is unknown (canonical is 'Training bots') so it's
+      // dropped — keeps the URL Inspector PG inclusion list intentionally
+      // narrow until somebody plumbs Training bots into the dashboard.
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
     });
   });
 

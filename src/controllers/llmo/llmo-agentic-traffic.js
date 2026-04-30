@@ -87,7 +87,7 @@ const PLATFORM_CODE_TO_DB = {
  * as `successRate`. An empty resulting list collapses to null so the RPC
  * receives `p_agent_types=NULL` and returns the unfiltered baseline.
  */
-function parseAgentTypes(raw) {
+export function parseAgentTypes(raw) {
   if (raw === undefined || raw === null) {
     return null;
   }
