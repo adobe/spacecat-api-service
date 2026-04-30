@@ -1348,7 +1348,17 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         });
         log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
       } catch (brandError) {
-        log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+        // Surface upsertBrand failures loudly. The pre-LLMO-4621 swallow as
+        // log.warn hid the Pattern A bleed for weeks (24 brands stranded
+        // before the audit caught it). Onboarding still proceeds because
+        // the SpaceCat site row exists, but operators must see this in
+        // logs and Slack so the brand can be reconciled before downstream
+        // prompt-gen runs against an inconsistent state.
+        log.error(
+          `Failed to create initial brand in normalized table for site ${site.getId()}: ${brandError.message}`,
+          { siteId: site.getId(), brandName, error: brandError.message },
+        );
+        say(`:warning: Failed to create initial brand "${brandName}" in normalized table — brand_sites linkage may be missing. Investigate before downstream prompt-gen runs.`);
       }
 
       // Trigger Brandalf immediately after the v2 config exists so downstream

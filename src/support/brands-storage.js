@@ -173,72 +173,155 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
 }
 
 /**
- * Fully replaces brand_sites for a brand. Groups submitted URLs by normalized base URL
- * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
+ * Asserts the primary brand_sites row mirroring brands.site_id exists for a brand.
+ *
+ * The primary citation row links a brand to its canonical site via
+ * (brand_id, site_id=brands.site_id, paths=['/'], type='base'). This helper
+ * is idempotent (uses ON CONFLICT DO NOTHING) and is called unconditionally
+ * after every upsertBrand / updateBrand whose resulting brand has a site_id.
+ *
+ * Closes the LLMO-4621 Pattern A bleed where a downstream caller passing
+ * `urls=[]` to upsertBrand could trip the destructive DELETE in
+ * syncBrandSites without a matching INSERT, leaving the active root brand
+ * with zero brand_sites rows.
+ *
+ * No-op when primarySiteId is unset (e.g. pending Brandalf siblings whose
+ * brand entity legitimately has site_id=NULL).
  */
-async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
-  const { error: deleteError } = await postgrestClient
-    .from('brand_sites')
-    .delete()
-    .eq('brand_id', brandId);
-  if (deleteError) {
-    throw new Error(`Failed to sync brand_sites: ${deleteError.message}`);
-  }
-
-  if (!urls || urls.length === 0) {
+async function ensurePrimaryBrandSite({
+  organizationId, brandId, primarySiteId, postgrestClient, updatedBy,
+}) {
+  if (!hasText(primarySiteId)) {
     return;
   }
-
-  // Group paths by base URL and track type
-  const pathsByBase = new Map();
-  const typeByBase = new Map();
-  urls
-    .forEach((u) => {
-      const value = typeof u === 'string' ? u : u?.value;
-      if (!hasText(value)) {
-        return;
-      }
-      const { base, path } = parseUrlParts(value);
-      const normalizedBase = composeBaseURL(base);
-      if (!pathsByBase.has(normalizedBase)) {
-        pathsByBase.set(normalizedBase, []);
-      }
-      pathsByBase.get(normalizedBase).push(path || '/');
-      // First URL with a type wins for a given base URL — prevents silent overwrite
-      // when multiple paths under the same domain carry different types.
-      if (typeof u === 'object' && hasText(u?.type) && !typeByBase.has(normalizedBase)) {
-        typeByBase.set(normalizedBase, u.type);
-      }
-    });
-
-  if (pathsByBase.size === 0) {
-    return;
-  }
-
-  const { data: sites } = await postgrestClient
-    .from('sites')
-    .select('id, base_url')
-    .eq('organization_id', organizationId)
-    .in('base_url', [...pathsByBase.keys()]);
-
-  if (!sites || sites.length === 0) {
-    return;
-  }
-
-  const rows = sites.map((s) => ({
-    organization_id: organizationId,
-    brand_id: brandId,
-    site_id: s.id,
-    paths: pathsByBase.get(s.base_url) || [],
-    type: typeByBase.get(s.base_url) || null,
-    updated_by: updatedBy,
-  }));
-
   const { error } = await postgrestClient
     .from('brand_sites')
-    .upsert(rows, { onConflict: 'brand_id,site_id' });
+    .upsert(
+      {
+        organization_id: organizationId,
+        brand_id: brandId,
+        site_id: primarySiteId,
+        paths: ['/'],
+        type: 'base',
+        updated_by: updatedBy,
+      },
+      { onConflict: 'brand_id,site_id', ignoreDuplicates: true },
+    );
   if (error) {
-    throw new Error(`Failed to sync brand_sites: ${error.message}`);
+    throw new Error(`Failed to ensure primary brand_sites row: ${error.message}`);
+  }
+}
+
+/**
+ * Reconciles brand_sites for a brand against a caller-supplied URL list.
+ *
+ * Non-destructive to the primary citation row: rows whose site_id matches
+ * brands.site_id are protected from the orphan-cleanup step regardless of
+ * whether the caller's URL list resolves to that site. The primary row is
+ * (re-)asserted independently by ensurePrimaryBrandSite.
+ *
+ * Behavior:
+ * 1. Resolve brands.site_id for the brand (the protected primary).
+ * 2. Group submitted URLs by composeBaseURL(base) and look up matching sites
+ *    rows in the same org. Upsert one brand_sites row per matched site.
+ * 3. Delete any pre-existing brand_sites rows that are NOT in the desired
+ *    set AND not the primary site — i.e. genuine orphan citations.
+ *
+ * Replaces the prior DELETE-then-INSERT scheme that would silently wipe
+ * citations (and the primary row) when the caller's URL list was empty
+ * or didn't match any sites.base_url (LLMO-4621 Pattern A).
+ */
+async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
+  // 1. Resolve the primary site we must protect from the orphan-cleanup DELETE.
+  const { data: brandRow, error: brandFetchError } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('id', brandId)
+    .maybeSingle();
+  if (brandFetchError) {
+    throw new Error(`Failed to load brand for syncBrandSites: ${brandFetchError.message}`);
+  }
+  const primarySiteId = brandRow?.site_id || null;
+
+  // 2. Group paths by base URL and track type from caller-supplied URLs.
+  const pathsByBase = new Map();
+  const typeByBase = new Map();
+  (urls || []).forEach((u) => {
+    const value = typeof u === 'string' ? u : u?.value;
+    if (!hasText(value)) {
+      return;
+    }
+    const { base, path } = parseUrlParts(value);
+    const normalizedBase = composeBaseURL(base);
+    if (!pathsByBase.has(normalizedBase)) {
+      pathsByBase.set(normalizedBase, []);
+    }
+    pathsByBase.get(normalizedBase).push(path || '/');
+    // First URL with a type wins for a given base URL — prevents silent overwrite
+    // when multiple paths under the same domain carry different types.
+    if (typeof u === 'object' && hasText(u?.type) && !typeByBase.has(normalizedBase)) {
+      typeByBase.set(normalizedBase, u.type);
+    }
+  });
+
+  // 3. Upsert citations matching the caller's URL list.
+  const desiredSiteIds = new Set();
+  if (pathsByBase.size > 0) {
+    const { data: sites, error: sitesError } = await postgrestClient
+      .from('sites')
+      .select('id, base_url')
+      .eq('organization_id', organizationId)
+      .in('base_url', [...pathsByBase.keys()]);
+    if (sitesError) {
+      throw new Error(`Failed to load sites for syncBrandSites: ${sitesError.message}`);
+    }
+    if (sites && sites.length > 0) {
+      const rows = sites.map((s) => ({
+        organization_id: organizationId,
+        brand_id: brandId,
+        site_id: s.id,
+        paths: pathsByBase.get(s.base_url) || [],
+        type: typeByBase.get(s.base_url) || null,
+        updated_by: updatedBy,
+      }));
+      const { error: upsertError } = await postgrestClient
+        .from('brand_sites')
+        .upsert(rows, { onConflict: 'brand_id,site_id' });
+      if (upsertError) {
+        throw new Error(`Failed to sync brand_sites: ${upsertError.message}`);
+      }
+      sites.forEach((s) => desiredSiteIds.add(s.id));
+    }
+  }
+
+  // 4. Delete orphan citations: pre-existing rows NOT in desired set AND
+  //    NOT the primary site. Compute orphan id list in JS (rather than via
+  //    PostgREST .not('site_id', 'in', ...)) so the DELETE targets PK ids
+  //    explicitly — robust against quoting edge-cases in the UUID list.
+  const { data: existing, error: existingError } = await postgrestClient
+    .from('brand_sites')
+    .select('id, site_id')
+    .eq('brand_id', brandId);
+  if (existingError) {
+    throw new Error(`Failed to load brand_sites for syncBrandSites: ${existingError.message}`);
+  }
+
+  const protectedSiteIds = new Set(desiredSiteIds);
+  if (primarySiteId) {
+    protectedSiteIds.add(primarySiteId);
+  }
+  const orphanIds = (existing || [])
+    .filter((bs) => !protectedSiteIds.has(bs.site_id))
+    .map((bs) => bs.id);
+
+  if (orphanIds.length > 0) {
+    const { error: deleteError } = await postgrestClient
+      .from('brand_sites')
+      .delete()
+      .in('id', orphanIds);
+    if (deleteError) {
+      throw new Error(`Failed to clean brand_sites: ${deleteError.message}`);
+    }
   }
 }
 
@@ -477,7 +560,7 @@ export async function upsertBrand({
   const { data: upserted, error } = await postgrestClient
     .from('brands')
     .upsert(row, { onConflict: 'organization_id,name' })
-    .select('id, name')
+    .select('id, name, site_id')
     .single();
 
   if (error) {
@@ -490,6 +573,7 @@ export async function upsertBrand({
   }
 
   const brandId = upserted.id;
+  const primarySiteId = upserted.site_id;
 
   await Promise.all([
     syncAliases(brandId, organizationId, brand.brandAliases, postgrestClient, updatedBy),
@@ -497,6 +581,14 @@ export async function upsertBrand({
     syncSocialAccounts(brandId, organizationId, brand.socialAccounts, postgrestClient, updatedBy),
     syncEarnedSources(brandId, organizationId, brand.earnedContent, postgrestClient, updatedBy),
   ]);
+
+  // Always assert the primary brand_sites row when brands.site_id is set —
+  // independent of whether the caller passed brand.urls. Closes the
+  // LLMO-4621 Pattern A bleed (downstream caller passing urls=[] could
+  // wipe the primary citation row when syncBrandSites was destructive).
+  await ensurePrimaryBrandSite({
+    organizationId, brandId, primarySiteId, postgrestClient, updatedBy,
+  });
 
   if (brand.urls !== undefined) {
     await Promise.all([
@@ -577,7 +669,7 @@ export async function updateBrand({
     .update(patch)
     .eq('organization_id', organizationId)
     .eq('id', brandId)
-    .select('id')
+    .select('id, site_id')
     .maybeSingle();
 
   if (error) {
@@ -617,6 +709,18 @@ export async function updateBrand({
   if (childSyncs.length > 0) {
     await Promise.all(childSyncs);
   }
+
+  // Re-assert the primary brand_sites row when brands.site_id is set. Cheap
+  // ON CONFLICT DO NOTHING upsert so update calls that don't touch site_id
+  // are no-ops. Catches the NULL→set transition when an operator finally
+  // assigns a base site to a previously-pending brand.
+  await ensurePrimaryBrandSite({
+    organizationId,
+    brandId,
+    primarySiteId: data.site_id,
+    postgrestClient,
+    updatedBy,
+  });
 
   if (updates.urls !== undefined) {
     await Promise.all([

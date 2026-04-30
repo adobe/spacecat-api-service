@@ -1584,9 +1584,13 @@ describe('LLMO Onboarding Functions', () => {
         'LLMO onboarding completed successfully',
       );
       expect(failingUpsertBrand).to.have.been.calledOnce;
-      expect(mockLog.warn).to.have.been.calledWith(
-        'Failed to create initial brand in normalized table: '
-        + 'PostgREST unavailable',
+      // LLMO-4621: failures are now log.error + Slack-visible say(), not log.warn,
+      // so silent regressions like the original Pattern A bleed are visible to
+      // operators in Coralogix and the onboarding Slack thread immediately.
+      const brandErrorCall = mockLog.error.getCalls().find((c) => /Failed to create initial brand/.test(String(c.args[0])));
+      expect(brandErrorCall, 'expected a log.error for the upsertBrand failure').to.exist;
+      expect(brandErrorCall.args[0]).to.match(
+        /Failed to create initial brand in normalized table for site .+: PostgREST unavailable/,
       );
       // Brandalf job should still be submitted
       expect(mockDrsClient.createFrom().submitJob)
