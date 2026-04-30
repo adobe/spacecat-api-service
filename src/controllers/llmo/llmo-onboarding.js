@@ -1345,6 +1345,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           },
           postgrestClient,
           updatedBy: 'llmo-onboarding',
+          log,
         });
         log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
       } catch (brandError) {

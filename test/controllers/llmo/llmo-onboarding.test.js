@@ -1951,12 +1951,21 @@ describe('LLMO Onboarding Functions', () => {
       // directly so the legacy LLMO config still gets prompts written (LLMO-4534).
       expect(mockDrsClient.createFrom().submitJob).to.not.have.been.called;
       expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
-      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+      const drsClientStub = mockDrsClient.createFrom();
+      const v1PromptGenArgs = drsClientStub.submitPromptGenerationJob.firstCall.args[0];
+      expect(v1PromptGenArgs).to.include({
         brandName: 'Test Brand',
         siteId: 'site123',
         imsOrgId: 'ABC123@AdobeOrg',
         audience: 'Tech-savvy professionals',
       });
+      // LLMO-4129 Bug 3 / LLMO-4561: v1 onboardings must NOT pass onboarding_mode
+      // to the DRS prompt-generation job. The DRS-side `should_sync_spacecat_v2`
+      // gate keys off this metadata; setting it on a v1 org would cross-pollute
+      // the v2 customer-config store. Pin the contract.
+      expect(v1PromptGenArgs).to.not.have.property('onboarding_mode');
+      expect(v1PromptGenArgs).to.not.have.property('onboardingMode');
+      expect(v1PromptGenArgs.metadata?.onboarding_mode).to.be.undefined;
     }).timeout(10000);
 
     it('should skip DRS prompt generation in v1 mode when DRS client is not configured', async () => {

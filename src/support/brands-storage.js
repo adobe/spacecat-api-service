@@ -175,8 +175,32 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
 /**
  * Fully replaces brand_sites for a brand. Groups submitted URLs by normalized base URL
  * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
+ *
+ * @param {string} organizationId
+ * @param {string} brandId
+ * @param {Array} urls
+ * @param {object} postgrestClient
+ * @param {string} updatedBy
+ * @param {object} [opts]
+ * @param {string} [opts.fallbackSiteId] - Pattern A fallback (LLMO-4621): when no
+ *   submitted URLs resolve to a site row in the org but the caller knows the
+ *   brand's base site (`brands.site_id`), seed a single `brand_sites` row keyed
+ *   off that site so the brand has at least one linkage. Prevents the
+ *   active-brand / no-linkage / 0-prompts failure mode.
+ * @param {object} [opts.log] - Structured logger. Used to emit
+ *   `event=brand_sites_no_matching_site` WARN per dropped URL and a single
+ *   ERROR summary when ≥1 URL is dropped (LLMO-4350).
  */
-async function syncBrandSites(organizationId, brandId, urls, postgrestClient, updatedBy) {
+async function syncBrandSites(
+  organizationId,
+  brandId,
+  urls,
+  postgrestClient,
+  updatedBy,
+  opts = {},
+) {
+  const { fallbackSiteId, log } = opts;
+
   const { error: deleteError } = await postgrestClient
     .from('brand_sites')
     .delete()
@@ -220,6 +244,79 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     .select('id, base_url')
     .eq('organization_id', organizationId)
     .in('base_url', [...pathsByBase.keys()]);
+
+  // LLMO-4350: every requested base URL that did not resolve to a site row in
+  // this org gets a structured WARN event. Today this happens silently — under
+  // multi-tenant or stale-config scenarios, brand URLs are dropped without a
+  // trace, leaving brands with zero `brand_sites` linkage and zero prompts.
+  const matchedBases = new Set((sites || []).map((s) => s.base_url));
+  const droppedBases = [...pathsByBase.keys()].filter((b) => !matchedBases.has(b));
+  if (droppedBases.length > 0 && log?.warn) {
+    droppedBases.forEach((base) => {
+      try {
+        log.warn(JSON.stringify({
+          event: 'brand_sites_no_matching_site',
+          message: 'Submitted brand URL did not resolve to any site in the target organization',
+          url: base,
+          target_org_id: organizationId,
+          brand_id: brandId,
+        }));
+      } catch (e) {
+        // Defensive: never let log serialization break the brand sync.
+      }
+    });
+    if (log?.error) {
+      try {
+        log.error(JSON.stringify({
+          event: 'brand_sites_cross_org_url_summary',
+          message: `${droppedBases.length} brand URL(s) dropped because they do not match any site in the target organization`,
+          dropped_count: droppedBases.length,
+          dropped_urls: droppedBases.slice(0, 5),
+          target_org_id: organizationId,
+          brand_id: brandId,
+        }));
+      } catch (e) {
+        // Defensive
+      }
+    }
+  }
+
+  // LLMO-4621 Pattern A: when none of the submitted URLs match a site row in
+  // the org but the caller knows the brand's base site (`brands.site_id`),
+  // seed a single brand_sites row keyed off that site_id. Prevents the
+  // active-brand / no-linkage / 0-prompts failure mode.
+  if ((!sites || sites.length === 0) && hasText(fallbackSiteId)) {
+    const { error: fallbackError } = await postgrestClient
+      .from('brand_sites')
+      .upsert(
+        [{
+          organization_id: organizationId,
+          brand_id: brandId,
+          site_id: fallbackSiteId,
+          paths: [],
+          type: 'base',
+          updated_by: updatedBy,
+        }],
+        { onConflict: 'brand_id,site_id' },
+      );
+    if (fallbackError) {
+      throw new Error(`Failed to sync brand_sites: ${fallbackError.message}`);
+    }
+    if (log?.info) {
+      try {
+        log.info(JSON.stringify({
+          event: 'brand_sites_fallback_to_base_site',
+          message: 'Submitted URLs did not match any site; falling back to brands.site_id linkage',
+          brand_id: brandId,
+          site_id: fallbackSiteId,
+          target_org_id: organizationId,
+        }));
+      } catch (e) {
+        // Defensive
+      }
+    }
+    return;
+  }
 
   if (!sites || sites.length === 0) {
     return;
@@ -427,6 +524,7 @@ export async function upsertBrand({
   brand,
   postgrestClient,
   updatedBy = 'system',
+  log,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -486,6 +584,18 @@ export async function upsertBrand({
       err.status = 409;
       throw err;
     }
+    // LLMO-4656: distinguish the (organization_id, name) unique violation from a
+    // generic 500. DRS / re-onboarding callers can then treat 409 as a known
+    // duplicate rather than a transient. The `onConflict` upsert path normally
+    // handles (organization_id, name) collisions natively; this branch fires
+    // when the constraint surfaces a 23505 anyway (e.g. concurrent insert race
+    // or partial-index quirks).
+    if (error.code === '23505' && error.message?.includes('uq_brand_name_per_org')) {
+      const err = new Error('A brand with this name already exists in this organization');
+      err.status = 409;
+      err.code = 'duplicate_brand_name';
+      throw err;
+    }
     throw new Error(`Failed to upsert brand: ${error.message}`);
   }
 
@@ -499,8 +609,21 @@ export async function upsertBrand({
   ]);
 
   if (brand.urls !== undefined) {
+    // LLMO-4621 Pattern A: pass `brands.site_id` as the fallback so syncBrandSites
+    // can seed a brand_sites row when none of the submitted URLs match a site
+    // row in the org. Honor the request payload first, then the row that was
+    // just upserted. Prefer the persisted `existing.site_id` so the fallback
+    // works on update paths where the caller did not re-send `baseSiteId`.
+    const fallbackSiteId = brand.baseSiteId || existing?.site_id || null;
     await Promise.all([
-      syncBrandSites(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
+      syncBrandSites(
+        organizationId,
+        brandId,
+        brand.urls,
+        postgrestClient,
+        updatedBy,
+        { fallbackSiteId, log },
+      ),
       syncBrandUrls(organizationId, brandId, brand.urls, postgrestClient, updatedBy),
     ]);
   }
@@ -525,6 +648,7 @@ export async function updateBrand({
   updates,
   postgrestClient,
   updatedBy = 'system',
+  log,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -586,6 +710,14 @@ export async function updateBrand({
       err.status = 409;
       throw err;
     }
+    // LLMO-4656: same 23505 handling as upsertBrand for the
+    // (organization_id, name) unique constraint, surfaced on rename collisions.
+    if (error.code === '23505' && error.message?.includes('uq_brand_name_per_org')) {
+      const err = new Error('A brand with this name already exists in this organization');
+      err.status = 409;
+      err.code = 'duplicate_brand_name';
+      throw err;
+    }
     throw new Error(`Failed to update brand: ${error.message}`);
   }
   if (!data) {
@@ -619,8 +751,28 @@ export async function updateBrand({
   }
 
   if (updates.urls !== undefined) {
+    // LLMO-4621 Pattern A: resolve the brand's persisted base site so
+    // syncBrandSites can fall back to it when none of the submitted URLs
+    // match a site row in the org. Read independently of the patch so we
+    // pick up an existing site_id even when the caller is not updating it.
+    let fallbackSiteId = hasText(updates.baseSiteId) ? updates.baseSiteId : null;
+    if (!fallbackSiteId) {
+      const { data: brandRow } = await postgrestClient
+        .from('brands')
+        .select('site_id')
+        .eq('id', brandId)
+        .maybeSingle();
+      fallbackSiteId = brandRow?.site_id || null;
+    }
     await Promise.all([
-      syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
+      syncBrandSites(
+        organizationId,
+        brandId,
+        updates.urls,
+        postgrestClient,
+        updatedBy,
+        { fallbackSiteId, log },
+      ),
       syncBrandUrls(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
     ]);
   }

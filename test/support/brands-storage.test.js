@@ -1241,6 +1241,353 @@ describe('brands-storage', () => {
         postgrestClient,
       })).to.be.rejectedWith('Failed to sync brand_aliases: insert failed');
     });
+
+    // LLMO-4656: distinguish (organization_id, name) unique violation from
+    // generic 500 so DRS / re-onboarding callers can disambiguate.
+    it('throws structured 409 when uq_brand_name_per_org is violated on upsert', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: {
+          data: null,
+          error: {
+            code: '23505',
+            message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+          },
+        },
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('A brand with this name already exists in this organization');
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('duplicate_brand_name');
+    });
+
+    // LLMO-4350: emit a structured WARN per dropped URL plus an ERROR summary
+    // when ≥1 cross-org URL is silently skipped by syncBrandSites.
+    it('logs structured WARN per dropped URL and ERROR summary when sites query is empty', async () => {
+      const fullBrandRow = makeBrandRow();
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const log = { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() };
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          urls: [
+            { value: 'https://other-org-1.com' },
+            { value: 'https://other-org-2.com/path' },
+          ],
+        },
+        postgrestClient,
+        log,
+      });
+
+      expect(log.warn).to.have.been.calledTwice;
+      const warnedEvents = log.warn.getCalls().map((c) => JSON.parse(c.args[0]));
+      expect(warnedEvents.every((e) => e.event === 'brand_sites_no_matching_site')).to.be.true;
+      expect(warnedEvents.map((e) => e.url)).to.have.members([
+        'https://other-org-1.com',
+        'https://other-org-2.com',
+      ]);
+      expect(log.error).to.have.been.calledOnce;
+      const summary = JSON.parse(log.error.getCall(0).args[0]);
+      expect(summary.event).to.equal('brand_sites_cross_org_url_summary');
+      expect(summary.dropped_count).to.equal(2);
+      expect(summary.dropped_urls).to.have.length(2);
+      expect(summary.target_org_id).to.equal(ORG_ID);
+      expect(summary.brand_id).to.equal(BRAND_ID);
+    });
+
+    it('does not log cross-org events when all URLs match a site', async () => {
+      const fullBrandRow = makeBrandRow({
+        brand_sites: [{ site_id: 'site-1', paths: [], sites: { base_url: 'https://test.com' } }],
+      });
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-1', base_url: 'https://test.com' }], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const log = { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() };
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://test.com' }] },
+        postgrestClient,
+        log,
+      });
+
+      expect(log.warn).to.not.have.been.called;
+      expect(log.error).to.not.have.been.called;
+    });
+
+    // LLMO-4621 Pattern A: when no submitted URLs match a site row but the brand
+    // has a known base site, seed a brand_sites row keyed off brands.site_id so
+    // the brand has at least one linkage. Prevents active-brand / 0-prompts.
+    it('falls back to brands.site_id when URL match is empty and baseSiteId is known', async () => {
+      const fullBrandRow = makeBrandRow({
+        site_id: 'site-fallback',
+        brand_sites: [{
+          site_id: 'site-fallback', paths: [], type: 'base', sites: { base_url: 'https://fallback.example' },
+        }],
+      });
+      const brandSitesUpsert = sinon.stub().returns({
+        then: (resolve) => resolve({ data: null, error: null }),
+      });
+      const upsertReturn = { upsert: brandSitesUpsert };
+
+      // Hand-rolled client to capture the brand_sites upsert payload.
+      const callCounts = {
+        brands: 0, sites: 0, brand_sites: 0, brand_urls: 0,
+      };
+      const responses = {
+        brands: [
+          { data: null, error: null }, // existing lookup (no row)
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert
+          { data: fullBrandRow, error: null }, // getBrandById
+        ],
+        sites: [{ data: [], error: null }],
+        brand_sites: [{ data: null, error: null }],
+        brand_urls: [{ data: null, error: null }],
+      };
+
+      const fromStub = sinon.stub().callsFake((table) => {
+        if (table === 'brand_sites' && callCounts.brand_sites > 0) {
+          // Second brand_sites call is the fallback upsert — capture it.
+          callCounts.brand_sites += 1;
+          return upsertReturn;
+        }
+        const idx = Math.min(callCounts[table] || 0, (responses[table] || []).length - 1);
+        callCounts[table] = (callCounts[table] || 0) + 1;
+        return createChainableQuery((responses[table] || [{ data: null, error: null }])[idx]);
+      });
+
+      const postgrestClient = { from: fromStub };
+
+      const log = { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() };
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          baseSiteId: 'site-fallback',
+          urls: [{ value: 'https://stale.example', type: 'base' }],
+        },
+        postgrestClient,
+        log,
+      });
+
+      // Fallback brand_sites row was upserted with site_id and type='base'.
+      expect(brandSitesUpsert).to.have.been.calledOnce;
+      const [rows, opts] = brandSitesUpsert.firstCall.args;
+      expect(rows).to.have.length(1);
+      expect(rows[0]).to.include({
+        organization_id: ORG_ID,
+        brand_id: BRAND_ID,
+        site_id: 'site-fallback',
+        type: 'base',
+      });
+      expect(rows[0].paths).to.deep.equal([]);
+      expect(opts).to.deep.equal({ onConflict: 'brand_id,site_id' });
+
+      // Info log captures the fallback event.
+      expect(log.info).to.have.been.calledOnce;
+      const fallbackEvent = JSON.parse(log.info.firstCall.args[0]);
+      expect(fallbackEvent.event).to.equal('brand_sites_fallback_to_base_site');
+      expect(fallbackEvent.brand_id).to.equal(BRAND_ID);
+      expect(fallbackEvent.site_id).to.equal('site-fallback');
+
+      expect(result).to.not.be.null;
+    });
+
+    it('throws when Pattern A fallback brand_sites upsert fails', async () => {
+      const callCounts = { brands: 0, sites: 0, brand_sites: 0 };
+      const responses = {
+        brands: [
+          { data: null, error: null }, // existing lookup
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow(), error: null },
+        ],
+        sites: [{ data: [], error: null }],
+        brand_sites: [{ data: null, error: null }], // first call: delete
+      };
+
+      const failingUpsert = sinon.stub().returns({
+        then: (resolve) => resolve({ data: null, error: { message: 'fallback upsert failed' } }),
+      });
+
+      const fromStub = sinon.stub().callsFake((table) => {
+        if (table === 'brand_sites' && callCounts.brand_sites > 0) {
+          callCounts.brand_sites += 1;
+          return { upsert: failingUpsert };
+        }
+        const idx = Math.min(callCounts[table] || 0, (responses[table] || []).length - 1);
+        callCounts[table] = (callCounts[table] || 0) + 1;
+        return createChainableQuery((responses[table] || [{ data: null, error: null }])[idx]);
+      });
+
+      const postgrestClient = { from: fromStub };
+
+      await expect(upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          baseSiteId: 'site-fallback',
+          urls: [{ value: 'https://stale.example' }],
+        },
+        postgrestClient,
+        log: { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() },
+      })).to.be.rejectedWith('Failed to sync brand_sites: fallback upsert failed');
+    });
+
+    it('handles a null sites response from postgrest (no rows, no array)', async () => {
+      const fullBrandRow = makeBrandRow();
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        // postgrest occasionally returns data:null instead of an empty array
+        sites: { data: null, error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://orphan.example' }] },
+        postgrestClient,
+      });
+
+      expect(result.siteIds).to.deep.equal([]);
+    });
+
+    it('keeps Pattern A fallback resilient when log serialization throws', async () => {
+      const fullBrandRow = makeBrandRow();
+      const captured = sinon.stub().returns({
+        then: (resolve) => resolve({ data: null, error: null }),
+      });
+
+      const callCounts = {
+        brands: 0, sites: 0, brand_sites: 0, brand_urls: 0,
+      };
+      const responses = {
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: [{ data: [], error: null }],
+        brand_sites: [{ data: null, error: null }],
+        brand_urls: [{ data: null, error: null }],
+      };
+      const fromStub = sinon.stub().callsFake((table) => {
+        if (table === 'brand_sites' && callCounts.brand_sites > 0) {
+          callCounts.brand_sites += 1;
+          return { upsert: captured };
+        }
+        const idx = Math.min(callCounts[table] || 0, (responses[table] || []).length - 1);
+        callCounts[table] = (callCounts[table] || 0) + 1;
+        return createChainableQuery((responses[table] || [{ data: null, error: null }])[idx]);
+      });
+      const postgrestClient = { from: fromStub };
+
+      // log.info throws (simulates a misbehaving structured logger). The
+      // syncBrandSites fallback path must swallow it and still return the brand.
+      const log = {
+        warn: sinon.stub(),
+        error: sinon.stub(),
+        info: sinon.stub().throws(new Error('log explode')),
+      };
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          baseSiteId: 'site-fallback',
+          urls: [{ value: 'https://stale.example' }],
+        },
+        postgrestClient,
+        log,
+      });
+
+      expect(captured).to.have.been.calledOnce;
+      expect(result).to.not.be.null;
+    });
+
+    it('logs cross-org WARN events resiliently when log.warn throws', async () => {
+      const fullBrandRow = makeBrandRow();
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      // log.warn and log.error both throw — exercise both defensive catches
+      // in syncBrandSites without breaking the brand sync.
+      const log = {
+        warn: sinon.stub().throws(new Error('warn explode')),
+        error: sinon.stub().throws(new Error('error explode')),
+        info: sinon.stub(),
+      };
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://other-org.com' }] },
+        postgrestClient,
+        log,
+      });
+
+      expect(result).to.not.be.null;
+    });
+
+    it('skips Pattern A fallback when neither baseSiteId nor existing.site_id is known', async () => {
+      const fullBrandRow = makeBrandRow();
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [], error: null },
+        brand_sites: { data: null, error: null },
+      });
+
+      const log = { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() };
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', urls: [{ value: 'https://stale.example' }] },
+        postgrestClient,
+        log,
+      });
+
+      // No fallback — info event for fallback should not fire.
+      const infoEvents = log.info.getCalls().map((c) => {
+        try {
+          return JSON.parse(c.args[0]);
+        } catch (e) {
+          return null;
+        }
+      });
+      expect(infoEvents.some((e) => e?.event === 'brand_sites_fallback_to_base_site')).to.be.false;
+      expect(result).to.not.be.null;
+    });
   });
 
   describe('updateBrand', () => {
@@ -1573,6 +1920,67 @@ describe('brands-storage', () => {
       expect(result.brandAliases).to.deep.equal([]);
       expect(result.competitors).to.deep.equal([]);
       expect(result.urls).to.deep.equal([]);
+    });
+
+    // LLMO-4621 Pattern A: when an update both sets baseSiteId and submits URLs
+    // that resolve to the matching site, the patch path must skip the extra
+    // brands lookup (we already know the new site_id from updates.baseSiteId).
+    it('uses updates.baseSiteId as the syncBrandSites fallback hint when both are present', async () => {
+      const fullBrandRow = makeBrandRow({
+        site_id: 'site-explicit',
+        brand_sites: [{ site_id: 'site-explicit', paths: [], sites: { base_url: 'https://explicit.example' } }],
+      });
+      const postgrestClient = createTableMockClient({
+        brands: [
+          // 1st: select current site_id (null → allow setting)
+          { data: { site_id: null }, error: null },
+          // 2nd: update succeeds
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd: getBrandById re-fetch
+          { data: fullBrandRow, error: null },
+        ],
+        sites: { data: [{ id: 'site-explicit', base_url: 'https://explicit.example' }], error: null },
+        brand_sites: { data: null, error: null },
+        brand_urls: { data: null, error: null },
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: {
+          baseSiteId: 'site-explicit',
+          urls: [{ value: 'https://explicit.example', type: 'base' }],
+        },
+        postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+      expect(result.baseSiteId).to.equal('site-explicit');
+    });
+
+    // LLMO-4656: rename collisions on (organization_id, name) surface as 23505
+    // and must turn into a structured 409, not a generic 500.
+    it('throws structured 409 when uq_brand_name_per_org is violated on update', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: {
+          data: null,
+          error: {
+            code: '23505',
+            message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+          },
+        },
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { name: 'AnotherBrandsName' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal('A brand with this name already exists in this organization');
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('duplicate_brand_name');
     });
   });
 
