@@ -270,6 +270,38 @@ describe('llmo-referral-traffic', () => {
       ]);
     });
 
+    it('maps all optional numeric fields when non-null (lines 276-284)', async () => {
+      const client = makeRpcClient({
+        data: [{
+          traffic_date: '2026-02-03',
+          total_pageviews: 1000,
+          entries: 800,
+          revenue: 5000,
+          bounce_rate: 0.35,
+          consent_rate: 0.75,
+          avg_session_duration: 180,
+          pages_per_visit: 3.2,
+          orders: 25,
+          conversion_rate: 0.03,
+        }],
+      });
+      const handler = createReferralTrafficTrendHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      const body = await res.json();
+      expect(body.trend[0]).to.deep.equal({
+        date: '2026-02-03',
+        pageviews: 1000,
+        entries: 800,
+        revenue: 5000,
+        bounceRate: 0.35,
+        consentRate: 0.75,
+        avgSessionDuration: 180,
+        pagesPerVisit: 3.2,
+        orders: 25,
+        conversionRate: 0.03,
+      });
+    });
+
     it('returns empty trend array when RPC returns no rows', async () => {
       const client = makeRpcClient({ data: [], error: null });
       const handler = createReferralTrafficTrendHandler(stubbedValidateAccess);
@@ -321,6 +353,32 @@ describe('llmo-referral-traffic', () => {
         visits: null,
         avgTimeOnSite: null,
         revenue: null,
+      });
+    });
+
+    it('maps visits, avgTimeOnSite and revenue when non-null (lines 328-330)', async () => {
+      const client = makeRpcClient({
+        data: [{
+          platform: 'perplexity',
+          total_pageviews: 200,
+          bounce_rate: 0.25,
+          channels: ['llm'],
+          visits: 150,
+          avg_time_on_site: 95,
+          revenue: 1200,
+        }],
+      });
+      const handler = createReferralTrafficByPlatformHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      const body = await res.json();
+      expect(body.rows[0]).to.deep.equal({
+        platform: 'perplexity',
+        pageviews: 200,
+        bounceRate: 0.25,
+        channels: ['llm'],
+        visits: 150,
+        avgTimeOnSite: 95,
+        revenue: 1200,
       });
     });
 
@@ -548,6 +606,39 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
       await handler(makeContext({ client, data: { sortBy: 'hacked_column' } }));
       expect(client.rpc.getCall(0).args[1].p_sort_by).to.equal('total_pageviews');
+    });
+
+    it('maps entries, exits, avgTimeOnSite, revenue when non-null (lines 526-529)', async () => {
+      const client = makeRpcClient({
+        data: [{
+          url_path: '/checkout',
+          host: 'shop.example.com',
+          total_pageviews: 500,
+          bounce_rate: 0.2,
+          consent_rate: 0.8,
+          page_intent: 'purchase',
+          entries: 400,
+          exits: 100,
+          avg_time_on_site: 210,
+          revenue: 9800,
+          total_count: 1,
+        }],
+      });
+      const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      const body = await res.json();
+      expect(body.rows[0]).to.deep.equal({
+        urlPath: '/checkout',
+        host: 'shop.example.com',
+        pageviews: 500,
+        bounceRate: 0.2,
+        consentRate: 0.8,
+        pageIntent: 'purchase',
+        entries: 400,
+        exits: 100,
+        avgTimeOnSite: 210,
+        revenue: 9800,
+      });
     });
 
     it('returns 500 on PostgREST error', async () => {

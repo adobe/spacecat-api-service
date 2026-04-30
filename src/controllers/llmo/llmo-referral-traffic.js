@@ -374,8 +374,8 @@ export function createReferralTrafficByDeviceHandler(getSiteAndValidateAccess) {
       },
     );
   };
-  /* c8 ignore stop */
 }
+/* c8 ignore stop */
 
 // ============================================================================
 // /by-region
