@@ -1154,6 +1154,17 @@ function SitesController(ctx, log, env) {
   /**
    * Resolves site and organization data based on query parameters.
    * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
+   *
+   * On failure, returns HTTP 404 with a structured body:
+   *   { message, resolveStatus, details? }
+   * where `resolveStatus` is one of:
+   *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
+   *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
+   *   - 'site_not_enrolled' — entitlement is visible but no SiteEnrollment links this site.
+   * `details` shape is `{ productCode, siteId, organizationId }` for all three statuses
+   * (these branches are reached only via the siteId path, so siteId is always present).
+   * Unspecified 404s fall through without resolveStatus (unknown/generic not-found).
+   *
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Resolved site and organization data response.
    */
@@ -1169,6 +1180,12 @@ function SitesController(ctx, log, env) {
     if (!hasText(organizationId) && !hasText(imsOrg)) {
       return badRequest('Either organizationId or imsOrg must be provided');
     }
+
+    const resolveFailure = (message, resolveStatus, details) => createResponse(
+      { message, resolveStatus, details },
+      404,
+      { 'x-error': message },
+    );
 
     let organization;
     let site;
@@ -1191,18 +1208,38 @@ function SitesController(ctx, log, env) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
 
-              const tierVisible = entitlement
-                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
-              if (tierVisible && enrollments?.length) {
-                const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-                const data = {
-                  organization: OrganizationDto.toJSON(organization),
-                  site: SiteDto.toJSON(site),
-                  isSummitPlgEnabled,
-                };
-
-                return ok({ data });
+              if (!entitlement) {
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  'no_entitlement_for_product',
+                  { productCode, siteId, organizationId: orgId },
+                );
               }
+
+              if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  'aso_pre_onboard',
+                  { productCode, siteId, organizationId: orgId },
+                );
+              }
+
+              if (!enrollments?.length) {
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  'site_not_enrolled',
+                  { productCode, siteId, organizationId: orgId },
+                );
+              }
+
+              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+              const data = {
+                organization: OrganizationDto.toJSON(organization),
+                site: SiteDto.toJSON(site),
+                isSummitPlgEnabled,
+              };
+
+              return ok({ data });
             }
           }
         }

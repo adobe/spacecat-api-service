@@ -1,3 +1,17 @@
+# [1.463.0](https://github.com/adobe/spacecat-api-service/compare/v1.462.1...v1.463.0) (2026-04-30)
+
+
+### Features
+
+* structured resolveStatus envelope on /sites-resolve 404s ([#2253](https://github.com/adobe/spacecat-api-service/issues/2253)) ([2b574ce](https://github.com/adobe/spacecat-api-service/commit/2b574ce57520c9ab6b1b6156ee6c4a172d8e0712))
+
+## [1.462.1](https://github.com/adobe/spacecat-api-service/compare/v1.462.0...v1.462.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* restore uuid PK in v2 prompts response (LLMO-4625) ([#2294](https://github.com/adobe/spacecat-api-service/issues/2294)) ([6dcdf0d](https://github.com/adobe/spacecat-api-service/commit/6dcdf0db9763ca29b81d7217ffd3c1839e4a2006)), closes [#2199](https://github.com/adobe/spacecat-api-service/issues/2199) [#2199](https://github.com/adobe/spacecat-api-service/issues/2199) [#1433](https://github.com/adobe/spacecat-api-service/issues/1433) [#1444](https://github.com/adobe/spacecat-api-service/issues/1444) [#1447](https://github.com/adobe/spacecat-api-service/issues/1447) [#1453](https://github.com/adobe/spacecat-api-service/issues/1453) [#1463](https://github.com/adobe/spacecat-api-service/issues/1463) [#1467](https://github.com/adobe/spacecat-api-service/issues/1467) [#2199](https://github.com/adobe/spacecat-api-service/issues/2199)
+
 # [1.462.0](https://github.com/adobe/spacecat-api-service/compare/v1.461.0...v1.462.0) (2026-04-30)
 
 
