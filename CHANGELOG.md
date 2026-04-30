@@ -1,3 +1,31 @@
+## [1.464.1](https://github.com/adobe/spacecat-api-service/compare/v1.464.0...v1.464.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* revert structured resolveStatus envelope on /sites-resolve 404s ([#2253](https://github.com/adobe/spacecat-api-service/issues/2253)) ([#2299](https://github.com/adobe/spacecat-api-service/issues/2299)) ([51cd0fc](https://github.com/adobe/spacecat-api-service/commit/51cd0fceae35bba1e1f2f0fe8a4892da4b43bc5a))
+
+# [1.464.0](https://github.com/adobe/spacecat-api-service/compare/v1.463.1...v1.464.0) (2026-04-30)
+
+
+### Features
+
+* notify  LLMO team when a customer opted in for optimise at edge ([#2256](https://github.com/adobe/spacecat-api-service/issues/2256)) ([30f64d9](https://github.com/adobe/spacecat-api-service/commit/30f64d961cea3c36c3609d24f430ea952de14bab))
+
+## [1.463.1](https://github.com/adobe/spacecat-api-service/compare/v1.463.0...v1.463.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.26.0 ([#2296](https://github.com/adobe/spacecat-api-service/issues/2296)) ([48b67f6](https://github.com/adobe/spacecat-api-service/commit/48b67f6ea371914a3abaa4e84b8a452757e1384b))
+
+# [1.463.0](https://github.com/adobe/spacecat-api-service/compare/v1.462.1...v1.463.0) (2026-04-30)
+
+
+### Features
+
+* structured resolveStatus envelope on /sites-resolve 404s ([#2253](https://github.com/adobe/spacecat-api-service/issues/2253)) ([2b574ce](https://github.com/adobe/spacecat-api-service/commit/2b574ce57520c9ab6b1b6156ee6c4a172d8e0712))
+
 ## [1.462.1](https://github.com/adobe/spacecat-api-service/compare/v1.462.0...v1.462.1) (2026-04-30)
 
 
