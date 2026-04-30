@@ -1243,16 +1243,25 @@ describe('brands-storage', () => {
     });
 
     // LLMO-4656: distinguish (organization_id, name) unique violation from
-    // generic 500 so DRS / re-onboarding callers can disambiguate.
-    it('throws structured 409 when uq_brand_name_per_org is violated on upsert', async () => {
+    // generic 500 so DRS / re-onboarding callers can disambiguate, and
+    // surface `existingBrandId` so they can auto-merge into the existing row.
+    it('throws structured 409 with existingBrandId when uq_brand_name_per_org is violated on upsert', async () => {
+      const EXISTING_BRAND_ID = '99999999-9999-4999-8999-999999999999';
       const postgrestClient = createTableMockClient({
-        brands: {
-          data: null,
-          error: {
-            code: '23505',
-            message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+        brands: [
+          // 1. existence check (by name) — pre-collision lookup miss
+          { data: null, error: null },
+          // 2. upsert — fires the constraint violation
+          {
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+            },
           },
-        },
+          // 3. post-collision lookup — resolves the existing row's id
+          { data: { id: EXISTING_BRAND_ID }, error: null },
+        ],
       });
 
       const err = await upsertBrand({
@@ -1264,6 +1273,36 @@ describe('brands-storage', () => {
       expect(err.message).to.equal('A brand with this name already exists in this organization');
       expect(err.status).to.equal(409);
       expect(err.code).to.equal('duplicate_brand_name');
+      expect(err.existingBrandId).to.equal(EXISTING_BRAND_ID);
+    });
+
+    // Defensive: 23505 fires but the post-collision lookup can't find the
+    // duplicate row (race with hard-delete). The 409 still throws cleanly,
+    // just without an existingBrandId field.
+    it('throws structured 409 without existingBrandId when post-collision lookup is empty', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: null },
+          {
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+            },
+          },
+          { data: null, error: null },
+        ],
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('duplicate_brand_name');
+      expect(err.existingBrandId).to.be.undefined;
     });
 
     // LLMO-4350: emit a structured WARN per dropped URL plus an ERROR summary
@@ -1959,16 +1998,23 @@ describe('brands-storage', () => {
     });
 
     // LLMO-4656: rename collisions on (organization_id, name) surface as 23505
-    // and must turn into a structured 409, not a generic 500.
-    it('throws structured 409 when uq_brand_name_per_org is violated on update', async () => {
+    // and must turn into a structured 409, not a generic 500. Surface
+    // `existingBrandId` so DRS can auto-merge into the conflicting row.
+    it('throws structured 409 with existingBrandId when uq_brand_name_per_org is violated on update', async () => {
+      const EXISTING_BRAND_ID = '99999999-9999-4999-8999-999999999999';
       const postgrestClient = createTableMockClient({
-        brands: {
-          data: null,
-          error: {
-            code: '23505',
-            message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+        brands: [
+          // 1. update — fires the constraint violation
+          {
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+            },
           },
-        },
+          // 2. post-collision lookup — resolves the existing row's id by new name
+          { data: { id: EXISTING_BRAND_ID }, error: null },
+        ],
       });
 
       const err = await updateBrand({
@@ -1981,6 +2027,7 @@ describe('brands-storage', () => {
       expect(err.message).to.equal('A brand with this name already exists in this organization');
       expect(err.status).to.equal(409);
       expect(err.code).to.equal('duplicate_brand_name');
+      expect(err.existingBrandId).to.equal(EXISTING_BRAND_ID);
     });
   });
 

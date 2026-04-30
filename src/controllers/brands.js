@@ -140,7 +140,17 @@ function BrandsController(ctx, log, env) {
 
   function createErrorResponse(error) {
     if (error.status) {
-      return createResponse({ message: error.message }, error.status, {
+      const body = { message: error.message };
+      // LLMO-4656: surface structured fields on typed errors (e.g. 409 on
+      // duplicate brand name) so DRS / re-onboarding callers can auto-merge
+      // into the existing brand instead of failing the customer at 0 prompts.
+      if (hasText(error.code)) {
+        body.code = error.code;
+      }
+      if (hasText(error.existingBrandId)) {
+        body.existing_brand_id = error.existingBrandId;
+      }
+      return createResponse(body, error.status, {
         [HEADER_ERROR]: error.message,
       });
     }

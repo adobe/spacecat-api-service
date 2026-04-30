@@ -3641,6 +3641,57 @@ describe('Brands Controller', () => {
       });
       expect(response.status).to.equal(500);
     });
+
+    // LLMO-4656: 409 on duplicate brand name must surface the structured
+    // payload — code='duplicate_brand_name' and existing_brand_id — so DRS
+    // can auto-merge into the existing row instead of stalling at 0 prompts.
+    it('returns 409 with code and existing_brand_id when uq_brand_name_per_org fires', async () => {
+      const EXISTING_BRAND_ID = '99999999-9999-4999-8999-999999999999';
+      const singleStub = sandbox.stub();
+      const maybeSingleStub = sandbox.stub();
+      // existence pre-check (by name) — empty
+      maybeSingleStub.onFirstCall().resolves({ data: null, error: null });
+      // post-collision lookup — resolves the existing brand id
+      maybeSingleStub.onSecondCall().resolves({
+        data: { id: EXISTING_BRAND_ID }, error: null,
+      });
+      // upsert returns 23505 on uq_brand_name_per_org
+      singleStub.resolves({
+        data: null,
+        error: {
+          code: '23505',
+          message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+        },
+      });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          single: singleStub,
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Dup Brand' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('duplicate_brand_name');
+      expect(body.existing_brand_id).to.equal(EXISTING_BRAND_ID);
+    });
   });
 
   describe('updateBrandForOrg', () => {
@@ -3839,6 +3890,56 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    // LLMO-4656: PATCH rename collisions must also surface the structured
+    // payload (code, existing_brand_id) so DRS can fold the duplicate.
+    it('returns 409 with code and existing_brand_id when uq_brand_name_per_org fires on rename', async () => {
+      const EXISTING_BRAND_ID = '99999999-9999-4999-8999-999999999999';
+      const maybeSingleStub = sandbox.stub();
+      // 1. resolveBrandUuid lookup — finds the brand being patched
+      maybeSingleStub.onCall(0).resolves({ data: { id: BRAND_UUID }, error: null });
+      // 2. updateBrand UPDATE — surfaces 23505
+      maybeSingleStub.onCall(1).resolves({
+        data: null,
+        error: {
+          code: '23505',
+          message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"',
+        },
+      });
+      // 3. post-collision lookup — resolves the existing row id
+      maybeSingleStub.onCall(2).resolves({
+        data: { id: EXISTING_BRAND_ID }, error: null,
+      });
+
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: maybeSingleStub,
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'CollidingName' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('duplicate_brand_name');
+      expect(body.existing_brand_id).to.equal(EXISTING_BRAND_ID);
     });
   });
 

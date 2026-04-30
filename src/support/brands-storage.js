@@ -589,11 +589,22 @@ export async function upsertBrand({
     // duplicate rather than a transient. The `onConflict` upsert path normally
     // handles (organization_id, name) collisions natively; this branch fires
     // when the constraint surfaces a 23505 anyway (e.g. concurrent insert race
-    // or partial-index quirks).
+    // or partial-index quirks). We also surface `existingBrandId` so DRS can
+    // auto-merge the duplicate request into the row that already exists
+    // instead of leaving the customer at zero prompts.
     if (error.code === '23505' && error.message?.includes('uq_brand_name_per_org')) {
       const err = new Error('A brand with this name already exists in this organization');
       err.status = 409;
       err.code = 'duplicate_brand_name';
+      const { data: dup } = await postgrestClient
+        .from('brands')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .eq('name', brand.name)
+        .maybeSingle();
+      if (dup?.id) {
+        err.existingBrandId = dup.id;
+      }
       throw err;
     }
     throw new Error(`Failed to upsert brand: ${error.message}`);
@@ -712,10 +723,23 @@ export async function updateBrand({
     }
     // LLMO-4656: same 23505 handling as upsertBrand for the
     // (organization_id, name) unique constraint, surfaced on rename collisions.
+    // Surface `existingBrandId` for the conflicting row so DRS can auto-merge
+    // instead of leaving the customer at zero prompts.
     if (error.code === '23505' && error.message?.includes('uq_brand_name_per_org')) {
       const err = new Error('A brand with this name already exists in this organization');
       err.status = 409;
       err.code = 'duplicate_brand_name';
+      if (hasText(patch.name)) {
+        const { data: dup } = await postgrestClient
+          .from('brands')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('name', patch.name)
+          .maybeSingle();
+        if (dup?.id) {
+          err.existingBrandId = dup.id;
+        }
+      }
       throw err;
     }
     throw new Error(`Failed to update brand: ${error.message}`);
