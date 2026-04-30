@@ -36,6 +36,7 @@ import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-t
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
+import { cachedOk } from '../../support/cached-response.js';
 import {
   probeSiteAndResolveDomain,
   parseEdgeRoutingConfig,
@@ -68,6 +69,7 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
@@ -83,6 +85,14 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+
+/** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
+const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
+  '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3', // adobe.com Prod
+  'c2473d89-e997-458d-a86d-b4096649c12b', // adobe.com Stage
+]);
+
+const HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE = 'Access to HLX sheet data has been blocked for this site due to PG migration';
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -155,6 +165,23 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * True when HLX sheet data must not be used: missing siteId, or PG-migrated site
+   * requesting the `brandpresence` sheet type.
+   * @param {Object} context - The context object
+   * @returns {boolean}
+   */
+  const isHlxSheetDataAccessBlocked = (context) => {
+    const { siteId, sheetType } = context.params;
+    if (!siteId) {
+      return true;
+    }
+    if (sheetType !== 'brand-presence') {
+      return false;
+    }
+    return HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS.has(siteId);
+  };
+
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
     const { log } = context;
@@ -168,6 +195,10 @@ function LlmoController(ctx) {
         return siteValidation;
       }
       const { llmoConfig } = siteValidation;
+      if (isHlxSheetDataAccessBlocked(context)) {
+        return forbidden(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+      }
+
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
       if (sheetType && week) {
@@ -210,7 +241,7 @@ function LlmoController(ctx) {
       const data = await response.json();
 
       // Return the data, pass through any compression headers from upstream
-      return ok(data, {
+      return cachedOk(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
@@ -266,6 +297,9 @@ function LlmoController(ctx) {
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) {
         return siteValidation;
+      }
+      if (isHlxSheetDataAccessBlocked(context)) {
+        return forbidden(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
       }
       const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
@@ -439,7 +473,7 @@ function LlmoController(ctx) {
 
       log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
       // Return the data and let the framework handle the compression
-      return ok(data, {
+      return cachedOk(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
@@ -1083,15 +1117,19 @@ function LlmoController(ctx) {
 
   const queryFiles = async (context) => {
     const { log } = context;
-    const { siteId } = context.params;
+    const { siteId, sheetType } = context.params;
     try {
       const siteValidation = await getSiteAndValidateLlmo(context);
       if (siteValidation.status) {
         return siteValidation;
       }
+      const sheetDataAccessBlocked = isHlxSheetDataAccessBlocked(context);
+      if (sheetDataAccessBlocked && sheetType) {
+        return forbidden(HLX_SHEET_DATA_PG_MIGRATION_FORBIDDEN_MESSAGE);
+      }
       const { llmoConfig } = siteValidation;
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
-      return ok(data, headers);
+      return cachedOk(data, headers);
     } catch (error) {
       log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
@@ -1166,7 +1204,9 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log, dataAccess, env } = context;
+    const {
+      log, dataAccess, env, s3,
+    } = context;
     const { siteId } = context.params;
     const { authInfo: { profile } } = context.attributes;
     const { Site } = dataAccess;
@@ -1289,6 +1329,54 @@ function LlmoController(ctx) {
           // Log error but don't fail the request
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
+
+        // Detached from the response path so the UI's enable click is not blocked
+        // by the IMS lookup, bot-blocker probe (5s timeout), S3 read, and email
+        // send. Lambda's default callbackWaitsForEmptyEventLoop=true keeps the
+        // invocation alive until this promise settles, so the email still goes out.
+        ((async () => {
+          // profile.email holds the IMS userId (sub claim) for IMS-authenticated
+          // callers, so we resolve the real email via IMS. Best-effort: non-IMS
+          // auth modes leave optedBy unset, which the email helper handles.
+          let optedBy;
+          const imsUserId = profile?.email;
+          if (imsUserId && context.imsClient) {
+            try {
+              const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
+              optedBy = adminProfile?.email;
+            } catch (imsErr) {
+              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
+            }
+          }
+
+          /* CDN provider is managed by log-infra and stored in the S3 LLMO config
+          during provisioning. Site DynamoDB cdnBucketConfig does not store it,
+          so S3 is the primary source.
+          Fallback to request cdnType (e.g. AEM CS Fastly self-service)
+          when S3 config is not yet available. */
+          let notificationCdnType;
+          try {
+            if (s3?.s3Client) {
+              const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
+                s3Bucket: s3.s3Bucket,
+              });
+              notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
+            }
+          } catch (s3Err) {
+            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+          }
+          if (!hasText(notificationCdnType) && hasText(cdnType)) {
+            notificationCdnType = cdnType;
+          }
+
+          await notifyOptInIfNeeded(context, {
+            siteId,
+            siteBaseURL: baseURL,
+            cdnType: notificationCdnType,
+            orgId: site.getOrganizationId?.(),
+            optedBy,
+          });
+        })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
       }
 
       let cdnTypeNormalized = null;

@@ -283,6 +283,7 @@ describe('getRouteHandlers', () => {
     getAgenticTrafficWeeks: () => null,
     getAgenticTrafficMovers: () => null,
     getAgenticTrafficUrlBrandPresence: () => null,
+    getAgenticTrafficHasData: () => null,
   };
 
   const mockLlmoOpportunitiesController = {
@@ -632,6 +633,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail',
       'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail',
+      'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail',
       'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources',
       'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers',
@@ -922,6 +925,16 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/agentic-traffic/weeks',
       'GET /sites/:siteId/agentic-traffic/movers',
       'GET /sites/:siteId/agentic-traffic/url-brand-presence',
+      'GET /sites/:siteId/agentic-traffic/has-data',
+      'GET /sites/:siteId/referral-traffic/filter-dimensions',
+      'GET /sites/:siteId/referral-traffic/kpis',
+      'GET /sites/:siteId/referral-traffic/trend',
+      'GET /sites/:siteId/referral-traffic/by-platform',
+      'GET /sites/:siteId/referral-traffic/by-region',
+      'GET /sites/:siteId/referral-traffic/by-page-intent',
+      'GET /sites/:siteId/referral-traffic/by-url',
+      'GET /sites/:siteId/referral-traffic/business-impact',
+      'GET /sites/:siteId/referral-traffic/weeks',
       'GET /admin/users/:userId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);

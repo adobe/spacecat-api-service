@@ -27,6 +27,20 @@ export const CDN_TYPES = {
   COMMERCE_FASTLY: 'commerce-fastly',
 };
 
+// Human-readable display names for each CDN type.
+export const CDN_DISPLAY_NAMES = {
+  [CDN_TYPES.BYOCDN_FASTLY]: 'Fastly (BYOCDN)',
+  [CDN_TYPES.BYOCDN_AKAMAI]: 'Akamai (BYOCDN)',
+  [CDN_TYPES.BYOCDN_CLOUDFRONT]: 'CloudFront (BYOCDN)',
+  [CDN_TYPES.BYOCDN_CLOUDFLARE]: 'Cloudflare (BYOCDN)',
+  [CDN_TYPES.BYOCDN_IMPERVA]: 'Imperva (BYOCDN)',
+  [CDN_TYPES.BYOCDN_OTHER]: 'Other',
+  [CDN_TYPES.AMS_CLOUDFRONT]: 'Adobe Managed Services CloudFront',
+  [CDN_TYPES.AMS_FRONTDOOR]: 'Adobe Managed Services Front Door',
+  [CDN_TYPES.AEM_CS_FASTLY]: 'AEM Cloud Service Managed CDN (Fastly)',
+  [CDN_TYPES.COMMERCE_FASTLY]: 'Adobe Commerce Cloud - PaaS (Fastly)',
+};
+
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
   const data = { ...rawData };
