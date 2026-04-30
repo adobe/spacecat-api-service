@@ -111,6 +111,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/referral-traffic/by-region',
   'GET /sites/:siteId/referral-traffic/by-page-intent',
   'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-device',
   'GET /sites/:siteId/referral-traffic/business-impact',
   'GET /sites/:siteId/referral-traffic/weeks',
 

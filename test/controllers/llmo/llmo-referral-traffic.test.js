@@ -243,8 +243,30 @@ describe('llmo-referral-traffic', () => {
       const res = await handler(makeContext({ client }));
       const body = await res.json();
       expect(body.trend).to.deep.equal([
-        { date: '2026-01-05', pageviews: 500 },
-        { date: '2026-01-12', pageviews: 800 },
+        {
+          date: '2026-01-05',
+          pageviews: 500,
+          entries: null,
+          revenue: null,
+          bounceRate: null,
+          consentRate: null,
+          avgSessionDuration: null,
+          pagesPerVisit: null,
+          orders: null,
+          conversionRate: null,
+        },
+        {
+          date: '2026-01-12',
+          pageviews: 800,
+          entries: null,
+          revenue: null,
+          bounceRate: null,
+          consentRate: null,
+          avgSessionDuration: null,
+          pagesPerVisit: null,
+          orders: null,
+          conversionRate: null,
+        },
       ]);
     });
 
@@ -283,10 +305,22 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.rows[0]).to.deep.equal({
-        platform: 'openai', pageviews: 100, bounceRate: 0.3, channels: ['llm'],
+        platform: 'openai',
+        pageviews: 100,
+        bounceRate: 0.3,
+        channels: ['llm'],
+        visits: null,
+        avgTimeOnSite: null,
+        revenue: null,
       });
       expect(body.rows[1]).to.deep.equal({
-        platform: 'google', pageviews: 50, bounceRate: null, channels: ['social'],
+        platform: 'google',
+        pageviews: 50,
+        bounceRate: null,
+        channels: ['social'],
+        visits: null,
+        avgTimeOnSite: null,
+        revenue: null,
       });
     });
 
@@ -354,7 +388,6 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.rows).to.deep.equal([
         { pageIntent: 'purchase', pageviews: 80 },
-        { pageIntent: '', pageviews: 20 },
       ]);
     });
 
@@ -404,6 +437,10 @@ describe('llmo-referral-traffic', () => {
         bounceRate: 0.4,
         consentRate: 0.9,
         pageIntent: 'purchase',
+        entries: null,
+        exits: null,
+        avgTimeOnSite: null,
+        revenue: null,
       });
       expect(body.rows[1]).to.deep.equal({
         urlPath: '/blog',
@@ -412,6 +449,10 @@ describe('llmo-referral-traffic', () => {
         bounceRate: null,
         consentRate: null,
         pageIntent: null,
+        entries: null,
+        exits: null,
+        avgTimeOnSite: null,
+        revenue: null,
       });
     });
 
