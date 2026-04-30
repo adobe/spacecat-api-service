@@ -20,6 +20,7 @@ function mapDbTopicToV2(row) {
     description: row.description || null,
     status: row.status || 'active',
     brandId: row.brand_id || null,
+    categoryUuids: row.topic_categories?.map((tc) => tc.category_id) ?? [],
     createdAt: row.created_at,
     createdBy: row.created_by,
     updatedAt: row.updated_at,
@@ -46,7 +47,7 @@ export async function listTopics({
 
   let query = postgrestClient
     .from('topics')
-    .select('*')
+    .select('*, topic_categories(category_id)')
     .eq('organization_id', organizationId)
     .order('name', { ascending: true });
 

@@ -86,6 +86,55 @@ export default function topicTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /v2/orgs/:orgId/topics surfaces categoryUuids', () => {
+      before(() => resetData());
+
+      it('returns categoryUuids array on topic response after creation with categoryId', async () => {
+        const http = getHttpClient();
+
+        // Create a category
+        const catRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { id: 'baseurl-awareness', name: 'Awareness', origin: 'human' },
+        );
+        expect(catRes.status).to.equal(201);
+        const categoryUuid = catRes.body.uuid;
+
+        // Create a topic with categoryId
+        const topicRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/topics`,
+          { name: 'Brand Awareness', categoryId: categoryUuid },
+        );
+        expect(topicRes.status).to.equal(201);
+
+        // GET topics and verify categoryUuids is populated
+        const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/topics`);
+        expect(listRes.status).to.equal(200);
+        const topic = listRes.body.find((t) => t.name === 'Brand Awareness');
+        expect(topic).to.exist;
+        expect(topic.categoryUuids).to.be.an('array').with.lengthOf(1);
+        expect(topic.categoryUuids[0]).to.equal(categoryUuid);
+      });
+
+      it('returns empty categoryUuids array for topics without categories', async () => {
+        const http = getHttpClient();
+
+        // Create a topic without categoryId
+        const topicRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/topics`,
+          { name: 'Uncategorized Topic' },
+        );
+        expect(topicRes.status).to.equal(201);
+
+        // GET topics and verify categoryUuids is empty
+        const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/topics`);
+        expect(listRes.status).to.equal(200);
+        const topic = listRes.body.find((t) => t.name === 'Uncategorized Topic');
+        expect(topic).to.exist;
+        expect(topic.categoryUuids).to.be.an('array').with.lengthOf(0);
+      });
+    });
+
     describe('Idempotency: duplicate topic with same categoryId', () => {
       before(() => resetData());
 

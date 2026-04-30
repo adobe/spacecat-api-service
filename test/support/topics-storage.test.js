@@ -50,6 +50,7 @@ describe('topics-storage', () => {
         description: 'All about SEO',
         status: 'active',
         brand_id: null,
+        topic_categories: [{ category_id: 'cat-uuid-a' }, { category_id: 'cat-uuid-b' }],
         created_at: '2026-01-01T00:00:00Z',
         created_by: 'admin@test.com',
         updated_at: '2026-02-01T00:00:00Z',
@@ -64,10 +65,54 @@ describe('topics-storage', () => {
       expect(result[0].id).to.equal('seo-best-practices');
       expect(result[0].uuid).to.equal('uuid-1');
       expect(result[0].name).to.equal('SEO Best Practices');
+      expect(result[0].categoryUuids).to.deep.equal(['cat-uuid-a', 'cat-uuid-b']);
       expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
       expect(result[0].createdBy).to.equal('admin@test.com');
       expect(result[0].updatedAt).to.equal('2026-02-01T00:00:00Z');
       expect(result[0].updatedBy).to.equal('user@test.com');
+    });
+
+    it('returns empty categoryUuids when topic has no topic_categories', async () => {
+      const dbRow = {
+        id: 'uuid-2',
+        topic_id: 'uncategorized',
+        name: 'Uncategorized Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        topic_categories: [],
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result[0].categoryUuids).to.deep.equal([]);
+    });
+
+    it('returns empty categoryUuids when topic_categories is absent from row', async () => {
+      const dbRow = {
+        id: 'uuid-3',
+        topic_id: 'legacy-topic',
+        name: 'Legacy Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result[0].categoryUuids).to.deep.equal([]);
     });
 
     it('returns empty array and defaults status when data is null', async () => {
