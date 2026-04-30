@@ -10,14 +10,34 @@
  * governing permissions and limitations under the License.
  */
 
+// The request body is HMAC-verified by GitHubWebhookHmacHandler.
+// Headers (x-github-event, x-github-delivery) are NOT part of GitHub's signed
+// material - only the body is signed. Pass header-derived values as structured
+// log context, never interpolated into log message strings (log injection risk).
+
 import {
   accepted, noContent, badRequest, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import wrap from '@adobe/helix-shared-wrap';
 import { getSkipReason, EVENT_JOB_MAP } from '../utils/github-trigger-rules.js';
 
+const DEFAULT_WORKSPACE_REPOS = [
+  'adobe/mysticat-architecture',
+  'adobe/mysticat-ai-native-guidelines',
+  'Adobe-AEM-Sites/aem-sites-architecture',
+];
+
+function getWorkspaceRepos(env) {
+  const raw = env.MYSTICAT_WORKSPACE_REPOS;
+  if (!raw) {
+    return DEFAULT_WORKSPACE_REPOS;
+  }
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 function WebhooksController(context) {
   const { sqs, log, env } = context;
+  const workspaceRepos = getWorkspaceRepos(env);
 
   function errorHandler(fn) {
     return async (ctx) => {
@@ -46,16 +66,17 @@ function WebhooksController(context) {
     // Check event-to-job-type mapping
     const jobType = EVENT_JOB_MAP[event];
     if (!jobType) {
-      log.info(`Skipping unmapped event: ${event}`, { deliveryId });
+      log.info('Skipping unmapped event', { event, deliveryId });
       return noContent();
     }
 
     const { action, pull_request: pr } = data;
 
-    // Apply trigger rules
+    // Apply trigger rules (returns skip reason string or null)
     const skipReason = getSkipReason(data, action, env);
     if (skipReason) {
-      log.info(`Skipping: ${skipReason}`, {
+      log.info('Skipping webhook', {
+        skipReason,
         deliveryId,
         event,
         action,
@@ -64,6 +85,17 @@ function WebhooksController(context) {
         prNumber: pr?.number,
       });
       return noContent();
+    }
+
+    // Validate pull_request-specific fields before building payload
+    if (!pr?.number) {
+      return badRequest('Missing required field: pull_request.number');
+    }
+    if (!data.repository?.owner?.login) {
+      return badRequest('Missing required field: repository.owner.login');
+    }
+    if (!data.repository?.name) {
+      return badRequest('Missing required field: repository.name');
     }
 
     // Build and enqueue job payload
@@ -76,18 +108,15 @@ function WebhooksController(context) {
       installation_id: String(data.installation.id),
       delivery_id: deliveryId,
       job_type: jobType,
-      workspace_repos: [
-        'adobe/mysticat-architecture',
-        'adobe/mysticat-ai-native-guidelines',
-        'Adobe-AEM-Sites/aem-sites-architecture',
-      ],
+      workspace_repos: workspaceRepos,
       retry_count: 0,
     };
 
     const queueUrl = env.MYSTICAT_GITHUB_JOBS_QUEUE_URL;
     await sqs.sendMessage(queueUrl, jobPayload);
 
-    log.info(`Enqueued ${jobType} job`, {
+    log.info('Enqueued webhook job', {
+      jobType,
       deliveryId,
       event,
       action,

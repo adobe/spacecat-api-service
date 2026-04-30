@@ -96,47 +96,73 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('skip rules', () => {
-      it('returns skip reason for draft PR', () => {
-        const data = {
-          ...baseData,
+    describe('skip rules (parametrized across review_requested and labeled)', () => {
+      const scenarios = [
+        {
+          name: 'review_requested',
           action: 'review_requested',
-          requested_reviewer: { login: 'mysticat[bot]' },
-          pull_request: { ...baseData.pull_request, draft: true },
-        };
-        expect(getSkipReason(data, 'review_requested', defaultEnv)).to.equal('draft PR');
-      });
+          matchFields: { requested_reviewer: { login: 'mysticat[bot]' } },
+        },
+        {
+          name: 'labeled',
+          action: 'labeled',
+          matchFields: { label: { name: 'mysticat:review-requested' } },
+        },
+      ];
 
-      it('returns skip reason for bot sender', () => {
-        const data = {
-          ...baseData,
-          action: 'review_requested',
-          requested_reviewer: { login: 'mysticat[bot]' },
-          sender: { type: 'Bot' },
-        };
-        expect(getSkipReason(data, 'review_requested', defaultEnv)).to.equal('bot sender');
-      });
+      scenarios.forEach(({ name, action, matchFields }) => {
+        describe(`for action ${name}`, () => {
+          it('returns skip reason for draft PR', () => {
+            const data = {
+              ...baseData,
+              action,
+              ...matchFields,
+              pull_request: { ...baseData.pull_request, draft: true },
+            };
+            expect(getSkipReason(data, action, defaultEnv)).to.equal('draft PR');
+          });
 
-      it('returns skip reason for non-default branch', () => {
-        const data = {
-          ...baseData,
-          action: 'review_requested',
-          requested_reviewer: { login: 'mysticat[bot]' },
-          pull_request: { ...baseData.pull_request, base: { ref: 'release/v2' } },
-        };
-        const reason = getSkipReason(data, 'review_requested', defaultEnv);
-        expect(reason).to.include('non-default branch');
+          it('returns skip reason for bot sender', () => {
+            const data = {
+              ...baseData,
+              action,
+              ...matchFields,
+              sender: { type: 'Bot' },
+            };
+            expect(getSkipReason(data, action, defaultEnv)).to.equal('bot sender');
+          });
+
+          it('returns skip reason for non-default branch', () => {
+            const data = {
+              ...baseData,
+              action,
+              ...matchFields,
+              pull_request: { ...baseData.pull_request, base: { ref: 'release/v2' } },
+            };
+            const reason = getSkipReason(data, action, defaultEnv);
+            expect(reason).to.include('non-default branch');
+          });
+        });
       });
     });
 
-    describe('GITHUB_APP_SLUG default', () => {
-      it('defaults to mysticat when env var is not set', () => {
+    describe('GITHUB_APP_SLUG configuration', () => {
+      it('returns misconfiguration skip when env var is not set', () => {
         const data = {
           ...baseData,
           action: 'review_requested',
           requested_reviewer: { login: 'mysticat[bot]' },
         };
-        expect(getSkipReason(data, 'review_requested', {})).to.be.null;
+        expect(getSkipReason(data, 'review_requested', {})).to.equal('GITHUB_APP_SLUG not configured');
+      });
+
+      it('returns misconfiguration skip when env var is empty string', () => {
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: 'mysticat[bot]' },
+        };
+        expect(getSkipReason(data, 'review_requested', { GITHUB_APP_SLUG: '' })).to.equal('GITHUB_APP_SLUG not configured');
       });
     });
   });

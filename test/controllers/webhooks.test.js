@@ -44,6 +44,19 @@ describe('WebhooksController', () => {
     },
   };
 
+  function buildController(envOverrides = {}) {
+    const context = {
+      sqs: mockSqs,
+      log: mockLog,
+      env: {
+        MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
+        GITHUB_APP_SLUG: 'mysticat',
+        ...envOverrides,
+      },
+    };
+    return WebhooksController(context);
+  }
+
   beforeEach(() => {
     sandbox = sinon.createSandbox();
     mockSqs = { sendMessage: sandbox.stub().resolves() };
@@ -52,17 +65,7 @@ describe('WebhooksController', () => {
       warn: sandbox.stub(),
       error: sandbox.stub(),
     };
-
-    const context = {
-      sqs: mockSqs,
-      log: mockLog,
-      env: {
-        MYSTICAT_GITHUB_JOBS_QUEUE_URL: queueUrl,
-        GITHUB_APP_SLUG: 'mysticat',
-      },
-    };
-
-    controller = WebhooksController(context);
+    controller = buildController();
   });
 
   afterEach(() => {
@@ -131,6 +134,60 @@ describe('WebhooksController', () => {
     expect(body.message).to.include('installation.id');
   });
 
+  it('returns 400 with field name when pull_request.number is missing', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        pull_request: { ...validContext.data.pull_request, number: undefined },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.number');
+  });
+
+  it('returns 400 with field name when repository.owner.login is missing', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        repository: {
+          ...validContext.data.repository,
+          owner: {},
+        },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('repository.owner.login');
+  });
+
+  it('returns 400 with field name when repository.name is missing', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        repository: {
+          ...validContext.data.repository,
+          name: undefined,
+        },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('repository.name');
+  });
+
   it('propagates X-GitHub-Delivery to job payload as delivery_id', async () => {
     await controller.processGitHubWebhook(validContext);
 
@@ -138,12 +195,14 @@ describe('WebhooksController', () => {
     expect(payload.delivery_id).to.equal('delivery-uuid-123');
   });
 
-  it('returns 500 when SQS sendMessage fails', async () => {
+  it('returns 500 and logs error when SQS sendMessage fails', async () => {
     mockSqs.sendMessage.rejects(new Error('SQS timeout'));
 
     const response = await controller.processGitHubWebhook(validContext);
 
     expect(response.status).to.equal(500);
+    expect(mockLog.error.calledOnce).to.be.true;
+    expect(mockLog.error.firstCall.args[0]).to.include('GitHub webhook handler error');
   });
 
   it('returns 204 for skipped events (draft PR)', async () => {
@@ -159,5 +218,34 @@ describe('WebhooksController', () => {
 
     expect(response.status).to.equal(204);
     expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
+  it('uses MYSTICAT_WORKSPACE_REPOS env var when set', async () => {
+    controller = buildController({
+      MYSTICAT_WORKSPACE_REPOS: 'adobe/custom-repo-a, adobe/custom-repo-b',
+    });
+
+    await controller.processGitHubWebhook(validContext);
+
+    const [, payload] = mockSqs.sendMessage.firstCall.args;
+    expect(payload.workspace_repos).to.deep.equal([
+      'adobe/custom-repo-a',
+      'adobe/custom-repo-b',
+    ]);
+  });
+
+  it('logs structured skip reason (not interpolated) for untrusted event header', async () => {
+    const context = {
+      ...validContext,
+      headers: { ...validContext.headers, 'x-github-event': 'evil\ninjected' },
+    };
+
+    await controller.processGitHubWebhook(context);
+
+    expect(mockLog.info.calledOnce).to.be.true;
+    // Message text must NOT contain the injected value
+    expect(mockLog.info.firstCall.args[0]).to.equal('Skipping unmapped event');
+    // Injected value goes to structured context, not message
+    expect(mockLog.info.firstCall.args[1]).to.deep.include({ event: 'evil\ninjected' });
   });
 });

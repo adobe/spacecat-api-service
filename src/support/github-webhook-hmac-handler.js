@@ -15,6 +15,10 @@ import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 const SIGNATURE_PATTERN = /^sha256=[a-f0-9]{64}$/;
+const WEBHOOK_PATH_PATTERN = /^\/?webhooks\//;
+// Real GitHub webhook payloads are typically under 100 KB; GitHub caps at 25 MB.
+// Reject larger bodies before HMAC computation to prevent pre-auth resource exhaustion.
+const MAX_BODY_BYTES = 1024 * 1024; // 1 MiB
 
 class GitHubWebhookHmacHandler extends AbstractHandler {
   constructor(log) {
@@ -22,8 +26,9 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
   }
 
   async checkAuth(request, context) {
-    // Path-scoped: only handle /webhooks/* routes
-    if (!context.pathInfo?.suffix?.startsWith('webhooks/')) {
+    // Path-scoped: only handle /webhooks/* routes. Tolerate suffix with or
+    // without leading slash (production sets it with leading slash).
+    if (!WEBHOOK_PATH_PATTERN.test(context.pathInfo?.suffix || '')) {
       return null;
     }
 
@@ -36,7 +41,14 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
 
     const secret = context.env?.GITHUB_WEBHOOK_SECRET;
     if (!secret) {
-      this.log('GITHUB_WEBHOOK_SECRET not configured', 'error');
+      this.log('GITHUB_WEBHOOK_SECRET not configured (misconfigured=true)', 'error');
+      return null;
+    }
+
+    // Reject oversized payloads pre-auth to prevent resource exhaustion.
+    const contentLength = Number(request.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+      this.log(`Payload too large: ${contentLength} bytes`, 'warn');
       return null;
     }
 
@@ -56,6 +68,12 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
       return null;
     }
 
+    // Second size check after reading (content-length may be absent or wrong).
+    if (rawBody.length > MAX_BODY_BYTES) {
+      this.log(`Payload too large after read: ${rawBody.length} bytes`, 'warn');
+      return null;
+    }
+
     // Compute expected HMAC
     const expected = `sha256=${crypto
       .createHmac('sha256', secret)
@@ -69,10 +87,6 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
       this.log('HMAC signature mismatch', 'warn');
       return null;
     }
-
-    // Stash raw body on context for controller use (e.g. logging, debugging).
-    // context.data is already set by bodyData middleware; no need to parse again.
-    context.rawBody = rawBody;
 
     return new AuthInfo()
       .withAuthenticated(true)

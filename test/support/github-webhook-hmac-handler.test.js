@@ -18,6 +18,7 @@ import GitHubWebhookHmacHandler from '../../src/support/github-webhook-hmac-hand
 describe('GitHubWebhookHmacHandler', () => {
   let handler;
   let sandbox;
+  let mockLog;
   const secret = 'test-webhook-secret';
   const validPayload = JSON.stringify({ action: 'review_requested', installation: { id: 123 } });
 
@@ -34,7 +35,7 @@ describe('GitHubWebhookHmacHandler', () => {
 
   function makeContext(overrides = {}) {
     return {
-      pathInfo: { suffix: 'webhooks/github' },
+      pathInfo: { suffix: '/webhooks/github' },
       env: { GITHUB_WEBHOOK_SECRET: secret },
       ...overrides,
     };
@@ -42,12 +43,12 @@ describe('GitHubWebhookHmacHandler', () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-    const log = {
+    mockLog = {
       info: sandbox.stub(),
       warn: sandbox.stub(),
       error: sandbox.stub(),
     };
-    handler = new GitHubWebhookHmacHandler(log);
+    handler = new GitHubWebhookHmacHandler(mockLog);
   });
 
   afterEach(() => {
@@ -66,20 +67,32 @@ describe('GitHubWebhookHmacHandler', () => {
     expect(result.authenticated).to.be.true;
   });
 
-  it('stashes rawBody on context on success', async () => {
+  it('accepts webhook path without leading slash', async () => {
     const sig = computeSignature(validPayload);
     const request = makeRequest({ 'x-hub-signature-256': sig });
-    const context = makeContext();
+    const context = makeContext({ pathInfo: { suffix: 'webhooks/github' } });
 
-    await handler.checkAuth(request, context);
+    const result = await handler.checkAuth(request, context);
 
-    expect(context.rawBody).to.equal(validPayload);
+    expect(result).to.not.be.null;
+    expect(result.type).to.equal('github_webhook');
+  });
+
+  it('accepts webhook path with leading slash', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig });
+    const context = makeContext({ pathInfo: { suffix: '/webhooks/github' } });
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.not.be.null;
+    expect(result.type).to.equal('github_webhook');
   });
 
   it('returns null for non-webhook path', async () => {
     const sig = computeSignature(validPayload);
     const request = makeRequest({ 'x-hub-signature-256': sig });
-    const context = makeContext({ pathInfo: { suffix: 'sites/123' } });
+    const context = makeContext({ pathInfo: { suffix: '/sites/123' } });
 
     const result = await handler.checkAuth(request, context);
 
@@ -96,7 +109,7 @@ describe('GitHubWebhookHmacHandler', () => {
     expect(result).to.be.null;
   });
 
-  it('returns null when GITHUB_WEBHOOK_SECRET is not configured', async () => {
+  it('returns null and logs error when GITHUB_WEBHOOK_SECRET is not configured', async () => {
     const sig = computeSignature(validPayload);
     const request = makeRequest({ 'x-hub-signature-256': sig });
     const context = makeContext({ env: {} });
@@ -104,27 +117,32 @@ describe('GitHubWebhookHmacHandler', () => {
     const result = await handler.checkAuth(request, context);
 
     expect(result).to.be.null;
+    expect(mockLog.error.calledOnce).to.be.true;
+    expect(mockLog.error.firstCall.args[0]).to.include('misconfigured=true');
   });
 
-  it('returns null for malformed signature (missing sha256= prefix)', async () => {
+  it('returns null and logs warn for malformed signature (missing sha256= prefix)', async () => {
     const request = makeRequest({ 'x-hub-signature-256': 'abc123' });
     const context = makeContext();
 
     const result = await handler.checkAuth(request, context);
 
     expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Malformed');
   });
 
-  it('returns null for signature with wrong byte length', async () => {
+  it('returns null and logs warn for signature with wrong byte length', async () => {
     const request = makeRequest({ 'x-hub-signature-256': 'sha256=tooshort' });
     const context = makeContext();
 
     const result = await handler.checkAuth(request, context);
 
     expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
   });
 
-  it('returns null for empty request body', async () => {
+  it('returns null and logs warn for empty request body', async () => {
     const sig = computeSignature(validPayload);
     const request = makeRequest({ 'x-hub-signature-256': sig }, '');
     const context = makeContext();
@@ -132,9 +150,11 @@ describe('GitHubWebhookHmacHandler', () => {
     const result = await handler.checkAuth(request, context);
 
     expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Empty');
   });
 
-  it('returns null for invalid signature (wrong secret)', async () => {
+  it('returns null and logs warn for invalid signature (wrong secret)', async () => {
     const wrongSig = computeSignature(validPayload, 'wrong-secret');
     const request = makeRequest({ 'x-hub-signature-256': wrongSig });
     const context = makeContext();
@@ -142,6 +162,36 @@ describe('GitHubWebhookHmacHandler', () => {
     const result = await handler.checkAuth(request, context);
 
     expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('mismatch');
+  });
+
+  it('returns null and logs warn when content-length exceeds limit', async () => {
+    const sig = computeSignature(validPayload);
+    // 2 MiB, above our 1 MiB limit
+    const request = makeRequest({ 'x-hub-signature-256': sig, 'content-length': '2097152' });
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Payload too large');
+    expect(request.text.called).to.be.false;
+  });
+
+  it('returns null and logs warn when actual body size exceeds limit', async () => {
+    const oversized = 'x'.repeat(1024 * 1024 + 1);
+    const sig = computeSignature(oversized);
+    // No content-length header so we only catch this after reading
+    const request = makeRequest({ 'x-hub-signature-256': sig }, oversized);
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Payload too large after read');
   });
 
   it('rejects signature computed over JSON.stringify (proves raw body matters)', async () => {
