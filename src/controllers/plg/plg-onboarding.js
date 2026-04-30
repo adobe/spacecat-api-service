@@ -1293,6 +1293,102 @@ async function performAsoPlgOnboarding({
   }
 }
 
+// ---------- GET /plg/sites helpers (admin list) ----------
+
+/**
+ * Parses + validates the optional `limit` query parameter for `getAllOnboardings`.
+ * Returns either `{ options }` for the data-access layer or `{ error }` on a bad input.
+ *
+ * NOTE: when limit is omitted the data-access layer fetches all pages — there is no
+ * server-side cap. This is OOM/timeout territory once the table grows and is flagged
+ * as a known gap by the surrounding TODOs (proper pagination + per-record endpoint).
+ */
+function parsePlgListLimit(rawLimit) {
+  if (rawLimit === undefined || rawLimit === null || rawLimit === '') {
+    return { options: { fetchAllPages: true } };
+  }
+  const limitStr = String(rawLimit).trim();
+  if (!/^\d+$/.test(limitStr)) {
+    return { error: 'limit must be a positive integer' };
+  }
+  const n = Number.parseInt(limitStr, 10);
+  if (n < 1) {
+    return { error: 'limit must be a positive integer' };
+  }
+  return { options: { limit: n } };
+}
+
+/**
+ * Coerces the BaseCollection result of `PlgOnboarding.all` into an array.
+ * Data access returns a single instance when limit === 1, so we have to handle the
+ * array / single-instance / null shapes explicitly. Returns null on an unexpected shape
+ * (caller maps to internalServerError).
+ */
+function normalizePlgListResult(raw, log) {
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  if (raw === null || raw === undefined) {
+    return [];
+  }
+  if (typeof raw === 'object' && typeof raw.getId === 'function') {
+    return [raw];
+  }
+  log.error(
+    `Unexpected PLG onboarding list result shape from data access: ${Object.prototype.toString.call(raw)}`,
+  );
+  return null;
+}
+
+const IMS_RESOLUTION_CONCURRENCY = 10;
+
+/**
+ * Builds a `{ imsId → email | null }` map for every IMS ID referenced from `records` in
+ * either `updatedBy` (excluding the literal 'system') or any review's `reviewedBy`
+ * (excluding the literal 'admin'). Looks up profiles via `context.imsClient` in batches
+ * of {@link IMS_RESOLUTION_CONCURRENCY}; lookup failures are logged and stored as null.
+ *
+ * TODO: Create a GET /plg/onboard/:onboardingId endpoint for individual record details.
+ * This would allow the backoffice UI to:
+ *   1. GET /plg/sites - return basic info without IMS resolution (fast list view)
+ *   2. GET /plg/onboard/:onboardingId - return full details with resolved emails
+ * That split would eliminate the N × IMS_CONCURRENCY API calls on every list load and
+ * significantly improve performance as the PLG onboarding table grows.
+ */
+async function resolveImsEmailsForPlgRecords(records, context) {
+  const { imsClient, log } = context;
+
+  const imsIds = new Set();
+  for (const r of records) {
+    const updatedBy = r.getUpdatedBy();
+    if (hasText(updatedBy) && updatedBy !== 'system') {
+      imsIds.add(updatedBy);
+    }
+    for (const review of (r.getReviews() || [])) {
+      if (hasText(review.reviewedBy) && review.reviewedBy !== 'admin') {
+        imsIds.add(review.reviewedBy);
+      }
+    }
+  }
+
+  const emailMap = {};
+  const imsIdList = [...imsIds];
+  for (let i = 0; i < imsIdList.length; i += IMS_RESOLUTION_CONCURRENCY) {
+    const batch = imsIdList.slice(i, i + IMS_RESOLUTION_CONCURRENCY);
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.all(batch.map(async (imsId) => {
+      try {
+        const imsProfile = await imsClient.getImsAdminProfile(imsId);
+        emailMap[imsId] = imsProfile.email || null;
+      } catch (e) {
+        log.warn(`Failed to resolve email for IMS ID ${imsId}: ${e.message}`);
+        emailMap[imsId] = null;
+      }
+    }));
+  }
+  return emailMap;
+}
+
 // ---------- Admin BYPASS handlers (called from PlgOnboardingController.update) ----------
 
 /**
@@ -1605,80 +1701,19 @@ function PlgOnboardingController(ctx) {
         return forbidden('Only admins can list all PLG onboarding records');
       }
 
-      const rawLimit = context.data?.limit;
-      let listOptions;
-      if (rawLimit === undefined || rawLimit === null || rawLimit === '') {
-        // TODO: implement proper pagination or filtering to stay under AWS Lambda
-        // response size limits (6MB). Without `limit`, all pages are loaded into memory before
-        // responding (OOM / timeout risk as the table grows).
-        listOptions = { fetchAllPages: true };
-      } else {
-        const limitStr = String(rawLimit).trim();
-        if (!/^\d+$/.test(limitStr)) {
-          return badRequest('limit must be a positive integer');
-        }
-        const n = Number.parseInt(limitStr, 10);
-        if (n < 1) {
-          return badRequest('limit must be a positive integer');
-        }
-        listOptions = { limit: n };
+      const limitParse = parsePlgListLimit(context.data?.limit);
+      if (limitParse.error) {
+        return badRequest(limitParse.error);
       }
 
       const { PlgOnboarding } = context.dataAccess;
-      const raw = await PlgOnboarding.all({}, listOptions);
-      // Data access returns a single instance when limit === 1, not an array (BaseCollection).
-      let records;
-      if (Array.isArray(raw)) {
-        records = raw;
-      } else if (raw === null || raw === undefined) {
-        records = [];
-      } else if (typeof raw === 'object' && typeof raw.getId === 'function') {
-        records = [raw];
-      } else {
-        log.error(
-          `Unexpected PLG onboarding list result shape from data access: ${Object.prototype.toString.call(raw)}`,
-        );
+      const raw = await PlgOnboarding.all({}, limitParse.options);
+      const records = normalizePlgListResult(raw, log);
+      if (records === null) {
         return internalServerError('Failed to list PLG onboarding records');
       }
 
-      // Resolve updatedBy IMS IDs to emails for the response
-      // eslint-disable-next-line no-warning-comments
-      // TODO: Create a GET /plg/onboard/:onboardingId endpoint for individual record details.
-      // This would allow the backoffice UI to:
-      // 1. GET /plg/sites - return basic info without IMS resolution (fast list view)
-      // 2. GET /plg/onboard/:onboardingId - return full details without resolved emails
-      // This would eliminate the N * IMS_CONCURRENCY API calls on every list load and
-      // significantly improve performance as the PLG onboarding table grows.
-      const { imsClient } = context;
-      // Collect all unique IMS IDs from updatedBy and reviewedBy fields
-      const imsIds = new Set();
-      for (const r of records) {
-        const updatedBy = r.getUpdatedBy();
-        if (hasText(updatedBy) && updatedBy !== 'system') {
-          imsIds.add(updatedBy);
-        }
-        for (const review of (r.getReviews() || [])) {
-          if (hasText(review.reviewedBy) && review.reviewedBy !== 'admin') {
-            imsIds.add(review.reviewedBy);
-          }
-        }
-      }
-      const emailMap = {};
-      const IMS_CONCURRENCY = 10;
-      const imsIdList = [...imsIds];
-      for (let i = 0; i < imsIdList.length; i += IMS_CONCURRENCY) {
-        const batch = imsIdList.slice(i, i + IMS_CONCURRENCY);
-        // eslint-disable-next-line no-await-in-loop
-        await Promise.all(batch.map(async (imsId) => {
-          try {
-            const imsProfile = await imsClient.getImsAdminProfile(imsId);
-            emailMap[imsId] = imsProfile.email || null;
-          } catch (e) {
-            log.warn(`Failed to resolve email for IMS ID ${imsId}: ${e.message}`);
-            emailMap[imsId] = null;
-          }
-        }));
-      }
+      const emailMap = await resolveImsEmailsForPlgRecords(records, context);
 
       let payload;
       try {
