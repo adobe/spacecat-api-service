@@ -4958,6 +4958,150 @@ describe('Sites Controller', () => {
       expect(body.details).to.not.have.property('tier');
     });
 
+    it('should return 200 for PRE_ONBOARD org when its IMS org ID is in ASO_PLG_EXCLUDED_ORGS (siteId path)', async () => {
+      const validSiteId = SITE_IDS[1];
+      const excludedImsOrgId = testOrganizations[3].getImsOrgId();
+
+      context.data = { siteId: validSiteId, imsOrg: excludedImsOrgId };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: excludedImsOrgId };
+      const controller = SitesController(context, loggerStub, context.env);
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollments: [{ getId: () => 'enrollment-pre-onboard', getSiteId: () => validSiteId }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await controller.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 aso_pre_onboard for PRE_ONBOARD org NOT in ASO_PLG_EXCLUDED_ORGS (siteId path)', async () => {
+      const validSiteId = SITE_IDS[1];
+      const excludedImsOrgId = testOrganizations[3].getImsOrgId();
+      const otherImsOrgId = '9999999999ABCDEF12345678@AdobeOrg';
+
+      context.data = { siteId: validSiteId, imsOrg: excludedImsOrgId };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: otherImsOrgId };
+      const controller = SitesController(context, loggerStub, context.env);
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollments: [{ getId: () => 'enrollment-pre-onboard', getSiteId: () => validSiteId }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await controller.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('aso_pre_onboard');
+    });
+
+    it('should return 404 site_not_enrolled for excluded org with no enrollments (siteId path)', async () => {
+      const validSiteId = SITE_IDS[1];
+      const excludedImsOrgId = testOrganizations[3].getImsOrgId();
+
+      context.data = { siteId: validSiteId, imsOrg: excludedImsOrgId };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: excludedImsOrgId };
+      const controller = SitesController(context, loggerStub, context.env);
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        enrollments: [],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await controller.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
+    });
+
+    it('should return 200 for excluded PRE_ONBOARD org via organizationId path', async () => {
+      const validOrgId = testOrganizations[3].getId();
+      const excludedImsOrgId = testOrganizations[3].getImsOrgId();
+
+      context.data = { organizationId: validOrgId };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: excludedImsOrgId };
+      const controller = SitesController(context, loggerStub, context.env);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        site: testSites[1],
+      });
+
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await controller.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 200 for excluded PRE_ONBOARD org via imsOrg path', async () => {
+      const excludedImsOrgId = testOrganizations[3].getImsOrgId();
+
+      context.data = { imsOrg: excludedImsOrgId };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: excludedImsOrgId };
+      const controller = SitesController(context, loggerStub, context.env);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: {
+          getId: () => 'entitlement-pre-onboard',
+          getProductCode: () => 'ASO',
+          getTier: () => 'PRE_ONBOARD',
+        },
+        site: testSites[1],
+      });
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[3]);
+
+      const response = await controller.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
     it('should return 404 with no_entitlement_for_product resolveStatus when product has no entitlement', async () => {
       const validSiteId = SITE_IDS[1];
 

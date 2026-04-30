@@ -1187,6 +1187,11 @@ function SitesController(ctx, log, env) {
       { 'x-error': message },
     );
 
+    const excludedOrgs = hasText(env.ASO_PLG_EXCLUDED_ORGS)
+      ? env.ASO_PLG_EXCLUDED_ORGS.split(',').map((id) => id.trim()).filter(Boolean)
+      : [];
+    const isPlgExcludedOrg = (org) => excludedOrgs.includes(org.getImsOrgId());
+
     let organization;
     let site;
 
@@ -1216,7 +1221,8 @@ function SitesController(ctx, log, env) {
                 );
               }
 
-              if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+              if (!isPlgExcludedOrg(organization)
+                && !CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
                 return resolveFailure(
                   'No site found for the provided parameters',
                   'aso_pre_onboard',
@@ -1253,6 +1259,7 @@ function SitesController(ctx, log, env) {
             .getFirstEnrollment();
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || isPlgExcludedOrg(organization)
             || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
@@ -1272,6 +1279,7 @@ function SitesController(ctx, log, env) {
             .getFirstEnrollment();
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
+            || isPlgExcludedOrg(organization)
             || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
