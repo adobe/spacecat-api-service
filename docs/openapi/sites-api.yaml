@@ -354,23 +354,7 @@ sites-resolve:
                 value:
                   message: 'Failed to resolve site'
       '404':
-        description: |
-          Not found - no site could be resolved.
-
-          When the failure is reached via the `siteId` resolution path, the body
-          carries a structured `resolveStatus` discriminator so clients can
-          distinguish "not enrolled" from "site doesn't exist" without
-          re-querying entitlements:
-
-          - `no_entitlement_for_product` — org has no entitlement for the
-            resolved product.
-          - `aso_pre_onboard` — entitlement tier is not in
-            `CUSTOMER_VISIBLE_TIERS` (e.g. `PRE_ONBOARD`).
-          - `site_not_enrolled` — entitlement is visible but no `SiteEnrollment`
-            links the site.
-
-          Generic 404s (e.g. site / org not found) omit `resolveStatus` and
-          `details`.
+        description: Not found - no site found for the provided parameters
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -381,62 +365,8 @@ sites-resolve:
               properties:
                 message:
                   type: string
-                resolveStatus:
-                  type: string
-                  enum:
-                    - no_entitlement_for_product
-                    - aso_pre_onboard
-                    - site_not_enrolled
-                  description: |
-                    Structured resolution status. Present only on the
-                    `siteId`-resolution path; absent on generic 404s.
-                details:
-                  type: object
-                  description: |
-                    Context for the resolution failure. Always
-                    `{ productCode, siteId, organizationId }` when
-                    `resolveStatus` is set (these branches are reached only
-                    via the `siteId` resolution path).
-                  properties:
-                    productCode:
-                      type: string
-                      example: 'ASO'
-                    siteId:
-                      $ref: './schemas.yaml#/Id'
-                    organizationId:
-                      $ref: './schemas.yaml#/Id'
-            examples:
-              no-entitlement-for-product:
-                summary: Org has no entitlement for the resolved product
-                value:
-                  message: 'No site found for the provided parameters'
-                  resolveStatus: 'no_entitlement_for_product'
-                  details:
-                    productCode: 'ASO'
-                    siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
-                    organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
-              aso-pre-onboard:
-                summary: Entitlement tier is not in CUSTOMER_VISIBLE_TIERS
-                value:
-                  message: 'No site found for the provided parameters'
-                  resolveStatus: 'aso_pre_onboard'
-                  details:
-                    productCode: 'ASO'
-                    siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
-                    organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
-              site-not-enrolled:
-                summary: Visible entitlement but site has no enrollment
-                value:
-                  message: 'No site found for the provided parameters'
-                  resolveStatus: 'site_not_enrolled'
-                  details:
-                    productCode: 'ASO'
-                    siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
-                    organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
-              generic-not-found:
-                summary: Generic 404 (no resolveStatus discriminator)
-                value:
-                  message: 'No site found for the provided parameters'
+            example:
+              message: 'No site found for the provided parameters'
       '500':
         description: Internal server error
         headers:

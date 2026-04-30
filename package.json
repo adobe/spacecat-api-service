@@ -177,5 +177,8 @@
       "."
     ],
     "ext": ".js, .cjs, .ejs, .css"
+  },
+  "optionalDependencies": {
+    "mark.js": "^8.11.1"
   }
 }
