@@ -19,6 +19,7 @@ import {
   createSearchHandler,
   createTopicDetailHandler,
   createPromptDetailHandler,
+  createPromptDetailByPromptIdHandler,
   createExecutionSourcesHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
@@ -51,6 +52,7 @@ import {
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
 } from './llmo-agentic-traffic.js';
 
 /**
@@ -116,6 +118,7 @@ function LlmoMysticatController(ctx) {
   const getSearch = createSearchHandler(getOrgAndValidateAccess);
   const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
   const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetailByPromptId = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
   const getExecutionSources = createExecutionSourcesHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
@@ -184,6 +187,7 @@ function LlmoMysticatController(ctx) {
   const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
     getSiteAndValidateAccess,
   );
+  const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -196,6 +200,7 @@ function LlmoMysticatController(ctx) {
     getSearch,
     getTopicDetail,
     getPromptDetail,
+    getPromptDetailByPromptId,
     getExecutionSources,
     getSentimentMovers,
     getShareOfVoice,
@@ -222,6 +227,7 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
+    getAgenticTrafficHasData,
   };
 }
 
