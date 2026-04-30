@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -71,37 +69,69 @@ describe('routeRequiredCapabilities', () => {
     });
   });
 
-  describe('API key routes', () => {
-    const API_KEY_ROUTES = [
-      'POST /tools/api-keys',
-      'DELETE /tools/api-keys/:id',
-      'GET /tools/api-keys',
-    ];
+  describe('internal vs capability partitioning', () => {
+    // Structural invariant: a route is either gated by a capability (S2S consumers can call
+    // it when granted) or listed as internal (S2S consumers are denied at the gate). Never
+    // both. If the same route appears in both lists, the capability wins and the internal
+    // listing becomes misleading documentation — the exact silent-broadening failure mode
+    // this suite exists to prevent.
+    it('INTERNAL_ROUTES and routeRequiredCapabilities must be disjoint', () => {
+      const capabilityRoutes = new Set(Object.keys(routeRequiredCapabilities));
+      const overlap = INTERNAL_ROUTES.filter((r) => capabilityRoutes.has(r));
+      expect(
+        overlap,
+        `Routes listed as internal must not also be mapped to a capability: ${overlap.join(', ')}`,
+      ).to.have.lengthOf(0);
+    });
 
-    it('are in INTERNAL_ROUTES (not exposed to S2S consumers)', () => {
-      const internalSet = new Set(INTERNAL_ROUTES);
-      API_KEY_ROUTES.forEach((route) => {
-        expect(internalSet.has(route), `${route} must be in INTERNAL_ROUTES`).to.be.true;
+    // Pin specific route-to-placement decisions so a silent regression (e.g. granting a
+    // broader capability to a platform-scoped route) fails loudly in review.
+    it('keeps GET /monitoring/drs-bp-pg-audit in INTERNAL_ROUTES, not routeRequiredCapabilities', () => {
+      const route = 'GET /monitoring/drs-bp-pg-audit';
+      expect(
+        INTERNAL_ROUTES,
+        'DRS Brand Presence PG audit is admin-key only; bundling into audit:read would silently '
+        + 'broaden that site-scoped capability to infra monitoring data.',
+      ).to.include(route);
+      expect(
+        routeRequiredCapabilities,
+        'DRS Brand Presence PG audit must not be mapped to an S2S capability until a dedicated '
+        + 'resource-scoped capability (e.g. drsBrandPresenceAudit:read) is registered.',
+      ).to.not.have.property(route);
+    });
+
+    describe('API key routes', () => {
+      const API_KEY_ROUTES = [
+        'POST /tools/api-keys',
+        'DELETE /tools/api-keys/:id',
+        'GET /tools/api-keys',
+      ];
+
+      it('are in INTERNAL_ROUTES (not exposed to S2S consumers)', () => {
+        const internalSet = new Set(INTERNAL_ROUTES);
+        API_KEY_ROUTES.forEach((route) => {
+          expect(internalSet.has(route), `${route} must be in INTERNAL_ROUTES`).to.be.true;
+        });
+      });
+
+      it('are not in routeRequiredCapabilities', () => {
+        API_KEY_ROUTES.forEach((route) => {
+          expect(routeRequiredCapabilities).to.not.have.property(route);
+        });
       });
     });
 
-    it('are not in routeRequiredCapabilities', () => {
-      API_KEY_ROUTES.forEach((route) => {
-        expect(routeRequiredCapabilities).to.not.have.property(route);
-      });
-    });
-  });
+    describe('sheet-data POST routes', () => {
+      const SHEET_DATA_POST_ROUTES = [
+        'POST /sites/:siteId/llmo/sheet-data/:dataSource',
+        'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+        'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
+      ];
 
-  describe('sheet-data POST routes', () => {
-    const SHEET_DATA_POST_ROUTES = [
-      'POST /sites/:siteId/llmo/sheet-data/:dataSource',
-      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
-      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
-    ];
-
-    it('are mapped to site:read (not site:write)', () => {
-      SHEET_DATA_POST_ROUTES.forEach((route) => {
-        expect(routeRequiredCapabilities[route], `${route} must map to site:read`).to.equal('site:read');
+      it('are mapped to site:read (not site:write)', () => {
+        SHEET_DATA_POST_ROUTES.forEach((route) => {
+          expect(routeRequiredCapabilities[route], `${route} must map to site:read`).to.equal('site:read');
+        });
       });
     });
   });

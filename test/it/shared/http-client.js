@@ -32,7 +32,9 @@ export function createHttpClient(baseUrl, tokens) {
 
     // Allow callers to omit default headers by setting them to undefined/null
     Object.keys(headers).forEach((key) => {
-      if (headers[key] == null) delete headers[key];
+      if (headers[key] == null) {
+        delete headers[key];
+      }
     });
 
     const options = { method, headers };

@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -38,6 +37,10 @@ describe('LLMO Onboarding Functions', () => {
       Site: {
         findByBaseURL: sinon.stub(),
         create: sinon.stub(),
+        // Default: no pre-cutoff sites → mode resolution returns v2 (the default).
+        // Tests that need v1 mode should set LLMO_ONBOARDING_DEFAULT_VERSION='v1'
+        // in context.env to use the global kill switch.
+        allByOrganizationId: sinon.stub().resolves([]),
       },
       Organization: {
         findByImsOrgId: sinon.stub(),
@@ -245,8 +248,12 @@ describe('LLMO Onboarding Functions', () => {
 
     if (mockTracingFetch || mockComposeBaseURL) {
       deps['@adobe/spacecat-shared-utils'] = {};
-      if (mockTracingFetch) deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
-      if (mockComposeBaseURL) deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+      if (mockTracingFetch) {
+        deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
+      }
+      if (mockComposeBaseURL) {
+        deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+      }
     }
 
     if (mockDrsClient) {
@@ -256,6 +263,10 @@ describe('LLMO Onboarding Functions', () => {
     deps['../../../src/support/customer-config-v2-storage.js'] = effectiveCustomerConfigV2Storage;
     deps['../../../src/support/brands-storage.js'] = {
       upsertBrand: options.mockUpsertBrand || sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+    };
+
+    deps['../../../src/support/cdn-detection.js'] = {
+      detectCdnForDomain: options.mockDetectCdnForDomain || sinon.stub().resolves(null),
     };
 
     return deps;
@@ -1205,8 +1216,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      // Note: save() is NOT called by createOrFindSite, it's the caller's responsibility
-      expect(mockSite.save).to.not.have.been.called;
+      // LLMO-4176: re-parent must be persisted before resolveLlmoOnboardingMode
+      // queries Site.allByOrganizationId, otherwise a legacy site moved into a
+      // brand-new org would be misclassified as v2.
+      expect(mockSite.save).to.have.been.calledOnce;
     });
 
     it('should not update organization ID when existing site has same organization', async () => {
@@ -1376,17 +1389,8 @@ describe('LLMO Onboarding Functions', () => {
         }),
       );
 
-      // Verify prompt generation job was submitted with audience from brand profile
-      expect(mockDrsClient.createFrom().submitJob.secondCall).to.have.been.calledWith(
-        sinon.match({
-          provider_id: 'prompt_generation_base_url',
-          source: 'onboarding',
-          parameters: sinon.match({
-            audience: 'Tech-savvy professionals',
-            metadata: sinon.match({ onboarding_mode: 'v2' }),
-          }),
-        }),
-      );
+      // Verify prompt generation is NOT submitted during onboarding (deferred to DRS post-Brandalf)
+      expect(mockDrsClient.createFrom().submitJob.secondCall).to.be.null;
 
       // Verify the result contains expected fields
       expect(result.siteId).to.equal('site123');
@@ -1404,6 +1408,13 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         organizationId: 'org123',
       });
+
+      // LLMO-4176 regression guard: resolveLlmoOnboardingMode reads
+      // Site.allByOrganizationId, and that read MUST happen after the site
+      // has been created/re-parented — otherwise a legacy site moved into a
+      // brand-new org gets misclassified as v2.
+      expect(mockDataAccess.Site.allByOrganizationId)
+        .to.have.been.calledAfter(mockDataAccess.Site.findByBaseURL);
 
       // Verify site config was updated
       expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
@@ -1443,7 +1454,7 @@ describe('LLMO Onboarding Functions', () => {
       });
       // Must use baseURL (matches sites.base_url), not overrideBaseURL
       expect(mockUpsertBrand.firstCall.args[0].brand.urls).to.deep.equal([
-        { value: 'https://example.com', type: 'url' },
+        { value: 'https://example.com', type: 'base' },
       ]);
       expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
 
@@ -1582,6 +1593,281 @@ describe('LLMO Onboarding Functions', () => {
         .to.have.been.called;
     });
 
+    it('should include detectedCdn in result when CDN is detected', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        updateLlmoDetectedCdn: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+        getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'Tech-savvy professionals' } }),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const select = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockDetectCdnForDomain = sinon.stub().resolves('aem-cs-fastly');
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockDetectCdnForDomain,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(result.detectedCdn).to.equal('aem-cs-fastly');
+      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('aem-cs-fastly');
+      expect(mockDetectCdnForDomain).to.have.been.calledWith('example.com');
+    });
+
+    it('should store detectedCdn as byocdn-other when CDN detection resolves but does not match a specific provider', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        updateLlmoDetectedCdn: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+        getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'Tech-savvy professionals' } }),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const select = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockDetectCdnForDomain = sinon.stub().resolves('byocdn-other');
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockDetectCdnForDomain,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(result.detectedCdn).to.equal('byocdn-other');
+      expect(mockSiteConfig.updateLlmoDetectedCdn).to.have.been.calledWith('byocdn-other');
+    });
+
+    it('should continue onboarding when CDN detection throws', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        updateLlmoDetectedCdn: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+        getBrandProfile: sinon.stub().returns({ main_profile: { target_audience: 'Tech-savvy professionals' } }),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqProduct = sinon.stub().returns({ eq: eqFlag });
+      const eqOrg = sinon.stub().returns({ eq: eqProduct });
+      const select = sinon.stub().returns({ eq: eqOrg });
+      const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+      const upsertSelect = sinon.stub().returns({ single: upsertSingle });
+      const upsertStub = sinon.stub().returns({ select: upsertSelect });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+      const mockDetectCdnForDomain = sinon.stub().rejects(new Error('DNS exploded'));
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+          mockDetectCdnForDomain,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(result.detectedCdn).to.be.null;
+      expect(mockSiteConfig.updateLlmoDetectedCdn).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch('CDN detection failed');
+    });
+
     it('should skip v2 initialization and Brandalf in v1 onboarding mode', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
@@ -1612,12 +1898,265 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: false }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
-      const eqProduct = sinon.stub().returns({ eq: eqFlag });
-      const eqOrg = sinon.stub().returns({ eq: eqProduct });
-      const select = sinon.stub().returns({ eq: eqOrg });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select });
+      // Force v1 mode via the global kill switch — no brandalf flag lookup needed.
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockDrsClient = createMockDrsClient();
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+      };
+
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
+      // V1 mode does not trigger Brandalf, but it MUST trigger DRS prompt generation
+      // directly so the legacy LLMO config still gets prompts written (LLMO-4534).
+      expect(mockDrsClient.createFrom().submitJob).to.not.have.been.called;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
+        audience: 'Tech-savvy professionals',
+      });
+    }).timeout(10000);
+
+    it('should skip DRS prompt generation in v1 mode when DRS client is not configured', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS client not configured — v1 path should fall through the else branch and skip
+      // submitPromptGenerationJob, emitting a debug log instead.
+      const mockDrsClient = createMockDrsClient(sinon, { isConfigured: false });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.not.have.been.called;
+      expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping prompt generation');
+    }).timeout(10000);
+
+    it('should handle DRS prompt generation failure gracefully in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS prompt generation throws — onboarding should swallow the error, log it,
+      // and warn via say() that a manual trigger is required (LLMO-4534).
+      const submitPromptGenerationJob = sinon.stub().rejects(new Error('drs unavailable'));
+      const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const sayStub = sinon.stub();
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context, sayStub);
+
+      // Onboarding still completes despite DRS failure
+      expect(result.siteId).to.equal('site123');
+      expect(submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: drs unavailable');
+      expect(sayStub).to.have.been.calledWith(':warning: Failed to start DRS prompt generation for site site123 (will need manual trigger)');
+    }).timeout(10000);
+
+    it('should use the English fallback audience when brand profile is missing in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          // Brand profile missing entirely — exercises the `||` fallback at the audience line.
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
 
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
@@ -1654,27 +2193,114 @@ describe('LLMO Onboarding Functions', () => {
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: mockEnv,
-        sqs: {
-          sendMessage: sinon.stub().resolves(),
-        },
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
       };
 
+      // Caller passes brandName with whitespace to confirm trim is applied to BOTH the
+      // audience template and the DRS payload (consistency).
       await performLlmoOnboardingWithMocks({
         domain: 'example.com',
-        brandName: 'Test Brand',
+        brandName: '  Test Brand  ',
         imsOrgId: 'ABC123@AdobeOrg',
       }, context);
 
-      expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.not.have.been.called;
-      expect(mockDrsClient.createFrom().submitJob).to.have.been.calledOnce;
-      expect(mockDrsClient.createFrom().submitJob.firstCall.args[0]).to.deep.include({
-        provider_id: 'prompt_generation_base_url',
-        source: 'onboarding',
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob.firstCall.args[0]).to.include({
+        brandName: 'Test Brand',
+        audience: 'General consumers interested in Test Brand products and services',
+        siteId: 'site123',
+        imsOrgId: 'ABC123@AdobeOrg',
       });
-      expect(
-        mockDrsClient.createFrom().submitJob.firstCall.args[0].parameters.metadata.onboarding_mode,
-      ).to.equal('v1');
+    }).timeout(10000);
+
+    it('should treat a DRS response missing job_id as a failure in v1 mode', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns(null),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      // DRS resolves without a job_id — onboarding must NOT log/say a fake success;
+      // it must throw into the catch and emit the `:warning:` instead.
+      const submitPromptGenerationJob = sinon.stub().resolves({});
+      const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
+      const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+          mockDrsClient,
+          mockCustomerConfigV2Storage,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: { ...mockEnv, LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+      };
+
+      const sayStub = sinon.stub();
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context, sayStub);
+
+      expect(result.siteId).to.equal('site123');
+      expect(submitPromptGenerationJob).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: DRS submitPromptGenerationJob returned no job_id');
+      expect(sayStub).to.have.been.calledWith(':warning: Failed to start DRS prompt generation for site site123 (will need manual trigger)');
+      // The success log/say must NOT have been emitted with `undefined`
+      expect(mockLog.info).to.not.have.been.calledWith('Started DRS prompt generation: job=undefined');
+      expect(sayStub).to.not.have.been.calledWith(':robot_face: Started DRS prompt generation job: undefined');
     }).timeout(10000);
 
     it('should skip DRS prompt generation when DRS client is not configured', async () => {
@@ -1762,9 +2388,8 @@ describe('LLMO Onboarding Functions', () => {
       expect(result.siteId).to.equal('site123');
       expect(result.message).to.equal('LLMO onboarding completed successfully');
 
-      // Verify DRS was checked but not called
+      // Verify DRS was checked but not called (prompt gen is deferred, only Brandalf is checked)
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping Brandalf flow');
-      expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping prompt generation');
     });
 
     it('should handle Brandalf job submission failure gracefully', async () => {
@@ -1857,100 +2482,6 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify error was logged but didn't fail onboarding
       expect(mockLog.error).to.have.been.calledWith('Failed to start DRS Brandalf flow: Brandalf API connection failed');
-    });
-
-    it('should handle DRS prompt generation failure gracefully', async () => {
-      // Mock organization
-      const mockOrganization = {
-        getId: sinon.stub().returns('org123'),
-        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
-      };
-
-      // Mock site
-      const mockSite = {
-        getId: sinon.stub().returns('site123'),
-        getConfig: sinon.stub().returns({
-          updateLlmoBrand: sinon.stub(),
-          updateLlmoDataFolder: sinon.stub(),
-          getImports: sinon.stub().returns([]),
-          enableImport: sinon.stub(),
-          getFetchConfig: sinon.stub().returns({}),
-          updateFetchConfig: sinon.stub(),
-        }),
-        setConfig: sinon.stub(),
-        save: sinon.stub().resolves(),
-      };
-
-      // Mock configuration
-      const mockConfiguration = {
-        enableHandlerForSite: sinon.stub(),
-        disableHandlerForSite: sinon.stub(),
-        isHandlerEnabledForSite: sinon.stub().returns(false),
-        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
-        save: sinon.stub().resolves(),
-        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
-      };
-
-      // Setup mocks
-      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
-      mockDataAccess.Site.findByBaseURL.resolves(null);
-      mockDataAccess.Site.create.resolves(mockSite);
-      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
-
-      const mockConfig = createMockConfig();
-      const mockTierClient = createMockTierClient();
-      const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
-      const mockComposeBaseURL = createMockComposeBaseURL();
-      const { mockClient: sharePointClient } = createMockSharePointClient(
-        sinon,
-        { folderExists: false },
-      );
-      const mockOctokit = createMockOctokit();
-      const submitJob = sinon.stub();
-      submitJob.onFirstCall().resolves({ job_id: 'test-brandalf-job-123' });
-      submitJob.onSecondCall().rejects(new Error('DRS API connection failed'));
-      const mockDrsClient = createMockDrsClient(sinon, {
-        isConfigured: true,
-        submitJob,
-      });
-
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
-        createCommonEsmockDependencies({
-          mockTierClient,
-          mockTracingFetch,
-          mockConfig,
-          mockComposeBaseURL,
-          mockSharePointClient: sharePointClient,
-          mockOctokit,
-          mockDrsClient,
-        }),
-      );
-
-      const context = {
-        dataAccess: mockDataAccess,
-        log: mockLog,
-        env: mockEnv,
-        sqs: {
-          sendMessage: sinon.stub().resolves(),
-        },
-      };
-
-      const params = {
-        domain: 'example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-      };
-
-      const result = await performLlmoOnboardingWithMocks(params, context);
-
-      // Verify onboarding completed successfully despite DRS failure
-      expect(result.siteId).to.equal('site123');
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
-
-      // Verify error was logged but didn't fail onboarding
-      expect(mockLog.error).to.have.been.calledWith('Failed to start DRS prompt generation: DRS API connection failed');
     });
 
     it('should create new organization when organization does not exist', async () => {
@@ -2387,15 +2918,15 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Mock Ahrefs client to return overrideBaseURL
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub(),
       };
       // Base URL fails, www variant succeeds
-      mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://example.com', { limit: 1 })
         .resolves({ result: { pages: [] } });
-      mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://www.example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -2422,9 +2953,9 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -2513,15 +3044,15 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Mock Ahrefs client - both URLs succeed
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub(),
       };
       // Both URLs succeed, so no overrideBaseURL should be set
-      mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://example.com/page1' }] } });
-      mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
+      mockSeoClient.getTopPages
+        .withArgs('https://www.example.com', { limit: 1 })
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -2548,9 +3079,9 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -2625,7 +3156,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Mock Ahrefs client - should NOT be called since we skip detection
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub(),
       };
 
@@ -2653,9 +3184,9 @@ describe('LLMO Onboarding Functions', () => {
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -2683,7 +3214,7 @@ describe('LLMO Onboarding Functions', () => {
       await performLlmoOnboardingWithMocks(params, context);
 
       // Verify Ahrefs was NOT called (auto-detection was skipped)
-      expect(mockAhrefsClient.getTopPages).to.not.have.been.called;
+      expect(mockSeoClient.getTopPages).to.not.have.been.called;
 
       // Verify updateFetchConfig was NOT called (existing override preserved)
       expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
@@ -2722,7 +3253,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.status).to.equal('active');
       expect(brand.v1SiteId).to.equal('site-123');
       expect(brand.baseUrl).to.equal('https://www.example.com');
-      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
       expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
@@ -2915,7 +3446,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(newBrand.status).to.equal('active');
       expect(newBrand.origin).to.equal('system');
       expect(newBrand.regions).to.deep.equal(['gl']);
-      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'url' }]);
+      expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
       expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
@@ -3608,7 +4139,7 @@ describe('LLMO Onboarding Functions', () => {
           'https://www.example.com': [],
         },
         expected: null,
-        expectedLog: { level: 'warn', pattern: /Both URLs failed Ahrefs test/ },
+        expectedLog: { level: 'warn', pattern: /Both URLs failed SEO top pages test/ },
       },
       {
         name: 'should handle multi-part TLD (.com.au) when only alternate succeeds',
@@ -3655,16 +4186,16 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     it('should handle Ahrefs API errors gracefully', async () => {
-      const mockAhrefsClient = {
+      const mockSeoClient = {
         getTopPages: sinon.stub().rejects(new Error('Ahrefs API error')),
       };
 
       const { determineOverrideBaseURL } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-shared-ahrefs-client': {
+          '@adobe/mysticat-shared-seo-client': {
             default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
+              createFrom: sinon.stub().returns(mockSeoClient),
             },
           },
         },
@@ -3679,9 +4210,9 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(result).to.be.null;
       expect(mockLog.debug).to.have.been.calledWith(
-        sinon.match(/Ahrefs top pages test.*FAILED/),
+        sinon.match(/SEO top pages test.*FAILED/),
       );
-      expect(mockLog.warn).to.have.been.calledWith('Both URLs failed Ahrefs test, no overrideBaseURL set');
+      expect(mockLog.warn).to.have.been.calledWith('Both URLs failed SEO top pages test, no overrideBaseURL set');
     });
 
     // Subdomain detection tests
@@ -3702,19 +4233,19 @@ describe('LLMO Onboarding Functions', () => {
 
     subdomainTestCases.forEach(({ name, url }) => {
       it(name, async () => {
-        const { result, mockAhrefsClient } = await testOverrideBaseURL(url, {});
+        const { result, mockSeoClient } = await testOverrideBaseURL(url, {});
 
         expect(result).to.be.null;
         expect(mockLog.info).to.have.been.calledWith(
           `Skipping overrideBaseURL detection for subdomain URL: ${url}`,
         );
         // Verify Ahrefs was NOT called
-        expect(mockAhrefsClient.getTopPages).to.not.have.been.called;
+        expect(mockSeoClient.getTopPages).to.not.have.been.called;
       });
     });
 
     it('should NOT skip detection for apex domain with multi-part TLD (example.co.uk)', async () => {
-      const { result, mockAhrefsClient } = await testOverrideBaseURL(
+      const { result, mockSeoClient } = await testOverrideBaseURL(
         'https://example.co.uk',
         {
           'https://example.co.uk': [{ url: 'https://example.co.uk/page1' }],
@@ -3724,7 +4255,7 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(result).to.be.null; // Both succeed, no override needed
       // Verify Ahrefs WAS called (not skipped)
-      expect(mockAhrefsClient.getTopPages).to.have.been.calledTwice;
+      expect(mockSeoClient.getTopPages).to.have.been.calledTwice;
       expect(mockLog.debug).to.have.been.calledWith('Both URLs succeeded, no overrideBaseURL needed');
     });
 
@@ -3759,7 +4290,9 @@ describe('LLMO Onboarding Functions', () => {
       const mockSite = { getId: () => 'site123' };
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub().callsFake((audit) => {
-          if (audit === 'fail') throw new Error('fail error');
+          if (audit === 'fail') {
+            throw new Error('fail error');
+          }
         }),
         save: sinon.stub().resolves(),
       };
@@ -3781,7 +4314,9 @@ describe('LLMO Onboarding Functions', () => {
       const mockSiteConfig = {
         getImports: () => [],
         enableImport: sinon.stub().callsFake((type) => {
-          if (type === 'fail') throw new Error('fail error');
+          if (type === 'fail') {
+            throw new Error('fail error');
+          }
         }),
       };
       const mockSay = sinon.stub();
@@ -3791,6 +4326,302 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Failed to enable import 'fail'/));
       expect(mockSay).to.have.been.calledWith(sinon.match(/:warning:.*fail/));
       expect(mockSiteConfig.enableImport).to.have.been.calledTwice;
+    });
+  });
+
+  describe('appendRowsToQueryIndex', () => {
+    it('should append rows with correct format and timestamps', async () => {
+      const mockAppendRowsToSheet = sinon.stub().resolves();
+      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
+      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+
+      const { appendRowsToQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves(mockSPClient),
+          },
+        },
+      );
+
+      await appendRowsToQueryIndex('dev/test-com', ['file1', 'file2.json'], mockEnv, mockLog);
+
+      expect(mockAppendRowsToSheet).to.have.been.calledOnce;
+      const [sheetPath, rows] = mockAppendRowsToSheet.firstCall.args;
+      expect(sheetPath).to.equal('/dev/test-com/query-index.xlsx');
+      expect(rows).to.have.length(2);
+      expect(rows[0][0]).to.equal('/dev/test-com/file1.json');
+      expect(rows[1][0]).to.equal('/dev/test-com/file2.json');
+      expect(rows[0][1]).to.be.a('number');
+      expect(rows[0][2]).to.be.a('number');
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Appending 2 rows/));
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Successfully appended rows/));
+    });
+
+    it('should not double-append .json extension for files already ending in .json', async () => {
+      const mockAppendRowsToSheet = sinon.stub().resolves();
+      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
+      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+
+      const { appendRowsToQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves(mockSPClient),
+          },
+        },
+      );
+
+      await appendRowsToQueryIndex('dev/test-com', ['already.json'], mockEnv, mockLog);
+
+      const [, rows] = mockAppendRowsToSheet.firstCall.args;
+      expect(rows[0][0]).to.equal('/dev/test-com/already.json');
+    });
+  });
+
+  describe('previewAndPublishQueryIndex', () => {
+    it('should successfully preview and publish with .json path', async () => {
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+      const previewCall = mockTracingFetch.firstCall;
+      expect(previewCall.args[0]).to.equal(
+        'https://admin.hlx.page/preview/adobe/project-elmo-ui-data/main/dev/test-com/query-index.json',
+      );
+      expect(previewCall.args[1]).to.deep.include({ method: 'POST', timeout: 30000 });
+
+      const publishCall = mockTracingFetch.secondCall;
+      expect(publishCall.args[0]).to.equal(
+        'https://admin.hlx.page/live/adobe/project-elmo-ui-data/main/dev/test-com/query-index.json',
+      );
+      expect(publishCall.args[1]).to.deep.include({ method: 'POST', timeout: 30000 });
+      expect(mockLog.info).to.have.been.calledWith('Preview of query-index succeeded');
+      expect(mockLog.info).to.have.been.calledWith('Publish of query-index succeeded');
+    });
+
+    it('should throw when HLX_ONBOARDING_TOKEN is not set', async () => {
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {},
+      );
+
+      const envWithoutToken = { ...mockEnv, HLX_ONBOARDING_TOKEN: '' };
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', envWithoutToken, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('HLX_ONBOARDING_TOKEN is not set');
+      }
+    });
+
+    it('should throw and log details when preview fails', async () => {
+      const mockHeaders = { get: sinon.stub() };
+      mockHeaders.get.withArgs('x-error-code').returns('CONTENT_NOT_FOUND');
+      mockHeaders.get.withArgs('x-error').returns('resource not found');
+
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: mockHeaders,
+        text: sinon.stub().resolves('detailed error body'),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Preview failed: 404 Not Found');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Preview failed.*404.*x-error-code: CONTENT_NOT_FOUND.*x-error: resource not found.*body: detailed error body/),
+      );
+    });
+
+    it('should throw and log details when publish fails', async () => {
+      const mockHeaders = { get: sinon.stub() };
+      mockHeaders.get.withArgs('x-error-code').returns('');
+      mockHeaders.get.withArgs('x-error').returns('throttled');
+
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).resolves({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: mockHeaders,
+        text: sinon.stub().resolves(''),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Publish failed: 503 Service Unavailable');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Publish failed.*503/),
+      );
+    });
+
+    it('should handle text() throwing when reading error body', async () => {
+      const mockHeaders = { get: sinon.stub().returns('') };
+
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: mockHeaders,
+        text: sinon.stub().rejects(new Error('stream error')),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Preview failed: 500 Internal Server Error');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Preview failed.*500.*body: $/),
+      );
+    });
+
+    it('should handle text() throwing when reading publish error body', async () => {
+      const mockHeaders = { get: sinon.stub().returns('') };
+
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onFirstCall().resolves({ ok: true });
+      mockTracingFetch.onSecondCall().resolves({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: mockHeaders,
+        text: sinon.stub().rejects(new Error('stream error')),
+      });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('dev/test-com', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Publish failed: 502 Bad Gateway');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Publish failed.*502.*body: $/),
+      );
+    });
+  });
+
+  // Round-trip every token the shared Joi schema accepts. Anchored against
+  // `@adobe/spacecat-shared-data-access` >= 3.54.0, which aligned the enum
+  // with the canonical CDN_TYPES vocabulary (10 tokens) plus the legacy
+  // `other` token kept for back-compat with records written by the
+  // original Phase-1-only detector. If the detector ever starts emitting a
+  // token the schema doesn't know about, the config write at runtime will
+  // throw; surfacing that at unit-test time is the whole point of this
+  // block.
+  describe('detectedCdn Joi round-trip', () => {
+    const ACCEPTED_TOKENS = [
+      // Detector emits today
+      'aem-cs-fastly',
+      'commerce-fastly',
+      'byocdn-fastly',
+      'byocdn-akamai',
+      'byocdn-cloudflare',
+      'byocdn-imperva',
+      'byocdn-other',
+      // Reserved CDN_TYPES tokens — not emitted today but accepted so
+      // a future detector revision with AMS-aware signatures can land
+      // without a coupled shared release.
+      'byocdn-cloudfront',
+      'ams-cloudfront',
+      'ams-frontdoor',
+      // Legacy sentinel kept for back-compat; detector no longer emits it.
+      'other',
+    ];
+
+    let validateConfiguration;
+
+    before(async () => {
+      ({ validateConfiguration } = await import('@adobe/spacecat-shared-data-access/src/models/site/config.js'));
+    });
+
+    ACCEPTED_TOKENS.forEach((token) => {
+      it(`accepts detectedCdn = "${token}" via the shared Joi schema`, () => {
+        const config = {
+          llmo: {
+            dataFolder: '/test',
+            brand: 'test',
+            detectedCdn: token,
+          },
+        };
+        const validated = validateConfiguration(config);
+        expect(validated.llmo.detectedCdn).to.equal(token);
+      });
+    });
+
+    it('rejects an unknown detectedCdn token (regression guard for future detector additions)', () => {
+      const config = {
+        llmo: {
+          dataFolder: '/test',
+          brand: 'test',
+          detectedCdn: 'byocdn-unknown-provider',
+        },
+      };
+      expect(() => validateConfiguration(config)).to.throw(/detectedCdn/);
     });
   });
 });

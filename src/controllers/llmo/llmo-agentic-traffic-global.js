@@ -18,6 +18,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { AgenticTrafficGlobalDto } from '../../dto/agentic-traffic-global.js';
+import { cachedOk } from '../../support/cached-response.js';
 
 const DEFAULT_LIMIT = 52;
 
@@ -34,7 +35,9 @@ function requirePostgrest(context) {
 
 function getQueryParams(context) {
   const rawQueryString = context.invocation?.event?.rawQueryString;
-  if (!rawQueryString) return {};
+  if (!rawQueryString) {
+    return {};
+  }
 
   const params = {};
   rawQueryString.split('&').forEach((param) => {
@@ -78,7 +81,9 @@ function normalizeIntegerFields(source, specs) {
     const { required = false, ...constraints } = options;
     const { value, error } = normalizeInteger(source[fieldName], fieldName, constraints);
 
-    if (error) return { error };
+    if (error) {
+      return { error };
+    }
     if (required && value == null) {
       return { error: `${fieldName} is required` };
     }
@@ -92,8 +97,12 @@ function normalizeIntegerFields(source, specs) {
 function resolveUpdatedBy(context) {
   const authInfo = context.attributes?.authInfo;
   const profile = authInfo?.getProfile?.() ?? authInfo?.profile;
-  if (profile?.user_id) return String(profile.user_id);
-  if (profile?.sub) return String(profile.sub);
+  if (profile?.user_id) {
+    return String(profile.user_id);
+  }
+  if (profile?.sub) {
+    return String(profile.sub);
+  }
   return 'spacecat-api-service';
 }
 
@@ -106,7 +115,9 @@ export function createAgenticTrafficGlobalGetHandler(validateReadAccess) {
     }
 
     const unavailable = requirePostgrest(context);
-    if (unavailable) return unavailable;
+    if (unavailable) {
+      return unavailable;
+    }
 
     const query = getQueryParams(context);
     const { values, error: validationError } = normalizeIntegerFields(query, {
@@ -114,7 +125,9 @@ export function createAgenticTrafficGlobalGetHandler(validateReadAccess) {
       week: { minimum: 1, maximum: 53 },
       limit: { minimum: 1, maximum: 520 },
     });
-    if (validationError) return badRequest(validationError);
+    if (validationError) {
+      return badRequest(validationError);
+    }
 
     try {
       const { postgrestClient } = context.dataAccess.services;
@@ -137,7 +150,7 @@ export function createAgenticTrafficGlobalGetHandler(validateReadAccess) {
         throw new Error(error.message);
       }
 
-      return ok((data || []).map((row) => AgenticTrafficGlobalDto.toJSON(row)));
+      return cachedOk((data || []).map((row) => AgenticTrafficGlobalDto.toJSON(row)));
     } catch (e) {
       context.log.error(`Error listing global agentic traffic: ${e.message}`);
       return internalServerError('Failed to list global agentic traffic');
@@ -152,7 +165,9 @@ export function createAgenticTrafficGlobalPostHandler(accessControlUtil) {
     }
 
     const unavailable = requirePostgrest(context);
-    if (unavailable) return unavailable;
+    if (unavailable) {
+      return unavailable;
+    }
 
     if (!isObjectPayload(context.data)) {
       return badRequest('Request body must be an object');
@@ -163,7 +178,9 @@ export function createAgenticTrafficGlobalPostHandler(accessControlUtil) {
       week: { required: true, minimum: 1, maximum: 53 },
       hits: { required: true, minimum: 0 },
     });
-    if (validationError) return badRequest(validationError);
+    if (validationError) {
+      return badRequest(validationError);
+    }
 
     try {
       const { postgrestClient } = context.dataAccess.services;

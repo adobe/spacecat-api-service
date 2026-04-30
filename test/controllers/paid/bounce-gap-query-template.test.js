@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import { getTop3PagesWithBounceGapTemplate } from '../../../src/controllers/paid/bounce-gap-query-template.js';
 

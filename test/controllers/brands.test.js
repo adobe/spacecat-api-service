@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
@@ -612,8 +610,14 @@ describe('Brands Controller', () => {
           contains: sandbox.stub().returnsThis(),
           range: sandbox.stub().rejects(new Error('DB connection lost')),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({
+                data: { config: { customer: { brands: [] } } }, error: null,
+              });
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -674,9 +678,17 @@ describe('Brands Controller', () => {
         order: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
         maybeSingle: sandbox.stub().callsFake(() => {
-          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          if (table === 'brands') {
+            return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'llmo_customer_config') {
+            return Promise.resolve({
+              data: { config: { customer: { brands: [] } } }, error: null,
+            });
+          }
+          if (table === 'prompts') {
+            return Promise.resolve({ data: null, error: null });
+          }
           return Promise.resolve({ data: null, error: null });
         }),
       }));
@@ -700,9 +712,17 @@ describe('Brands Controller', () => {
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({
+                data: { config: { customer: { brands: [] } } }, error: null,
+              });
+            }
+            if (table === 'prompts') {
+              return Promise.reject(new Error('DB connection lost'));
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -763,8 +783,13 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
         };
-        if (table === 'brands') chain.maybeSingle = sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null });
-        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        if (table === 'brands') {
+          chain.maybeSingle = sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null });
+        }
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
         return chain;
       });
 
@@ -831,7 +856,10 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
-        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
         return chain;
       });
 
@@ -913,9 +941,17 @@ describe('Brands Controller', () => {
         update: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
         maybeSingle: sandbox.stub().callsFake(() => {
-          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          if (table === 'brands') {
+            return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'llmo_customer_config') {
+            return Promise.resolve({
+              data: { config: { customer: { brands: [] } } }, error: null,
+            });
+          }
+          if (table === 'prompts') {
+            return Promise.resolve({ data: null, error: null });
+          }
           return Promise.resolve({ data: null, error: null });
         }),
       }));
@@ -973,9 +1009,17 @@ describe('Brands Controller', () => {
         update: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
         maybeSingle: sandbox.stub().callsFake(() => {
-          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          if (table === 'brands') {
+            return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          }
+          if (table === 'llmo_customer_config') {
+            return Promise.resolve({
+              data: { config: { customer: { brands: [] } } }, error: null,
+            });
+          }
+          if (table === 'prompts') {
+            return Promise.resolve({ data: null, error: null });
+          }
           return Promise.resolve({ data: null, error: null });
         }),
       }));
@@ -999,9 +1043,17 @@ describe('Brands Controller', () => {
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({
+                data: { config: { customer: { brands: [] } } }, error: null,
+              });
+            }
+            if (table === 'prompts') {
+              return Promise.reject(new Error('DB connection lost'));
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -1028,9 +1080,17 @@ describe('Brands Controller', () => {
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
-            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
-            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({
+                data: { config: { customer: { brands: [] } } }, error: null,
+              });
+            }
+            if (table === 'prompts') {
+              return Promise.reject(new Error('DB connection lost'));
+            }
             return Promise.resolve({ data: null, error: null });
           }),
         };
@@ -1475,14 +1535,18 @@ describe('Brands Controller', () => {
             update: sandbox.stub().returnsThis(),
             range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
             maybeSingle: sandbox.stub().callsFake(() => {
-              if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              if (table === 'brands') {
+                return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              }
               if (table === 'llmo_customer_config') {
                 return Promise.resolve({
                   data: { config: { customer: { brands: [] } } },
                   error: null,
                 });
               }
-              if (table === 'prompts') return Promise.resolve({ data: { id: 'row-id' }, error: null });
+              if (table === 'prompts') {
+                return Promise.resolve({ data: { id: 'row-id' }, error: null });
+              }
               return Promise.resolve({ data: null, error: null });
             }),
           };
@@ -1603,7 +1667,9 @@ describe('Brands Controller', () => {
           ilike: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
           maybeSingle: sandbox.stub().callsFake(() => {
-            if (table === 'brands') return Promise.resolve({ data: null, error: null });
+            if (table === 'brands') {
+              return Promise.resolve({ data: null, error: null });
+            }
             if (table === 'llmo_customer_config') {
               return Promise.resolve({
                 data: { config: { customer: { brands: [] } } },
@@ -2100,24 +2166,33 @@ describe('Brands Controller', () => {
   });
 
   describe('createCategoryForOrg', () => {
+    const CATEGORY_ROW = {
+      id: 'cat-uuid',
+      category_id: 'my-category',
+      name: 'My Category',
+      status: 'active',
+      origin: 'human',
+      updated_at: '2026-01-01T00:00:00Z',
+      updated_by: 'user@test.com',
+    };
+
     beforeEach(() => {
+      // Lookup returns null (not found) on first .maybeSingle(), and .single()
+      // (from insert path) resolves the happy-path row. Tests that want the
+      // "existing row" path override maybeSingle to return CATEGORY_ROW.
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          insert: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
           single: sandbox.stub().resolves({
-            data: {
-              id: 'cat-uuid',
-              category_id: 'my-category',
-              name: 'My Category',
-              status: 'active',
-              origin: 'human',
-              updated_at: '2026-01-01T00:00:00Z',
-              updated_by: 'user@test.com',
-            },
+            data: CATEGORY_ROW,
             error: null,
           }),
         })),
@@ -2240,6 +2315,153 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    it('returns 200 with the existing row when a category with the same name already exists (idempotent update)', async () => {
+      const existingRow = {
+        id: 'uuid-existing',
+        category_id: 'baseurl-discovery-research',
+        name: 'Discovery & Research',
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-03-15T00:00:00Z',
+        updated_by: 'tester@adobe.com',
+      };
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          insert: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: existingRow, error: null }),
+          single: sandbox.stub().resolves({ data: existingRow, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        // Client posts a drifted slug; the stable `category_id` must be preserved.
+        data: { id: 'discovery-research', name: 'Discovery & Research' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.id).to.equal('baseurl-discovery-research');
+      expect(body.uuid).to.equal('uuid-existing');
+    });
+
+    it('returns 500 when the lookup-by-name query fails with a non-23505 PostgREST error', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          insert: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: null,
+            error: {
+              code: '23503',
+              message: 'insert or update on table "categories" violates foreign key constraint "categories_org_fk"',
+            },
+          }),
+          single: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'DupTest' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.match(/Failed to lookup category by name/);
+    });
+
+    it('returns 409 and logs at warn (not error) when storage raises concurrent-hard-delete 409', async () => {
+      // Storage surfaces the race as a typed 409. The controller must
+      // mirror the topics pattern and demote these to WARN to avoid
+      // re-polluting Coralogix ERROR severity — the explicit goal of
+      // LLMO-4370.
+      const existingRow = {
+        id: 'uuid-vanishing',
+        category_id: 'vanishing',
+        name: 'Vanishing',
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+      // Shared across every .from() call, so the first maybeSingle() (the
+      // lookup) finds the row and the second (post-update) returns null —
+      // simulating the row being hard-deleted between the two round-trips.
+      const sharedMaybeSingle = sandbox.stub();
+      sharedMaybeSingle.onCall(0).resolves({ data: existingRow, error: null });
+      sharedMaybeSingle.onCall(1).resolves({ data: null, error: null });
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sharedMaybeSingle,
+        })),
+      };
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        // Force the update path (differing status) so the race path is hit.
+        data: { name: 'Vanishing', status: 'pending' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      expect(loggerStub.warn).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
+    });
+
+    it('logs the outcome tag for post-deploy Coralogix quantification', async () => {
+      loggerStub.info.resetHistory();
+      await brandsController.createCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'My Category' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      });
+
+      // info call includes {organization_id, category_id, outcome} for
+      // aggregatable log-storm metrics — see LLMO-4370 #15.
+      expect(loggerStub.info).to.have.been.called;
+      const infoCall = loggerStub.info.getCalls().find(
+        (c) => /Category POST resolved/.test(c.args[0] || ''),
+      );
+      expect(infoCall).to.exist;
+      expect(infoCall.args[1]).to.have.property('outcome', 'insert');
+      expect(infoCall.args[1]).to.have.property('organization_id', ORGANIZATION_ID);
     });
   });
 
@@ -2397,6 +2619,43 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    it('returns 409 and logs at warn when PATCH name collides with a sibling in the same org', async () => {
+      // Storage layer maps 23505 on `uq_category_name_per_org` to a typed
+      // 409. The controller must surface that at WARN to keep the PATCH
+      // path symmetric with POST's no-storm contract. LLMO-4370 #9.
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_category_name_per_org"',
+            },
+          }),
+        })),
+      };
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.updateCategoryForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, categoryId: 'my-category' },
+        data: { name: 'Collides With Sibling' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      expect(loggerStub.warn).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
     });
   });
 
@@ -2794,6 +3053,44 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+
+    it('returns 409 and logs at warn (not error) when the storage layer raises a 23505 unique violation', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          single: sandbox.stub().resolves({
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "uq_topic_per_org"',
+              details: '',
+              hint: '',
+            },
+          }),
+        })),
+      };
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.createTopicForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'DupTopic' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { profile: { email: 'tester@adobe.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.message).to.include('uq_topic_per_org');
+      expect(loggerStub.warn).to.have.been.called;
+      expect(loggerStub.error).to.not.have.been.called;
     });
   });
 

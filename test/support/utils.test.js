@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -32,6 +31,7 @@ import {
   queueDeliveryConfigWriter,
   validateSiteForRedirects,
   sendAutofixMessage,
+  isViewAsTrialRequest,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -665,6 +665,78 @@ describe('utils', () => {
       expect(result).to.be.false;
       expect(context.log.error).to.have.been.calledOnce;
     });
+
+    it('returns true immediately when x-view-as-trial header is set, without config or entitlement lookup', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      };
+      // Configuration and Entitlement intentionally absent to prove they are not reached
+      context.dataAccess = {};
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.true;
+    });
+
+    it('does not short-circuit when x-view-as-trial is absent in requestContext', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      };
+      // No Configuration — falls through and returns false
+      context.dataAccess = {};
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when requestContext is present but x-client-type is wrong', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'other-client', 'x-view-as-trial': 'true' } },
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.false;
+    });
+  });
+
+  describe('isViewAsTrialRequest', () => {
+    it('returns true when both x-client-type and x-view-as-trial headers are correct', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.true;
+    });
+
+    it('returns false when x-client-type is not sites-optimizer-ui', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'other-client', 'x-view-as-trial': 'true' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-as-trial header is absent', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-as-trial is not "true"', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'false' } },
+      };
+      expect(isViewAsTrialRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when requestContext is undefined', () => {
+      expect(isViewAsTrialRequest(undefined)).to.be.false;
+    });
+
+    it('returns false when pathInfo is undefined', () => {
+      expect(isViewAsTrialRequest({})).to.be.false;
+    });
   });
 
   describe('getCookieValue', () => {
@@ -712,6 +784,8 @@ describe('utils', () => {
     let mockOrg;
     let mockSites;
     let sandbox2;
+    let nonAdminUtil;
+    let adminUtil;
 
     beforeEach(() => {
       sandbox2 = sinon.createSandbox();
@@ -736,6 +810,9 @@ describe('utils', () => {
         },
         log: { error: sinon.stub() },
       };
+
+      nonAdminUtil = { hasAdminAccess: () => false };
+      adminUtil = { hasAdminAccess: () => true };
     });
 
     afterEach(() => {
@@ -745,7 +822,7 @@ describe('utils', () => {
     it('returns empty array when no entitlement exists', async () => {
       mockTierClient.checkValidEntitlement.resolves({ entitlement: null });
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.deep.equal([]);
     });
@@ -761,13 +838,13 @@ describe('utils', () => {
         { getSiteId: () => 'site-1' },
       ]);
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.have.lengthOf(1);
       expect(result[0].getId()).to.equal('site-1');
     });
 
-    it('returns empty array for PRE_ONBOARD-tier entitlement', async () => {
+    it('returns empty array for PRE_ONBOARD-tier entitlement for non-admin', async () => {
       mockTierClient.checkValidEntitlement.resolves({
         entitlement: {
           getId: () => 'ent-1',
@@ -775,10 +852,28 @@ describe('utils', () => {
         },
       });
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.deep.equal([]);
       expect(mockContext.dataAccess.SiteEnrollment.allByEntitlementId).to.not.have.been.called;
+    });
+
+    it('returns enrolled sites for PRE_ONBOARD-tier entitlement for admin', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => EntitlementModel.TIERS.PRE_ONBOARD,
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', adminUtil);
+
+      expect(result).to.have.lengthOf(1);
+      expect(result[0].getId()).to.equal('site-1');
+      expect(mockContext.dataAccess.SiteEnrollment.allByEntitlementId).to.have.been.calledOnce;
     });
 
     it('returns enrolled sites for FREE_TRIAL-tier entitlement', async () => {
@@ -792,7 +887,7 @@ describe('utils', () => {
         { getSiteId: () => 'site-1' },
       ]);
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.have.lengthOf(1);
       expect(result[0].getId()).to.equal('site-1');
@@ -810,12 +905,12 @@ describe('utils', () => {
         { getSiteId: () => 'site-2' },
       ]);
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.have.lengthOf(2);
     });
 
-    it('returns empty array for any unrecognized future tier (allow-list pattern)', async () => {
+    it('returns empty array for any unrecognized future tier for non-admin (allow-list pattern)', async () => {
       mockTierClient.checkValidEntitlement.resolves({
         entitlement: {
           getId: () => 'ent-1',
@@ -823,9 +918,26 @@ describe('utils', () => {
         },
       });
 
-      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo');
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', nonAdminUtil);
 
       expect(result).to.deep.equal([]);
+    });
+
+    it('returns enrolled sites for any unrecognized future tier for admin', async () => {
+      mockTierClient.checkValidEntitlement.resolves({
+        entitlement: {
+          getId: () => 'ent-1',
+          getTier: () => 'FUTURE_TIER',
+        },
+      });
+      mockContext.dataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getSiteId: () => 'site-1' },
+        { getSiteId: () => 'site-2' },
+      ]);
+
+      const result = await filterSitesForProductCode(mockContext, mockOrg, mockSites, 'llmo', adminUtil);
+
+      expect(result).to.have.lengthOf(2);
     });
   });
 

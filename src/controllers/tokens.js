@@ -24,6 +24,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { TokenDto } from '../dto/token.js';
+import { SuggestionGrantDto } from '../dto/suggestion-grant.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
@@ -42,7 +43,7 @@ function TokensController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { Token, Site } = dataAccess;
+  const { Token, Site, SuggestionGrant } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -84,8 +85,47 @@ function TokensController(ctx) {
     }
   };
 
+  /**
+   * Gets all suggestion grants for a token.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} List of suggestion grants.
+   */
+  const getGrants = async (context) => {
+    const { siteId, tokenId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(tokenId)) {
+      return badRequest('Token ID required');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Access denied to this site');
+      }
+
+      const token = await Token.findById(tokenId);
+      if (!token || token.getSiteId() !== siteId) {
+        return notFound('Token not found');
+      }
+
+      const grants = await SuggestionGrant.allByIndexKeys({ tokenId });
+      return ok(grants.map(SuggestionGrantDto.toJSON));
+    } catch (e) {
+      context.log.error(`Error getting grants for token ${tokenId} on site ${siteId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getByTokenType,
+    getGrants,
   };
 }
 

@@ -35,7 +35,9 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
       .eq('organization_id', organizationId)
       .eq('id', brandId)
       .maybeSingle();
-    if (!error && data?.id) return data.id;
+    if (!error && data?.id) {
+      return data.id;
+    }
     return null;
   }
 
@@ -46,7 +48,9 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
     .ilike('name', brandId)
     .maybeSingle();
 
-  if (!error && data?.id) return data.id;
+  if (!error && data?.id) {
+    return data.id;
+  }
   return null;
 }
 
@@ -59,7 +63,9 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient)
  * @returns {Promise<string|null>} categories.id (uuid) or null
  */
 export async function resolveCategoryUuid(organizationId, categoryId, postgrestClient) {
-  if (!hasText(categoryId) || !postgrestClient?.from) return null;
+  if (!hasText(categoryId) || !postgrestClient?.from) {
+    return null;
+  }
   const { data, error } = await postgrestClient
     .from('categories')
     .select('id')
@@ -78,7 +84,9 @@ export async function resolveCategoryUuid(organizationId, categoryId, postgrestC
  * @returns {Promise<string|null>} topics.id (uuid) or null
  */
 export async function resolveTopicUuid(organizationId, topicId, postgrestClient) {
-  if (!hasText(topicId) || !postgrestClient?.from) return null;
+  if (!hasText(topicId) || !postgrestClient?.from) {
+    return null;
+  }
   const { data, error } = await postgrestClient
     .from('topics')
     .select('id')
@@ -89,184 +97,112 @@ export async function resolveTopicUuid(organizationId, topicId, postgrestClient)
 }
 
 /**
- * Builds in-memory lookup maps for category and topic business keys to UUIDs.
+ * Builds in-memory lookup maps for category and topic names to UUIDs.
+ * Keys are normalized (lowercase + trim) to handle legacy title-cased names.
  * Fetches all categories/topics for the org in two bulk queries, replacing
  * per-prompt DB round-trips with O(1) Map lookups.
  */
 async function buildLookupMaps(organizationId, postgrestClient) {
   const [catResult, topicResult] = await Promise.all([
-    postgrestClient.from('categories').select('id,category_id').eq('organization_id', organizationId),
-    postgrestClient.from('topics').select('id,topic_id').eq('organization_id', organizationId),
+    postgrestClient.from('categories').select('id,name').eq('organization_id', organizationId),
+    postgrestClient.from('topics').select('id,name').eq('organization_id', organizationId),
   ]);
 
   const categoryMap = new Map();
-  (catResult.data || []).forEach((c) => categoryMap.set(c.category_id, c.id));
+  (catResult.data || []).forEach((c) => {
+    if (c.name) {
+      categoryMap.set(c.name.toLowerCase().trim(), c.id);
+    }
+  });
 
   const topicMap = new Map();
-  (topicResult.data || []).forEach((t) => topicMap.set(t.topic_id, t.id));
+  (topicResult.data || []).forEach((t) => {
+    if (t.name) {
+      topicMap.set(t.name.toLowerCase().trim(), t.id);
+    }
+  });
 
   return { categoryMap, topicMap };
 }
 
 /**
- * DRS source prefix pattern. Must stay in sync with DRS _build_gsc /
- * _build_base_url / _build_agentic_traffic in spacecat_v2_prompts_sync.py.
- */
-const DRS_PREFIX_RE = /^(baseurl|gsc|agentic)-/;
-
-/**
- * Strips known DRS source prefixes from a slug.
- * e.g. "baseurl-comparison-decision" → "comparison-decision"
- */
-function stripDrsPrefix(slug) {
-  return slug.replace(DRS_PREFIX_RE, '');
-}
-
-/**
- * Best-effort conversion of a category/topic slug back to a readable name.
- * Strips known DRS source prefixes and title-cases each word. Two-word slugs
- * are joined with " & " to match the DRS naming convention (e.g.
- * "comparison-decision" → "Comparison & Decision"). Slugs with more or fewer
- * words are joined with spaces.
- *
- * This is a fallback — the primary fix is DRS sending explicit `id` so this
- * path rarely executes.
- */
-function slugToName(slug) {
-  const words = stripDrsPrefix(slug)
-    .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
-  return words.join(words.length === 2 ? ' & ' : ' ');
-}
-
-/**
  * Ensures that all referenced categories and topics exist in their respective
- * tables. Creates any missing ones and updates the lookup maps in place.
- *
- * The fallback path (prefix-stripping lookup) depends on the
- * uq_category_name_per_org / uq_topic_name_per_org unique constraints in
- * mysticat-data-service to trigger an upsert failure when a prefixed slug
- * collides with an existing unprefixed entry's name.
+ * tables. Creates any missing ones (by name) and updates the lookup maps in place.
+ * Map keys are normalized (lowercase + trim) for case-insensitive matching.
+ * The name is also used as the business key (category_id / topic_id) for new entries.
  */
 // eslint-disable-next-line max-len
 async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy) {
-  const missingCategories = [];
-  const missingTopics = [];
+  const missingCatNames = [...new Set(
+    prompts
+      .filter((p) => hasText(p.category) && !categoryMap.has(p.category.toLowerCase().trim()))
+      .map((p) => p.category.trim()),
+  )];
 
-  for (const p of prompts) {
-    if (hasText(p.categoryId) && !categoryMap.has(p.categoryId)) {
-      missingCategories.push(p.categoryId);
-    }
-    if (hasText(p.topicId) && !topicMap.has(p.topicId)) {
-      missingTopics.push(p.topicId);
-    }
-  }
+  const missingTopicNames = [...new Set(
+    prompts
+      .filter((p) => hasText(p.topic) && !topicMap.has(p.topic.toLowerCase().trim()))
+      .map((p) => p.topic.trim()),
+  )];
 
   const ops = [];
 
-  if (missingCategories.length > 0) {
-    const unique = [...new Set(missingCategories)];
-    const rows = unique.map((catId) => ({
-      organization_id: organizationId,
-      category_id: catId,
-      name: slugToName(catId),
-      origin: 'human',
-      status: 'active',
-      updated_by: updatedBy,
-    }));
+  if (missingCatNames.length > 0) {
     ops.push(
       postgrestClient
         .from('categories')
-        .upsert(rows, { onConflict: 'organization_id,category_id' })
-        .select('id,category_id')
-        .then(async ({ data, error }) => {
-          if (!error) {
-            data.forEach((c) => categoryMap.set(c.category_id, c.id));
+        .upsert(
+          missingCatNames.map((name) => ({
+            organization_id: organizationId,
+            category_id: name,
+            name,
+            origin: 'human',
+            status: 'active',
+            updated_by: updatedBy,
+          })),
+          { onConflict: 'organization_id,category_id' },
+        )
+        .select('id,name')
+        .then(({ data, error }) => {
+          if (error) {
+            // eslint-disable-next-line no-console
+            console.warn(`Failed to auto-create categories: ${error.message}`);
             return;
           }
-          // Only attempt fallback for unique constraint violations (23505).
-          // Re-throw unexpected errors (network, auth, etc.).
-          if (error.code !== '23505') {
-            throw new Error(`Failed to auto-create categories: ${error.message}`);
-          }
-          // uq_category_name_per_org hit. Try resolving each missing category
-          // by its unprefixed slug — the old category_id before DRS added prefixes.
-          const unresolved = [];
-          for (const catId of unique) {
-            if (!categoryMap.has(catId)) {
-              const unprefixed = stripDrsPrefix(catId);
-              // eslint-disable-next-line no-await-in-loop
-              const { data: existing } = await postgrestClient
-                .from('categories')
-                .select('id,category_id')
-                .eq('organization_id', organizationId)
-                .eq('category_id', unprefixed)
-                .maybeSingle();
-              if (existing) {
-                categoryMap.set(catId, existing.id);
-              } else {
-                unresolved.push(catId);
-              }
-            }
-          }
-          if (unresolved.length > 0) {
-            // eslint-disable-next-line no-console
-            console.warn(`Failed to auto-create or resolve categories: ${unresolved.join(', ')} (org: ${organizationId}, upsert error: ${error.message})`);
-          }
+          (data || []).forEach((c) => categoryMap.set(c.name.toLowerCase().trim(), c.id));
         }),
     );
   }
 
-  if (missingTopics.length > 0) {
-    const unique = [...new Set(missingTopics)];
-    const rows = unique.map((topId) => ({
-      organization_id: organizationId,
-      topic_id: topId,
-      name: slugToName(topId),
-      status: 'active',
-      updated_by: updatedBy,
-    }));
+  if (missingTopicNames.length > 0) {
     ops.push(
       postgrestClient
         .from('topics')
-        .upsert(rows, { onConflict: 'organization_id,topic_id' })
-        .select('id,topic_id')
-        .then(async ({ data, error }) => {
-          if (!error) {
-            data.forEach((t) => topicMap.set(t.topic_id, t.id));
+        .upsert(
+          missingTopicNames.map((name) => ({
+            organization_id: organizationId,
+            topic_id: name,
+            name,
+            status: 'active',
+            updated_by: updatedBy,
+          })),
+          { onConflict: 'organization_id,topic_id' },
+        )
+        .select('id,name')
+        .then(({ data, error }) => {
+          if (error) {
+            // eslint-disable-next-line no-console
+            console.warn(`Failed to auto-create topics: ${error.message}`);
             return;
           }
-          if (error.code !== '23505') {
-            throw new Error(`Failed to auto-create topics: ${error.message}`);
-          }
-          // Unique constraint — try resolving by unprefixed slug.
-          const unresolved = [];
-          for (const topId of unique) {
-            if (!topicMap.has(topId)) {
-              const unprefixed = stripDrsPrefix(topId);
-              // eslint-disable-next-line no-await-in-loop
-              const { data: existing } = await postgrestClient
-                .from('topics')
-                .select('id,topic_id')
-                .eq('organization_id', organizationId)
-                .eq('topic_id', unprefixed)
-                .maybeSingle();
-              if (existing) {
-                topicMap.set(topId, existing.id);
-              } else {
-                unresolved.push(topId);
-              }
-            }
-          }
-          if (unresolved.length > 0) {
-            // eslint-disable-next-line no-console
-            console.warn(`Failed to auto-create or resolve topics: ${unresolved.join(', ')} (org: ${organizationId}, upsert error: ${error.message})`);
-          }
+          (data || []).forEach((t) => topicMap.set(t.name.toLowerCase().trim(), t.id));
         }),
     );
   }
 
-  if (ops.length > 0) await Promise.all(ops);
+  if (ops.length > 0) {
+    await Promise.all(ops);
+  }
 }
 
 const SORT_COLUMN_MAP = {
@@ -284,12 +220,9 @@ function mapRowToPrompt(row) {
   const topic = row.topics;
   return {
     id: row.prompt_id,
-    uuid: row.id,
     prompt: row.text,
     name: row.name,
     regions: row.regions || [],
-    categoryId: category?.category_id ?? null,
-    topicId: topic?.topic_id ?? null,
     status: row.status || 'active',
     origin: row.origin || 'human',
     source: row.source || 'config',
@@ -301,18 +234,15 @@ function mapRowToPrompt(row) {
     brandName: brand?.name ?? null,
     category: category
       ? {
-        id: category.category_id,
-        uuid: category.id,
+        id: category.id,
         name: category.name,
         origin: category.origin,
       }
       : null,
     topic: topic
       ? {
-        id: topic.topic_id,
-        uuid: topic.id,
+        id: topic.id,
         name: topic.name,
-        categoryId: category?.category_id ?? null,
       }
       : null,
   };
@@ -355,12 +285,16 @@ export async function listPrompts({
   page = 1,
   postgrestClient,
 }) {
-  if (!postgrestClient?.from) return [];
+  if (!postgrestClient?.from) {
+    return [];
+  }
 
   let brandUuid = null;
   if (hasText(brandId)) {
     brandUuid = await resolveBrandUuid(organizationId, brandId, postgrestClient);
-    if (!brandUuid) return [];
+    if (!brandUuid) {
+      return [];
+    }
   }
 
   const MAX_LIMIT = 5000;
@@ -414,7 +348,9 @@ export async function listPrompts({
       .order('id', { ascending: true });
   }
 
-  if (brandUuid) baseQuery = baseQuery.eq('brand_id', brandUuid);
+  if (brandUuid) {
+    baseQuery = baseQuery.eq('brand_id', brandUuid);
+  }
   if (hasText(status)) {
     baseQuery = baseQuery.eq('status', status);
   } else {
@@ -441,13 +377,19 @@ export async function listPrompts({
     const topicUuid = hasText(topicId)
       ? await resolveTopicUuid(organizationId, topicId, postgrestClient)
       : null;
-    if (categoryUuid) baseQuery = baseQuery.eq('category_id', categoryUuid);
-    if (topicUuid) baseQuery = baseQuery.eq('topic_id', topicUuid);
+    if (categoryUuid) {
+      baseQuery = baseQuery.eq('category_id', categoryUuid);
+    }
+    if (topicUuid) {
+      baseQuery = baseQuery.eq('topic_id', topicUuid);
+    }
   }
 
   const { data: rows, error, count } = await baseQuery.range(offset, offset + limitNum - 1);
 
-  if (error) throw new Error(`Failed to list prompts: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to list prompts: ${error.message}`);
+  }
   if (!rows?.length) {
     return {
       items: [], total: count ?? 0, limit: limitNum, page: pageNum,
@@ -476,8 +418,12 @@ export async function getPromptById({
   promptId,
   postgrestClient,
 }) {
-  if (!postgrestClient?.from) return null;
-  if (!hasText(promptId)) return null;
+  if (!postgrestClient?.from) {
+    return null;
+  }
+  if (!hasText(promptId)) {
+    return null;
+  }
 
   const { data, error } = await postgrestClient
     .from('prompts')
@@ -506,8 +452,12 @@ export async function getPromptById({
     .eq('prompt_id', promptId)
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to get prompt: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to get prompt: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   return mapRowToPrompt(data);
 }
@@ -584,8 +534,12 @@ export async function upsertPrompts({
     // eslint-disable-next-line max-len
     const match = existingById.get(promptId) || existingByKey.get(getKey({ prompt: text, regions }));
 
-    const categoryUuid = hasText(p.categoryId) ? (categoryMap.get(p.categoryId) || null) : null;
-    const topicUuid = hasText(p.topicId) ? (topicMap.get(p.topicId) || null) : null;
+    const categoryUuid = hasText(p.category)
+      ? categoryMap.get(p.category.toLowerCase().trim()) || null
+      : null;
+    const topicUuid = hasText(p.topic)
+      ? topicMap.get(p.topic.toLowerCase().trim()) || null
+      : null;
 
     const row = {
       organization_id: organizationId,
@@ -604,14 +558,10 @@ export async function upsertPrompts({
 
     if (match) {
       toUpdate.push({ ...row, id: match.id });
-      processed.push({
-        ...row, categoryId: p.categoryId, topicId: p.topicId, prompt_id: promptId,
-      });
+      processed.push({ ...row, prompt_id: promptId });
     } else {
       toInsert.push(row);
-      processed.push({
-        ...row, categoryId: p.categoryId, topicId: p.topicId, prompt_id: promptId,
-      });
+      processed.push({ ...row, prompt_id: promptId });
     }
   }
 
@@ -620,7 +570,9 @@ export async function upsertPrompts({
 
   if (toInsert.length > 0) {
     const { data: inserted, error } = await postgrestClient.from('prompts').insert(toInsert).select();
-    if (error) throw new Error(`Failed to insert prompts: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to insert prompts: ${error.message}`);
+    }
     created = inserted?.length ?? toInsert.length;
   }
 
@@ -628,7 +580,9 @@ export async function upsertPrompts({
     const { id, ...patch } = row;
     // eslint-disable-next-line no-await-in-loop, max-len
     const { error } = await postgrestClient.from('prompts').update(patch).eq('id', id);
-    if (error) throw new Error(`Failed to update prompt: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to update prompt: ${error.message}`);
+    }
     updated += 1;
   }
 
@@ -636,8 +590,6 @@ export async function upsertPrompts({
     id: r.prompt_id,
     prompt: r.text,
     regions: r.regions,
-    categoryId: r.categoryId,
-    topicId: r.topicId,
     status: r.status,
     origin: r.origin,
     source: r.source,
@@ -670,14 +622,26 @@ export async function updatePromptById({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const patch = { updated_by: updatedBy };
-  if (updates.prompt !== undefined) patch.text = updates.prompt;
-  if (updates.name !== undefined) patch.name = updates.name;
-  if (updates.regions !== undefined) patch.regions = updates.regions;
-  if (updates.status !== undefined) patch.status = updates.status;
-  if (updates.origin !== undefined) patch.origin = updates.origin;
+  if (updates.prompt !== undefined) {
+    patch.text = updates.prompt;
+  }
+  if (updates.name !== undefined) {
+    patch.name = updates.name;
+  }
+  if (updates.regions !== undefined) {
+    patch.regions = updates.regions;
+  }
+  if (updates.status !== undefined) {
+    patch.status = updates.status;
+  }
+  if (updates.origin !== undefined) {
+    patch.origin = updates.origin;
+  }
   if (updates.categoryId !== undefined) {
     patch.category_id = hasText(updates.categoryId)
       ? await resolveCategoryUuid(organizationId, updates.categoryId, postgrestClient)
@@ -698,8 +662,12 @@ export async function updatePromptById({
     .select()
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to update prompt: ${error.message}`);
-  if (!data) return null;
+  if (error) {
+    throw new Error(`Failed to update prompt: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
 
   return getPromptById({
     organizationId,
@@ -727,7 +695,9 @@ export async function deletePromptById({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const { data, error } = await postgrestClient
     .from('prompts')
@@ -738,7 +708,9 @@ export async function deletePromptById({
     .select('id')
     .maybeSingle();
 
-  if (error) throw new Error(`Failed to delete prompt: ${error.message}`);
+  if (error) {
+    throw new Error(`Failed to delete prompt: ${error.message}`);
+  }
   return !!data;
 }
 
@@ -760,7 +732,9 @@ export async function bulkDeletePrompts({
   postgrestClient,
   updatedBy = 'system',
 }) {
-  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
 
   const total = promptIds.length;
   let success = 0;

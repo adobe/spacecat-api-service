@@ -12,8 +12,16 @@
 
 /**
  * Routes that are intentionally excluded from S2S consumer access.
- * Deny-by-default blocks these for S2S consumers. Every omission is a conscious decision
- * documented below. These must never be added to routeRequiredCapabilities.
+ *
+ * Enforcement note: deny-by-default for S2S JWT callers is driven by *absence* of a route
+ * from `routeRequiredCapabilities` (see `s2sAuthWrapper` in `@adobe/spacecat-shared-http-utils`).
+ * This list is documentation + a coverage-test assertion — it records the deliberate decision
+ * to leave a route out of `routeRequiredCapabilities` so the decision is visible, greppable,
+ * and reviewable. Admin `x-api-key` callers bypass the S2S path entirely and are unaffected
+ * by either list.
+ *
+ * Every omission is a conscious decision documented below. A route must never appear in both
+ * this list and `routeRequiredCapabilities` — the disjointness invariant is enforced by test.
  *
  * @type {string[]}
  */
@@ -43,6 +51,8 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — list and detail endpoints (detail includes prompts) used by DRS/UI
   'GET /sites/:siteId/geo-experiments',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+  'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
+  'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -57,31 +67,67 @@ export const INTERNAL_ROUTES = [
   'GET /org/:spaceCatId/brands/all/brand-presence/stats',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/stats',
 
+  // URL Inspector - org-scoped, site-filtered; LLMO product, not yet required by S2S consumers
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/stats',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/stats',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/owned-urls',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/owned-urls',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/trending-urls',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/trending-urls',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/cited-domains',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/cited-domains',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/domain-urls',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions',
+
   // LLMO Opportunities - org-scoped, LLMO product; not yet required by S2S consumers
   'GET /org/:spaceCatId/opportunities/count',
   'GET /org/:spaceCatId/brands/all/opportunities',
   'GET /org/:spaceCatId/brands/:brandId/opportunities',
+
+  // Agentic traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/agentic-traffic/url-brand-presence',
+  'GET /sites/:siteId/agentic-traffic/kpis',
+  'GET /sites/:siteId/agentic-traffic/kpis-trend',
+  'GET /sites/:siteId/agentic-traffic/by-region',
+  'GET /sites/:siteId/agentic-traffic/by-category',
+  'GET /sites/:siteId/agentic-traffic/by-page-type',
+  'GET /sites/:siteId/agentic-traffic/by-status',
+  'GET /sites/:siteId/agentic-traffic/by-user-agent',
+  'GET /sites/:siteId/agentic-traffic/by-url',
+  'GET /sites/:siteId/agentic-traffic/filter-dimensions',
+  'GET /sites/:siteId/agentic-traffic/weeks',
+  'GET /sites/:siteId/agentic-traffic/movers',
+  'GET /sites/:siteId/agentic-traffic/has-data',
 
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations',
   'POST /llmo/onboard',
+  'POST /llmo/onboard/update-query-index',
   'POST /sites/:siteId/llmo/offboard',
   'POST /sites/:siteId/llmo/edge-optimize-config',
   'POST /sites/:siteId/llmo/edge-optimize-config/stage',
-  'POST /sites/:siteId/llmo/edge-optimize-routing',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
+  'PATCH /plg/onboard/:onboardingId',
+  'POST /plg/records',
+  'PATCH /plg/records/:plgOnboardingId',
+  'DELETE /plg/records/:plgOnboardingId',
 
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
   'POST /sites/:siteId/user-activities',
   'GET /organizations/:organizationId/trial-users',
+  'GET /admin/users/:userId',
   'GET /organizations/:organizationId/userDetails/:externalUserId',
   'POST /organizations/:organizationId/userDetails',
   'POST /organizations/:organizationId/trial-user-invite',
@@ -107,6 +153,9 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/sites/:siteId/contact-sales-lead',
   'PATCH /contact-sales-leads/:contactSalesLeadId',
 
+  // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
+  'POST /sites/:siteId/autofix-checks',
+
   // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
   'GET /consumers',
   'GET /consumers/by-client-id/:clientId',
@@ -122,6 +171,19 @@ export const INTERNAL_ROUTES = [
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
+
+  // Regions lookup - global table, no org scope; session-token authenticated, not for S2S consumers
+  'GET /v2/regions',
+
+  // Monitoring - DRS Brand Presence PostgREST audit proxy. Called by DRS monitoring workers
+  // via admin x-api-key only (DRS runs in a separate AWS account and holds no S2S consumer
+  // registration). Kept internal because reusing `audit:read` would silently broaden that
+  // site-scoped capability to cover platform/infra monitoring data. Revisit when a concrete
+  // S2S consumer exists and introduce a dedicated capability scoped to the exposed resource
+  // (e.g. `drsBrandPresenceAudit:read`) rather than bundling into `audit:read` or a domain
+  // bucket like `monitoring:read` that would re-create the same problem for the next
+  // monitoring endpoint.
+  'GET /monitoring/drs-bp-pg-audit',
 ];
 
 /**
@@ -129,6 +191,12 @@ export const INTERNAL_ROUTES = [
  * Format: 'entity:action' where action is 'read' for GET, 'write' for all other methods.
  * Entity names use camelCase consistently (e.g. apiKey, botBlocker, importJob) to avoid
  * silent auth failures when granting capabilities — consumers must use exact entity names.
+ *
+ * Authoritative entity list: entity names must match those registered in
+ * `@adobe/spacecat-shared-data-access` at `src/models/base/entity.registry.js` (plus the
+ * S3-backed `configuration` entity). Capability strings referencing unregistered entities are
+ * schema-valid but can never be granted to an S2S consumer — `Consumer.validateCapabilities`
+ * in the data-access layer rejects them. Do not invent entity names here.
  *
  * Routes not listed here (and not in INTERNAL_ROUTES) are denied for S2S consumers.
  * Only routes explicitly defined with a capability in this mapping can be called by S2S consumers.
@@ -203,16 +271,14 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-movers': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/share-of-voice': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/share-of-voice': 'brand:read',
-  'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/llmo-prompts': 'organization:read',
-  'POST /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
-  'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
   'GET /organizations/:organizationId/projects': 'project:read',
   'GET /organizations/:organizationId/projects/:projectId/sites': 'site:read',
   'GET /organizations/:organizationId/by-project-name/:projectName/sites': 'site:read',
@@ -484,6 +550,10 @@ const routeRequiredCapabilities = {
 
   // Tokens
   'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
+  'GET /sites/:siteId/tokens/:tokenId/grants': 'token:read',
+
+  // Suggestion grants
+  'DELETE /sites/:siteId/suggestions/grants/:grantId': 'suggestion:write',
 };
 
 export default routeRequiredCapabilities;

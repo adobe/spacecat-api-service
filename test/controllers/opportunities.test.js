@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -1309,6 +1307,62 @@ describe('Opportunities Controller', () => {
       const ctrl = ControllerWithPlg(mockContext);
       const requestContext = { params: { siteId: SITE_ID, status: 'NEW' } };
       await ctrl.getByStatus(requestContext);
+
+      expect(plgStub.calledOnce).to.be.true;
+      expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+
+    it('calls grantSuggestionsForOpportunity in getByID when summit PLG is enabled', async () => {
+      const grantStub = sinon.stub().resolves();
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(true),
+        },
+        '../../src/support/grant-suggestions-handler.js': {
+          grantSuggestionsForOpportunity: grantStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getByID({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(grantStub).to.have.been.calledOnce;
+    });
+
+    it('does not call grantSuggestionsForOpportunity in getByID when summit PLG is not enabled', async () => {
+      const grantStub = sinon.stub().resolves();
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: sinon.stub().resolves(false),
+        },
+        '../../src/support/grant-suggestions-handler.js': {
+          grantSuggestionsForOpportunity: grantStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const response = await ctrl.getByID({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(grantStub).not.to.have.been.called;
+    });
+
+    it('passes request context to getIsSummitPlgEnabled for getByID', async () => {
+      const plgStub = sinon.stub().resolves(false);
+      const ControllerWithPlg = (await esmock('../../src/controllers/opportunities.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: plgStub,
+        },
+      })).default;
+
+      const ctrl = ControllerWithPlg(mockContext);
+      const requestContext = { params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID } };
+      await ctrl.getByID(requestContext);
 
       expect(plgStub.calledOnce).to.be.true;
       expect(plgStub.firstCall.args[2]).to.equal(requestContext);

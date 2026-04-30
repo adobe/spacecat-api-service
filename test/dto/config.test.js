@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -70,6 +68,7 @@ describe('ConfigDto', () => {
           brand: 'TestBrand',
           tags: ['tag1'],
           customerIntent: [{ key: 'intent1' }],
+          detectedCdn: 'aem-cs-fastly',
           someInternalField: 'should-be-excluded',
         },
         edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
@@ -90,6 +89,7 @@ describe('ConfigDto', () => {
           brand: 'TestBrand',
           tags: ['tag1'],
           customerIntent: [{ key: 'intent1' }],
+          detectedCdn: 'aem-cs-fastly',
         },
         edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
         slack: { channel: '#test', workspace: 'T123' },
@@ -113,6 +113,17 @@ describe('ConfigDto', () => {
       const result = ConfigDto.toListJSON({ some: 'config' });
       expect(result).to.deep.equal({
         llmo: { dataFolder: '/data', brand: 'Test' },
+      });
+    });
+
+    it('includes detectedCdn other in toListJSON', () => {
+      sinon.stub(Config, 'toDynamoItem').returns({
+        llmo: { dataFolder: '/data', brand: 'Test', detectedCdn: 'other' },
+      });
+
+      const result = ConfigDto.toListJSON({ some: 'config' });
+      expect(result).to.deep.equal({
+        llmo: { dataFolder: '/data', brand: 'Test', detectedCdn: 'other' },
       });
     });
 

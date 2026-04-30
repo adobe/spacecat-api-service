@@ -13,8 +13,8 @@
 // LLMO constants
 export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
-// Supported CDN / log source types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
-export const LOG_SOURCES = {
+// Supported CDN types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
+export const CDN_TYPES = {
   BYOCDN_FASTLY: 'byocdn-fastly',
   BYOCDN_AKAMAI: 'byocdn-akamai',
   BYOCDN_CLOUDFRONT: 'byocdn-cloudfront',
@@ -27,20 +27,6 @@ export const LOG_SOURCES = {
   COMMERCE_FASTLY: 'commerce-fastly',
 };
 
-// Per-CDN strategies for edge optimize routing.
-export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
-  [LOG_SOURCES.AEM_CS_FASTLY]: {
-    buildUrl: (cdnConfig, domain) => {
-      const base = cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '');
-      return `${base}/${domain}/edgeoptimize`;
-    },
-    buildBody: (enabled) => ({ enabled }),
-    method: 'POST',
-  },
-};
-
-export const EDGE_OPTIMIZE_CDN_TYPES = Object.keys(EDGE_OPTIMIZE_CDN_STRATEGIES);
-
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
   const data = { ...rawData };
@@ -48,7 +34,9 @@ export const applyFilters = (rawData, filterFields) => {
     const filteredArray = array.filter((item) => {
       const itemMatchesFilter = Object.entries(filterFields).every(([attr, value]) => {
         const itemValue = item[attr];
-        if (itemValue == null) return false;
+        if (itemValue == null) {
+          return false;
+        }
         return String(itemValue).toLowerCase() === String(value).toLowerCase();
       });
       return itemMatchesFilter;
@@ -211,9 +199,15 @@ export const applySort = (rawData, sortConfig) => {
       const bValue = b[field];
 
       // Handle null/undefined values - push to end
-      if (aValue == null && bValue == null) return 0;
-      if (aValue == null) return 1;
-      if (bValue == null) return -1;
+      if (aValue == null && bValue == null) {
+        return 0;
+      }
+      if (aValue == null) {
+        return 1;
+      }
+      if (bValue == null) {
+        return -1;
+      }
 
       // Try numeric comparison first
       const aNum = Number(aValue);

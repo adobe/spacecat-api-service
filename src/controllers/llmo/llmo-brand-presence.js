@@ -10,8 +10,14 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok, badRequest, forbidden } from '@adobe/spacecat-shared-http-utils';
+import {
+  badRequest,
+  forbidden,
+  internalServerError,
+  notFound,
+} from '@adobe/spacecat-shared-http-utils';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * Brand Presence filter-dimensions handler for org-based routes.
@@ -45,6 +51,7 @@ const DEFAULT_MODEL = 'chatgpt-free';
 const MODEL_QUERY_ALIASES = new Map([
   ['all', 'chatgpt-paid'],
   ['chatgpt', 'chatgpt-free'],
+  ['openai', 'chatgpt-paid'], // UI PLATFORM_CODES.ChatGPTPaid sends 'openai'
 ]);
 
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
@@ -69,7 +76,8 @@ const ERR_NOT_FOUND = 'not found';
  * @param {Function} handlerFn - Async (context, client) => response. Receives PostgREST client.
  * @returns {Promise<Response>}
  */
-async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
+// eslint-disable-next-line max-len
+export async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
   const { log, dataAccess } = context;
   const { Site } = dataAccess;
 
@@ -97,15 +105,21 @@ async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerNa
 /** @internal Exported for testing null/undefined fallbacks */
 export const strCompare = (a, b) => (a || '').localeCompare(b || '');
 
-function shouldApplyFilter(value) {
-  if (value == null) return false;
-  if (typeof value === 'string' && SKIP_VALUES.has(value.trim())) return false;
+export function shouldApplyFilter(value) {
+  if (value == null) {
+    return false;
+  }
+  if (typeof value === 'string' && SKIP_VALUES.has(value.trim())) {
+    return false;
+  }
   return hasText(String(value));
 }
 
 /** @internal Exported for testing */
 export function resolveModelFromRequest(model) {
-  if (!hasText(model)) return DEFAULT_MODEL;
+  if (!hasText(model)) {
+    return DEFAULT_MODEL;
+  }
   const trimmed = String(model).trim();
   const alias = MODEL_QUERY_ALIASES.get(trimmed.toLowerCase());
   return alias ?? trimmed;
@@ -135,13 +149,15 @@ export function toFilterOption(id, label) {
 
 /**
  * Normalizes topicIds param to an array of valid UUIDs.
- * Accepts topicIds as: array, comma-separated string, or single UUID.
+ * Accepts topicIds or topic_ids as: array, comma-separated string, or single UUID.
  * Non-UUID values are filtered out.
  * @returns {string[]} Array of valid topic_id UUIDs, empty if none
  */
 function parseTopicIds(q) {
-  const raw = q.topicIds;
-  if (raw == null) return [];
+  const raw = q.topicIds || q.topic_ids;
+  if (raw == null) {
+    return [];
+  }
   let arr;
   if (Array.isArray(raw)) {
     arr = raw;
@@ -153,17 +169,380 @@ function parseTopicIds(q) {
   return arr.filter((id) => id != null && isValidUUID(String(id)));
 }
 
-function parseFilterDimensionsParams(context) {
+/**
+ * Parses a list-style query param (array, comma-separated string, or scalar).
+ * Trims entries; drops empty and skip tokens (same semantics as shouldApplyFilter).
+ * @param {unknown} raw
+ * @returns {string[]}
+ * @internal Exported for testing
+ */
+export function parseListParam(raw) {
+  if (raw == null) {
+    return [];
+  }
+  let arr;
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === 'string') {
+    arr = raw.split(',').map((s) => s.trim());
+  } else {
+    arr = [raw];
+  }
+  return arr
+    .map((v) => (v == null ? '' : String(v).trim()))
+    .filter((s) => shouldApplyFilter(s));
+}
+
+/** @internal Exported for testing */
+export function mergeUniqueOrderedStrings(fromList, singular) {
+  const out = [];
+  const seen = new Set();
+  const push = (v) => {
+    if (v == null) {
+      return;
+    }
+    const t = String(v).trim();
+    if (!shouldApplyFilter(t)) {
+      return;
+    }
+    const key = t.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    out.push(t);
+  };
+  (fromList || []).forEach(push);
+  if (singular != null) {
+    push(singular);
+  }
+  return out;
+}
+
+const MULTI_CATEGORY_REGION_RPC_UNSUPPORTED = 'Multiple categoryIds or regionCodes are not supported for this endpoint.';
+const MIXED_CATEGORY_UUID_AND_NAME_STATS = 'Cannot combine category UUID(s) with category name(s) for aggregated stats.';
+
+/**
+ * Normalizes category + region filters from raw request data.
+ * Supports `categoryIds` / `category_ids` and `regionCodes` / `region_codes` (lists)
+ * alongside legacy singular `categoryId` / `regionCode` / `region`.
+ * @param {Object} q - Typically `context.data`
+ * @returns {{ categoryUuidIds: string[], categoryNames: string[], regionCodesList: string[] }}
+ * @internal Exported for testing
+ */
+export function extractCategoryRegionFromQuery(q) {
+  const categoryRaw = mergeUniqueOrderedStrings(
+    parseListParam(q.categoryIds ?? q.category_ids),
+    q.categoryId ?? q.category_id,
+  );
+  const regionRaw = mergeUniqueOrderedStrings(
+    parseListParam(q.regionCodes ?? q.region_codes),
+    q.regionCode ?? q.region_code ?? q.region,
+  );
+  const categoryUuidIds = [];
+  const categoryNames = [];
+  categoryRaw.forEach((v) => {
+    if (isValidUUID(v)) {
+      categoryUuidIds.push(v);
+    } else {
+      categoryNames.push(v);
+    }
+  });
+  return { categoryUuidIds, categoryNames, regionCodesList: regionRaw };
+}
+
+function hasMixedCategoryUuidAndName(params) {
+  return (params.categoryUuidIds?.length > 0) && (params.categoryNames?.length > 0);
+}
+
+function hasMultiValueCategoryFilter(params) {
+  return (params.categoryUuidIds?.length > 1) || (params.categoryNames?.length > 1);
+}
+
+function hasMultiValueRegionFilter(params) {
+  return (params.regionCodesList?.length > 1);
+}
+
+function brandPresenceRpcRejectsMultiCategoryOrRegion(params) {
+  return hasMultiValueCategoryFilter(params)
+    || hasMultiValueRegionFilter(params)
+    || hasMixedCategoryUuidAndName(params);
+}
+
+/**
+ * Single-value category + region fields for RPCs that only accept scalars
+ * (market tracking, topics, etc.).
+ * @param {Object} params - normalized brand presence params
+ * @returns {{ p_category_id: string|null, p_category_name: string|null,
+ *   p_region_code: string|null }}
+ */
+/** @internal Exported for testing */
+export function buildScalarRpcCategoryRegion(params) {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  const regions = params.regionCodesList || [];
+  return {
+    p_category_id: uuids.length === 1 ? uuids[0] : null,
+    p_category_name: names.length === 1 ? names[0] : null,
+    p_region_code: regions.length === 1 ? regions[0] : null,
+  };
+}
+
+function statsRequiresFanOutRpc(params) {
+  return hasMultiValueCategoryFilter(params) || hasMultiValueRegionFilter(params);
+}
+
+/**
+ * Cartesian slices for stats RPC when multiple categories or regions are requested.
+ * Caller must reject mixed UUID + name category filters before calling.
+ * @param {Object} params - normalized params
+ * @returns {Array<{ p_category_id: string|null, p_category_name: string|null,
+ *   p_region_code: string|null }>}
+ * @internal Exported for testing
+ */
+export function expandBrandPresenceStatsRpcSlices(params) {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  const regions = params.regionCodesList || [];
+
+  const catSlices = [];
+  if (uuids.length > 1) {
+    uuids.forEach((u) => catSlices.push({ p_category_id: u, p_category_name: null }));
+  } else if (uuids.length === 1) {
+    catSlices.push({ p_category_id: uuids[0], p_category_name: null });
+  } else if (names.length > 1) {
+    names.forEach((n) => catSlices.push({ p_category_id: null, p_category_name: n }));
+  } else if (names.length === 1) {
+    catSlices.push({ p_category_id: null, p_category_name: names[0] });
+  } else {
+    catSlices.push({ p_category_id: null, p_category_name: null });
+  }
+
+  const regSlices = regions.length > 1 ? [...regions] : [regions[0] ?? null];
+
+  const out = [];
+  for (const c of catSlices) {
+    for (const r of regSlices) {
+      out.push({
+        p_category_id: c.p_category_id,
+        p_category_name: c.p_category_name,
+        p_region_code: r,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Merges multiple `rpc_brand_presence_stats` result rows with OR semantics
+ * (disjoint slices). Weighted mean for average_visibility_score.
+ * If the same execution could match more than one slice, summed counts would
+ * double-count — callers assume slices partition the row set (no overlap).
+ * @param {Array<unknown>} rpcDataArray - each entry is RPC `data` (row or row array)
+ * @returns {Object} merged numeric fields
+ * @internal Exported for testing
+ */
+export function mergeBrandPresenceStatsRpcRows(rpcDataArray) {
+  const rows = (rpcDataArray || []).map((d) => {
+    if (Array.isArray(d)) {
+      return d.length > 0 ? d[0] : null;
+    }
+    return d;
+  }).filter(Boolean);
+  if (rows.length === 0) {
+    return {
+      total_executions: 0,
+      average_visibility_score: 0,
+      total_mentions: 0,
+      total_citations: 0,
+    };
+  }
+  let totalExec = 0;
+  let totalMentions = 0;
+  let totalCitations = 0;
+  let weightedVis = 0;
+  rows.forEach((row) => {
+    const exec = Number(row.total_executions ?? 0);
+    const avg = Number(row.average_visibility_score ?? 0);
+    const men = Number(row.total_mentions ?? 0);
+    const cit = Number(row.total_citations ?? 0);
+    totalExec += exec;
+    totalMentions += men;
+    totalCitations += cit;
+    weightedVis += avg * exec;
+  });
+  const avgVis = totalExec > 0 ? weightedVis / totalExec : 0;
+  return {
+    total_executions: totalExec,
+    average_visibility_score: avgVis,
+    total_mentions: totalMentions,
+    total_citations: totalCitations,
+  };
+}
+
+/**
+ * Applies category filters to a `brand_presence_executions` PostgREST chain.
+ * For mixed UUID + name filters, uses `.or(...)` with quoted `.in.(...)` tokens
+ * so values are literals in PostgREST filter grammar (not arbitrary expressions).
+ * @param {Object} q - query builder
+ * @param {Object} params - normalized params from parseFilterDimensionsParams
+ * @returns {Object} updated chain
+ * @internal Exported for testing
+ */
+export function applyExecutionCategoryFilter(q, params) {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  if (uuids.length === 0 && names.length === 0) {
+    return q;
+  }
+  if (uuids.length > 0 && names.length === 0) {
+    return uuids.length === 1 ? q.eq('category_id', uuids[0]) : q.in('category_id', uuids);
+  }
+  if (names.length > 0 && uuids.length === 0) {
+    return names.length === 1 ? q.eq('category_name', names[0]) : q.in('category_name', names);
+  }
+  const quoteOrToken = (v) => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const idPart = uuids.length === 1
+    ? `category_id.eq.${uuids[0]}`
+    : `category_id.in.(${uuids.map(quoteOrToken).join(',')})`;
+  const namePart = names.length === 1
+    ? `category_name.eq.${quoteOrToken(names[0])}`
+    : `category_name.in.(${names.map(quoteOrToken).join(',')})`;
+  return q.or(`${idPart},${namePart}`);
+}
+
+/**
+ * Applies region / market filters to a `brand_presence_executions` PostgREST chain.
+ * @param {Object} q - query builder
+ * @param {Object} params - normalized params from parseFilterDimensionsParams
+ * @returns {Object} updated chain
+ * @internal Exported for testing
+ */
+export function applyExecutionRegionFilter(q, params) {
+  const regions = params.regionCodesList || [];
+  if (regions.length === 0) {
+    return q;
+  }
+  return regions.length === 1 ? q.eq('region_code', regions[0]) : q.in('region_code', regions);
+}
+
+/**
+ * PostgREST filter for URL path `:topicId` (after decodeURIComponent):
+ * trimmed value is a UUID → topic_id; otherwise topics (display name).
+ * @param {Object} query - PostgREST builder chain (from/select/org/date/model already applied)
+ * @param {string} decodedTopicParam - decoded path segment
+ * @returns {Object} query with .eq('topic_id' | 'topics', ...) applied
+ */
+export function applyTopicPathFilter(query, decodedTopicParam) {
+  const trimmed = String(decodedTopicParam).trim();
+  if (isValidUUID(trimmed)) {
+    return query.eq('topic_id', trimmed);
+  }
+  return query.eq('topics', decodedTopicParam);
+}
+
+/**
+ * Newest-first sort for detail / envelope helpers (PostgREST row order is not guaranteed).
+ * @param {Array<Object>} rows - Raw execution rows (mutated copy only)
+ * @returns {Array<Object>}
+ */
+export function sortDetailRowsByExecutionDateDesc(rows) {
+  return [...rows].sort(
+    (a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''),
+  );
+}
+
+/**
+ * Response topic label: prefer `topics` on the newest `execution_date` row with a label,
+ * then older rows; else the path param (e.g. UUID when no rows or no labels).
+ * @param {Array<Object>} rows - execution rows
+ * @param {string} decodedTopicParam - decoded :topicId
+ */
+export function topicLabelForDetailResponse(rows, decodedTopicParam) {
+  if (!rows || rows.length === 0) {
+    return decodedTopicParam;
+  }
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.topics != null ? String(r.topics) : ''));
+  return row ? String(row.topics) : decodedTopicParam;
+}
+
+/**
+ * Stable topic id for JSON: prefer `topic_id` on the newest row that has one, then older
+ * rows; else UUID path param if valid; else null.
+ * @param {Array<Object>} rows - execution rows (may be empty)
+ * @param {string} decodedTopicParam - decoded :topicId
+ * @returns {string|null}
+ */
+export function topicIdForDetailResponse(rows, decodedTopicParam) {
+  const trimmedParam = String(decodedTopicParam).trim();
+  if (!rows || rows.length === 0) {
+    return isValidUUID(trimmedParam) ? trimmedParam : null;
+  }
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.topic_id != null ? String(r.topic_id) : ''));
+  if (row) {
+    return String(row.topic_id).trim();
+  }
+  if (isValidUUID(trimmedParam)) {
+    return trimmedParam;
+  }
+  return null;
+}
+
+/**
+ * Prompt id for prompt-detail envelope: prefers `prompt_id` on the newest execution row
+ * (by `execution_date`), then scans older rows. Empty string when no row carries an id.
+ * @param {Array<Object>} rows - Raw `brand_presence_executions` rows
+ * @returns {string}
+ */
+export function promptIdForDetailResponse(rows) {
+  if (!rows?.length) {
+    return '';
+  }
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.prompt_id != null ? String(r.prompt_id) : ''));
+  return row && row.prompt_id != null ? String(row.prompt_id) : '';
+}
+
+/**
+ * Prompt text for prompt-detail envelope when rows were loaded by `prompt_id`
+ * (newest execution with non-empty `prompt` wins).
+ * @param {Array<Object>} rows - Raw `brand_presence_executions` rows
+ * @returns {string}
+ */
+export function promptTextForDetailEnvelope(rows) {
+  if (!rows?.length) {
+    return '';
+  }
+  const sorted = sortDetailRowsByExecutionDateDesc(rows);
+  const row = sorted.find((r) => hasText(r.prompt != null ? String(r.prompt) : ''));
+  return row ? String(row.prompt) : '';
+}
+
+export function parseFilterDimensionsParams(context) {
   const q = context.data || {};
+  const { categoryUuidIds, categoryNames, regionCodesList } = extractCategoryRegionFromQuery(q);
+  const categoryCount = categoryUuidIds.length + categoryNames.length;
+  const categoryId = categoryCount === 1 ? (categoryUuidIds[0] ?? categoryNames[0]) : undefined;
+  const regionCode = regionCodesList.length === 1 ? regionCodesList[0] : undefined;
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
     model: q.model || q.platform,
     siteId: q.siteId || q.site_id,
-    categoryId: q.categoryId || q.category_id,
+    categoryUuidIds,
+    categoryNames,
+    regionCodesList,
+    /**
+     * @deprecated for internal filters — use categoryUuidIds/categoryNames;
+     * kept for backward compat when exactly one category is selected
+     */
+    categoryId,
     topicIds: parseTopicIds(q),
     topic: q.topic,
-    regionCode: q.regionCode || q.region_code || q.region,
+    /** @deprecated for internal filters — use regionCodesList */
+    regionCode,
     origin: q.origin,
     user_intent: q.user_intent || q.userIntent,
     branding: q.branding || q.promptBranding || q.prompt_branding,
@@ -171,7 +550,7 @@ function parseFilterDimensionsParams(context) {
   };
 }
 
-function defaultDateRange() {
+export function defaultDateRange() {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - 28);
@@ -182,102 +561,15 @@ function defaultDateRange() {
 }
 
 /**
- * Same filters as rpc_brand_presence_filter_dimensions / filter-dimensions RPC; used only to
- * collect distinct site_id rows for page_intents when a brand scope is applied without siteId.
- */
-function buildExecutionsSiteIdsQuery(client, organizationId, params, defaults, filterByBrandId) {
-  const startDate = params.startDate || defaults.startDate;
-  const endDate = params.endDate || defaults.endDate;
-  const {
-    model, categoryId, topicIds, regionCode, origin,
-  } = params;
-
-  let q = client
-    .from('brand_presence_executions')
-    .select('site_id')
-    .eq('organization_id', organizationId)
-    .gte('execution_date', startDate)
-    .lte('execution_date', endDate)
-    .eq('model', model);
-
-  if (filterByBrandId) {
-    q = q.eq('brand_id', filterByBrandId);
-  }
-  if (shouldApplyFilter(categoryId)) {
-    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
-  }
-  if (topicIds?.length > 0) {
-    q = q.in('topic_id', topicIds);
-  }
-  if (shouldApplyFilter(regionCode)) {
-    q = q.eq('region_code', regionCode);
-  }
-  if (shouldApplyFilter(origin)) {
-    q = q.ilike('origin', origin);
-  }
-
-  return q.limit(QUERY_LIMIT);
-}
-
-function buildFilterDimensionsRpcParams(organizationId, params, defaults, filterByBrandId) {
-  const startDate = params.startDate || defaults.startDate;
-  const endDate = params.endDate || defaults.endDate;
-  const rpcParams = {
-    p_organization_id: organizationId,
-    p_start_date: startDate,
-    p_end_date: endDate,
-    p_model: params.model,
-  };
-  if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
-  if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
-  if (shouldApplyFilter(params.categoryId)) {
-    if (isValidUUID(params.categoryId)) {
-      rpcParams.p_category_id = params.categoryId;
-    } else {
-      rpcParams.p_category_name = params.categoryId;
-    }
-  }
-  if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
-  if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
-  if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
-  return rpcParams;
-}
-
-/**
- * Normalizes RPC `stats` for the filter-dimensions HTTP response.
- * Safe when the function omits `stats` or fields (e.g. older DB migration): each missing or
- * non-finite value becomes 0. Non-plain objects (arrays, null stats) are treated as absent.
- * @param {Record<string, unknown>|null|undefined} dims - Parsed RPC JSON body
- * @returns {{ total_execution_count: number, distinct_prompt_count: number,
- *   empty_answer_execution_count: number }}
- */
-export function normalizeFilterDimensionsStatsFromRpc(dims) {
-  const hasPlainStats = dims != null
-    && typeof dims === 'object'
-    && dims.stats != null
-    && typeof dims.stats === 'object'
-    && !Array.isArray(dims.stats);
-  const raw = hasPlainStats ? dims.stats : {};
-  const totalExecutionCount = Number(raw.total_execution_count);
-  const distinctPromptCount = Number(raw.distinct_prompt_count);
-  const emptyAnswerExecutionCount = Number(raw.empty_answer_execution_count);
-  return {
-    total_execution_count: Number.isFinite(totalExecutionCount) ? totalExecutionCount : 0,
-    distinct_prompt_count: Number.isFinite(distinctPromptCount) ? distinctPromptCount : 0,
-    empty_answer_execution_count: Number.isFinite(emptyAnswerExecutionCount)
-      ? emptyAnswerExecutionCount
-      : 0,
-  };
-}
-
-/**
  * Validates that the given site belongs to the organization.
  * Used to prevent cross-tenant access when siteId is used in page_intents query.
  * @returns {Promise<boolean>} true if site exists in org, false otherwise
  * @internal Exported for testing early-return paths
  */
 export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
-  if (!shouldApplyFilter(siteId)) return true;
+  if (!shouldApplyFilter(siteId)) {
+    return true;
+  }
   const { data, error } = await client
     .from('sites')
     .select('id')
@@ -287,26 +579,11 @@ export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
   return !error && data?.length === 1;
 }
 
-/** @internal Exported for testing sites-query path coverage */
-export async function resolveSiteIds(client, organizationId, siteId, filterByBrandId, rows) {
-  if (shouldApplyFilter(siteId)) {
-    return [siteId];
-  }
-  if (filterByBrandId) {
-    return [...new Set(rows.map((r) => r.site_id).filter(Boolean))];
-  }
-  const { data: sitesData, error: sitesError } = await client
-    .from('sites')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .limit(QUERY_LIMIT);
-  if (!sitesError && sitesData?.length) {
-    return sitesData.map((s) => s.id).filter(Boolean);
-  }
-  return [];
-}
-
-async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
+/**
+ * Distinct page intent values for filter dropdowns (same semantics as filter-dimensions).
+ * @internal Exported for tests.
+ */
+export async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
   if (shouldApplyFilter(siteId)) {
     const { data: piData, error: piError } = await client
       .from('page_intents')
@@ -349,6 +626,411 @@ async function fetchPageIntents(client, organizationId, siteId, filterByBrandId,
     return sorted.map((p) => toFilterOption(p, p));
   }
   return [];
+}
+
+/** Hardcoded origin options for filter-dimensions (category_origin values). */
+const CONFIG_FILTER_ORIGINS = Object.freeze([
+  toFilterOption('human', 'human'),
+  toFilterOption('ai', 'ai'),
+]);
+
+/**
+ * Optional query param only: siteId / site_id.
+ * @param {Object} context
+ * @returns {{ siteId: string|undefined }}
+ */
+function parseFilterDimensionsSiteQuery(context) {
+  const q = context.data || {};
+  return {
+    siteId: q.siteId || q.site_id,
+  };
+}
+
+/**
+ * True if the brand is tied to the site via legacy `brands.site_id` or `brand_sites` (M2M).
+ * When `preloadedBrandSiteId` is passed (including `null`), skips the initial `brands` lookup — use
+ * when the caller already selected `site_id` on the same brand row.
+ * @param {string|null|undefined} [preloadedBrandSiteId] - Known brands.site_id, else query DB
+ * @internal Exported for tests
+ */
+export async function brandLinkedToSite(
+  client,
+  organizationId,
+  brandId,
+  siteId,
+  preloadedBrandSiteId,
+) {
+  let legacySiteId = preloadedBrandSiteId;
+  if (legacySiteId === undefined) {
+    const { data: rows, error } = await client
+      .from('brands')
+      .select('site_id')
+      .eq('id', brandId)
+      .eq('organization_id', organizationId)
+      .limit(1);
+    if (error || !rows?.length) {
+      return false;
+    }
+    legacySiteId = rows[0].site_id;
+  }
+  if (legacySiteId === siteId) {
+    return true;
+  }
+  const { data: links } = await client
+    .from('brand_sites')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandId)
+    .eq('site_id', siteId)
+    .limit(1);
+  return !!(links?.length);
+}
+
+/**
+ * Resolves site_id for page_intents for a brand: prefer `brands.site_id`,
+ * else first matching `brand_sites` row.
+ */
+async function resolveBrandPrimarySiteId(client, organizationId, brandId) {
+  const { data: bRows, error } = await client
+    .from('brands')
+    .select('site_id')
+    .eq('id', brandId)
+    .eq('organization_id', organizationId)
+    .limit(1);
+  if (error || !bRows?.length) {
+    return null;
+  }
+  if (bRows[0].site_id) {
+    return bRows[0].site_id;
+  }
+  const { data: bsRows } = await client
+    .from('brand_sites')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandId)
+    .limit(1);
+  return bsRows?.[0]?.site_id ?? null;
+}
+
+/**
+ * Resolves site_id list for page_intents when using config-based dimensions (no execution query).
+ * @internal Exported for tests
+ */
+export async function resolveSiteIdsForConfigPageIntents(
+  client,
+  organizationId,
+  siteId,
+  filterByBrandId,
+) {
+  if (shouldApplyFilter(siteId)) {
+    return [siteId];
+  }
+  if (filterByBrandId) {
+    const sid = await resolveBrandPrimarySiteId(client, organizationId, filterByBrandId);
+    if (!sid) {
+      return [];
+    }
+    const siteBelongs = await validateSiteBelongsToOrg(client, organizationId, sid);
+    return siteBelongs ? [sid] : [];
+  }
+  return [];
+}
+
+/**
+ * @internal Exported for tests
+ */
+export async function fetchRegionsForConfig(client) {
+  const { data, error } = await client
+    .from('regions')
+    .select('code, name')
+    .order('name', { ascending: true });
+  if (error || !data?.length) {
+    return [];
+  }
+  return data.map((r) => toFilterOption(r.code, r.name));
+}
+
+export function createRegionsHandler() {
+  return async (context) => {
+    const { log, dataAccess } = context;
+    const { Site } = dataAccess;
+    if (!Site?.postgrestService) {
+      log.error('Regions API requires PostgREST (DATA_SERVICE_PROVIDER=postgres)');
+      return badRequest('Region data is not available. PostgreSQL data service is required.');
+    }
+    try {
+      const regions = await fetchRegionsForConfig(Site.postgrestService);
+      return cachedOk(regions);
+    } catch (error) {
+      log.error(`Regions handler error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+}
+
+/**
+ * Brands linked to one site: rows in `brand_sites` for this org + site, with embedded `brands`.
+ * @internal Exported for tests
+ */
+export async function fetchBrandsForOrgSite(client, organizationId, siteFilter) {
+  const { data: bsData, error: bsErr } = await client
+    .from('brand_sites')
+    .select('brand_id, brands(id, name)')
+    .eq('organization_id', organizationId)
+    .eq('site_id', siteFilter)
+    .limit(QUERY_LIMIT);
+  if (bsErr || !bsData?.length) {
+    return [];
+  }
+  const byId = new Map();
+  bsData.forEach((row) => {
+    const br = row.brands;
+    if (br?.id && br?.name) {
+      byId.set(String(br.id), toFilterOption(String(br.id), br.name));
+    }
+  });
+  const opts = [...byId.values()];
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Brands scoped by org (`organization_id`), optional site filter, optional single brand path.
+ * With a site filter, brands are listed from `brand_sites` only (see `fetchBrandsForOrgSite`).
+ * @internal Exported for tests
+ */
+export async function fetchBrandsForConfig(client, organizationId, siteFilter, filterByBrandId) {
+  if (filterByBrandId) {
+    const { data, error } = await client
+      .from('brands')
+      .select('id, name, site_id')
+      .eq('id', filterByBrandId)
+      .eq('organization_id', organizationId)
+      .limit(1);
+    if (error || !data?.length) {
+      return [];
+    }
+    const b = data[0];
+    if (shouldApplyFilter(siteFilter)) {
+      const linked = await brandLinkedToSite(
+        client,
+        organizationId,
+        filterByBrandId,
+        siteFilter,
+        b.site_id,
+      );
+      if (!linked) {
+        return [];
+      }
+    }
+    return [toFilterOption(String(b.id), b.name)];
+  }
+  if (shouldApplyFilter(siteFilter)) {
+    return fetchBrandsForOrgSite(client, organizationId, siteFilter);
+  }
+  const { data, error } = await client
+    .from('brands')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) {
+    return [];
+  }
+  const opts = data.map((b) => toFilterOption(String(b.id), b.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Org-scoped categories (active / pending). Option `id` is `categories.id` (UUID) for filtering.
+ * @internal Exported for tests
+ */
+export async function fetchCategoriesForConfig(client, organizationId) {
+  const { data, error } = await client
+    .from('categories')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) {
+    return [];
+  }
+  const opts = data.map((c) => toFilterOption(String(c.id), c.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+/**
+ * Topics for org, optionally scoped to brand_ids from config brands (includes brand_id NULL).
+ * @internal Exported for tests
+ */
+export async function fetchTopicsForConfig(client, organizationId, brandOptions) {
+  const brandIdSet = new Set(
+    brandOptions.map((b) => b.id).filter((id) => hasText(id)),
+  );
+  const { data, error } = await client
+    .from('topics')
+    .select('id, name, brand_id')
+    .eq('organization_id', organizationId)
+    .in('status', ['pending', 'active'])
+    .limit(QUERY_LIMIT);
+  if (error || !data?.length) {
+    return [];
+  }
+  const filtered = data.filter((t) => !t.brand_id || brandIdSet.has(String(t.brand_id)));
+  const opts = filtered.map((t) => toFilterOption(String(t.id), t.name));
+  opts.sort((a, b) => strCompare(a.label, b.label));
+  return opts;
+}
+
+const PROMPT_STATUS_FOR_CONFIG_STATS = ['pending', 'active'];
+
+/**
+ * Counts `prompts` rows for the same brand scope as filter-dimensions dimensions.
+ * @internal Exported for tests
+ */
+export async function fetchDistinctPromptCountForConfig(
+  client,
+  organizationId,
+  filterByBrandId,
+  brandOptions,
+) {
+  if (filterByBrandId) {
+    const { count, error } = await client
+      .from('prompts')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
+      .eq('brand_id', filterByBrandId)
+      .in('status', PROMPT_STATUS_FOR_CONFIG_STATS);
+    if (error) {
+      return 0;
+    }
+    return Number.isFinite(Number(count)) ? Number(count) : 0;
+  }
+  const brandIds = brandOptions.map((b) => b.id).filter((id) => hasText(id));
+  if (brandIds.length === 0) {
+    return 0;
+  }
+  const chunks = [];
+  for (let i = 0; i < brandIds.length; i += IN_FILTER_CHUNK_SIZE) {
+    chunks.push(brandIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
+  }
+  const rows = await Promise.all(chunks.map((chunk) => client
+    .from('prompts')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .in('brand_id', chunk)
+    .in('status', PROMPT_STATUS_FOR_CONFIG_STATS)));
+  let total = 0;
+  for (const { count, error } of rows) {
+    if (error) {
+      return 0;
+    }
+    total += Number.isFinite(Number(count)) ? Number(count) : 0;
+  }
+  return total;
+}
+
+/**
+ * Stats for filter-dimensions: prompt count from `prompts`;
+ * execution fields reserved (0) until wired to executions.
+ * @internal Exported for tests
+ */
+export async function fetchFilterDimensionsStats(
+  client,
+  organizationId,
+  filterByBrandId,
+  brandOptions,
+) {
+  const distinctPromptCount = await fetchDistinctPromptCountForConfig(
+    client,
+    organizationId,
+    filterByBrandId,
+    brandOptions,
+  );
+  return {
+    distinct_prompt_count: distinctPromptCount,
+    total_execution_count: 0,
+    empty_answer_execution_count: 0,
+  };
+}
+
+/**
+ * Creates the getFilterDimensions handler.
+ * Returns dimension option lists from reference tables (`regions`, `brands`, `categories`,
+ * `topics`), fixed origin options, `distinct_prompt_count` from `prompts`, placeholder execution
+ * counts (0) until wired to executions, and `page_intents` from a separate query.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'filter-dimensions',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const { siteId: siteFilter } = parseFilterDimensionsSiteQuery(ctx);
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (filterByBrandId && !isValidUUID(filterByBrandId)) {
+        return badRequest('Brand id must be a valid UUID');
+      }
+
+      if (shouldApplyFilter(siteFilter)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const [regions, brandOptions, categories] = await Promise.all([
+        fetchRegionsForConfig(client),
+        fetchBrandsForConfig(client, organizationId, siteFilter, filterByBrandId),
+        fetchCategoriesForConfig(client, organizationId),
+      ]);
+
+      if (filterByBrandId && brandOptions.length === 0) {
+        return forbidden('Brand not found or not accessible for this organization');
+      }
+
+      const [topics, stats] = await Promise.all([
+        fetchTopicsForConfig(client, organizationId, brandOptions),
+        fetchFilterDimensionsStats(
+          client,
+          organizationId,
+          filterByBrandId,
+          brandOptions,
+        ),
+      ]);
+      const origins = [...CONFIG_FILTER_ORIGINS];
+
+      const siteIdsForPageIntents = await resolveSiteIdsForConfigPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+      );
+      const pageIntents = await fetchPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+        siteIdsForPageIntents,
+      );
+
+      return cachedOk({
+        brands: brandOptions,
+        categories,
+        topics,
+        origins,
+        regions,
+        stats,
+        page_intents: pageIntents,
+      });
+    },
+  );
 }
 
 function parseWeeksParams(context) {
@@ -411,7 +1093,9 @@ export function splitDateRangeIntoWeeksBackward(
 
 function parseIsoWeek(weekStr) {
   const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
-  if (!match) return { weekNumber: 0, year: 0 };
+  if (!match) {
+    return { weekNumber: 0, year: 0 };
+  }
   return {
     year: Number.parseInt(match[1], 10),
     weekNumber: Number.parseInt(match[2], 10),
@@ -427,7 +1111,9 @@ function parseIsoWeek(weekStr) {
  */
 export function getWeekDateRange(isoWeek) {
   const { year, weekNumber: week } = parseIsoWeek(isoWeek);
-  if (!year || week < 1 || week > 53) return null;
+  if (!year || week < 1 || week > 53) {
+    return null;
+  }
   const jan4 = new Date(Date.UTC(year, 0, 4));
   const dayOfWeek = jan4.getUTCDay();
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
@@ -480,10 +1166,14 @@ export function dateToIsoWeek(dateStr) {
  * @internal Exported for testing
  */
 export function generateIsoWeekRange(minDate, maxDate) {
-  if (!minDate || !maxDate) return [];
+  if (!minDate || !maxDate) {
+    return [];
+  }
   const minRange = getWeekDateRange(dateToIsoWeek(minDate));
   const maxRange = getWeekDateRange(dateToIsoWeek(maxDate));
-  if (!minRange || !maxRange) return [];
+  if (!minRange || !maxRange) {
+    return [];
+  }
 
   const result = [];
   let currentMs = new Date(`${minRange.startDate}T00:00:00Z`).getTime();
@@ -549,7 +1239,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
         };
       });
 
-      return ok({ weeks });
+      return cachedOk({ weeks });
     },
   );
 }
@@ -563,13 +1253,20 @@ function parseMarketTrackingTrendsParams(context) {
   if (rawNames) {
     competitorNames = Array.isArray(rawNames) ? rawNames : String(rawNames).split(',').map((s) => s.trim()).filter(Boolean);
   }
+  const { categoryUuidIds, categoryNames, regionCodesList } = extractCategoryRegionFromQuery(q);
+  const categoryCount = categoryUuidIds.length + categoryNames.length;
+  const categoryId = categoryCount === 1 ? (categoryUuidIds[0] ?? categoryNames[0]) : undefined;
+  const regionCode = regionCodesList.length === 1 ? regionCodesList[0] : undefined;
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
     model: q.model,
     siteId: q.siteId || q.site_id,
-    categoryId: q.categoryId || q.category_id,
-    regionCode: q.regionCode || q.region_code || q.region,
+    categoryUuidIds,
+    categoryNames,
+    regionCodesList,
+    categoryId,
+    regionCode,
     competitorNames,
   };
 }
@@ -578,6 +1275,7 @@ function parseMarketTrackingTrendsParams(context) {
 async function callMarketTrackingTrendsRpc(client, organizationId, params, defaults, filterByBrandId, log) {
   const competitorNames = params.competitorNames || null;
   const rpcName = competitorNames ? 'rpc_market_tracking_filtered' : 'rpc_market_tracking_trends';
+  const cr = buildScalarRpcCategoryRegion(params);
   const rpcParams = {
     p_organization_id: organizationId,
     p_start_date: params.startDate || defaults.startDate,
@@ -585,11 +1283,9 @@ async function callMarketTrackingTrendsRpc(client, organizationId, params, defau
     p_model: resolveModelFromRequest(params.model),
     p_brand_id: filterByBrandId || null,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_category_id: cr.p_category_id,
+    p_category_name: cr.p_category_name,
+    p_region_code: cr.p_region_code,
     ...(competitorNames && { p_competitor_names: competitorNames }),
   };
   log.info(`RPC ${rpcName} called with: ${JSON.stringify(rpcParams)}`);
@@ -602,6 +1298,7 @@ async function callMarketTrackingTrendsRpc(client, organizationId, params, defau
 
 // eslint-disable-next-line max-len
 async function callCompetitorSummaryRpc(client, organizationId, params, defaults, filterByBrandId, log) {
+  const cr = buildScalarRpcCategoryRegion(params);
   const rpcParams = {
     p_organization_id: organizationId,
     p_start_date: params.startDate || defaults.startDate,
@@ -609,11 +1306,9 @@ async function callCompetitorSummaryRpc(client, organizationId, params, defaults
     p_model: resolveModelFromRequest(params.model),
     p_brand_id: filterByBrandId || null,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
-      ? params.categoryId : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_category_id: cr.p_category_id,
+    p_category_name: cr.p_category_name,
+    p_region_code: cr.p_region_code,
   };
   log.info(`RPC rpc_market_tracking_competitor_summary called with: ${JSON.stringify(rpcParams)}`);
   const start = performance.now();
@@ -634,7 +1329,9 @@ async function callCompetitorSummaryRpc(client, organizationId, params, defaults
 export function reshapeMarketTrackingRows(rows) {
   const weekMap = new Map();
   rows.forEach((r) => {
-    if (!r.week_str) return;
+    if (!r.week_str) {
+      return;
+    }
     if (!weekMap.has(r.week_str)) {
       weekMap.set(r.week_str, {
         week: r.week_str,
@@ -674,6 +1371,10 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -701,7 +1402,7 @@ export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
 
       const weeklyTrends = reshapeMarketTrackingRows(data || []);
 
-      return ok({
+      return cachedOk({
         weeklyTrends,
         weeklyTrendsForComparison: weeklyTrends,
       });
@@ -725,6 +1426,10 @@ export function createCompetitorSummaryHandler(getOrgAndValidateAccess) {
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
 
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
@@ -751,7 +1456,7 @@ export function createCompetitorSummaryHandler(getOrgAndValidateAccess) {
         return badRequest(error.message);
       }
 
-      return ok({
+      return cachedOk({
         competitors: (data || []).map((r) => ({
           name: r.competitor_name,
           mentions: r.total_mentions || 0,
@@ -829,7 +1534,9 @@ export function aggregateSentimentByWeek(rows) {
     const entry = weekMap.get(week);
 
     const key = buildPromptKey(row);
-    if (entry.seenKeys.has(key)) return;
+    if (entry.seenKeys.has(key)) {
+      return;
+    }
     entry.seenKeys.add(key);
 
     entry.totalPrompts += 1;
@@ -896,23 +1603,27 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const model = resolveModelFromRequest(params.model);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select('execution_date, sentiment, prompt, region_code, topics')
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
         .lte('execution_date', endDate)
         .eq('model', model);
 
-      if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
-      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
-      if (shouldApplyFilter(params.categoryId)) {
-        q = isValidUUID(params.categoryId)
-          ? q.eq('category_id', params.categoryId)
-          : q.eq('category_name', params.categoryId);
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
       }
-      if (params.topicIds?.length > 0) q = q.in('topic_id', params.topicIds);
-      if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
-      if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+      if (filterByBrandId) {
+        q = q.eq('brand_id', filterByBrandId);
+      }
+      q = applyExecutionCategoryFilter(q, params);
+      if (params.topicIds?.length > 0) {
+        q = q.in('topic_id', params.topicIds);
+      }
+      q = applyExecutionRegionFilter(q, params);
+      if (shouldApplyFilter(params.origin)) {
+        q = q.ilike('origin', params.origin);
+      }
 
       const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
 
@@ -933,7 +1644,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       }
 
       const weeklyTrends = aggregateSentimentByWeek(data || []);
-      return ok({ weeklyTrends });
+      return cachedOk({ weeklyTrends });
     },
   );
 }
@@ -970,12 +1681,51 @@ export function buildTopicPromptKey(row) {
  * @returns {string} 'High', 'Medium', 'Low', or 'N/A'
  */
 function volumeToCategory(volumeSum, volumeCount) {
-  if (volumeCount === 0) return 'N/A';
+  if (volumeCount === 0) {
+    return 'N/A';
+  }
   const avg = volumeSum / volumeCount;
-  if (avg <= -25) return 'High';
-  if (avg <= -15) return 'Medium';
-  if (avg < 0) return 'Low';
+  if (avg <= -25) {
+    return 'High';
+  }
+  if (avg <= -15) {
+    return 'Medium';
+  }
+  if (avg < 0) {
+    return 'Low';
+  }
   return 'N/A';
+}
+
+/**
+ * Trims a PostgREST / RPC UUID string for JSON; null when missing or blank.
+ * PostgREST returns UUID columns as strings; non-strings are rejected.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function normalizeRpcUuid(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const s = value.trim();
+  return s || null;
+}
+
+/**
+ * Picks the lexicographically greatest non-null topic UUID in a group,
+ * matching `rpc_brand_presence_topics` (`topic_id ORDER BY ... DESC NULLS LAST`).
+ * @param {string|null} current
+ * @param {string|null} candidate
+ * @returns {string|null}
+ */
+function maxTopicIdForAggregate(current, candidate) {
+  if (!candidate) {
+    return current;
+  }
+  if (!current || candidate > current) {
+    return candidate;
+  }
+  return current;
 }
 
 /**
@@ -987,7 +1737,7 @@ function volumeToCategory(volumeSum, volumeCount) {
  *
  * @param {Array<Object>} rows - Raw brand_presence_executions rows
  *   (with embedded brand_presence_sources)
- * @returns {Array<Object>} TopicDetail-compatible objects (without items)
+ * @returns {Array<Object>} TopicDetail-compatible objects (without items); each includes `topicId`
  * @internal Exported for testing
  */
 export function aggregateTopicData(rows) {
@@ -1000,6 +1750,7 @@ export function aggregateTopicData(rows) {
     if (!topicAgg.has(topicName)) {
       topicAgg.set(topicName, {
         promptMap: new Map(),
+        maxTopicId: null,
         totalMentions: 0,
         totalCitations: 0,
         uniqueSourceUrlIds: new Set(),
@@ -1015,6 +1766,8 @@ export function aggregateTopicData(rows) {
     }
     const agg = topicAgg.get(topicName);
 
+    agg.maxTopicId = maxTopicIdForAggregate(agg.maxTopicId, normalizeRpcUuid(row.topic_id));
+
     // Dedup prompts (keep latest execution) — used only for promptCount
     const key = buildTopicPromptKey(row);
     const existing = agg.promptMap.get(key);
@@ -1023,12 +1776,18 @@ export function aggregateTopicData(rows) {
     }
 
     // Count mentions/citations from EVERY execution row
-    if (row.mentions === true || row.mentions === 'true') agg.totalMentions += 1;
-    if (row.citations === true || row.citations === 'true') agg.totalCitations += 1;
+    if (row.mentions === true || row.mentions === 'true') {
+      agg.totalMentions += 1;
+    }
+    if (row.citations === true || row.citations === 'true') {
+      agg.totalCitations += 1;
+    }
 
     if (Array.isArray(row.brand_presence_sources)) {
       row.brand_presence_sources.forEach((s) => {
-        if (s.url_id) agg.uniqueSourceUrlIds.add(s.url_id);
+        if (s.url_id) {
+          agg.uniqueSourceUrlIds.add(s.url_id);
+        }
       });
     }
 
@@ -1073,6 +1832,7 @@ export function aggregateTopicData(rows) {
 
     return {
       topic: topicName,
+      topicId: agg.maxTopicId,
       promptCount: agg.promptMap.size,
       brandMentions: agg.totalMentions,
       brandCitations: agg.totalCitations,
@@ -1109,8 +1869,12 @@ export function buildPromptDetails(rows) {
       existing.latestRow = row;
     }
     const entry = promptMap.get(key);
-    if (row.mentions === true || row.mentions === 'true') entry.totalMentions += 1;
-    if (row.citations === true || row.citations === 'true') entry.totalCitations += 1;
+    if (row.mentions === true || row.mentions === 'true') {
+      entry.totalMentions += 1;
+    }
+    if (row.citations === true || row.citations === 'true') {
+      entry.totalCitations += 1;
+    }
   });
 
   return [...promptMap.values()].map(({ latestRow: r, totalMentions, totalCitations }) => {
@@ -1118,7 +1882,9 @@ export function buildPromptDetails(rows) {
 
     return {
       topic: r.topics || 'Unknown',
+      topicId: r.topic_id != null ? String(r.topic_id) : '',
       prompt: r.prompt || '',
+      promptId: r.prompt_id != null ? String(r.prompt_id) : '',
       region: r.region_code || '',
       category: r.category_name || '',
       executionDate: r.execution_date || '',
@@ -1137,7 +1903,7 @@ export function buildPromptDetails(rows) {
   });
 }
 
-function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
+export function parsePaginationParams(context, { defaultPageSize = 20 } = {}) {
   const q = context.data || {};
   return {
     sortBy: q.sortBy || 'name',
@@ -1165,7 +1931,7 @@ function sortTopicDetails(topicDetails, sortBy, sortOrder) {
 }
 
 // eslint-disable-next-line max-len
-const TOPICS_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
+const TOPICS_SELECT = 'id, topic_id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code, brand_presence_sources(url_id)';
 
 /**
  * Creates the getTopics handler.
@@ -1189,6 +1955,10 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -1200,6 +1970,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         }
       }
 
+      const cr = buildScalarRpcCategoryRegion(params);
       const { data, error } = await client.rpc('rpc_brand_presence_topics', {
         p_organization_id: organizationId,
         p_start_date: params.startDate || defaults.startDate,
@@ -1207,13 +1978,11 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         p_model: resolveModelFromRequest(params.model),
         p_brand_id: filterByBrandId || null,
         p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-        p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-          ? params.categoryId : null,
-        p_category_name: shouldApplyFilter(params.categoryId) && !isValidUUID(params.categoryId)
-          ? params.categoryId : null,
+        p_category_id: cr.p_category_id,
+        p_category_name: cr.p_category_name,
         p_topic: shouldApplyFilter(params.topic) ? params.topic : null,
         p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
-        p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+        p_region_code: cr.p_region_code,
         p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
         p_sort_by: pagination.sortBy,
         p_sort_order: pagination.sortOrder,
@@ -1231,6 +2000,7 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
 
       const topicDetails = rows.map((row) => ({
         topic: row.topic,
+        topicId: normalizeRpcUuid(row.topic_id),
         promptCount: Number(row.prompt_count ?? 0),
         brandMentions: Number(row.brand_mentions ?? 0),
         brandCitations: Number(row.brand_citations ?? 0),
@@ -1241,17 +2011,20 @@ export function createTopicsHandler(getOrgAndValidateAccess) {
         popularityVolume: row.popularity_volume || 'N/A',
       }));
 
-      return ok({ topicDetails, totalCount });
+      return cachedOk({ topicDetails, totalCount });
     },
   );
 }
 
 // eslint-disable-next-line max-len
-const PROMPTS_SELECT = 'topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
+const PROMPTS_SELECT = 'topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, url, error_code';
 
 /**
  * Creates the getTopicPrompts handler.
  * Returns prompt-level data for a single topic (loaded on expansion).
+ * Applies the same category + region execution filters as sentiment overview,
+ * search, and topic/prompt detail (not region alone), so prompts respect
+ * dashboard filter dimensions when those query params are present.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createTopicPromptsHandler(getOrgAndValidateAccess) {
@@ -1279,13 +2052,13 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       }
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(PROMPTS_SELECT)
         .eq('organization_id', organizationId)
-        .eq('topics', topicName)
         .gte('execution_date', startDate)
         .lte('execution_date', endDate)
         .eq('model', model);
+      q = applyTopicPathFilter(q, topicName);
 
       if (shouldApplyFilter(params.siteId)) {
         q = q.eq('site_id', params.siteId);
@@ -1293,9 +2066,8 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       if (filterByBrandId) {
         q = q.eq('brand_id', filterByBrandId);
       }
-      if (shouldApplyFilter(params.regionCode)) {
-        q = q.eq('region_code', params.regionCode);
-      }
+      q = applyExecutionCategoryFilter(q, params);
+      q = applyExecutionRegionFilter(q, params);
       if (shouldApplyFilter(params.origin)) {
         q = q.ilike('origin', params.origin);
       }
@@ -1318,7 +2090,10 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let items = buildPromptDetails(data || []);
+      const rawRows = data || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rawRows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rawRows, topicName);
+      let items = buildPromptDetails(rawRows);
 
       // When a search query is provided, filter to only prompts whose text
       // matches — mirroring the original brand presence client-side behaviour
@@ -1335,7 +2110,12 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = items.slice(start, start + pagination.pageSize);
 
-      return ok({ items: paged, totalCount });
+      return cachedOk({
+        items: paged,
+        totalCount,
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
+      });
     },
   );
 }
@@ -1381,7 +2161,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 
       const query = (ctx.data?.query ?? '').trim();
       if (!query) {
-        return ok({ topicDetails: [], totalCount: 0 });
+        return cachedOk({ topicDetails: [], totalCount: 0 });
       }
 
       if (query.length < MIN_SEARCH_QUERY_LENGTH) {
@@ -1396,7 +2176,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const pattern = buildSearchPattern(bounded);
 
       let q = client
-        .from('brand_presence_executions')
+        .from('brand_presence_executions_active')
         .select(TOPICS_SELECT)
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
@@ -1407,18 +2187,14 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       if (shouldApplyFilter(params.siteId)) {
         q = q.eq('site_id', params.siteId);
       }
-      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
-      if (shouldApplyFilter(params.categoryId)) {
-        q = isValidUUID(params.categoryId)
-          ? q.eq('category_id', params.categoryId)
-          : q.eq('category_name', params.categoryId);
+      if (filterByBrandId) {
+        q = q.eq('brand_id', filterByBrandId);
       }
+      q = applyExecutionCategoryFilter(q, params);
       if (params.topicIds?.length > 0) {
         q = q.in('topic_id', params.topicIds);
       }
-      if (shouldApplyFilter(params.regionCode)) {
-        q = q.eq('region_code', params.regionCode);
-      }
+      q = applyExecutionRegionFilter(q, params);
       if (shouldApplyFilter(params.origin)) {
         q = q.ilike('origin', params.origin);
       }
@@ -1481,7 +2257,7 @@ export function createSearchHandler(getOrgAndValidateAccess) {
       const start = pagination.page * pagination.pageSize;
       const paged = topicDetails.slice(start, start + pagination.pageSize);
 
-      return ok({ topicDetails: paged, totalCount });
+      return cachedOk({ topicDetails: paged, totalCount });
     },
   );
 }
@@ -1489,13 +2265,70 @@ export function createSearchHandler(getOrgAndValidateAccess) {
 // ── Topic Detail / Prompt Detail ─────────────────────────────────────────────
 
 // eslint-disable-next-line max-len
-const DETAIL_SELECT = 'id, topics, prompt, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code';
+const DETAIL_SELECT = 'id, topic_id, topics, prompt, prompt_id, region_code, mentions, citations, visibility_score, position, sentiment, volume, origin, category_name, execution_date, answer, url, error_code, business_competitors, detected_brand_mentions';
+
+/** PostgREST select for topic detail: `DETAIL_SELECT` without `answer`. */
+const TOPIC_DETAIL_SELECT = DETAIL_SELECT
+  .split(', ')
+  .filter((col) => col !== 'answer')
+  .join(', ');
+
+/** Minimal columns for execution-sources execution row (summary + execution_date partition key). */
+const EXECUTION_SOURCES_EXEC_SELECT = 'id, execution_date, brand_id, site_id, model';
+
+/** brand_presence_sources columns plus embedded URL for execution-sources API */
+// eslint-disable-next-line max-len
+const EXECUTION_SOURCES_SOURCE_SELECT = 'url_id, content_type, is_owned, source_urls(url, hostname)';
 
 /**
  * Derives the ISO week string from an execution_date using the shared toISOWeek helper.
  */
 function weekFromExecDate(execDate) {
   return toISOWeek(execDate).week;
+}
+
+/**
+ * Maps a `brand_presence_executions` detail row to one `executions[]` entry.
+ * Used for prompt detail (`DETAIL_SELECT`) and topic detail (`TOPIC_DETAIL_SELECT`).
+ * @param {Object} r - Raw PostgREST row
+ * @param {{ includeAnswer?: boolean }} [options]
+ * @param {boolean} [options.includeAnswer=true] - When false, `answer` is omitted (topic detail).
+ * @returns {Object}
+ */
+function mapBrandPresenceDetailExecutionRow(r, { includeAnswer = true } = {}) {
+  const mentioned = r.mentions === true || r.mentions === 'true';
+  const cited = r.citations === true || r.citations === 'true';
+  const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+  return {
+    prompt: r.prompt || '',
+    promptId: r.prompt_id != null ? String(r.prompt_id) : '',
+    topicId: r.topic_id != null ? String(r.topic_id) : '',
+    executionId: r.id != null ? String(r.id) : '',
+    region: r.region_code || '',
+    executionDate: r.execution_date || '',
+    week: weekFromExecDate(r.execution_date),
+    ...(includeAnswer ? { answer: r.answer || '' } : {}),
+    mentions: mentioned,
+    citations: cited,
+    visibilityScore: Number.isNaN(vs) ? 0 : vs,
+    position: r.position ? String(r.position) : '',
+    sentiment: r.sentiment || '',
+    volume: r.volume != null ? String(r.volume) : '',
+    origin: r.origin || '',
+    category: r.category_name || '',
+    sources: r.url || '',
+    errorCode: r.error_code || '',
+    businessCompetitors: r.business_competitors || '',
+    detectedBrandMentions: r.detected_brand_mentions || '',
+  };
+}
+
+/**
+ * @param {Object} r - Raw PostgREST row (`TOPIC_DETAIL_SELECT`)
+ * @returns {Object}
+ */
+function mapBrandPresenceTopicDetailExecutionRow(r) {
+  return mapBrandPresenceDetailExecutionRow(r, { includeAnswer: false });
 }
 
 /**
@@ -1539,8 +2372,12 @@ export function aggregateWeeklyDetailStats(rows) {
       agg.positionCount += 1;
     }
 
-    if (row.mentions === true || row.mentions === 'true') agg.mentionCount += 1;
-    if (row.citations === true || row.citations === 'true') agg.citationCount += 1;
+    if (row.mentions === true || row.mentions === 'true') {
+      agg.mentionCount += 1;
+    }
+    if (row.citations === true || row.citations === 'true') {
+      agg.citationCount += 1;
+    }
 
     const vol = row.volume != null ? Number(row.volume) : NaN;
     if (!Number.isNaN(vol)) {
@@ -1587,7 +2424,9 @@ export function aggregateDetailSources(sourceRows) {
 
   sourceRows.forEach((row) => {
     const url = row.url || '';
-    if (!url) return;
+    if (!url) {
+      return;
+    }
     if (!sourceMap.has(url)) {
       sourceMap.set(url, {
         url,
@@ -1600,7 +2439,9 @@ export function aggregateDetailSources(sourceRows) {
     }
     const s = sourceMap.get(url);
     s.citationCount += 1;
-    if (row.execution_date) s.weeks.add(weekFromExecDate(row.execution_date));
+    if (row.execution_date) {
+      s.weeks.add(weekFromExecDate(row.execution_date));
+    }
     if (row.prompt) {
       s.prompts.set(row.prompt, (s.prompts.get(row.prompt) || 0) + 1);
     }
@@ -1619,26 +2460,146 @@ export function aggregateDetailSources(sourceRows) {
 /**
  * Shared query builder for topic/prompt detail endpoints.
  * Returns the base PostgREST query on brand_presence_executions.
+ * @param {string} [selectColumns=DETAIL_SELECT] - PostgREST select list
+ *   (`TOPIC_DETAIL_SELECT` omits answer)
  */
-function buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId) {
+function buildDetailExecQuery(
+  client,
+  organizationId,
+  params,
+  defaults,
+  filterByBrandId,
+  selectColumns = DETAIL_SELECT,
+) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const model = resolveModelFromRequest(params.model);
 
   let q = client
-    .from('brand_presence_executions')
-    .select(DETAIL_SELECT)
+    .from('brand_presence_executions_active')
+    .select(selectColumns)
     .eq('organization_id', organizationId)
     .gte('execution_date', startDate)
     .lte('execution_date', endDate)
     .eq('model', model);
 
-  if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
-  if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
-  if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
-  if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+  if (shouldApplyFilter(params.siteId)) {
+    q = q.eq('site_id', params.siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  q = applyExecutionCategoryFilter(q, params);
+  q = applyExecutionRegionFilter(q, params);
+  if (shouldApplyFilter(params.origin)) {
+    q = q.ilike('origin', params.origin);
+  }
 
   return q;
+}
+
+/**
+ * Execution-sources requires explicit `startDate`/`endDate`/`platform` (or aliases) so the
+ * execution row can be resolved inside the date window and model partition.
+ * @param {Object} context - Request context (`data` = query)
+ * @returns {Response|null} badRequest or null when valid
+ */
+function validateExecutionSourcesRequiredQuery(context) {
+  const q = context.data || {};
+  const startRaw = q.startDate ?? q.start_date;
+  const endRaw = q.endDate ?? q.end_date;
+  const platformRaw = q.model ?? q.platform;
+  if (!hasText(startRaw)) {
+    return badRequest('Missing required query parameter: startDate');
+  }
+  if (!hasText(endRaw)) {
+    return badRequest('Missing required query parameter: endDate');
+  }
+  if (!hasText(platformRaw)) {
+    return badRequest('Missing required query parameter: platform');
+  }
+  return null;
+}
+
+/**
+ * Builds a single-execution query for brand presence sources (same filters as topic/prompt detail).
+ * @param {Object} client - PostgREST client
+ * @param {string} organizationId - Organization UUID
+ * @param {string} executionId - Execution row id
+ * @param {Object} params - Parsed filter params (must include startDate, endDate, model)
+ * @param {string|null} filterByBrandId - Brand UUID or null when brand is "all"
+ * @returns {Object} Chainable query ending in .limit(1)
+ */
+function buildSingleExecutionSourcesExecQuery(
+  client,
+  organizationId,
+  executionId,
+  params,
+  filterByBrandId,
+) {
+  const { startDate, endDate, model: modelParam } = params;
+  const model = resolveModelFromRequest(modelParam);
+
+  let q = client
+    .from('brand_presence_executions_active')
+    .select(EXECUTION_SOURCES_EXEC_SELECT)
+    .eq('organization_id', organizationId)
+    .eq('id', executionId)
+    .gte('execution_date', startDate)
+    .lte('execution_date', endDate)
+    .eq('model', model);
+
+  if (shouldApplyFilter(params.siteId)) {
+    q = q.eq('site_id', params.siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(params.regionCode)) {
+    q = q.eq('region_code', params.regionCode);
+  }
+  if (shouldApplyFilter(params.origin)) {
+    q = q.ilike('origin', params.origin);
+  }
+
+  return q;
+}
+
+/**
+ * Maps a brand_presence_sources row (with embedded source_urls) to the slim
+ * execution-sources API shape (url resolution only).
+ * @param {Object} row - PostgREST row
+ * @returns {{
+ *   urlId: string,
+ *   contentType: string,
+ *   isOwned: boolean,
+ *   url: string,
+ *   hostname: string,
+ * }}
+ */
+function mapExecutionSourceRowToResponse(row) {
+  const su = row.source_urls || {};
+  return {
+    urlId: row.url_id != null ? String(row.url_id) : '',
+    contentType: row.content_type ?? '',
+    isOwned: row.is_owned === true || row.is_owned === 'true',
+    url: su.url ?? '',
+    hostname: su.hostname ?? '',
+  };
+}
+
+/**
+ * Minimal execution summary for execution-sources responses.
+ * @param {Object} execRow - brand_presence_executions row
+ * @returns {Object}
+ */
+function mapExecutionSummaryForSources(execRow) {
+  return {
+    executionId: execRow.id != null ? String(execRow.id) : '',
+    brandId: execRow.brand_id != null ? String(execRow.brand_id) : '',
+    siteId: execRow.site_id != null ? String(execRow.site_id) : '',
+    model: execRow.model ?? '',
+  };
 }
 
 /**
@@ -1646,7 +2607,9 @@ function buildDetailExecQuery(client, organizationId, params, defaults, filterBy
  * Uses chunked IN filters to stay within PostgREST limits.
  */
 async function fetchSourcesForExecutions(client, organizationId, execIds, startDate, endDate) {
-  if (!execIds.length) return [];
+  if (!execIds.length) {
+    return [];
+  }
 
   const chunks = [];
   for (let i = 0; i < execIds.length; i += IN_FILTER_CHUNK_SIZE) {
@@ -1723,8 +2686,15 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
-        .eq('topics', topicName);
+      let q = buildDetailExecQuery(
+        client,
+        organizationId,
+        params,
+        defaults,
+        filterByBrandId,
+        TOPIC_DETAIL_SELECT,
+      );
+      q = applyTopicPathFilter(q, topicName);
 
       const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
 
@@ -1734,9 +2704,12 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       }
 
       const rows = execRows || [];
+      const topicResponseLabel = topicLabelForDetailResponse(rows, topicName);
+      const topicIdResponse = topicIdForDetailResponse(rows, topicName);
       if (rows.length === 0) {
-        return ok({
-          topic: topicName,
+        return cachedOk({
+          topic: topicResponseLabel,
+          topicId: topicIdResponse,
           stats: {
             averageVisibilityScore: 0,
             averagePosition: 0,
@@ -1760,31 +2733,10 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       // Weekly stats for mini-charts
       const weeklyStats = aggregateWeeklyDetailStats(rows);
 
-      // Build execution entries (all rows, newest first)
+      // Build execution entries (all rows, newest first; no answer field)
       const executions = rows
         .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map((r) => {
-          const mentioned = r.mentions === true || r.mentions === 'true';
-          const cited = r.citations === true || r.citations === 'true';
-          const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-          return {
-            prompt: r.prompt || '',
-            region: r.region_code || '',
-            executionDate: r.execution_date || '',
-            week: weekFromExecDate(r.execution_date),
-            answer: r.answer || '',
-            mentions: mentioned,
-            citations: cited,
-            visibilityScore: Number.isNaN(vs) ? 0 : vs,
-            position: r.position ? String(r.position) : '',
-            sentiment: r.sentiment || '',
-            volume: r.volume != null ? String(r.volume) : '',
-            origin: r.origin || '',
-            category: r.category_name || '',
-            sources: r.url || '',
-            errorCode: r.error_code || '',
-          };
-        });
+        .map(mapBrandPresenceTopicDetailExecutionRow);
 
       // Fetch sources
       const execIdMap = new Map(rows.map((r) => [r.id, r]));
@@ -1797,8 +2749,9 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
       const sources = aggregateDetailSources(flatSources);
 
-      return ok({
-        topic: topicName,
+      return cachedOk({
+        topic: topicResponseLabel,
+        topicId: topicIdResponse,
         /* c8 ignore start */
         stats: {
           averageVisibilityScore: topicStats.averageVisibilityScore || 0,
@@ -1817,6 +2770,137 @@ export function createTopicDetailHandler(getOrgAndValidateAccess) {
       });
     },
   );
+}
+
+/**
+ * Builds the JSON body for prompt-detail and prompt-detail-by-prompt-id responses.
+ * @param {Object} client - PostgREST client
+ * @param {string} organizationId - Organization UUID
+ * @param {Object} params - Parsed filter params (includes startDate, endDate, model, siteId, …)
+ * @param {Object} defaults - Default date range
+ * @param {Array<Object>} rows - Raw execution rows (possibly empty)
+ * @param {Object} envelope
+ * @param {string} envelope.topicPathParam - Decoded `:topicId` path segment, or empty string if N/A
+ * @param {string} envelope.promptEnvelopeText - Human-readable prompt text for the envelope
+ * @param {string} envelope.envelopePromptId - Stable `promptId` field for the envelope
+ * @param {string} [envelope.regionCode] - Optional region filter applied for this response
+ * @returns {Promise<Object>} Serializable payload (not wrapped in `ok()`)
+ */
+async function assemblePromptDetailPayload(
+  client,
+  organizationId,
+  params,
+  defaults,
+  rows,
+  {
+    topicPathParam,
+    promptEnvelopeText,
+    envelopePromptId,
+    regionCode,
+  },
+) {
+  const topicResponseLabel = topicLabelForDetailResponse(rows, topicPathParam);
+  const topicIdResponse = topicIdForDetailResponse(rows, topicPathParam);
+  const region = regionCode || '';
+
+  if (!rows.length) {
+    return {
+      topic: topicResponseLabel,
+      topicId: topicIdResponse,
+      prompt: promptEnvelopeText,
+      promptId: envelopePromptId,
+      region,
+      stats: {
+        visibilityScore: 0,
+        position: '',
+        sentiment: -1,
+        mentions: 0,
+        citations: 0,
+      },
+      weeklyStats: [],
+      executions: [],
+      sources: [],
+    };
+  }
+
+  let visSum = 0;
+  let visCount = 0;
+  let posSum = 0;
+  let posCount = 0;
+  let sentSum = 0;
+  let sentCount = 0;
+  let mentionTotal = 0;
+  let citationTotal = 0;
+
+  rows.forEach((r) => {
+    const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
+    if (!Number.isNaN(vs)) {
+      visSum += vs;
+      visCount += 1;
+    }
+    const pos = r.position;
+    if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
+      posSum += Number(pos);
+      posCount += 1;
+    }
+    const sentiment = (r.sentiment || '').toLowerCase().trim();
+    if (sentiment === 'positive') {
+      sentSum += 100;
+      sentCount += 1;
+    } else if (sentiment === 'neutral') {
+      sentSum += 50;
+      sentCount += 1;
+    } else if (sentiment === 'negative') {
+      sentCount += 1;
+    }
+    if (r.mentions === true || r.mentions === 'true') {
+      mentionTotal += 1;
+    }
+    if (r.citations === true || r.citations === 'true') {
+      citationTotal += 1;
+    }
+  });
+
+  const avgVisibility = visCount > 0
+    ? Math.round((visSum / visCount) * 100) / 100 : 0;
+  const avgPosition = posCount > 0
+    ? Math.round((posSum / posCount) * 100) / 100 : 0;
+  const avgSentiment = sentCount > 0
+    ? Math.round(sentSum / sentCount) : -1;
+
+  const weeklyStats = aggregateWeeklyDetailStats(rows);
+
+  const executions = rows
+    .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
+    .map(mapBrandPresenceDetailExecutionRow);
+
+  const execIdMap = new Map(rows.map((r) => [r.id, r]));
+  const execIds = rows.map((r) => r.id).filter(Boolean);
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+
+  // eslint-disable-next-line max-len
+  const rawSources = await fetchSourcesForExecutions(client, organizationId, execIds, startDate, endDate);
+  const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
+  const sources = aggregateDetailSources(flatSources);
+
+  return {
+    topic: topicResponseLabel,
+    topicId: topicIdResponse,
+    prompt: promptEnvelopeText,
+    promptId: envelopePromptId,
+    region,
+    stats: {
+      visibilityScore: avgVisibility,
+      position: avgPosition > 0 ? String(avgPosition) : '',
+      sentiment: avgSentiment,
+      mentions: mentionTotal,
+      citations: citationTotal,
+    },
+    weeklyStats,
+    executions,
+    sources,
+  };
 }
 
 /**
@@ -1863,8 +2947,8 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
         }
       }
 
-      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
-        .eq('topics', topicName)
+      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId);
+      q = applyTopicPathFilter(q, topicName)
         .eq('prompt', promptText);
 
       if (shouldApplyFilter(regionCode)) {
@@ -1879,117 +2963,180 @@ export function createPromptDetailHandler(getOrgAndValidateAccess) {
       }
 
       const rows = execRows || [];
-      if (rows.length === 0) {
-        return ok({
-          topic: topicName,
-          prompt: promptText,
-          region: regionCode || '',
-          stats: {
-            visibilityScore: 0,
-            position: '',
-            sentiment: -1,
-            mentions: 0,
-            citations: 0,
-          },
-          weeklyStats: [],
-          executions: [],
-          sources: [],
-        });
+      const envelopePromptId = promptIdForDetailResponse(rows);
+      const payload = await assemblePromptDetailPayload(
+        client,
+        organizationId,
+        params,
+        defaults,
+        rows,
+        {
+          topicPathParam: topicName,
+          promptEnvelopeText: promptText,
+          envelopePromptId,
+          regionCode,
+        },
+      );
+      return cachedOk(payload);
+    },
+  );
+}
+
+/**
+ * Creates the getPromptDetailByPromptId handler.
+ * Same response shape as {@link createPromptDetailHandler}, but scopes executions by
+ * `prompt_id` (path UUID) and the shared date/model/site/origin filters — no topic path
+ * or `prompt` query string required.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createPromptDetailByPromptIdHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'prompt-detail-by-prompt-id',
+    async (ctx, client) => {
+      const { spaceCatId, brandId, promptId } = ctx.params;
+      const trimmedPromptId = String(promptId || '').trim();
+      if (!isValidUUID(trimmedPromptId)) {
+        return badRequest('Invalid prompt id');
       }
 
-      // Compute stats
-      let visSum = 0;
-      let visCount = 0;
-      let posSum = 0;
-      let posCount = 0;
-      let sentSum = 0;
-      let sentCount = 0;
-      let mentionTotal = 0;
-      let citationTotal = 0;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-      rows.forEach((r) => {
-        const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-        if (!Number.isNaN(vs)) {
-          visSum += vs;
-          visCount += 1;
+      const promptData = ctx.data || {};
+      const regionCode = promptData.promptRegion || promptData.prompt_region;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
         }
-        const pos = r.position;
-        if (pos && pos !== 'Not Mentioned' && /^\d+\.?\d*$/.test(String(pos))) {
-          posSum += Number(pos);
-          posCount += 1;
-        }
-        const sentiment = (r.sentiment || '').toLowerCase().trim();
-        if (sentiment === 'positive') {
-          sentSum += 100;
-          sentCount += 1;
-        } else if (sentiment === 'neutral') {
-          sentSum += 50;
-          sentCount += 1;
-        } else if (sentiment === 'negative') {
-          sentCount += 1;
-        }
-        if (r.mentions === true || r.mentions === 'true') mentionTotal += 1;
-        if (r.citations === true || r.citations === 'true') citationTotal += 1;
-      });
+      }
 
-      const avgVisibility = visCount > 0
-        ? Math.round((visSum / visCount) * 100) / 100 : 0;
-      const avgPosition = posCount > 0
-        ? Math.round((posSum / posCount) * 100) / 100 : 0;
-      const avgSentiment = sentCount > 0
-        ? Math.round(sentSum / sentCount) : -1;
+      let q = buildDetailExecQuery(client, organizationId, params, defaults, filterByBrandId)
+        .eq('prompt_id', trimmedPromptId);
 
-      const weeklyStats = aggregateWeeklyDetailStats(rows);
+      if (shouldApplyFilter(regionCode)) {
+        q = q.eq('region_code', regionCode);
+      }
 
-      const executions = rows
-        .sort((a, b) => (b.execution_date || '').localeCompare(a.execution_date || ''))
-        .map((r) => {
-          const mentioned = r.mentions === true || r.mentions === 'true';
-          const cited = r.citations === true || r.citations === 'true';
-          const vs = r.visibility_score != null ? Number(r.visibility_score) : NaN;
-          return {
-            prompt: r.prompt || '',
-            region: r.region_code || '',
-            executionDate: r.execution_date || '',
-            week: weekFromExecDate(r.execution_date),
-            answer: r.answer || '',
-            mentions: mentioned,
-            citations: cited,
-            visibilityScore: Number.isNaN(vs) ? 0 : vs,
-            position: r.position ? String(r.position) : '',
-            sentiment: r.sentiment || '',
-            volume: r.volume != null ? String(r.volume) : '',
-            origin: r.origin || '',
-            category: r.category_name || '',
-            sources: r.url || '',
-            errorCode: r.error_code || '',
-          };
-        });
+      const { data: execRows, error: execError } = await q.limit(WEEKS_QUERY_LIMIT);
 
-      // Fetch sources
-      const execIdMap = new Map(rows.map((r) => [r.id, r]));
-      const execIds = rows.map((r) => r.id).filter(Boolean);
-      const startDate = params.startDate || defaults.startDate;
-      const endDate = params.endDate || defaults.endDate;
+      if (execError) {
+        ctx.log.error(
+          `Brand presence prompt-detail-by-prompt-id PostgREST error: ${execError.message}`,
+        );
+        return badRequest(execError.message);
+      }
 
-      // eslint-disable-next-line max-len
-      const rawSources = await fetchSourcesForExecutions(client, organizationId, execIds, startDate, endDate);
-      const flatSources = rawSources.map((s) => flattenSourceRow(s, execIdMap));
-      const sources = aggregateDetailSources(flatSources);
-
-      return ok({
-        topic: topicName,
-        prompt: promptText,
-        region: regionCode || '',
-        stats: {
-          visibilityScore: avgVisibility,
-          position: avgPosition > 0 ? String(avgPosition) : '',
-          sentiment: avgSentiment,
-          mentions: mentionTotal,
-          citations: citationTotal,
+      const rows = execRows || [];
+      const promptEnvelopeText = promptTextForDetailEnvelope(rows);
+      const payload = await assemblePromptDetailPayload(
+        client,
+        organizationId,
+        params,
+        defaults,
+        rows,
+        {
+          topicPathParam: '',
+          promptEnvelopeText,
+          envelopePromptId: trimmedPromptId,
+          regionCode,
         },
-        weeklyStats,
-        executions,
+      );
+      return cachedOk(payload);
+    },
+  );
+}
+
+/**
+ * Creates the getExecutionSources handler.
+ * Returns one source entry per `brand_presence_sources` row with
+ * `{ urlId, contentType, isOwned, url, hostname }` (`url` / `hostname` from `source_urls`).
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createExecutionSourcesHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'execution-sources',
+    async (ctx, client) => {
+      const { spaceCatId, brandId, executionId } = ctx.params;
+      if (!hasText(executionId) || !isValidUUID(executionId)) {
+        return badRequest('Invalid execution id');
+      }
+
+      const missingQuery = validateExecutionSourcesRequiredQuery(ctx);
+      if (missingQuery) {
+        return missingQuery;
+      }
+
+      const params = parseFilterDimensionsParams(ctx);
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const execQ = buildSingleExecutionSourcesExecQuery(
+        client,
+        organizationId,
+        executionId,
+        params,
+        filterByBrandId,
+      );
+      const { data: execRows, error: execError } = await execQ.limit(1);
+
+      if (execError) {
+        ctx.log.error(`Brand presence execution-sources PostgREST error: ${execError.message}`);
+        return internalServerError('Internal server error');
+      }
+
+      const execRow = (execRows || [])[0];
+      if (!execRow) {
+        return notFound('Execution not found');
+      }
+
+      const execDate = execRow.execution_date;
+      if (!hasText(execDate)) {
+        return notFound('Execution not found');
+      }
+
+      const { data: sourceRows, error: sourceError } = await client
+        .from('brand_presence_sources')
+        .select(EXECUTION_SOURCES_SOURCE_SELECT)
+        .eq('organization_id', organizationId)
+        .eq('execution_id', executionId)
+        .eq('execution_date', execDate)
+        .limit(WEEKS_QUERY_LIMIT);
+
+      if (sourceError) {
+        ctx.log.error(`Brand presence execution-sources PostgREST error: ${sourceError.message}`);
+        return internalServerError('Internal server error');
+      }
+
+      const sources = (sourceRows || []).map(mapExecutionSourceRowToResponse);
+
+      return cachedOk({
+        execution: {
+          ...mapExecutionSummaryForSources(execRow),
+          executionDate: execDate,
+        },
         sources,
       });
     },
@@ -2010,14 +3157,24 @@ const DEFAULT_MAX_COMPETITORS = 5; // max competitors the RPC returns from the D
  * @internal Exported for testing
  */
 export function volumeToPopularity(volume, avgPositiveVolume) {
-  if (volume === -30) return 'High';
-  if (volume === -20) return 'Medium';
-  if (volume === -10) return 'Low';
+  if (volume === -30) {
+    return 'High';
+  }
+  if (volume === -20) {
+    return 'Medium';
+  }
+  if (volume === -10) {
+    return 'Low';
+  }
   if (volume > 0 && avgPositiveVolume > 0) {
     const low = avgPositiveVolume * 0.33;
     const med = avgPositiveVolume * 0.66;
-    if (volume <= low) return 'Low';
-    if (volume <= med) return 'Medium';
+    if (volume <= low) {
+      return 'Low';
+    }
+    if (volume <= med) {
+      return 'Medium';
+    }
     return 'High';
   }
   return 'Low';
@@ -2027,6 +3184,9 @@ function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByB
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
   const model = resolveModelFromRequest(params.model);
+  const cr = buildScalarRpcCategoryRegion(params);
+  // rpc_share_of_voice accepts p_category_id (UUID) and p_region_code only;
+  // name-based categories are not passed (same RPC contract as before).
 
   return client.rpc('rpc_share_of_voice', {
     p_organization_id: organizationId,
@@ -2035,11 +3195,10 @@ function callShareOfVoiceRpc(client, organizationId, params, defaults, filterByB
     p_model: model,
     p_brand_id: filterByBrandId || null,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-      ? params.categoryId : null,
+    p_category_id: cr.p_category_id,
     p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
     p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_region_code: cr.p_region_code,
     p_max_competitors: params.maxCompetitors
       ? Number(params.maxCompetitors) : DEFAULT_MAX_COMPETITORS,
   });
@@ -2050,15 +3209,23 @@ async function fetchConfiguredCompetitorNames(client, organizationId, filterByBr
     .from('competitors')
     .select('name, aliases')
     .eq('organization_id', organizationId);
-  if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
   const { data, error } = await q.limit(QUERY_LIMIT);
-  if (error || !data) return new Set();
+  if (error || !data) {
+    return new Set();
+  }
   const names = new Set();
   data.forEach((c) => {
-    if (c.name) names.add(c.name.toLowerCase().trim());
+    if (c.name) {
+      names.add(c.name.toLowerCase().trim());
+    }
     if (Array.isArray(c.aliases)) {
       c.aliases.forEach((a) => {
-        if (a) names.add(a.toLowerCase().trim());
+        if (a) {
+          names.add(a.toLowerCase().trim());
+        }
       });
     }
   });
@@ -2093,7 +3260,9 @@ export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
   // Compute average positive volume for legacy percentile bucketing
   const positiveVolumes = [];
   topicMap.forEach((m) => {
-    if (m.volume > 0) positiveVolumes.push(m.volume);
+    if (m.volume > 0) {
+      positiveVolumes.push(m.volume);
+    }
   });
   const avgPositiveVolume = positiveVolumes.length > 0
     ? positiveVolumes.reduce((s, v) => s + v, 0) / positiveVolumes.length
@@ -2135,7 +3304,9 @@ export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
 
     allEntities.sort((a, b) => {
       const diff = b.shareOfVoice - a.shareOfVoice;
-      if (diff !== 0) return diff;
+      if (diff !== 0) {
+        return diff;
+      }
       return Number(b.isBrand) - Number(a.isBrand);
     });
 
@@ -2194,7 +3365,9 @@ export function aggregateShareOfVoice(rpcRows, configuredNames, brandName) {
   };
   shareOfVoiceData.sort((a, b) => {
     const pDiff = getPriorityValue(b.popularity) - getPriorityValue(a.popularity);
-    if (pDiff !== 0) return pDiff;
+    if (pDiff !== 0) {
+      return pDiff;
+    }
     return (b.shareOfVoice || 0) - (a.shareOfVoice || 0);
   });
 
@@ -2217,6 +3390,10 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
 
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
@@ -2249,7 +3426,9 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
           .select('name')
           .eq('id', filterByBrandId)
           .limit(1);
-        if (brandData?.[0]?.name) brandName = brandData[0].name;
+        if (brandData?.[0]?.name) {
+          brandName = brandData[0].name;
+        }
       }
 
       const shareOfVoiceData = aggregateShareOfVoice(
@@ -2258,101 +3437,7 @@ export function createShareOfVoiceHandler(getOrgAndValidateAccess) {
         brandName,
       );
 
-      return ok({ shareOfVoiceData });
-    },
-  );
-}
-
-/**
- * Creates the getFilterDimensions handler.
- * Returns dimension option lists from `rpc_brand_presence_filter_dimensions`, plus `stats`
- * (total_execution_count, distinct_prompt_count, empty_answer_execution_count) from the same RPC,
- * and `page_intents` from a separate query.
- * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
- */
-export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
-  return (context) => withBrandPresenceAuth(
-    context,
-    getOrgAndValidateAccess,
-    'filter-dimensions',
-    async (ctx, client) => {
-      const { spaceCatId, brandId } = ctx.params;
-      const params = parseFilterDimensionsParams(ctx);
-      params.model = resolveModelFromRequest(params.model);
-
-      const defaults = defaultDateRange();
-      const organizationId = spaceCatId;
-      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-      const siteFilter = params.siteId;
-
-      if (shouldApplyFilter(siteFilter)) {
-        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
-        if (!siteBelongsToOrg) {
-          return forbidden('Site does not belong to the organization');
-        }
-      }
-
-      const rpcParams = buildFilterDimensionsRpcParams(
-        organizationId,
-        params,
-        defaults,
-        filterByBrandId,
-      );
-      const { data: rpcData, error: rpcError } = await client.rpc(
-        'rpc_brand_presence_filter_dimensions',
-        rpcParams,
-      );
-
-      if (rpcError) {
-        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${rpcError.message}`);
-        return badRequest(rpcError.message);
-      }
-
-      const dims = rpcData && typeof rpcData === 'object' ? rpcData : {};
-      const brands = Array.isArray(dims.brands) ? dims.brands : [];
-      const categories = Array.isArray(dims.categories) ? dims.categories : [];
-      const topics = Array.isArray(dims.topics) ? dims.topics : [];
-      const origins = Array.isArray(dims.origins) ? dims.origins : [];
-      const regions = Array.isArray(dims.regions) ? dims.regions : [];
-      const stats = normalizeFilterDimensionsStatsFromRpc(dims);
-
-      let rowsForSiteIds = [];
-      if (filterByBrandId && !shouldApplyFilter(siteFilter)) {
-        const siteQ = buildExecutionsSiteIdsQuery(
-          client,
-          organizationId,
-          params,
-          defaults,
-          filterByBrandId,
-        );
-        const { data: siteRows, error: siteErr } = await siteQ;
-        if (siteErr) {
-          ctx.log.error(`Brand presence filter-dimensions site-id query error: ${siteErr.message}`);
-          return badRequest(siteErr.message);
-        }
-        rowsForSiteIds = siteRows || [];
-      }
-
-      const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
-        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rowsForSiteIds)
-        : [];
-      const pageIntents = await fetchPageIntents(
-        client,
-        organizationId,
-        siteFilter,
-        filterByBrandId,
-        siteIds,
-      );
-
-      return ok({
-        brands,
-        categories,
-        topics,
-        origins,
-        regions,
-        stats,
-        page_intents: pageIntents,
-      });
+      return cachedOk({ shareOfVoiceData });
     },
   );
 }
@@ -2385,6 +3470,10 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         return badRequest('Invalid type parameter. Must be "top" or "bottom".');
       }
 
+      if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
+        return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -2404,16 +3493,25 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         p_type: type,
       };
 
-      if (filterByBrandId) rpcParams.p_brand_id = filterByBrandId;
-      if (shouldApplyFilter(params.siteId)) rpcParams.p_site_id = params.siteId;
-      if (shouldApplyFilter(params.categoryId)) {
-        rpcParams.p_category_id = isValidUUID(params.categoryId)
-          ? params.categoryId
-          : undefined;
+      if (filterByBrandId) {
+        rpcParams.p_brand_id = filterByBrandId;
       }
-      if (shouldApplyFilter(params.origin)) rpcParams.p_origin = params.origin;
-      if (shouldApplyFilter(params.regionCode)) rpcParams.p_region_code = params.regionCode;
-      if (params.topicIds?.length > 0) rpcParams.p_topic_ids = params.topicIds;
+      if (shouldApplyFilter(params.siteId)) {
+        rpcParams.p_site_id = params.siteId;
+      }
+      const cr = buildScalarRpcCategoryRegion(params);
+      if (cr.p_category_id) {
+        rpcParams.p_category_id = cr.p_category_id;
+      }
+      if (shouldApplyFilter(params.origin)) {
+        rpcParams.p_origin = params.origin;
+      }
+      if (cr.p_region_code) {
+        rpcParams.p_region_code = cr.p_region_code;
+      }
+      if (params.topicIds?.length > 0) {
+        rpcParams.p_topic_ids = params.topicIds;
+      }
 
       const { data, error } = await client.rpc('rpc_sentiment_movers', rpcParams);
 
@@ -2439,14 +3537,16 @@ export function createSentimentMoversHandler(getOrgAndValidateAccess) {
         executionCount: row.execution_count,
       }));
 
-      return ok({ movers });
+      return cachedOk({ movers });
     },
   );
 }
 
 function parseShowTrends(q) {
   const v = q?.showTrends ?? q?.show_trends;
-  if (v === true || v === 1) return true;
+  if (v === true || v === 1) {
+    return true;
+  }
   if (typeof v === 'string') {
     const s = v.toLowerCase().trim();
     return s === 'true' || s === '1';
@@ -2471,23 +3571,65 @@ function rowToStats(row) {
   };
 }
 
-function buildRpcParams(organizationId, startDate, endDate, model, filterByBrandId, params) {
+/**
+ * Parameters for `rpc_brand_presence_stats` (single call or one fan-out slice).
+ * Without `slice`: sets `p_category_id` when exactly one UUID category,
+ * `p_category_name` when exactly one name (and no UUID categories),
+ * `p_region_code` when exactly one region. With `slice`, copies all three from
+ * the slice (used when fan-out merging multi-category or multi-region requests).
+ */
+function buildRpcParams(
+  organizationId,
+  startDate,
+  endDate,
+  model,
+  filterByBrandId,
+  params,
+  slice = null,
+) {
   const topicIds = params.topicIds?.length ? params.topicIds : null;
-  const categoryId = shouldApplyFilter(params.categoryId) && isValidUUID(params.categoryId)
-    ? params.categoryId
-    : null;
-  return {
+  const uuids = params.categoryUuidIds || [];
+  const names = params.categoryNames || [];
+  const regions = params.regionCodesList || [];
+
+  let pCategoryId = null;
+  let pCategoryName = null;
+  let pRegionCode = null;
+
+  if (slice) {
+    ({
+      p_category_id: pCategoryId,
+      p_category_name: pCategoryName,
+      p_region_code: pRegionCode,
+    } = slice);
+  } else {
+    if (uuids.length === 1 && names.length === 0) {
+      [pCategoryId] = uuids;
+    }
+    if (names.length === 1 && uuids.length === 0) {
+      [pCategoryName] = names;
+    }
+    if (regions.length === 1) {
+      [pRegionCode] = regions;
+    }
+  }
+
+  const rpc = {
     p_organization_id: organizationId,
     p_start_date: startDate,
     p_end_date: endDate,
     p_model: model,
     p_brand_id: filterByBrandId,
     p_site_id: shouldApplyFilter(params.siteId) ? params.siteId : null,
-    p_category_id: categoryId,
+    p_category_id: pCategoryId,
     p_topic_ids: topicIds,
     p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
-    p_region_code: shouldApplyFilter(params.regionCode) ? params.regionCode : null,
+    p_region_code: pRegionCode,
   };
+  if (pCategoryName != null) {
+    rpc.p_category_name = pCategoryName;
+  }
+  return rpc;
 }
 
 /**
@@ -2516,6 +3658,10 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
       const model = resolveModelFromRequest(params.model);
       const showTrends = parseShowTrends(q);
 
+      if (hasMixedCategoryUuidAndName(params)) {
+        return badRequest(MIXED_CATEGORY_UUID_AND_NAME_STATS);
+      }
+
       if (shouldApplyFilter(params.siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(
           client,
@@ -2527,16 +3673,44 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      const rpcParams = buildRpcParams(
-        organizationId,
-        startDate,
-        endDate,
-        model,
-        filterByBrandId,
-        params,
-      );
+      const fanOut = statsRequiresFanOutRpc(params);
+      const slices = fanOut ? expandBrandPresenceStatsRpcSlices(params) : null;
 
-      const { data, error } = await client.rpc('rpc_brand_presence_stats', rpcParams);
+      const callStatsForRange = async (rangeStart, rangeEnd) => {
+        if (fanOut && slices?.length) {
+          const results = await Promise.all(slices.map((slice) => client.rpc(
+            'rpc_brand_presence_stats',
+            buildRpcParams(
+              organizationId,
+              rangeStart,
+              rangeEnd,
+              model,
+              filterByBrandId,
+              params,
+              slice,
+            ),
+          )));
+          const failed = results.find((r) => r.error);
+          if (failed) {
+            return { data: null, error: failed.error };
+          }
+          const merged = mergeBrandPresenceStatsRpcRows(results.map((r) => r.data));
+          return { data: merged, error: null };
+        }
+        return client.rpc(
+          'rpc_brand_presence_stats',
+          buildRpcParams(
+            organizationId,
+            rangeStart,
+            rangeEnd,
+            model,
+            filterByBrandId,
+            params,
+          ),
+        );
+      };
+
+      const { data, error } = await callStatsForRange(startDate, endDate);
 
       if (error) {
         ctx.log.error(`Brand presence stats RPC error: ${error.message}`);
@@ -2551,11 +3725,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         const weeks = splitDateRangeIntoWeeksBackward(startDate, endDate);
         if (weeks.length > 0) {
           const trendResults = await Promise.all(
-            weeks.map((w) => client.rpc('rpc_brand_presence_stats', {
-              ...rpcParams,
-              p_start_date: w.startDate,
-              p_end_date: w.endDate,
-            })),
+            weeks.map((w) => callStatsForRange(w.startDate, w.endDate)),
           );
 
           const failed = trendResults.find((r) => r.error);
@@ -2575,7 +3745,7 @@ export function createBrandPresenceStatsHandler(getOrgAndValidateAccess) {
         }
       }
 
-      return ok(response);
+      return cachedOk(response);
     },
   );
 }
