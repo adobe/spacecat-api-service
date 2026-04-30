@@ -1,3 +1,11 @@
+# [1.460.0](https://github.com/adobe/spacecat-api-service/compare/v1.459.0...v1.460.0) (2026-04-30)
+
+
+### Features
+
+* return topic + prompt ids in bp responses; add lookup by prompt id endpoint | LLMO-4440 ([#2248](https://github.com/adobe/spacecat-api-service/issues/2248)) ([face861](https://github.com/adobe/spacecat-api-service/commit/face861143e6a551deb190631ef3a70bdd7cc39d))
+* support multiple category ids and multiple topic ids as filters to llmo BP calls | LLMO-4297 ([#2221](https://github.com/adobe/spacecat-api-service/issues/2221)) ([c887a91](https://github.com/adobe/spacecat-api-service/commit/c887a9147f3355199262d733c171396231c18654))
+
 # [1.459.0](https://github.com/adobe/spacecat-api-service/compare/v1.458.1...v1.459.0) (2026-04-29)
 
 
