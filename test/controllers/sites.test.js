@@ -671,18 +671,19 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Delivery type required');
   });
 
-  it('gets all sites by enrollment tier', async () => {
+  it('gets all sites by enrollment tier with default pagination', async () => {
     mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
 
     const result = await sitesController.getAllByEnrollmentAndTier({
       params: { tier: 'PAID' },
     });
-    const resultSites = await result.json();
+    const body = await result.json();
 
     expect(mockDataAccess.Site.allByEnrollmentAndTier)
       .to.have.been.calledOnceWithExactly('PAID', undefined);
-    expect(resultSites).to.be.an('array').with.lengthOf(2);
-    expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
+    expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+    expect(body.pagination).to.deep.equal({ limit: 100, cursor: null, hasMore: false });
   });
 
   it('forwards productCode to allByEnrollmentAndTier when supplied', async () => {
@@ -726,6 +727,58 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error.message).to.match(/^Tier must be one of:/);
+  });
+
+  it('returns bad request when limit is invalid on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { limit: '0' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Page size must be a positive integer');
+    expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
+  });
+
+  it('paginates and returns cursor when more results remain', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { limit: '1' },
+    });
+    const body = await result.json();
+
+    expect(body.sites).to.have.lengthOf(1);
+    expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+    expect(body.pagination).to.deep.equal({ limit: 1, cursor: SITE_IDS[0], hasMore: true });
+  });
+
+  it('returns next page when cursor is supplied', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { limit: '1', cursor: SITE_IDS[0] },
+    });
+    const body = await result.json();
+
+    expect(body.sites).to.have.lengthOf(1);
+    expect(body.sites[0]).to.have.property('id', SITE_IDS[1]);
+    expect(body.pagination).to.deep.equal({ limit: 1, cursor: null, hasMore: false });
+  });
+
+  it('caps limit at MAX_PAGE_SIZE', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { limit: '99999' },
+    });
+    const body = await result.json();
+
+    expect(body.pagination.limit).to.equal(500);
   });
 
   it('returns bad request if audit type is not provided', async () => {

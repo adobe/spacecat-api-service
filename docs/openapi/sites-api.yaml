@@ -166,6 +166,21 @@ sites-by-tier:
   parameters:
     - $ref: './parameters.yaml#/tier'
     - $ref: './parameters.yaml#/productCodeQuery'
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+      description: Number of sites to return per page
+    - name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Pagination cursor returned by the previous response
   get:
     tags:
       - site
@@ -174,15 +189,17 @@ sites-by-tier:
       Returns sites whose organization has an entitlement at the requested tier
       (PAID, FREE_TRIAL, or PLG) and that are enrolled into that entitlement.
       Optionally restrict to a single product via the `productCode` query
-      parameter (e.g. LLMO). Admin-only.
+      parameter (e.g. LLMO). Results are cursor-paginated and ordered by site
+      ID; pass the `cursor` from the previous response to fetch the next page.
+      Admin-only.
     operationId: getSitesByEnrollmentAndTier
     responses:
       '200':
-        description: A list of sites
+        description: A paginated list of sites
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SiteList'
+              $ref: './schemas.yaml#/SiteListPaginated'
       '400':
         $ref: './responses.yaml#/400-no-tier'
       '401':
