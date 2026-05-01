@@ -7308,6 +7308,13 @@ V2Topic:
         - 'null'
       format: uuid
       description: Optional brand UUID this topic belongs to
+    categoryUuids:
+      type: array
+      items:
+        type: string
+        format: uuid
+      description: UUIDs of categories linked to this topic via the topic_categories junction table
+      example: ['019d4464-5784-74d1-8469-e5d3cddc8e52']
     updatedAt:
       type: string
       format: date-time
