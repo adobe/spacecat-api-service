@@ -110,7 +110,7 @@ export default function topicTests(getHttpClient, resetData) {
         // GET topics and verify categoryUuids is populated
         const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/topics`);
         expect(listRes.status).to.equal(200);
-        const topic = listRes.body.find((t) => t.name === 'Brand Awareness');
+        const topic = listRes.body.topics.find((t) => t.name === 'Brand Awareness');
         expect(topic).to.exist;
         expect(topic.categoryUuids).to.be.an('array').with.lengthOf(1);
         expect(topic.categoryUuids[0]).to.equal(categoryUuid);
@@ -129,7 +129,7 @@ export default function topicTests(getHttpClient, resetData) {
         // GET topics and verify categoryUuids is empty
         const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/topics`);
         expect(listRes.status).to.equal(200);
-        const topic = listRes.body.find((t) => t.name === 'Uncategorized Topic');
+        const topic = listRes.body.topics.find((t) => t.name === 'Uncategorized Topic');
         expect(topic).to.exist;
         expect(topic.categoryUuids).to.be.an('array').with.lengthOf(0);
       });
