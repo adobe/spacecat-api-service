@@ -98,6 +98,39 @@ export default class AccessControlUtil {
   }
 
   /**
+   * Verifies the requesting S2S consumer holds the given capability by issuing
+   * a fresh DB fetch. Uses `context.s2sConsumer` (set by s2sAuthWrapper) only as
+   * an identity source — extracts `clientId` and `imsOrgId` and re-queries the
+   * Consumer table. Capabilities are NOT read from the in-context object: a stale
+   * or tampered context cannot grant access.
+   *
+   * Returns false for non-S2S requests (no `s2sConsumer` in context), suspended
+   * or revoked consumers, missing DB rows, or a consumer that does not hold the
+   * requested capability.
+   *
+   * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the trust-boundary analysis.
+   *
+   * @param {string} capability - Full capability string, e.g. 'site:readAll'.
+   * @returns {Promise<boolean>}
+   */
+  async hasS2SCapability(capability) {
+    const { s2sConsumer } = this.context;
+    if (!s2sConsumer) {
+      return false;
+    }
+
+    const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
+      s2sConsumer.getClientId(),
+      s2sConsumer.getImsOrgId(),
+    );
+    if (!fresh || fresh.isRevoked() || fresh.getStatus() !== 'ACTIVE') {
+      return false;
+    }
+
+    return fresh.getCapabilities()?.includes(capability) === true;
+  }
+
+  /**
    * Returns true if the authenticated user holds the LLMO administrator role
    * AND the last {@link hasAccess} check did not resolve via a delegation grant.
    *

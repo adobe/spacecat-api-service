@@ -27,6 +27,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 import { filterSitesForProductCode, CUSTOMER_VISIBLE_TIERS } from '../support/utils.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
@@ -80,16 +81,27 @@ function OrganizationsController(ctx, env) {
   };
 
   /**
-   * Gets all organizations.
+   * Gets all organizations. Accessible to admin callers (legacy admin path) and to S2S
+   * consumers that hold the `organization:readAll` capability — see
+   * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    * @returns {Promise<Response>} Array of organizations response.
    */
   const getAll = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can view all Organizations');
+    const { log } = ctx;
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    const hasS2SReadAll = !isAdmin && await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
+    if (!isAdmin && !hasS2SReadAll) {
+      log?.info(`[acl] Denied GET /organizations — admin=${isAdmin} s2sReadAll=${hasS2SReadAll}`);
+      return forbidden('Forbidden');
     }
 
     const organizations = (await Organization.all())
       .map((organization) => OrganizationDto.toJSON(organization));
+
+    if (hasS2SReadAll) {
+      log?.info(`[s2s-readall] GET /organizations returned ${organizations.length} orgs to S2S consumer`);
+    }
+
     return ok(organizations);
   };
 

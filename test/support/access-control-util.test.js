@@ -83,6 +83,104 @@ describe('Access Control Util', () => {
     expect(authInfo.isS2SAdmin).to.have.been.calledOnce;
   });
 
+  describe('hasS2SCapability', () => {
+    function buildContext({ s2sConsumer, fresh } = {}) {
+      const Consumer = {
+        findByClientIdAndImsOrgId: sinon.stub().resolves(fresh),
+      };
+      return {
+        pathInfo: { headers: {} },
+        attributes: { authInfo: new AuthInfo().withType('jwt').withProfile({ user_id: 'u' }) },
+        dataAccess: {
+          Consumer,
+          Entitlement: { findByOrganizationIdAndProductCode: sinon.stub() },
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+        s2sConsumer,
+      };
+    }
+
+    function makeS2SConsumer(clientId = 'client-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg') {
+      return {
+        getClientId: () => clientId,
+        getImsOrgId: () => imsOrgId,
+      };
+    }
+
+    function makeFresh({
+      capabilities = ['site:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    it('returns false when context has no s2sConsumer (non-S2S request)', async () => {
+      const ctx = buildContext({ s2sConsumer: null });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(await util.hasS2SCapability('site:readAll')).to.be.false;
+      expect(ctx.dataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
+    });
+
+    it('returns false when re-fetched consumer is not found (deleted between L1 and L2)', async () => {
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh: null });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(await util.hasS2SCapability('site:readAll')).to.be.false;
+    });
+
+    it('returns false when re-fetched consumer is SUSPENDED', async () => {
+      const fresh = makeFresh({ status: 'SUSPENDED' });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(await util.hasS2SCapability('site:readAll')).to.be.false;
+    });
+
+    it('returns false when re-fetched consumer was revoked between L1 and L2', async () => {
+      const fresh = makeFresh({ revoked: true });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(await util.hasS2SCapability('site:readAll')).to.be.false;
+    });
+
+    it('returns false when consumer is ACTIVE but missing the requested capability', async () => {
+      const fresh = makeFresh({ capabilities: ['site:read', 'organization:read'] });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(await util.hasS2SCapability('site:readAll')).to.be.false;
+    });
+
+    it('returns true when consumer is ACTIVE and holds the requested capability', async () => {
+      const fresh = makeFresh({ capabilities: ['site:readAll'] });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(await util.hasS2SCapability('site:readAll')).to.be.true;
+    });
+
+    it('uses identity from context.s2sConsumer for the DB lookup (not from authInfo)', async () => {
+      const fresh = makeFresh();
+      const consumer = makeS2SConsumer('client-X', 'BBB222222222222222222222@AdobeOrg');
+      const ctx = buildContext({ s2sConsumer: consumer, fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      await util.hasS2SCapability('site:readAll');
+      expect(ctx.dataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnceWith(
+        'client-X',
+        'BBB222222222222222222222@AdobeOrg',
+      );
+    });
+
+    it('returns false when consumer.getCapabilities() returns null/undefined', async () => {
+      const fresh = makeFresh({ capabilities: null });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(await util.hasS2SCapability('site:readAll')).to.be.false;
+    });
+  });
+
   it('should throw an error if entity is not provided', async () => {
     const context = {
       pathInfo: {

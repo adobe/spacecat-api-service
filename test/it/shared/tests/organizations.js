@@ -78,6 +78,27 @@ export default function organizationTests(getHttpClient, resetData) {
         const res = await http.trialUser.get('/organizations');
         expect(res.status).to.equal(403);
       });
+
+      // ── S2S readAll capability path ──
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('s2sConsumerReadAll: returns all organizations (organization:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get('/organizations');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf.at.least(3);
+        const ids = res.body.map((org) => org.id);
+        expect(ids).to.include(ORG_1_ID);
+        expect(ids).to.include(ORG_2_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no organization:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies — required capability is organization:readAll
+        // and CONSUMER_1 is not granted it.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get('/organizations');
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /organizations/:organizationId', () => {
