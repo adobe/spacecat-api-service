@@ -1,3 +1,10 @@
+## [1.464.1](https://github.com/adobe/spacecat-api-service/compare/v1.464.0...v1.464.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* revert structured resolveStatus envelope on /sites-resolve 404s ([#2253](https://github.com/adobe/spacecat-api-service/issues/2253)) ([#2299](https://github.com/adobe/spacecat-api-service/issues/2299)) ([51cd0fc](https://github.com/adobe/spacecat-api-service/commit/51cd0fceae35bba1e1f2f0fe8a4892da4b43bc5a))
+
 # [1.464.0](https://github.com/adobe/spacecat-api-service/compare/v1.463.1...v1.464.0) (2026-04-30)
 
 
