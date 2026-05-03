@@ -41,7 +41,7 @@ services:
       retries: 10
 
   data-service:
-    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v1.67.9
+    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v5.1.1
     container_name: spacecat-it-data-service
     depends_on:
       db:
