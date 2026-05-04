@@ -263,10 +263,10 @@ export async function ensureInitialCustomerConfigV2({
 /**
  * Generates the data folder name from a baseURL.
  *
- * The hostname and (if present) each URL path segment are percent-decoded,
+ * The hostname and (if present) each URL path segment are percent-decoded and
  * individually sanitized (non-alphanumeric replaced with `-`, lowercased —
  * paths are case-folded deliberately so /Kings and /kings map to the same folder),
- * and joined with `--` as a path-segment delimiter. The double-hyphen delimiter
+ * then joined with `--` as a path-segment delimiter. The double-hyphen delimiter
  * cannot appear in a sanitized segment, so distinct paths cannot collide.
  *
  * Examples:
@@ -282,13 +282,7 @@ export function generateDataFolder(baseURL, env = 'dev') {
   const url = new URL(baseURL);
   const host = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
   const segments = url.pathname.split('/').filter(Boolean)
-    .map((seg) => {
-      let decoded = seg;
-      try {
-        decoded = decodeURIComponent(seg);
-      } catch { /* keep raw on malformed percent-encoding */ }
-      return decoded.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().replace(/-+/g, '-');
-    });
+    .map((seg) => decodeURIComponent(seg).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().replace(/-+/g, '-'));
   const dataFolderName = segments.length > 0 ? `${host}--${segments.join('--')}` : host;
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 }
