@@ -386,9 +386,9 @@ describe('LLMO Onboarding Functions', () => {
     it('should generate unique folder names for subpath sites on the same domain', async () => {
       const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
-      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal('nba-com-kings');
-      expect(generateDataFolder('https://nba.com/lakers', 'prod')).to.equal('nba-com-lakers');
-      expect(generateDataFolder('https://nba.com/kings', 'dev')).to.equal('dev/nba-com-kings');
+      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal('nba-com--kings');
+      expect(generateDataFolder('https://nba.com/lakers', 'prod')).to.equal('nba-com--lakers');
+      expect(generateDataFolder('https://nba.com/kings', 'dev')).to.equal('dev/nba-com--kings');
     });
 
     it('should produce the same folder name for root domain with or without trailing slash', async () => {
@@ -397,11 +397,24 @@ describe('LLMO Onboarding Functions', () => {
       expect(generateDataFolder('https://nba.com', 'prod')).to.equal(generateDataFolder('https://nba.com/', 'prod'));
     });
 
+    it('should produce the same folder name for subpath with or without trailing slash', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal(generateDataFolder('https://nba.com/kings/', 'prod'));
+    });
+
     it('should generate correct folder name for nested subpaths', async () => {
       const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
-      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-com-us-kings');
-      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-com-us-kings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-com--us--kings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-com--us--kings');
+    });
+
+    it('should generate distinct folder names for paths that differ only by separator type', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us-kings', 'prod'));
     });
   });
 
