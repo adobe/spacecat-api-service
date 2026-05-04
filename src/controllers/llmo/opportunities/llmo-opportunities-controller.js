@@ -150,6 +150,10 @@ function LlmoOpportunitiesController(ctx) {
    * GET /org/:spaceCatId/brands/all/opportunities
    * Returns all LLMO opportunities for sites under the given brand (or all org sites).
    * Accepts optional ?siteId query parameter to scope results to a single site.
+   *
+   * For a specific brandId, queries by scope_type='brand' AND scope_id=brandId directly —
+   * this correctly handles the case where multiple brands share the same site (e.g. nba.com
+   * with kings and lakers brands), since each opportunity is tagged with its specific brand.
    */
   const getBrandOpportunities = async (context) => {
     const { dataAccess, log } = context;
@@ -172,64 +176,99 @@ function LlmoOpportunitiesController(ctx) {
 
     try {
       const orgId = organization.getId();
-      let siteIds;
-      let brandName = 'All';
 
       if (brandId === 'all') {
-        // Fetch all sites for the organization
+        // Fetch all LLMO opportunities across every org site
         const sites = await Site.allByOrganizationId(orgId);
-        siteIds = sites.map((s) => s.getId());
-      } else {
-        // Look up brand to get its associated site IDs
-        const postgrestClient = dataAccess?.services?.postgrestClient;
-        if (!postgrestClient?.from) {
-          return badRequest('Brand data requires PostgreSQL data service');
+        let siteIds = sites.map((s) => s.getId());
+
+        if (filterSiteId) {
+          if (!siteIds.includes(filterSiteId)) {
+            return forbidden('Site does not belong to the organization or brand');
+          }
+          siteIds = [filterSiteId];
         }
 
-        const brand = await getBrandById(orgId, brandId, postgrestClient);
-        if (!brand) {
-          return notFound(`Brand not found: ${brandId}`);
+        if (siteIds.length === 0) {
+          return ok({
+            brandId, brandName: 'All', opportunities: [], total: 0,
+          });
         }
 
-        siteIds = brand.siteIds || [];
-        brandName = brand.name;
-      }
+        const fetchForSite = async (siteId) => {
+          try {
+            const site = await Site.findById(siteId);
+            if (!site) {
+              return [];
+            }
+            const opportunities = await Opportunity.allBySiteId(siteId);
+            return opportunities
+              .filter((opp) => isLlmoOpportunity(opp) && VALID_STATUSES.has(opp.getStatus()))
+              .map((opp) => ({
+                ...OpportunityDto.toJSON(opp),
+                siteBaseURL: site.getBaseURL(),
+              }));
+          } catch (siteError) {
+            log.warn(`Failed to fetch opportunities for site ${siteId}: ${siteError.message}`);
+            return [];
+          }
+        };
 
-      if (filterSiteId) {
-        if (!siteIds.includes(filterSiteId)) {
-          return forbidden('Site does not belong to the organization or brand');
-        }
-        siteIds = [filterSiteId];
-      }
+        const results = await processBatch(siteIds, fetchForSite, MAX_CONCURRENT_SITES);
+        const opportunities = results.flat();
 
-      if (siteIds.length === 0) {
         return ok({
-          brandId, brandName, opportunities: [], total: 0,
+          brandId, brandName: 'All', opportunities, total: opportunities.length,
         });
       }
 
-      const fetchForSite = async (siteId) => {
-        try {
-          const site = await Site.findById(siteId);
-          if (!site) {
-            return [];
-          }
+      // Brand-specific query: validate brand belongs to org, then query by scope directly
+      const postgrestClient = dataAccess?.services?.postgrestClient;
+      if (!postgrestClient?.from) {
+        return badRequest('Brand data requires PostgreSQL data service');
+      }
 
-          const opportunities = await Opportunity.allBySiteId(siteId);
-          return opportunities
-            .filter((opp) => isLlmoOpportunity(opp) && VALID_STATUSES.has(opp.getStatus()))
-            .map((opp) => ({
-              ...OpportunityDto.toJSON(opp),
-              siteBaseURL: site.getBaseURL(),
-            }));
-        } catch (siteError) {
-          log.warn(`Failed to fetch opportunities for site ${siteId}: ${siteError.message}`);
-          return [];
+      const brand = await getBrandById(orgId, brandId, postgrestClient);
+      if (!brand) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const brandName = brand.name;
+
+      if (filterSiteId) {
+        const brandSiteIds = brand.siteIds || [];
+        if (!brandSiteIds.includes(filterSiteId)) {
+          return forbidden('Site does not belong to the organization or brand');
         }
+      }
+
+      // Query opportunities directly by brand scope — avoids cross-brand contamination
+      // on sites shared by multiple brands (e.g. nba.com with kings and lakers brands)
+      const allScopedOpps = await Opportunity.allByScopeId('brand', brandId);
+      const filteredOpps = allScopedOpps.filter(
+        (opp) => isLlmoOpportunity(opp)
+          && VALID_STATUSES.has(opp.getStatus())
+          && (!filterSiteId || opp.getSiteId() === filterSiteId),
+      );
+
+      // Resolve siteBaseURL with a cache to avoid redundant lookups
+      const siteCache = new Map();
+      const resolveSite = (siteId) => {
+        if (!siteCache.has(siteId)) {
+          siteCache.set(siteId, Site.findById(siteId));
+        }
+        return siteCache.get(siteId);
       };
 
-      const results = await processBatch(siteIds, fetchForSite, MAX_CONCURRENT_SITES);
-      const opportunities = results.flat();
+      const opportunities = await Promise.all(
+        filteredOpps.map(async (opp) => {
+          const site = await resolveSite(opp.getSiteId());
+          return {
+            ...OpportunityDto.toJSON(opp),
+            siteBaseURL: site?.getBaseURL() ?? null,
+          };
+        }),
+      );
 
       return ok({
         brandId, brandName, opportunities, total: opportunities.length,

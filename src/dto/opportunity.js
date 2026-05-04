@@ -50,6 +50,8 @@ export const OpportunityDto = {
     guidance: oppty.getGuidance(),
     tags: oppty.getTags(),
     status: oppty.getStatus(),
+    scopeType: oppty.getScopeType?.() ?? null,
+    scopeId: oppty.getScopeId?.() ?? null,
     createdAt: oppty.getCreatedAt(),
     updatedAt: oppty.getUpdatedAt(),
     updatedBy: oppty.getUpdatedBy(),

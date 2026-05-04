@@ -20,6 +20,7 @@ use(sinonChai);
 // Helper to create a mock opportunity
 function createMockOpportunity({
   id = 'opp-1', siteId = 'site-1', tags = ['isElmo'], type = 'content', status = 'NEW',
+  scopeType = null, scopeId = null,
 } = {}) {
   return {
     getId: () => id,
@@ -34,6 +35,8 @@ function createMockOpportunity({
     getGuidance: () => ({}),
     getTags: () => new Set(tags),
     getStatus: () => status,
+    getScopeType: () => scopeType,
+    getScopeId: () => scopeId,
     getCreatedAt: () => '2026-01-01',
     getUpdatedAt: () => '2026-01-02',
     getUpdatedBy: () => 'system',
@@ -85,6 +88,7 @@ describe('LlmoOpportunitiesController', () => {
         },
         Opportunity: {
           allBySiteId: sandbox.stub().resolves([]),
+          allByScopeId: sandbox.stub().resolves([]),
         },
         services: {
           postgrestClient: {
@@ -390,6 +394,19 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.opportunities[0].siteBaseURL).to.equal('https://example.com');
     });
 
+    it('returns empty when org has no sites for brandId "all"', async () => {
+      mockContext.params.brandId = 'all';
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([]);
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(0);
+      expect(body.opportunities).to.deep.equal([]);
+    });
+
     it('returns 404 when brand is not found', async () => {
       mockContext.params.brandId = 'brand-uuid';
 
@@ -419,8 +436,9 @@ describe('LlmoOpportunitiesController', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns empty when brand has no sites', async () => {
+    it('returns empty when brand has no scoped opportunities', async () => {
       mockContext.params.brandId = 'brand-uuid';
+      mockContext.dataAccess.Opportunity.allByScopeId.withArgs('brand', 'brand-uuid').resolves([]);
 
       LlmoOpportunitiesController = await esmock(
         '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
@@ -442,13 +460,16 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.brandName).to.equal('TestBrand');
     });
 
-    it('returns opportunities for a specific brand', async () => {
+    it('returns opportunities for a specific brand using scope query', async () => {
       mockContext.params.brandId = 'brand-uuid';
       const site = createMockSite({ id: 'site-1', baseURL: 'https://brand.com' });
       mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
 
-      const opp = createMockOpportunity({ id: 'opp-1', siteId: 'site-1' });
-      mockContext.dataAccess.Opportunity.allBySiteId.withArgs('site-1').resolves([opp]);
+      const opp = createMockOpportunity({
+        id: 'opp-1', siteId: 'site-1', scopeType: 'brand', scopeId: 'brand-uuid',
+      });
+      mockContext.dataAccess.Opportunity.allByScopeId
+        .withArgs('brand', 'brand-uuid').resolves([opp]);
 
       LlmoOpportunitiesController = await esmock(
         '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
@@ -470,6 +491,41 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.total).to.equal(1);
       expect(body.opportunities[0].id).to.equal('opp-1');
       expect(body.opportunities[0].siteBaseURL).to.equal('https://brand.com');
+      expect(body.opportunities[0].scopeType).to.equal('brand');
+      expect(body.opportunities[0].scopeId).to.equal('brand-uuid');
+    });
+
+    it('does not cross-contaminate opportunities between brands sharing a site', async () => {
+      // nba.com (site-1) has two brands: kings (brand-a) and lakers (brand-b)
+      // Querying brand-a must NOT return brand-b's opportunities
+      const kingsOpp = createMockOpportunity({
+        id: 'opp-kings', siteId: 'site-1', scopeType: 'brand', scopeId: 'brand-a',
+      });
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://nba.com' });
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+      mockContext.dataAccess.Opportunity.allByScopeId
+        .withArgs('brand', 'brand-a').resolves([kingsOpp]);
+
+      mockContext.params.brandId = 'brand-a';
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'Kings', siteIds: ['site-1'] }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.opportunities[0].id).to.equal('opp-kings');
+      expect(body.opportunities[0].scopeId).to.equal('brand-a');
     });
 
     it('filters out non-LLMO and invalid-status opportunities', async () => {
@@ -618,8 +674,111 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.total).to.equal(1);
     });
 
-    it('handles brand with undefined siteIds', async () => {
+    it('returns 403 when siteId filter is not in the brand site list for a specific brand', async () => {
       mockContext.params.brandId = 'brand-uuid';
+      mockContext.data = { siteId: 'unknown-site' };
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'MyBrand', siteIds: ['site-1'] }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when siteId filter is set and brand has no siteIds defined', async () => {
+      mockContext.params.brandId = 'brand-uuid';
+      mockContext.data = { siteId: 'any-site' };
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'NoBrandSites' }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('filters brand opportunities to a single site when siteId is provided for a specific brand', async () => {
+      mockContext.params.brandId = 'brand-uuid';
+      mockContext.data = { siteId: 'site-1' };
+
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://brand.com' });
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+
+      const opp = createMockOpportunity({
+        id: 'opp-1', siteId: 'site-1', scopeType: 'brand', scopeId: 'brand-uuid',
+      });
+      mockContext.dataAccess.Opportunity.allByScopeId
+        .withArgs('brand', 'brand-uuid').resolves([opp]);
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'MyBrand', siteIds: ['site-1'] }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.opportunities[0].id).to.equal('opp-1');
+    });
+
+    it('returns null siteBaseURL when site is not found for a brand-scoped opportunity', async () => {
+      mockContext.params.brandId = 'brand-uuid';
+      mockContext.dataAccess.Site.findById.resolves(null);
+
+      const opp = createMockOpportunity({
+        id: 'opp-1', siteId: 'site-missing', scopeType: 'brand', scopeId: 'brand-uuid',
+      });
+      mockContext.dataAccess.Opportunity.allByScopeId
+        .withArgs('brand', 'brand-uuid').resolves([opp]);
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'MyBrand', siteIds: ['site-missing'] }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.opportunities[0].siteBaseURL).to.be.null;
+    });
+
+    it('handles brand with undefined siteIds when no filterSiteId is provided', async () => {
+      mockContext.params.brandId = 'brand-uuid';
+      // allByScopeId returns empty — brand exists but has no scoped opportunities
+      mockContext.dataAccess.Opportunity.allByScopeId.withArgs('brand', 'brand-uuid').resolves([]);
 
       LlmoOpportunitiesController = await esmock(
         '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
