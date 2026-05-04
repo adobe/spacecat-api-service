@@ -111,6 +111,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/referral-traffic/by-region',
   'GET /sites/:siteId/referral-traffic/by-page-intent',
   'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-device',
   'GET /sites/:siteId/referral-traffic/business-impact',
   'GET /sites/:siteId/referral-traffic/weeks',
 
@@ -517,6 +518,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
 

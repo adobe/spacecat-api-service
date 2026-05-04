@@ -314,6 +314,7 @@ describe('getRouteHandlers', () => {
     getEdgeConfig: () => null,
     createOrUpdateStageEdgeConfig: () => null,
     checkEdgeOptimizeStatus: () => null,
+    checkWafConnectivity: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
     getDemoBrandPresence: () => null,
@@ -853,6 +854,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/edge-optimize-config',
       'POST /sites/:siteId/llmo/edge-optimize-config/stage',
       'GET /sites/:siteId/llmo/edge-optimize-status',
+      'GET /sites/:siteId/llmo/probes/edge-optimize',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
@@ -927,6 +929,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/trend',
       'GET /sites/:siteId/referral-traffic/by-platform',
       'GET /sites/:siteId/referral-traffic/by-region',
+      'GET /sites/:siteId/referral-traffic/by-device',
       'GET /sites/:siteId/referral-traffic/by-page-intent',
       'GET /sites/:siteId/referral-traffic/by-url',
       'GET /sites/:siteId/referral-traffic/business-impact',
@@ -1146,6 +1149,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config/stage'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/probes/edge-optimize'].handler).to.equal(mockLlmoController.checkWafConnectivity);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/probes/edge-optimize'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].handler).to.equal(mockLlmoController.markOpportunitiesReviewed);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
