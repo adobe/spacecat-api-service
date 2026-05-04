@@ -606,6 +606,7 @@ describe('Sites Controller', () => {
 
     it('grants access to S2S consumer with site:readAll', async () => {
       context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-abc-123' };
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
         .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
 
@@ -616,7 +617,7 @@ describe('Sites Controller', () => {
       expect(body).to.be.an('array').with.lengthOf(2);
       expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
       expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2/,
+        /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-abc-123/,
       );
     });
 

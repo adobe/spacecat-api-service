@@ -88,7 +88,7 @@ function OrganizationsController(ctx, env) {
    */
   const getAll = async (context) => {
     const { log } = ctx;
-    const requestId = context?.invocation?.requestId || context?.invocation?.id || 'unknown';
+    const requestId = context?.invocation?.id || 'unknown';
     const isAdmin = accessControlUtil.hasAdminAccess();
     const s2sResult = isAdmin
       ? { allowed: false, reason: 'admin-bypass' }

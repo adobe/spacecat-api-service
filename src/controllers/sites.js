@@ -322,7 +322,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAll = async (context) => {
-    const requestId = context?.invocation?.requestId || context?.invocation?.id || 'unknown';
+    const requestId = context?.invocation?.id || 'unknown';
     const isAdmin = accessControlUtil.hasAdminAccess();
     const s2sResult = isAdmin
       ? { allowed: false, reason: 'admin-bypass' }

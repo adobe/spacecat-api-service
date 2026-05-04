@@ -506,6 +506,7 @@ describe('Organizations Controller', () => {
 
     it('grants access to S2S consumer with organization:readAll', async () => {
       context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-org-456' };
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
         .resolves(makeFreshConsumer({ capabilities: ['organization:readAll'] }));
 
@@ -516,7 +517,7 @@ describe('Organizations Controller', () => {
       expect(body).to.be.an('array').with.lengthOf(4);
       expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWithMatch(
-        /\[s2s-readall\] GET \/organizations granted clientId=svc-1 consumerId=consumer-id-1 capability=organization:readAll count=4/,
+        /\[s2s-readall\] GET \/organizations granted clientId=svc-1 consumerId=consumer-id-1 capability=organization:readAll count=4 requestId=req-org-456/,
       );
     });
 
