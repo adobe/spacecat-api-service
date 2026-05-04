@@ -57,9 +57,23 @@ describe('status command helpers', () => {
   });
 
   it('rejects combining siteId and baseUrl', () => {
+    const siteId = '11111111-2222-3333-4444-555555555555';
+
     expect(parseStatusCommandArgs([
       'baseUrl=https://example.com',
-      '11111111-2222-3333-4444-555555555555',
+      siteId,
+    ])).to.deep.equal({
+      error: ':warning: Cannot combine siteId and baseUrl arguments.',
+    });
+    expect(parseStatusCommandArgs([
+      `siteId=${siteId}`,
+      'baseUrl=https://example.com',
+    ])).to.deep.equal({
+      error: ':warning: Cannot combine siteId and baseUrl arguments.',
+    });
+    expect(parseStatusCommandArgs([
+      'baseUrl=https://example.com',
+      `siteId=${siteId}`,
     ])).to.deep.equal({
       error: ':warning: Cannot combine siteId and baseUrl arguments.',
     });
