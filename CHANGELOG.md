@@ -1,3 +1,46 @@
+# [1.467.0](https://github.com/adobe/spacecat-api-service/compare/v1.466.1...v1.467.0) (2026-05-04)
+
+
+### Features
+
+* new endpoint to get prompt status ([#2311](https://github.com/adobe/spacecat-api-service/issues/2311)) ([6a0d566](https://github.com/adobe/spacecat-api-service/commit/6a0d566566a6d626ebf6c32508fb1647f64e3323))
+
+## [1.466.1](https://github.com/adobe/spacecat-api-service/compare/v1.466.0...v1.466.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.14.0 ([#2314](https://github.com/adobe/spacecat-api-service/issues/2314)) ([5c01b50](https://github.com/adobe/spacecat-api-service/commit/5c01b50b02c2d66d765ef4424deeaf417b853042))
+
+# [1.466.0](https://github.com/adobe/spacecat-api-service/compare/v1.465.0...v1.466.0) (2026-05-04)
+
+
+### Features
+
+* **llmo:** add edge-optimize connectivity probe endpoint ([#2232](https://github.com/adobe/spacecat-api-service/issues/2232)) ([f5a1a32](https://github.com/adobe/spacecat-api-service/commit/f5a1a32065b3782ef5fccf53291b7e8e98dd98f7))
+
+# [1.465.0](https://github.com/adobe/spacecat-api-service/compare/v1.464.2...v1.465.0) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.13.5 ([#2308](https://github.com/adobe/spacecat-api-service/issues/2308)) ([e52c6b5](https://github.com/adobe/spacecat-api-service/commit/e52c6b546a5a22135ede2c1c67480772774716e8))
+* **deps:** update external fixes ([#2306](https://github.com/adobe/spacecat-api-service/issues/2306)) ([78a0504](https://github.com/adobe/spacecat-api-service/commit/78a0504cab35f5ac8e523ba36b98a5fce39f4fcb))
+
+
+### Features
+
+* **llmo:** surface categoryUuids on V2 topics endpoints ([#2304](https://github.com/adobe/spacecat-api-service/issues/2304)) ([5679610](https://github.com/adobe/spacecat-api-service/commit/5679610fa38152c463679d1010273eddcfb9b232)), closes [adobe-rnd/llmo-data-retrieval-service#1512](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1512)
+* referral traffic endpoints follow up | LLMO-4261 ([#2301](https://github.com/adobe/spacecat-api-service/issues/2301)) ([eb4a885](https://github.com/adobe/spacecat-api-service/commit/eb4a8856022239a86c78f36a50b4813389e1bc71))
+
+## [1.464.2](https://github.com/adobe/spacecat-api-service/compare/v1.464.1...v1.464.2) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.6.0 ([#2303](https://github.com/adobe/spacecat-api-service/issues/2303)) ([612723a](https://github.com/adobe/spacecat-api-service/commit/612723af08f79a0fab7a174fad5ce5297d78e91e))
+* Update docker-compose.yml ([#2307](https://github.com/adobe/spacecat-api-service/issues/2307)) ([0170eb0](https://github.com/adobe/spacecat-api-service/commit/0170eb070f98ee726696afc1b4e915c6784fcd65))
+
 ## [1.464.1](https://github.com/adobe/spacecat-api-service/compare/v1.464.0...v1.464.1) (2026-04-30)
 
 

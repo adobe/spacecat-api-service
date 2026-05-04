@@ -16,6 +16,7 @@ import {
   createBrandPresenceWeeksHandler, createSentimentOverviewHandler,
   createMarketTrackingTrendsHandler, createCompetitorSummaryHandler, createTopicsHandler,
   createTopicPromptsHandler,
+  createPromptExecutionStatusHandler,
   createSearchHandler,
   createTopicDetailHandler,
   createPromptDetailHandler,
@@ -64,6 +65,7 @@ import {
   createReferralTrafficByUrlHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
 } from './llmo-referral-traffic.js';
 
 /**
@@ -126,6 +128,7 @@ function LlmoMysticatController(ctx) {
   const getSentimentOverview = createSentimentOverviewHandler(getOrgAndValidateAccess);
   const getTopics = createTopicsHandler(getOrgAndValidateAccess);
   const getTopicPrompts = createTopicPromptsHandler(getOrgAndValidateAccess);
+  const getPromptExecutionStatus = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
   const getSearch = createSearchHandler(getOrgAndValidateAccess);
   const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
   const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
@@ -219,6 +222,7 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByDevice = createReferralTrafficByDeviceHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -228,6 +232,7 @@ function LlmoMysticatController(ctx) {
     getSentimentOverview,
     getTopics,
     getTopicPrompts,
+    getPromptExecutionStatus,
     getSearch,
     getTopicDetail,
     getPromptDetail,
@@ -268,6 +273,7 @@ function LlmoMysticatController(ctx) {
     getReferralTrafficByUrl,
     getReferralTrafficBusinessImpact,
     getReferralTrafficWeeks,
+    getReferralTrafficByDevice,
   };
 }
 
