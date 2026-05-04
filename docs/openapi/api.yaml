@@ -488,6 +488,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/prompt-execution-status:
+    $ref: './llmo-api.yaml#/brand-presence-prompt-execution-status'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/stats:
     $ref: './llmo-api.yaml#/url-inspector-stats'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/owned-urls:
