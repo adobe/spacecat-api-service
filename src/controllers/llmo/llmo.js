@@ -67,6 +67,11 @@ import {
   appendRowsToQueryIndex,
   previewAndPublishQueryIndex,
 } from './llmo-onboarding.js';
+import {
+  LLM_BOT_AGENTS,
+  BOT_PROBE_TIMEOUT_MS,
+  classifyBotAgentResponse,
+} from '../../support/llm-bot-probe-utils.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
@@ -1949,11 +1954,14 @@ function LlmoController(ctx) {
   /**
    * GET /sites/{siteId}/llmo/probes/edge-optimize
    *
-   * Edge Optimize connectivity probe — detects whether a WAF or Bot Manager is
-   * blocking the AdobeEdgeOptimize/1.0 user-agent at the customer's origin.
+   * Combined WAF connectivity probe. Runs two checks in parallel:
+   *   1. Edge Optimize probe (via the Optimize at Edge proxy) — detects whether
+   *      the AdobeEdgeOptimize/1.0 UA is blocked at the customer's origin.
+   *   2. LLM bot agent probe (direct from SpaceCat infra, IPs already allowlisted)
+   *      — detects UA-based WAF rules that would block ChatGPT-User or Perplexity-User.
    *
    * @param {object} context - Request context.
-   * @returns {Promise<Response>} 200 with probe result, or 4xx/5xx on error.
+   * @returns {Promise<Response>} 200 with combined probe result, or 4xx/5xx on error.
    */
   const checkWafConnectivity = async (context) => {
     const { log, dataAccess } = context;
@@ -1971,7 +1979,6 @@ function LlmoController(ctx) {
 
     // Intentionally no isLLMOAdministrator() check here — this endpoint is designed for
     // the customer-facing diagnostic UI so org members can diagnose their own WAF config.
-    // Compare with checkEdgeOptimizeStatus (admin-only) which exposes internal routing state.
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can check this site');
     }
@@ -1983,12 +1990,37 @@ function LlmoController(ctx) {
 
     log.info(`[edge-optimize-probe] Starting WAF connectivity probe for site ${siteId} (${baseURL})`);
 
+    const normalized = baseURL.startsWith('http') ? baseURL : `https://${baseURL}`;
+    const probeUrl = new URL(normalized).href;
+
     const tokowakaClient = TokowakaClient.createFrom(context);
-    const result = await tokowakaClient.checkWafConnectivity(site);
 
-    log.info(`[edge-optimize-probe] Result for site ${siteId}: reachable=${result.reachable}, blocked=${result.blocked}`);
+    const [edgeOptimizeResult, agentResults] = await Promise.all([
+      tokowakaClient.checkWafConnectivity(site),
+      Promise.all(
+        LLM_BOT_AGENTS.map(async ({ name, userAgent }) => {
+          try {
+            const response = await fetch(probeUrl, {
+              method: 'GET',
+              headers: { 'User-Agent': userAgent },
+              signal: AbortSignal.timeout(BOT_PROBE_TIMEOUT_MS),
+            });
+            const classification = await classifyBotAgentResponse(response, name, log);
+            return { name, userAgent, ...classification };
+          } catch (err) {
+            log.warn(`[llm-bot-probe] Probe failed for ${name} on ${probeUrl}: ${err.message}`);
+            return {
+              name, userAgent, blocked: null, error: true,
+            };
+          }
+        }),
+      ),
+    ]);
 
-    return ok(result);
+    const anyBlocked = agentResults.some((r) => r.blocked === true);
+    log.info(`[edge-optimize-probe] Result for site ${siteId}: reachable=${edgeOptimizeResult.reachable}, blocked=${edgeOptimizeResult.blocked}, llmBotsAnyBlocked=${anyBlocked}`);
+
+    return ok({ ...edgeOptimizeResult, llmBotAgents: { anyBlocked, agents: agentResults } });
   };
 
   return {

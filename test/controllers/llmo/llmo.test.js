@@ -7861,5 +7861,62 @@ describe('LlmoController', () => {
       expect(body.message).to.include('no baseURL');
       expect(mockTokowakaClient.checkWafConnectivity).to.not.have.been.called;
     });
+
+    it('should prepend https:// when baseURL has no scheme', async () => {
+      mockSite.getBaseURL.returns('www.example.com');
+      tracingFetchStub.resolves({
+        status: 200,
+        headers: { get: () => null },
+        text: async () => '<html>Welcome</html>',
+      });
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const [firstCall] = tracingFetchStub.args;
+      expect(firstCall[0]).to.equal('https://www.example.com/');
+    });
+
+    it('should include llmBotAgents with anyBlocked false when all agents pass', async () => {
+      tracingFetchStub.resolves({
+        status: 200,
+        headers: {
+          get: (key) => (key.toLowerCase() === 'content-type' ? 'text/html' : null),
+        },
+        text: async () => '<html><body>Welcome</body></html>',
+      });
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.llmBotAgents).to.exist;
+      expect(body.llmBotAgents.anyBlocked).to.be.false;
+      expect(body.llmBotAgents.agents).to.have.lengthOf(2);
+      expect(body.llmBotAgents.agents[0].name).to.equal('ChatGPT-User');
+      expect(body.llmBotAgents.agents[1].name).to.equal('Perplexity-User');
+      body.llmBotAgents.agents.forEach((agent) => {
+        expect(agent.blocked).to.be.false;
+        expect(agent.statusCode).to.equal(200);
+      });
+    });
+
+    it('should set anyBlocked true when an agent receives a hard-block response', async () => {
+      tracingFetchStub.resolves({
+        status: 403,
+        headers: { get: () => null },
+        text: async () => '',
+      });
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.llmBotAgents.anyBlocked).to.be.true;
+      body.llmBotAgents.agents.forEach((agent) => {
+        expect(agent.blocked).to.be.true;
+        expect(agent.statusCode).to.equal(403);
+      });
+    });
   });
 });
