@@ -27,17 +27,44 @@ const DEFAULT_WORKSPACE_REPOS = [
   'Adobe-AEM-Sites/aem-sites-architecture',
 ];
 
-function getWorkspaceRepos(env) {
+// owner/repo format: non-slash owner + single slash + non-slash repo
+const WORKSPACE_REPO_PATTERN = /^[^/\s]+\/[^/\s]+$/;
+
+function getWorkspaceRepos(env, log) {
   const raw = env.MYSTICAT_WORKSPACE_REPOS;
   if (!raw) {
+    log.warn('MYSTICAT_WORKSPACE_REPOS not set, using built-in defaults', {
+      defaults: DEFAULT_WORKSPACE_REPOS,
+    });
     return DEFAULT_WORKSPACE_REPOS;
   }
-  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const entries = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const valid = [];
+  const invalid = [];
+  entries.forEach((entry) => {
+    if (WORKSPACE_REPO_PATTERN.test(entry)) {
+      valid.push(entry);
+    } else {
+      invalid.push(entry);
+    }
+  });
+  if (invalid.length > 0) {
+    log.warn('MYSTICAT_WORKSPACE_REPOS has invalid entries (expected owner/repo format)', {
+      invalid,
+    });
+  }
+  if (valid.length === 0) {
+    log.warn('MYSTICAT_WORKSPACE_REPOS produced no valid entries, falling back to defaults', {
+      defaults: DEFAULT_WORKSPACE_REPOS,
+    });
+    return DEFAULT_WORKSPACE_REPOS;
+  }
+  return valid;
 }
 
 function WebhooksController(context) {
   const { sqs, log, env } = context;
-  const workspaceRepos = getWorkspaceRepos(env);
+  const workspaceRepos = getWorkspaceRepos(env, log);
 
   function errorHandler(fn) {
     return async (ctx) => {
@@ -54,6 +81,16 @@ function WebhooksController(context) {
     const event = ctx.headers?.['x-github-event'];
     const deliveryId = ctx.headers?.['x-github-delivery'];
     const { data } = ctx;
+
+    // Validate required config up front. GITHUB_APP_SLUG is a security-relevant
+    // decision (which bot can trigger automated runs). Missing config must be
+    // a 5xx so GitHub retries once it is fixed — returning 204 here would
+    // mean GitHub treats the delivery as succeeded and never redelivers,
+    // permanently losing every webhook during the misconfiguration window.
+    if (!env.GITHUB_APP_SLUG) {
+      log.error('GITHUB_APP_SLUG not configured', { deliveryId });
+      return internalServerError('GITHUB_APP_SLUG not configured');
+    }
 
     // Validate required payload fields
     if (!data?.action) {

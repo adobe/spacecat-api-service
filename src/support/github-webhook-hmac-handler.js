@@ -39,6 +39,15 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
       return null;
     }
 
+    // Validate signature format FIRST: structural check, no I/O, no config.
+    // Must run before the secret presence check to prevent error-log amplification
+    // on pre-auth malformed requests when GITHUB_WEBHOOK_SECRET is unset.
+    // Also prevents timingSafeEqual from throwing on length mismatch later.
+    if (!SIGNATURE_PATTERN.test(signature)) {
+      this.log('Malformed X-Hub-Signature-256 header', 'warn');
+      return null;
+    }
+
     const secret = context.env?.GITHUB_WEBHOOK_SECRET;
     if (!secret) {
       this.log('GITHUB_WEBHOOK_SECRET not configured (misconfigured=true)', 'error');
@@ -48,17 +57,11 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     // Two-tier size check:
     //   - Pre-read via Content-Length: honest-client-only (attacker can omit the
     //     header to skip this branch). Saves the body read when the header is set.
-    //   - Post-read via rawBody.length (below): the actual enforcement, catches
+    //   - Post-read via Buffer.byteLength (below): the actual enforcement, catches
     //     missing or falsified Content-Length.
     const contentLength = Number(request.headers.get('content-length'));
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
       this.log(`Payload too large: ${contentLength} bytes`, 'warn');
-      return null;
-    }
-
-    // Validate signature format before timingSafeEqual (prevents throw on length mismatch)
-    if (!SIGNATURE_PATTERN.test(signature)) {
-      this.log('Malformed X-Hub-Signature-256 header', 'warn');
       return null;
     }
 
@@ -73,8 +76,10 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     }
 
     // Second size check after reading (content-length may be absent or wrong).
-    if (rawBody.length > MAX_BODY_BYTES) {
-      this.log(`Payload too large after read: ${rawBody.length} bytes`, 'warn');
+    // Use byte length (not JS string length) for a byte-accurate cap.
+    const byteLength = Buffer.byteLength(rawBody, 'utf8');
+    if (byteLength > MAX_BODY_BYTES) {
+      this.log(`Payload too large after read: ${byteLength} bytes`, 'warn');
       return null;
     }
 

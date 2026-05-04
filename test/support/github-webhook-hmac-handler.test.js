@@ -121,6 +121,22 @@ describe('GitHubWebhookHmacHandler', () => {
     expect(mockLog.error.firstCall.args[0]).to.include('misconfigured=true');
   });
 
+  it('malformed signature + missing secret does NOT log secret error (format check runs first)', async () => {
+    // Regression guard for pre-auth log amplification: a request with a
+    // present-but-malformed signature must bail on the format check BEFORE
+    // hitting the secret-presence check, so a misconfigured instance does
+    // not spam error logs on every malformed probe.
+    const request = makeRequest({ 'x-hub-signature-256': 'abc123' });
+    const context = makeContext({ env: {} });
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Malformed');
+    expect(mockLog.error.called).to.be.false;
+  });
+
   it('returns null and logs warn for malformed signature (missing sha256= prefix)', async () => {
     const request = makeRequest({ 'x-hub-signature-256': 'abc123' });
     const context = makeContext();

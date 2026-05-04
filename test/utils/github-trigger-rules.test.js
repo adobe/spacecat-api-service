@@ -146,24 +146,8 @@ describe('github-trigger-rules', () => {
       });
     });
 
-    describe('GITHUB_APP_SLUG configuration', () => {
-      it('returns misconfiguration skip when env var is not set', () => {
-        const data = {
-          ...baseData,
-          action: 'review_requested',
-          requested_reviewer: { login: 'mysticat[bot]' },
-        };
-        expect(getSkipReason(data, 'review_requested', {})).to.equal('GITHUB_APP_SLUG not configured');
-      });
-
-      it('returns misconfiguration skip when env var is empty string', () => {
-        const data = {
-          ...baseData,
-          action: 'review_requested',
-          requested_reviewer: { login: 'mysticat[bot]' },
-        };
-        expect(getSkipReason(data, 'review_requested', { GITHUB_APP_SLUG: '' })).to.equal('GITHUB_APP_SLUG not configured');
-      });
-    });
+    // Note: missing GITHUB_APP_SLUG is validated at controller entry (returns 500),
+    // not by getSkipReason. The controller is the gate; this function only sees
+    // calls with a validated appSlug.
   });
 });

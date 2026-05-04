@@ -365,17 +365,18 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //    standard auth paths for the rest of the API surface.
 // When adding a new path-scoped handler, place it in the same position (after
 // SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
+// AUTH_HANDLERS order is enforced by test/auth-handlers.test.js.
+const AUTH_HANDLERS = [
+  SkipAuthHandler,
+  GitHubWebhookHmacHandler,
+  JwtHandler,
+  AdobeImsHandler,
+  ScopedApiKeyHandler,
+  LegacyApiKeyHandler,
+];
+
 const wrappedMain = wrap(run)
-  .with(authWrapper, {
-    authHandlers: [
-      SkipAuthHandler,
-      GitHubWebhookHmacHandler,
-      JwtHandler,
-      AdobeImsHandler,
-      ScopedApiKeyHandler,
-      LegacyApiKeyHandler,
-    ],
-  })
+  .with(authWrapper, { authHandlers: AUTH_HANDLERS })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
 export const main = wrappedMain

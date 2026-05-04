@@ -234,6 +234,62 @@ describe('WebhooksController', () => {
     ]);
   });
 
+  it('logs warning and uses defaults when MYSTICAT_WORKSPACE_REPOS is not set', async () => {
+    // buildController() in beforeEach does not set the env var, so defaults are used
+    // but the log.warn occurs at controller construction — already recorded.
+    expect(mockLog.warn.called).to.be.true;
+    const warnMessage = mockLog.warn.getCalls()
+      .find((c) => c.args[0].includes('MYSTICAT_WORKSPACE_REPOS not set'));
+    expect(warnMessage).to.not.be.undefined;
+  });
+
+  it('filters invalid entries from MYSTICAT_WORKSPACE_REPOS and logs warning', async () => {
+    controller = buildController({
+      MYSTICAT_WORKSPACE_REPOS: 'adobe/valid, not-a-valid-repo, other/valid',
+    });
+
+    await controller.processGitHubWebhook(validContext);
+
+    const [, payload] = mockSqs.sendMessage.firstCall.args;
+    expect(payload.workspace_repos).to.deep.equal(['adobe/valid', 'other/valid']);
+
+    const invalidWarn = mockLog.warn.getCalls()
+      .find((c) => c.args[0].includes('invalid entries'));
+    expect(invalidWarn).to.not.be.undefined;
+    expect(invalidWarn.args[1].invalid).to.deep.equal(['not-a-valid-repo']);
+  });
+
+  it('falls back to defaults when MYSTICAT_WORKSPACE_REPOS has only invalid entries', async () => {
+    controller = buildController({
+      MYSTICAT_WORKSPACE_REPOS: 'not-a-valid-repo, another-bad-one',
+    });
+
+    await controller.processGitHubWebhook(validContext);
+
+    const [, payload] = mockSqs.sendMessage.firstCall.args;
+    expect(payload.workspace_repos).to.deep.equal([
+      'adobe/mysticat-architecture',
+      'adobe/mysticat-ai-native-guidelines',
+      'Adobe-AEM-Sites/aem-sites-architecture',
+    ]);
+    const fallbackWarn = mockLog.warn.getCalls()
+      .find((c) => c.args[0].includes('no valid entries'));
+    expect(fallbackWarn).to.not.be.undefined;
+  });
+
+  it('returns 500 and logs error when GITHUB_APP_SLUG is not configured', async () => {
+    controller = buildController({ GITHUB_APP_SLUG: undefined });
+
+    const response = await controller.processGitHubWebhook(validContext);
+
+    expect(response.status).to.equal(500);
+    const errorCall = mockLog.error.getCalls()
+      .find((c) => c.args[0].includes('GITHUB_APP_SLUG not configured'));
+    expect(errorCall).to.not.be.undefined;
+    expect(errorCall.args[1]).to.deep.include({ deliveryId: 'delivery-uuid-123' });
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
   it('logs structured skip reason (not interpolated) for untrusted event header', async () => {
     const context = {
       ...validContext,

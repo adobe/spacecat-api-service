@@ -30,14 +30,9 @@ export const EVENT_JOB_MAP = {
  */
 export function getSkipReason(data, action, env) {
   const pr = data.pull_request;
+  // Caller must validate env.GITHUB_APP_SLUG before invoking (the controller
+  // returns 500 on missing config so GitHub retries, rather than 204 from a skip).
   const appSlug = env.GITHUB_APP_SLUG;
-
-  // Explicitly fail rather than default: app slug is a security-relevant
-  // decision (which bot can trigger automated runs). Missing env var is a
-  // misconfiguration, not a "try mysticat" situation.
-  if (!appSlug) {
-    return 'GITHUB_APP_SLUG not configured';
-  }
 
   // Unsupported actions (auto-triggers deferred to Phase 3)
   if (action === 'opened' || action === 'ready_for_review') {
