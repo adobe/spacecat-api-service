@@ -96,6 +96,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
+ * @param {Object} webhooksController - GitHub webhook handler controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -149,6 +150,7 @@ export default function getRouteHandlers(
   autofixChecksController,
   plgOnboardingController,
   drsBpPgAuditController,
+  webhooksController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -169,6 +171,7 @@ export default function getRouteHandlers(
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
+    'POST /webhooks/github': webhooksController.processGitHubWebhook,
     'GET /organizations': organizationsController.getAll,
     'POST /organizations': organizationsController.createOrganization,
     'GET /organizations/:organizationId': organizationsController.getByID,

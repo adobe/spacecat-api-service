@@ -33,6 +33,8 @@ export const INTERNAL_ROUTES = [
   // Hooks - use hookSecret in path for auth, not JWT
   'POST /hooks/site-detection/cdn/:hookSecret',
   'POST /hooks/site-detection/rum/:hookSecret',
+  // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
+  'POST /webhooks/github',
 
   // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
   'POST /preflight/jobs',
