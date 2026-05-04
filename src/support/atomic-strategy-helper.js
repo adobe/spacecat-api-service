@@ -57,6 +57,13 @@ export async function createAtomicStrategy({
   sleep = defaultSleep,
 }) {
   const strategyId = geoExperimentId;
+  // The opportunityId references a SYSTEM Opportunity (DynamoDB), not a
+  // library opportunity in the strategy blob's top-level `opportunities`
+  // array. The schema's superRefine rule requires `link` to mark this as a
+  // system reference, otherwise parse() rejects with
+  // "Library opportunity <id> does not exist" the next time anything reads
+  // the blob. The link path mirrors the API route shape.
+  const opportunityLink = `/sites/${siteId}/opportunities/${opportunityId}`;
   const newStrategy = {
     id: strategyId,
     type: 'atomic',
@@ -71,6 +78,7 @@ export async function createAtomicStrategy({
     opportunities: [
       {
         opportunityId,
+        link: opportunityLink,
         status: 'in_progress',
         assignee: profile?.email || 'edge-deploy',
       },

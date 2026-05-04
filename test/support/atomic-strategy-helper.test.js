@@ -92,7 +92,12 @@ describe('atomic-strategy-helper', () => {
     });
     expect(newStrat.selectedPrompts).to.be.undefined;
     expect(newStrat.opportunities).to.deep.equal([
-      { opportunityId: baseArgs.opportunityId, status: 'in_progress', assignee: 'user@example.com' },
+      {
+        opportunityId: baseArgs.opportunityId,
+        link: `/sites/${baseArgs.siteId}/opportunities/${baseArgs.opportunityId}`,
+        status: 'in_progress',
+        assignee: 'user@example.com',
+      },
     ]);
     expect(newStrat.createdAt).to.match(/^\d{4}-\d{2}-\d{2}T/);
   });
@@ -218,6 +223,35 @@ describe('atomic-strategy-helper', () => {
     const newStrat = writeStrategyStub.firstCall.args[1].strategies[0];
     expect(newStrat.createdBy).to.equal('edge-deploy');
     expect(newStrat.opportunities[0].assignee).to.equal('edge-deploy');
+  });
+
+  it('writes data that round-trips through the F1 strategyWorkspaceData schema', async () => {
+    // Lock the contract: what writeStrategy receives must parse cleanly via
+    // the F1 schema, otherwise the next reader breaks.
+    const { llmoStrategy: realLlmoStrategy } = await import('@adobe/spacecat-shared-utils');
+    const realSchema = realLlmoStrategy.strategyWorkspaceData;
+
+    readStrategyStub.resolves({
+      exists: true,
+      data: { opportunities: [], strategies: [] },
+      version: 1,
+    });
+    writeStrategyStub.resolves({ version: 2 });
+
+    // Use real UUIDs so we pass the schema's strict UUID format check on experimentId.
+    const { randomUUID } = await import('node:crypto');
+    const realArgs = {
+      ...baseArgs,
+      siteId: randomUUID(),
+      geoExperimentId: randomUUID(),
+      opportunityId: randomUUID(),
+    };
+
+    await createAtomicStrategy(realArgs);
+
+    const writtenData = writeStrategyStub.firstCall.args[1];
+    // Should not throw.
+    realSchema.parse(writtenData);
   });
 
   it('uses defaultSleep when no sleep override is provided (smoke check)', async () => {
