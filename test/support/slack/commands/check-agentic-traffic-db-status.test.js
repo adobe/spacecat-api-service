@@ -389,6 +389,60 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('batch-fallback');
   });
 
+  it('uses agentic-db-export audit_result rows to find the batchId', async () => {
+    const audit = makeAudit([
+      {
+        name: 'agentic',
+        success: true,
+        weekOffset: 0,
+      },
+      {
+        name: 'agentic-db-export',
+        batchId: 'batch-audit-row',
+      },
+      {
+        name: 'referral-db-export',
+        batchId: 'referral-batch',
+      },
+    ], '2026-05-04T10:09:18.600Z');
+    context.dataAccess.Site.all.resolves([
+      makeSite('site-audit-row', 'https://audit-row.com', audit),
+    ]);
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-audit-row',
+          scopePrefix: 'site-audit-row',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-audit-row:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-audit-row',
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-audit-row:weekly-refresh',
+          handlerName: WEEKLY_REFRESH_HANDLER,
+          scopePrefix: 'site-audit-row',
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-05-03'], slackContext);
+
+    expect(chain.in.firstCall.args[1]).to.deep.equal([
+      'batch-audit-row',
+      'batch-audit-row:daily-refresh',
+      'batch-audit-row:weekly-refresh',
+    ]);
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Dashboard-ready: *1*');
+    expect(output).to.not.include('referral-batch');
+  });
+
   it('reports skipped for a site whose export was skipped (no traffic data)', async () => {
     const audit = makeAudit({
       dailyAgenticExport: { skipped: true, success: true, trafficDate: '2026-04-22' },

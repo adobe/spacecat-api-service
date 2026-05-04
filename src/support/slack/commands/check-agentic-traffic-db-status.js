@@ -106,8 +106,24 @@ function getAuditResult(audit) {
   return audit?.getAuditResult?.() || audit?.auditResult;
 }
 
+function inferTrafficDateFromAudit(audit) {
+  const auditedAt = parseTimestamp(getAuditTimestamp(audit));
+  return auditedAt ? formatUtcDate(addUtcDays(auditedAt, -1)) : undefined;
+}
+
 function getDailyAgenticExports(audit) {
-  const auditResult = getAuditResult(audit) || {};
+  const auditResult = getAuditResult(audit) || [];
+  if (Array.isArray(auditResult)) {
+    const trafficDate = inferTrafficDateFromAudit(audit);
+    return auditResult
+      .filter((entry) => entry?.name === 'agentic-db-export')
+      .map((entry) => ({
+        success: true,
+        trafficDate,
+        batchId: entry.batchId,
+      }));
+  }
+
   return [
     auditResult.dailyAgenticExport,
     ...(Array.isArray(auditResult.dailyAgenticExports) ? auditResult.dailyAgenticExports : []),
@@ -233,8 +249,8 @@ function parseBatchIdArg(args = []) {
  * Factory function to create the CheckAgenticTrafficDbStatusCommand object.
  *
  * Checks the processing status of the daily agentic traffic export pipeline:
- *  1. Reads the latest cdn-logs-report audit per site (which stores a batchId when
- *     runDailyAgenticExport completes).
+ *  1. Reads the latest cdn-logs-report audit per site (which stores an
+ *     agentic-db-export audit_result entry when runDailyAgenticExport completes).
  *  2. Queries projection_audit with those batchIds to see which have been projected
  *     into the agentic_traffic table by the projector service.
  *
@@ -693,7 +709,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           lines.push(`${missingBatchId.length} site(s) exported without a batchId. Action: check audit-worker dailyAgenticExport output before DB status can be correlated.`);
         }
         if (noExport.length > 0) {
-          lines.push(`${noExport.length} site(s) have a \`${CDN_LOGS_REPORT_AUDIT}\` audit, but no dailyAgenticExport/dailyAgenticExports entry to read. Action: check the audit result payload for ${dateStr}.`);
+          lines.push(`${noExport.length} site(s) have a \`${CDN_LOGS_REPORT_AUDIT}\` audit, but no agentic DB export batchId to read. Action: check the audit result payload for ${dateStr}.`);
         }
         if (unknown.length > 0) {
           lines.push(`${unknown.length} site(s) have unknown DB status because projection_audit could not be checked. Action: fix/check PostgREST before trusting pending counts.`);
