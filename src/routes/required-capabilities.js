@@ -103,6 +103,18 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/movers',
   'GET /sites/:siteId/agentic-traffic/has-data',
 
+  // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/referral-traffic/filter-dimensions',
+  'GET /sites/:siteId/referral-traffic/kpis',
+  'GET /sites/:siteId/referral-traffic/trend',
+  'GET /sites/:siteId/referral-traffic/by-platform',
+  'GET /sites/:siteId/referral-traffic/by-region',
+  'GET /sites/:siteId/referral-traffic/by-page-intent',
+  'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-device',
+  'GET /sites/:siteId/referral-traffic/business-impact',
+  'GET /sites/:siteId/referral-traffic/weeks',
+
   // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
   'GET /sites/:siteId/llmo/brand-claims',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
@@ -504,6 +516,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
 
