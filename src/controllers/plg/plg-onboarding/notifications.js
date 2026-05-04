@@ -10,6 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
+import { postSlackMessage } from '../../../utils/slack/base.js';
+import { STATUSES } from './constants.js';
+
 export const REVIEW_REASONS = {
   DOMAIN_ALREADY_ONBOARDED_IN_ORG: 'DOMAIN_ALREADY_ONBOARDED_IN_ORG',
   AEM_SITE_CHECK: 'AEM_SITE_CHECK',
@@ -38,4 +41,114 @@ export function deriveCheckKey(onboarding) {
   }
 
   return null;
+}
+
+const PLG_STATUS_NOTIFICATION_CONFIG = {
+  [STATUSES.ONBOARDED]: { emoji: ':white_check_mark:', label: 'Onboarded' },
+  [STATUSES.WAITLISTED]: { emoji: ':warning:', label: 'Waitlisted' },
+  [STATUSES.WAITING_FOR_IP_ALLOWLISTING]: { emoji: ':warning:', label: 'Waiting for IP Allowlisting' },
+  [STATUSES.ERROR]: { emoji: ':red_circle:', label: 'Error' },
+  [STATUSES.INACTIVE]: { emoji: ':zzz:', label: 'Inactive' },
+};
+
+/**
+ * Posts a PLG onboarding status notification to the configured ESE Slack channel.
+ * Fires on terminal/actionable status transitions. Fails gracefully.
+ */
+export async function postPlgOnboardingNotification(onboarding, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+
+  if (!channelId || !token) {
+    return;
+  }
+
+  const status = onboarding.getStatus();
+  const config = PLG_STATUS_NOTIFICATION_CONFIG[status];
+  /* c8 ignore next 3 */
+  if (!config) {
+    return;
+  }
+
+  const domain = onboarding.getDomain();
+  const imsOrgId = onboarding.getImsOrgId();
+  const siteId = onboarding.getSiteId();
+  const organizationId = onboarding.getOrganizationId();
+
+  let orgName = null;
+  if (organizationId) {
+    try {
+      const org = await context.dataAccess.Organization.findById(organizationId);
+      orgName = org?.getName?.() || null;
+    } catch (orgLookupError) {
+      log.warn(`Failed to look up org name for onboarding notification: ${orgLookupError.message}`);
+    }
+  }
+
+  let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *Onboarding requested on IMS Org:* \`${imsOrgId}\``;
+
+  if (orgName) {
+    message += `\n• *IMS Org Name:* ${orgName}`;
+  }
+  if (organizationId) {
+    message += `\n• *SpaceCat Org ID (derived from IMS Org):* \`${organizationId}\``;
+  }
+  if (siteId) {
+    message += `\n• *Site ID:* \`${siteId}\``;
+  }
+
+  if ([STATUSES.WAITLISTED, STATUSES.WAITING_FOR_IP_ALLOWLISTING].includes(status)) {
+    const waitlistReason = onboarding.getWaitlistReason();
+    if (waitlistReason) {
+      message += `\n• *Reason:* ${waitlistReason}`;
+    }
+
+    const botBlocker = onboarding.getBotBlocker();
+    if (botBlocker?.type) {
+      message += `\n• *Bot Blocker:* ${botBlocker.type}`;
+      if (botBlocker.ipsToAllowlist?.length) {
+        message += ` (IPs to allowlist: ${botBlocker.ipsToAllowlist.join(', ')})`;
+      }
+    }
+  }
+
+  const error = onboarding.getError();
+  if (error?.message) {
+    message += `\n• *Error:* ${error.message}`;
+  }
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (slackError) {
+    log.error(`Failed to post PLG onboarding notification to Slack: ${slackError.message}`);
+  }
+}
+
+/**
+ * Persists the onboarding record (with optional updatedBy stamp) and posts the Slack
+ * notification. The caller is responsible for setting status, waitlistReason, steps, etc.
+ * before calling.
+ *
+ * @param {{ swallowSaveErrors?: boolean, errorLabel?: string }} [opts]
+ *   When `swallowSaveErrors` is true, save+notify failures are logged with `errorLabel`
+ *   and not rethrown — used in catch handlers where we must not lose the original error.
+ */
+export async function persistAndNotify(onboarding, { updatedBy }, context, opts = {}) {
+  if (updatedBy) {
+    onboarding.setUpdatedBy(updatedBy);
+  }
+  if (opts.swallowSaveErrors) {
+    try {
+      await onboarding.save();
+      await postPlgOnboardingNotification(onboarding, context);
+    } catch (saveError) {
+      context.log.error(`Failed to persist ${opts.errorLabel} for onboarding ${onboarding.getId()}: ${saveError.message}`);
+    }
+    return;
+  }
+  await onboarding.save();
+  await postPlgOnboardingNotification(onboarding, context);
 }
