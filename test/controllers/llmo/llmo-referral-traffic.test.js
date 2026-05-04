@@ -388,6 +388,36 @@ describe('llmo-referral-traffic', () => {
       });
     });
 
+    it('maps visitors and orders when non-null (lines 332-333)', async () => {
+      const client = makeRpcClient({
+        data: [{
+          platform: 'perplexity',
+          total_pageviews: 200,
+          bounce_rate: 0.25,
+          channels: ['llm'],
+          visits: 150,
+          avg_time_on_site: 95,
+          revenue: 1200,
+          visitors: 80,
+          orders: 12,
+        }],
+      });
+      const handler = createReferralTrafficByPlatformHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      const body = await res.json();
+      expect(body.rows[0]).to.deep.equal({
+        platform: 'perplexity',
+        pageviews: 200,
+        bounceRate: 0.25,
+        channels: ['llm'],
+        visits: 150,
+        avgTimeOnSite: 95,
+        revenue: 1200,
+        visitors: 80,
+        orders: 12,
+      });
+    });
+
     it('falls back to empty array when RPC returns null channels', async () => {
       const client = makeRpcClient({
         data: [{
