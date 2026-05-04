@@ -1328,6 +1328,31 @@ async function performAsoPlgOnboarding({
   }
 }
 
+const PLG_REJECTION_MESSAGES = {
+  'internal-org': { emoji: ':no_entry:', label: 'Rejected — Internal Org' },
+  'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
+};
+
+async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  const config = PLG_REJECTION_MESSAGES[reason];
+  const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *IMS Org:* \`${imsOrgId}\``;
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (err) {
+    log.error(`Failed to post PLG rejection notification: ${err.message}`);
+  }
+}
+
 /**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
@@ -1391,6 +1416,7 @@ function PlgOnboardingController(ctx) {
     const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
     if (isInternalOrg(imsOrgId, context.env)) {
+      await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
       return badRequest('PLG onboarding is not available for internal organizations');
     }
 
@@ -1402,6 +1428,7 @@ function PlgOnboardingController(ctx) {
         (e) => e.getProductCode() === ASO_PRODUCT_CODE && e.getTier() !== ASO_TIER,
       );
       if (hasPaidEntitlement) {
+        await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
         return badRequest('PLG onboarding is not available for paid customers');
       }
     }
