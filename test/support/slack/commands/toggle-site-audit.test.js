@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import sinon from 'sinon';
 import { expect } from 'chai';
 import esmock from 'esmock';
@@ -305,7 +303,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(48); // 24 audits in demo profile × 2 sites
+        .to.equal(46); // 23 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });

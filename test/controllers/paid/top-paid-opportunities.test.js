@@ -10,15 +10,17 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import { AWSAthenaClient, TrafficDataWithCWVDto } from '@adobe/spacecat-shared-athena-client';
 import TopPaidOpportunitiesController from '../../../src/controllers/paid/top-paid-opportunities.js';
-import { matchOpportunitiesWithPaidUrls } from '../../../src/controllers/paid/opportunity-matcher.js';
+import {
+  matchOpportunitiesWithPaidUrls,
+  categorizeOpportunities,
+  processOpportunityMatching,
+} from '../../../src/controllers/paid/opportunity-matcher.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -51,6 +53,7 @@ const createSuggestion = (url, overrides = {}) => ({
   getOpportunityId: () => overrides.opportunityId || 'oppty-1',
   getData: () => ({ url, ...overrides.data }),
   getRank: () => overrides.rank || 0,
+  getStatus: () => overrides.status || 'NEW',
 });
 
 const createTrafficData = (overrides = {}) => ({
@@ -73,6 +76,26 @@ function setupOpportunityMocks(mockOpportunity, opportunities = []) {
   mockOpportunity.allBySiteIdAndStatus
     .withArgs(SITE_ID, 'NEW').resolves(opportunities)
     .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+}
+
+// Helper to set up suggestion mocks for batchGetByKeys/allByOpportunityId fallback.
+// suggestionMap: { opportunityId: [suggestion, ...], ... }
+// Suggestions should have getStatus() returning their status (default 'NEW').
+function setupSuggestionMocks(mockSuggestion, suggestionMap = {}) {
+  mockSuggestion.batchGetByKeys.callsFake(
+    (keys) => Promise.resolve({
+      data: keys.flatMap(
+        ({ opportunityId }) => (suggestionMap[opportunityId] || []).map((suggestion) => ({
+          ...suggestion,
+          getOpportunityId: () => opportunityId,
+        })),
+      ),
+      unprocessed: [],
+    }),
+  );
+  mockSuggestion.allByOpportunityId.callsFake(
+    (oppId) => Promise.resolve(suggestionMap[oppId] || []),
+  );
 }
 
 describe('TopPaidOpportunitiesController', () => {
@@ -103,7 +126,11 @@ describe('TopPaidOpportunitiesController', () => {
       dataAccess: {
         Site: { findById: sandbox.stub().resolves(createMockSite()) },
         Opportunity: { allBySiteIdAndStatus: sandbox.stub().resolves([]) },
-        Suggestion: { allByOpportunityIdAndStatus: sandbox.stub().resolves([]) },
+        Suggestion: {
+          batchGetByKeys: sandbox.stub().resolves({ data: [], unprocessed: [] }),
+          allByOpportunityId: sandbox.stub().resolves([]),
+          allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
+        },
       },
       attributes: {
         authInfo: {
@@ -244,9 +271,31 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities[0].system_type).to.equal('consent-banner');
     });
 
-    it('returns no-cta-above-the-fold opportunities in top paid opportunities', async () => {
+    it('returns no-cta-above-the-fold opportunities by type', async () => {
       const noctaOppty = createOpportunity({
         id: 'nocta-1',
+        type: 'no-cta-above-the-fold',
+        data: {
+          projectedTrafficValue: 5000,
+          page: 'https://example.com/nocta-page',
+          pageViews: 1234,
+        },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [noctaOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].system_type).to.equal('no-cta-above-the-fold');
+      expect(opportunities[0].urls).to.deep.equal(['https://example.com/nocta-page']);
+      expect(opportunities[0].pageViews).to.equal(1234);
+    });
+
+    it('returns no-cta-above-the-fold opportunities by data.opportunityType (backward compat)', async () => {
+      const noctaOppty = createOpportunity({
+        id: 'nocta-2',
         type: 'generic-opportunity',
         data: { opportunityType: 'no-cta-above-the-fold' },
       });
@@ -354,17 +403,13 @@ describe('TopPaidOpportunitiesController', () => {
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, opportunities);
 
       // Mock suggestions for CWV and forms opportunities
+      const suggMap = {};
       for (let i = 1; i <= 3; i += 1) {
-        mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
-          .withArgs(`cwv-${i}`, 'NEW')
-          .resolves([createSuggestion(`https://example.com/cwv${i}`)]);
-        mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
-          .withArgs(`forms-acc-${i}`, 'NEW')
-          .resolves([createSuggestion(`https://example.com/form-acc${i}`)]);
-        mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
-          .withArgs(`forms-conv-${i}`, 'NEW')
-          .resolves([createSuggestion(`https://example.com/form-conv${i}`)]);
+        suggMap[`cwv-${i}`] = [createSuggestion(`https://example.com/cwv${i}`)];
+        suggMap[`forms-acc-${i}`] = [createSuggestion(`https://example.com/form-acc${i}`)];
+        suggMap[`forms-conv-${i}`] = [createSuggestion(`https://example.com/form-conv${i}`)];
       }
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, suggMap);
 
       // Mock Athena to return paid traffic data for CWV and forms URLs
       const trafficData = [];
@@ -436,15 +481,98 @@ describe('TopPaidOpportunitiesController', () => {
       const opportunities = await response.json();
       expect(opportunities).to.have.lengthOf(1);
     });
+
+    it('loads suggestions only for supported valid paid opportunity types', async () => {
+      const supportedOppty = createOpportunity({ id: 'oppty-supported', tags: ['paid media'] });
+      const unsupportedOppty = createOpportunity({ id: 'oppty-unsupported', type: 'seo' });
+      const invalidOppty = createOpportunity({
+        id: 'oppty-invalid',
+        tags: ['paid media'],
+        description: null,
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [supportedOppty, unsupportedOppty, invalidOppty],
+      );
+
+      await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.calledOnce).to.be.true;
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.firstCall.args[0]).to.deep.equal([
+        { opportunityId: 'oppty-supported' },
+      ]);
+    });
+
+    it('filters out opportunities with PENDING_VALIDATION suggestions', async () => {
+      const validOppty = createOpportunity({ id: 'oppty-valid', tags: ['paid media'] });
+      const pendingValidationOppty = createOpportunity({
+        id: 'oppty-pending', tags: ['paid media'],
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [validOppty, pendingValidationOppty],
+      );
+
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'oppty-pending': [
+          createSuggestion('https://example.com/page', { status: 'PENDING_VALIDATION' }),
+        ],
+      });
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('oppty-valid');
+    });
+
+    it('handles null suggestion collections as empty', async () => {
+      const paidOppty = createOpportunity({ id: 'oppty-null-suggestions', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
+      mockContext.dataAccess.Suggestion.batchGetByKeys.resolves({ data: null, unprocessed: [] });
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('oppty-null-suggestions');
+      expect(opportunities[0].urls).to.deep.equal([]);
+    });
+
+    it('excludes only the opportunity whose suggestion fetch fails (fail-closed per-opportunity)', async () => {
+      const validOppty = createOpportunity({ id: 'oppty-success', tags: ['paid media'] });
+      const errorOppty = createOpportunity({ id: 'oppty-error', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [validOppty, errorOppty]);
+
+      mockContext.dataAccess.Suggestion.batchGetByKeys.rejects(new Error('Batch unavailable'));
+      mockContext.dataAccess.Suggestion.allByOpportunityId.callsFake((oppId) => {
+        if (oppId === 'oppty-error') {
+          return Promise.reject(new Error('Database error'));
+        }
+        return Promise.resolve([]);
+      });
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      // Only the errored opportunity is excluded; the valid one still returns
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('oppty-success');
+    });
   });
 
   describe('CWV opportunity filtering', () => {
     it('returns CWV opportunities when URLs match poor CWV from paid traffic', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' }), createTrafficData({ url: 'https://example.com/not-matching' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -483,9 +611,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('excludes CWV opportunities when URLs do not match paid traffic', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/different-page'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/different-page')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -498,10 +626,12 @@ describe('TopPaidOpportunitiesController', () => {
     it('sums pageviews correctly for CWV opportunities with multiple URLs', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-        createSuggestion('https://example.com/page2'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [
+          createSuggestion('https://example.com/page1'),
+          createSuggestion('https://example.com/page2'),
+        ],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1', pageviews: '3000' }),
         createTrafficData({ url: 'https://example.com/page2', pageviews: '2000' }),
@@ -517,9 +647,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('uses default year and week when not provided', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -531,9 +661,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('handles context.data being null', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -545,9 +675,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('handles invalid CWV_THRESHOLDS gracefully', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const envWithInvalidThresholds = { ...mockEnv, CWV_THRESHOLDS: 'invalid-json{' };
@@ -562,9 +692,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('handles null CWV_THRESHOLDS gracefully', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const envWithNullThresholds = { ...mockEnv, CWV_THRESHOLDS: null };
@@ -579,9 +709,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('includes CWV opportunities with "needs improvement" score', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({
           url: 'https://example.com/page1',
@@ -596,19 +726,24 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
-    it('does not fetch suggestions twice for CWV opportunities', async () => {
+    it('uses batchGetByKeys once to load suggestions', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       await controller.getTopPaidOpportunities({
         params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
       });
 
-      expect(mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.callCount).to.equal(1);
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.calledOnce).to.be.true;
+      expect(mockContext.dataAccess.Suggestion.batchGetByKeys.firstCall.args[0]).to.deep.equal([
+        { opportunityId: 'cwv-1' },
+      ]);
+      expect(mockContext.dataAccess.Suggestion.allByOpportunityId.called).to.be.false;
+      expect(mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.called).to.be.false;
     });
   });
 
@@ -620,9 +755,9 @@ describe('TopPaidOpportunitiesController', () => {
         data: { projectedConversionValue: 22888.14, form: 'https://example.com/form-page' },
       });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/form-page'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'forms-1': [createSuggestion('https://example.com/form-page')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/form-page', pageviews: '3000' }),
       ]);
@@ -641,9 +776,9 @@ describe('TopPaidOpportunitiesController', () => {
         data: { projectedConversionValue: 15000 },
       });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/different-page'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'forms-1': [createSuggestion('https://example.com/different-page')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/form-page' }),
       ]);
@@ -667,9 +802,10 @@ describe('TopPaidOpportunitiesController', () => {
         data: { projectedConversionValue: 12000 },
       });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty1, formsOppty2]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
-        .withArgs('forms-1', 'NEW').resolves([createSuggestion('https://example.com/form1')])
-        .withArgs('forms-2', 'NEW').resolves([createSuggestion('https://example.com/form2')]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'forms-1': [createSuggestion('https://example.com/form1')],
+        'forms-2': [createSuggestion('https://example.com/form2')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/form1', pageviews: '2500' }),
         createTrafficData({ url: 'https://example.com/form2', pageviews: '1800' }),
@@ -702,7 +838,6 @@ describe('TopPaidOpportunitiesController', () => {
         mockContext.dataAccess.Opportunity,
         [validFormsOppty, nullBriefFormsOppty],
       );
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/form1', pageviews: '3000' }),
         createTrafficData({ url: 'https://example.com/form2', pageviews: '5000' }),
@@ -736,7 +871,6 @@ describe('TopPaidOpportunitiesController', () => {
         mockContext.dataAccess.Opportunity,
         [validFormsOppty, missingBriefFormsOppty],
       );
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/form1', pageviews: '3000' }),
         createTrafficData({ url: 'https://example.com/form2', pageviews: '5000' }),
@@ -780,7 +914,6 @@ describe('TopPaidOpportunitiesController', () => {
         mockContext.dataAccess.Opportunity,
         [validFormsOppty, unscrapedFormsOppty],
       );
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/form1', pageviews: '3000' }),
         createTrafficData({ url: 'https://example.com/form2', pageviews: '5000' }),
@@ -805,9 +938,9 @@ describe('TopPaidOpportunitiesController', () => {
         },
       });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOpptyWithNullBrief]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1', pageviews: '2000' }),
       ]);
@@ -825,9 +958,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('matches URLs with www prefix differences', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://www.example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://www.example.com/page1')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1' }),
       ]);
@@ -842,9 +975,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('matches URLs with trailing slash differences', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1/'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1/')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1' }),
       ]);
@@ -859,9 +992,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('matches URLs with both www and trailing slash differences', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://www.example.com/page1/'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://www.example.com/page1/')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1' }),
       ]);
@@ -876,9 +1009,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('does not match partial URLs (exact match required)', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page')],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1' }),
       ]);
@@ -895,9 +1028,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('excludes CWV URLs below pageview threshold even if poor score', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       // pageviews below threshold (100) - Athena returns empty
       mockAthenaClient.query.resolves([]);
 
@@ -911,9 +1044,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('excludes CWV URLs with good score even if high traffic', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       // CWV scores are good - Athena query with CWV filter returns empty
       mockAthenaClient.query.resolves([
         createTrafficData({
@@ -933,10 +1066,12 @@ describe('TopPaidOpportunitiesController', () => {
     it('uses default PAGE_VIEW_THRESHOLD when PAID_DATA_THRESHOLD is not set', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-        createSuggestion('https://example.com/page2'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [
+          createSuggestion('https://example.com/page1'),
+          createSuggestion('https://example.com/page2'),
+        ],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1', pageviews: '1000' }), // at threshold
         createTrafficData({ url: 'https://example.com/page2', pageviews: '999' }), // below threshold
@@ -960,9 +1095,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('uses month parameter when provided', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -979,9 +1114,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('uses provided week when year and week are both provided', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       await controller.getTopPaidOpportunities({
@@ -996,9 +1131,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('uses default week when temporal params are not provided', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -1058,9 +1193,10 @@ describe('TopPaidOpportunitiesController', () => {
       const cwvOppty1 = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       const cwvOppty2 = createOpportunity({ id: 'cwv-2', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty1, cwvOppty2]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+        'cwv-2': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -1072,12 +1208,15 @@ describe('TopPaidOpportunitiesController', () => {
     it('handles suggestions with multiple URL fields (url_from, urlTo)', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      // Suggestion with url_from field
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([{
+      const urlFromSuggestion = {
         getOpportunityId: () => 'cwv-1',
         getData: () => ({ url_from: 'https://example.com/page1' }),
         getRank: () => 0,
-      }]);
+        getStatus: () => 'NEW',
+      };
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [urlFromSuggestion],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -1124,9 +1263,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('uses cache when available (cache hit)', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
 
       // Add S3 mock to context for cache testing - proper structure with s3Client
       const s3SendStub = sandbox.stub();
@@ -1157,9 +1296,9 @@ describe('TopPaidOpportunitiesController', () => {
     it('writes to cache after Athena query (cache miss)', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
 
       // Add S3 mock to context for cache testing - simulate cache miss
       const s3SendStub = sandbox.stub();
@@ -1184,12 +1323,13 @@ describe('TopPaidOpportunitiesController', () => {
     it('handles CWV opportunity matching with multiple suggestions', async () => {
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      // Multiple suggestions with different URLs
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-        createSuggestion('https://example.com/page2'),
-        createSuggestion('https://example.com/page3'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [
+          createSuggestion('https://example.com/page1'),
+          createSuggestion('https://example.com/page2'),
+          createSuggestion('https://example.com/page3'),
+        ],
+      });
       mockAthenaClient.query.resolves([
         createTrafficData({ url: 'https://example.com/page1', pageviews: '3000' }),
         createTrafficData({ url: 'https://example.com/page2', pageviews: '1000' }),
@@ -1207,11 +1347,15 @@ describe('TopPaidOpportunitiesController', () => {
     it('handles forms opportunity with url_to field', async () => {
       const formsOppty = createOpportunity({ id: 'forms-1', type: 'high-form-views-low-conversions' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([{
+      const urlToSuggestion = {
         getOpportunityId: () => 'forms-1',
         getData: () => ({ url_to: 'https://example.com/form-page' }),
         getRank: () => 0,
-      }]);
+        getStatus: () => 'NEW',
+      };
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'forms-1': [urlToSuggestion],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/form-page' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -1235,9 +1379,9 @@ describe('TopPaidOpportunitiesController', () => {
 
       const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
-        createSuggestion('https://example.com/page1'),
-      ]);
+      setupSuggestionMocks(mockContext.dataAccess.Suggestion, {
+        'cwv-1': [createSuggestion('https://example.com/page1')],
+      });
       mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -1349,5 +1493,22 @@ describe('matchOpportunitiesWithPaidUrls', () => {
     );
 
     expect(result.matched).to.have.lengthOf(1);
+  });
+
+  it('processOpportunityMatching handles missing cached suggestions as empty', async () => {
+    const cwvOpportunity = createOpportunity({ id: 'opp-cwv', type: 'cwv' });
+    const categorizedOpportunities = categorizeOpportunities([cwvOpportunity]);
+    const log = { info: sinon.stub(), debug: sinon.stub() };
+
+    const result = await processOpportunityMatching(
+      categorizedOpportunities,
+      [{ url: 'https://example.com/page1', pageviews: '1000', overall_cwv_score: 'poor' }],
+      100,
+      new Map(),
+      log,
+    );
+
+    expect(result.matchResults.get('cwv')).to.deep.equal([]);
+    expect(result.paidUrlsMap.size).to.equal(0);
   });
 });

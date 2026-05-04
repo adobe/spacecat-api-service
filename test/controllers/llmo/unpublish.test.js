@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -32,7 +31,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
     };
 
     mockEnv = {
-      HLX_ADMIN_TOKEN: 'test-admin-token',
+      HLX_ONBOARDING_TOKEN: 'test-onboarding-token',
     };
 
     // Mock setTimeout to execute immediately
@@ -178,9 +177,9 @@ describe('LLMO Bulk Unpublish Functions', () => {
       );
     });
 
-    it('should return null when HLX_ADMIN_TOKEN is not set', async () => {
+    it('should return null when HLX_ONBOARDING_TOKEN is not set', async () => {
       const mockTracingFetch = sinon.stub();
-      const envWithoutToken = { HLX_ADMIN_TOKEN: undefined };
+      const envWithoutToken = { HLX_ONBOARDING_TOKEN: undefined };
 
       const { deleteSharePointFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-utils': {
@@ -198,7 +197,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
       await deleteSharePointFolder('dev/test-com', { log: mockLog, env: envWithoutToken });
 
       // Verify warning was logged
-      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
 
       // Verify fetch was not called for bulk status
       expect(mockTracingFetch.called).to.be.false;
@@ -232,8 +231,8 @@ describe('LLMO Bulk Unpublish Functions', () => {
   });
 
   describe('pollJobStatus', () => {
-    it('should handle missing HLX_ADMIN_TOKEN in polling scenario', async () => {
-      const envWithoutToken = { HLX_ADMIN_TOKEN: undefined };
+    it('should handle missing HLX_ONBOARDING_TOKEN in polling scenario', async () => {
+      const envWithoutToken = { HLX_ONBOARDING_TOKEN: undefined };
       const mockTracingFetch = sinon.stub();
 
       const { deleteSharePointFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
@@ -253,7 +252,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
 
       // Verify the warning is logged when token is missing
       // This ensures the token check pattern (lines 258-260) is exercised
-      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
       expect(mockTracingFetch.called).to.be.false;
     });
 
@@ -314,9 +313,9 @@ describe('LLMO Bulk Unpublish Functions', () => {
       expect(mockTracingFetch.getCall(1).args[1].method).to.equal('GET');
     });
 
-    it('should return null when HLX_ADMIN_TOKEN is not set during polling', async () => {
+    it('should return null when HLX_ONBOARDING_TOKEN is not set during polling', async () => {
       const mockTracingFetch = sinon.stub();
-      const envWithoutToken = { HLX_ADMIN_TOKEN: undefined };
+      const envWithoutToken = { HLX_ONBOARDING_TOKEN: undefined };
 
       // Mock bulk status job start - should return null due to missing token
       mockTracingFetch.onCall(0).resolves({
@@ -341,7 +340,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
       await deleteSharePointFolder('dev/test-com', { log: mockLog, env: envWithoutToken });
 
       // Verify warning was logged (covers lines 258-260)
-      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
 
       // Verify fetch was not called
       expect(mockTracingFetch.called).to.be.false;
@@ -940,9 +939,9 @@ describe('LLMO Bulk Unpublish Functions', () => {
       expect(mockTracingFetch.callCount).to.equal(4);
     });
 
-    it('should return early when HLX_ADMIN_TOKEN is not set in bulkUnpublishPaths', async () => {
+    it('should return early when HLX_ONBOARDING_TOKEN is not set in bulkUnpublishPaths', async () => {
       const mockTracingFetch = sinon.stub();
-      const envWithoutToken = { HLX_ADMIN_TOKEN: undefined };
+      const envWithoutToken = { HLX_ONBOARDING_TOKEN: undefined };
 
       // Mock bulk status job start - will fail due to no token
       // But for this test, we want to reach bulkUnpublishPaths with empty token
@@ -968,7 +967,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
 
       // Verify warning was logged (covers lines 319-321 pattern)
       // The function checks for token early, preventing further execution
-      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
       expect(mockTracingFetch.called).to.be.false;
     });
 
@@ -1037,8 +1036,8 @@ describe('LLMO Bulk Unpublish Functions', () => {
   });
 
   describe('pollJobStatus - unit tests', () => {
-    it('should return null when HLX_ADMIN_TOKEN is not set (direct unit test for lines 258-260)', async () => {
-      const envWithoutToken = { HLX_ADMIN_TOKEN: undefined };
+    it('should return null when HLX_ONBOARDING_TOKEN is not set (direct unit test for lines 258-260)', async () => {
+      const envWithoutToken = { HLX_ONBOARDING_TOKEN: undefined };
 
       const { pollJobStatus } = await import('../../../src/controllers/llmo/llmo-onboarding.js');
 
@@ -1048,7 +1047,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
       expect(result).to.be.null;
 
       // Verify warning was logged
-      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     });
   });
 
@@ -1071,14 +1070,14 @@ describe('LLMO Bulk Unpublish Functions', () => {
       expect(mockLog.debug).to.have.been.calledWith('No paths to unpublish');
     });
 
-    it('should return early when HLX_ADMIN_TOKEN is not set (direct unit test for lines 319-321)', async () => {
-      const envWithoutToken = { HLX_ADMIN_TOKEN: undefined };
+    it('should return early when HLX_ONBOARDING_TOKEN is not set (direct unit test for lines 319-321)', async () => {
+      const envWithoutToken = { HLX_ONBOARDING_TOKEN: undefined };
       const { bulkUnpublishPaths } = await import('../../../src/controllers/llmo/llmo-onboarding.js');
 
       await bulkUnpublishPaths(['/test/path.json'], 'dev/test-com', envWithoutToken, mockLog);
 
       // Verify warning was logged (covers lines 319-321)
-      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+      expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ONBOARDING_TOKEN is not set');
     });
   });
 

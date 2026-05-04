@@ -311,6 +311,9 @@ sites-resolve:
                       $ref: './schemas.yaml#/Organization'
                     site:
                       $ref: './schemas.yaml#/Site'
+                    isSummitPlgEnabled:
+                      type: boolean
+                      description: Whether the summit-plg audit is enabled for the resolved site
               example:
                 data:
                   organization:
@@ -324,6 +327,7 @@ sites-resolve:
                     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
                     deliveryType: 'aem_edge'
                     isLive: true
+                  isSummitPlgEnabled: true
       '400':
         description: Bad request - missing required parameters or invalid input
         headers:

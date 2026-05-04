@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -37,8 +35,6 @@ describe('Sentiment Controller', () => {
     'createTopics',
     'updateTopic',
     'deleteTopic',
-    'addSubPrompts',
-    'removeSubPrompts',
     'linkAudits',
     'unlinkAudits',
     'listGuidelines',
@@ -54,7 +50,6 @@ describe('Sentiment Controller', () => {
     getTopicId: () => data.topicId || topicUUID,
     getName: () => data.name || 'Test Topic',
     getDescription: () => data.description,
-    getSubPrompts: () => data.subPrompts || [],
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
     getUpdatedAt: () => data.updatedAt || '2026-01-01T00:00:00Z',
@@ -62,11 +57,8 @@ describe('Sentiment Controller', () => {
     getUpdatedBy: () => data.updatedBy || 'system',
     setName: sandbox.stub(),
     setDescription: sandbox.stub(),
-    setSubPrompts: sandbox.stub(),
     setEnabled: sandbox.stub(),
     setUpdatedBy: sandbox.stub(),
-    addSubPrompt: sandbox.stub(),
-    removeSubPrompt: sandbox.stub(),
     save: sandbox.stub().resolvesThis(),
     remove: sandbox.stub().resolves(),
   });
@@ -355,18 +347,6 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(201);
     });
 
-    it('creates topics with non-array subPrompts defaulting to empty array', async () => {
-      context.data = [{ name: 'New Topic', subPrompts: 'not-an-array' }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-    });
-
-    it('creates topics with array subPrompts', async () => {
-      context.data = [{ name: 'New Topic', subPrompts: ['prompt1', 'prompt2'] }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-    });
-
     it('uses profile.name when email is not available', async () => {
       const authInfoWithNameOnly = new AuthInfo()
         .withType('jwt')
@@ -398,6 +378,44 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(201);
       const body = await result.json();
       expect(body.failures).to.have.lengthOf(1);
+    });
+
+    it('rejects duplicate topic names that already exist for the site', async () => {
+      context.data = [{ name: 'Topic 1' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('A topic with this name already exists for this site');
+      expect(body.metadata.success).to.equal(0);
+    });
+
+    it('rejects duplicate topic names case-insensitively', async () => {
+      context.data = [{ name: 'TOPIC 1' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('A topic with this name already exists for this site');
+    });
+
+    it('rejects duplicate topic names within the same batch', async () => {
+      context.data = [{ name: 'Brand New Topic' }, { name: 'Brand New Topic' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('Duplicate topic name within the same request');
+    });
+
+    it('handles null data from allBySiteId when checking duplicates', async () => {
+      mockDataAccess.SentimentTopic.allBySiteId.resolves({ data: null, cursor: null });
+      context.data = [{ name: 'New Topic' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.metadata.success).to.equal(1);
     });
   });
 
@@ -462,12 +480,6 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('updates topic subPrompts', async () => {
-      context.data = { subPrompts: ['prompt1', 'prompt2'] };
-      const result = await sentimentController.updateTopic(context);
-      expect(result.status).to.equal(200);
-    });
-
     it('returns forbidden if user does not have access', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
       context.data = { name: 'Updated' };
@@ -527,156 +539,6 @@ describe('Sentiment Controller', () => {
       mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
       const result = await sentimentController.deleteTopic(context);
       expect(result.status).to.equal(500);
-    });
-  });
-
-  describe('addSubPrompts', () => {
-    beforeEach(() => {
-      context.params.topicId = topicUUID;
-    });
-
-    it('returns bad request for invalid siteId', async () => {
-      context.params.siteId = 'invalid';
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing prompts', async () => {
-      context.data = {};
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request when context.data is undefined', async () => {
-      context.data = undefined;
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns not found if site does not exist', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('handles error gracefully', async () => {
-      context.data = { prompts: ['prompt1'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(500);
-    });
-
-    it('adds prompts successfully', async () => {
-      context.data = { prompts: ['prompt1', 'prompt2'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(200);
-    });
-
-    it('handles topic with null subPrompts', async () => {
-      const topicWithNullPrompts = {
-        getSiteId: () => siteId,
-        getTopicId: () => topicUUID,
-        getName: () => 'Test Topic',
-        getDescription: () => undefined,
-        getSubPrompts: () => null,
-        getEnabled: () => true,
-        getCreatedAt: () => '2026-01-01T00:00:00Z',
-        getUpdatedAt: () => '2026-01-01T00:00:00Z',
-        getCreatedBy: () => 'system',
-        getUpdatedBy: () => 'system',
-        setUpdatedBy: sandbox.stub(),
-        addSubPrompt: sandbox.stub(),
-        save: sandbox.stub().resolvesThis(),
-      };
-      mockDataAccess.SentimentTopic.findById.resolves(topicWithNullPrompts);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(200);
-    });
-
-    it('returns forbidden if user does not have access', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(403);
-    });
-  });
-
-  describe('removeSubPrompts', () => {
-    beforeEach(() => {
-      context.params.topicId = topicUUID;
-    });
-
-    it('returns bad request for invalid siteId', async () => {
-      context.params.siteId = 'invalid';
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing prompts', async () => {
-      context.data = {};
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request when context.data is undefined', async () => {
-      context.data = undefined;
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns not found if site does not exist', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('handles error gracefully', async () => {
-      context.data = { prompts: ['prompt1'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(500);
-    });
-
-    it('removes prompts successfully', async () => {
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(200);
-    });
-
-    it('returns forbidden if user does not have access', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(403);
     });
   });
 

@@ -14,8 +14,8 @@
  * Immutable baseline sentiment topics for IT tests.
  * All under SITE_1 (accessible).
  *
- * - TOPIC_1: enabled, 2 subPrompts
- * - TOPIC_2: enabled, 0 subPrompts
+ * - TOPIC_1: enabled, 2 sub_prompts
+ * - TOPIC_2: enabled, 0 sub_prompts
  * - TOPIC_3: disabled
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)

@@ -71,7 +71,7 @@ topics-list:
       
       - Maximum 100 topics per request
       - Returns per-item success/failure information
-      - Not idempotent: duplicate names create separate entries
+      - Duplicate topic names within a site are rejected as per-item failures
       - Partial success possible: some items may succeed while others fail
     operationId: createSentimentTopics
     requestBody:
@@ -148,7 +148,7 @@ topic-by-id:
     summary: Update a topic
     description: |
       Updates a sentiment topic. Only provided fields are updated.
-      Note: subPrompts array is replaced entirely, not merged.
+      Note: urls array is replaced entirely, not merged.
     operationId: updateSentimentTopic
     requestBody:
       required: true
@@ -194,113 +194,6 @@ topic-by-id:
                 message:
                   type: string
                   example: Topic deleted successfully
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '403':
-        $ref: './responses.yaml#/403'
-      '404':
-        $ref: './responses.yaml#/404'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - api_key: [ ]
-
-topic-prompts:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-    - name: topicId
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
-      description: Topic identifier
-  post:
-    tags:
-      - site
-      - sentiment
-    summary: Add sub-prompts to a topic
-    description: Adds one or more sub-prompts to an existing topic.
-    operationId: addTopicSubPrompts
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            required:
-              - prompts
-            properties:
-              prompts:
-                type: array
-                items:
-                  type: string
-                description: Array of sub-prompts to add
-    responses:
-      '200':
-        description: Sub-prompts added successfully
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/SentimentTopic'
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '403':
-        $ref: './responses.yaml#/403'
-      '404':
-        $ref: './responses.yaml#/404'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - api_key: [ ]
-
-topic-prompts-remove:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-    - name: topicId
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
-      description: Topic identifier
-  post:
-    tags:
-      - site
-      - sentiment
-    summary: Remove sub-prompts from a topic
-    description: |
-      Removes one or more sub-prompts from an existing topic.
-      
-      **Note:** This endpoint uses POST instead of DELETE because the operation requires
-      a request body to identify resources, and the body-data middleware does not parse
-      DELETE request bodies. See [ADR-001](../../docs/decisions/001-bulk-delete-via-post.md).
-    operationId: removeTopicSubPrompts
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            required:
-              - prompts
-            properties:
-              prompts:
-                type: array
-                items:
-                  type: string
-                description: Array of sub-prompts to remove
-    responses:
-      '200':
-        description: Sub-prompts removed successfully
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/SentimentTopic'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -535,7 +428,7 @@ guideline-audits:
     summary: Link audit types to a guideline
     description: |
       Adds audit type associations to a guideline.
-      Valid audit types: wikipedia-analysis, reddit-analysis, youtube-analysis, etc.
+      Valid audit types: wikipedia-analysis, reddit-analysis, youtube-analysis, cited-analysis, etc.
     operationId: linkGuidelineAudits
     requestBody:
       required: true

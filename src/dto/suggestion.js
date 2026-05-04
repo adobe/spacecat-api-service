@@ -20,6 +20,12 @@ import { Suggestion } from '@adobe/spacecat-shared-data-access';
 export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
+ * Valid skip reasons when a suggestion is marked as SKIPPED.
+ * @type {string[]}
+ */
+export const SUGGESTION_SKIP_REASONS = Object.values(Suggestion.SKIP_REASONS);
+
+/**
  * Extracts minimal data fields from suggestion data using schema-driven projection.
  * Uses Suggestion.getProjection() from spacecat-shared-data-access.
  *
@@ -28,7 +34,9 @@ export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
  * @returns {object|null} Object with only relevant fields, or null if no data.
  */
 const extractMinimalData = (data, opportunityType) => {
-  if (!data) return null;
+  if (!data) {
+    return null;
+  }
 
   // Get schema-driven projection configuration
   const projection = Suggestion.getProjection(opportunityType, 'minimal');
@@ -65,6 +73,16 @@ export const SuggestionDto = {
     const data = suggestion.getData();
     const opportunityType = opportunity?.getType() || null;
 
+    const skipReason = suggestion.getSkipReason?.();
+    const skipDetail = suggestion.getSkipDetail?.();
+    const skipFields = {};
+    if (skipReason != null) {
+      skipFields.skipReason = skipReason;
+    }
+    if (skipDetail != null) {
+      skipFields.skipDetail = skipDetail;
+    }
+
     // Minimal view: id, status, timestamps, and URL-related data fields
     if (view === 'minimal') {
       const minimalData = extractMinimalData(data, opportunityType);
@@ -84,6 +102,7 @@ export const SuggestionDto = {
         id: suggestion.getId(),
         status: suggestion.getStatus(),
         ...(minimalData && { data: minimalData }),
+        ...skipFields,
         opportunityId: suggestion.getOpportunityId(),
         type: suggestion.getType(),
         rank: suggestion.getRank(),
@@ -101,6 +120,7 @@ export const SuggestionDto = {
       type: suggestion.getType(),
       rank: suggestion.getRank(),
       status: suggestion.getStatus(),
+      ...skipFields,
       data: {
         ...data,
         ...(aggregationKey && { aggregationKey }),

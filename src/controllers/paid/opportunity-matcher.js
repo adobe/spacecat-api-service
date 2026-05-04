@@ -43,10 +43,14 @@ function isValidOpportunity(opportunityData) {
   } = opportunityData;
 
   // Must have description
-  if (!description) return false;
+  if (!description) {
+    return false;
+  }
 
   // Exclude reports
-  if (title?.toLowerCase().includes('report')) return false;
+  if (title?.toLowerCase().includes('report')) {
+    return false;
+  }
 
   // Must have positive value metric
   // CWV opportunities use projectedTrafficValue
@@ -59,7 +63,9 @@ function isValidOpportunity(opportunityData) {
   const hasValue = projectedTrafficValue > 0
     || projectedConversionValue > 0
     || projectedEngagementValue > 0;
-  if (!hasValue) return false;
+  if (!hasValue) {
+    return false;
+  }
 
   // Exclude forms opportunities with scrapedStatus = false
   // When forms aren't successfully scraped, they have incomplete data (null formDetails)
@@ -72,14 +78,18 @@ function isValidOpportunity(opportunityData) {
   ];
   if (formTypes.includes(type)) {
     // Filter out opportunities where scrapedStatus is false
-    if (data?.scrapedStatus === false) return false;
+    if (data?.scrapedStatus === false) {
+      return false;
+    }
 
     // Also check for null brief fields in guidance recommendations as a fallback
     const recommendations = original.getGuidance?.()?.recommendations;
     const hasInvalidBrief = recommendations?.some(
       (rec) => rec?.brief === null || rec?.brief === undefined,
     );
-    if (hasInvalidBrief) return false;
+    if (hasInvalidBrief) {
+      return false;
+    }
   }
 
   return true;
@@ -102,6 +112,7 @@ const OPPORTUNITY_TYPE_CONFIGS = [
       return lowerTags?.includes('paid media')
         || lowerTags?.includes('paid traffic')
         || type === 'consent-banner'
+        || type === 'no-cta-above-the-fold'
         || data?.opportunityType === 'no-cta-above-the-fold';
     },
   },
@@ -236,7 +247,7 @@ async function processOpportunityMatching(
   categorizedOpportunities,
   allPaidTrafficData,
   pageViewThreshold,
-  Suggestion,
+  suggestionsByOpportunityId,
   log,
 ) {
   // Collect all opportunities that need URL matching
@@ -283,11 +294,11 @@ async function processOpportunityMatching(
     }
   });
 
-  // Fetch ALL suggestions ONCE for all opportunities
-  const suggestionsPromises = allOpportunitiesNeedingMatching.map(
-    (oppData) => Suggestion.allByOpportunityIdAndStatus(oppData.id, 'NEW'),
-  );
-  const allSuggestions = await Promise.all(suggestionsPromises);
+  // Use the pre-fetched NEW suggestions from the cached map
+  const allSuggestions = allOpportunitiesNeedingMatching.map((oppData) => {
+    const cached = suggestionsByOpportunityId.get(oppData.id);
+    return cached?.newSuggestions || [];
+  });
 
   // Match opportunities with URLs and categorize results
   const matchResults = new Map();

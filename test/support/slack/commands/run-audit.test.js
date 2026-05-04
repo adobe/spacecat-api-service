@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
@@ -194,6 +192,232 @@ describe('RunAuditCommand', () => {
       ];
       await command.handleExecution(['site.com'], slackContext);
       expect(slackContext.say.calledWith(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.')).to.be.true;
+    });
+
+    it('allows prerender audits for a site with an attached CSV of page URLs', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO']));
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1\nhttps://valid.site/page-2\ninvalid-url');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering prerender audit for site https://site.com with 2 URLs.');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({
+        type: 'prerender',
+        siteId: '123',
+      });
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.deep.equal({
+        slackContext: {
+          channelId: undefined,
+          threadTs: undefined,
+        },
+        urls: [
+          'https://valid.site/page-1',
+          'https://valid.site/page-2',
+        ],
+      });
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
+    });
+
+    it('warns when a prerender CSV has no valid URLs', async () => {
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'invalid-url');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: No valid URLs found in the CSV file.')).to.be.true;
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('requires exactly one CSV file for prerender CSV audits', async () => {
+      slackContext.files = [
+        {
+          name: 'urls1.csv',
+          url_private: 'https://example.com/urls1.csv',
+        },
+        {
+          name: 'urls2.csv',
+          url_private: 'https://example.com/urls2.csv',
+        },
+      ];
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please provide only one CSV file.')).to.be.true;
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('requires a CSV file type for prerender CSV audits', async () => {
+      slackContext.files = [
+        {
+          name: 'urls.txt',
+          url_private: 'https://example.com/urls.txt',
+        },
+      ];
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please provide a CSV file.')).to.be.true;
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('shows site-not-found for prerender CSV audits when the site does not exist', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO']));
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering prerender audit for site https://site.com with 1 URLs.');
+      expect(slackContext.say.secondCall.args[0]).to.equal(':x: No site found with base URL \'https://site.com\'.');
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('blocks prerender CSV audits when the prerender handler is disabled', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getHandlers: sinon.stub().returns({ prerender: { productCodes: ['LLMO'] } }),
+      });
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.secondCall.args[0]).to.equal(':x: Will not audit site \'https://site.com\' because audits of type \'prerender\' are disabled for this site.');
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('blocks prerender CSV audits when no product codes are configured', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: sinon.stub().returns(true),
+        getHandlers: sinon.stub().returns({ prerender: {} }),
+      });
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.secondCall.args[0]).to.equal(':x: Will not audit site \'https://site.com\' because no product codes are configured for audit type \'prerender\'.');
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('blocks prerender CSV audits when no entitlement is found for any product code', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO', 'AEM']));
+      mockTierClient.createForSite.resolves({
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+      });
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.secondCall.args[0]).to.equal(':x: Will not audit site \'https://site.com\' because site is not entitled for this audit.');
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('continues prerender CSV entitlement checks when one product check throws but another succeeds', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO', 'AEM']));
+      mockTierClient.createForSite
+        .onFirstCall()
+        .rejects(new Error('tier down'))
+        .onSecondCall()
+        .resolves({
+          checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-123' } }),
+        });
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(context.log.error).to.have.been.calledWithMatch('Failed to check entitlement for product code LLMO:');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 1 URLs.');
+    });
+
+    it('posts an error when prerender CSV audit setup throws after CSV parsing', async () => {
+      dataAccessStub.Site.findByBaseURL.rejects(new Error('config exploded'));
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://example.com/urls.csv',
+        },
+      ];
+      nock('https://example.com')
+        .get('/urls.csv')
+        .reply(200, 'https://valid.site/page-1');
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      expect(slackContext.say.secondCall.args[0]).to.equal(':nuclear-warning: Oops! Something went wrong: config exploded');
+      expect(sqsStub.sendMessage.called).to.be.false;
     });
 
     it('handles multiple CSV files', async () => {

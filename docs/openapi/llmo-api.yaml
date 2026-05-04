@@ -653,6 +653,105 @@ llmo-global-sheet-data:
     security:
       - api_key: [ ]
 
+llmo-agentic-traffic-global:
+  get:
+    tags:
+      - llmo
+    summary: List global weekly agentic traffic totals
+    description: |
+      Returns weekly aggregate global agentic traffic rows from mysticat `agentic_traffic_global`,
+      ordered by newest `(year, week)` first.
+
+      Query parameters:
+      - `year`: optional 4-digit year filter
+      - `week`: optional ISO week filter (`1-53`)
+      - `limit`: optional max rows to return (`1-520`, defaults to `52`)
+
+      Human access requires either admin access or membership in an organization with LLMO access.
+      S2S consumers may call this endpoint when granted the mapped route capability.
+    operationId: getLlmoAgenticTrafficGlobal
+    parameters:
+      - name: year
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 2000
+          maximum: 9999
+      - name: week
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 53
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 520
+    responses:
+      '200':
+        description: Weekly global agentic traffic rows
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficGlobalWeekList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Create or update a weekly global agentic traffic row
+    description: |
+      Idempotently upserts a weekly aggregate row in mysticat `agentic_traffic_global`
+      using the unique `(year, week)` key.
+
+      If the week already exists, `hits` and `updatedBy` are updated in place.
+      Human access is admin-only. S2S consumers may call this endpoint when granted the mapped route capability.
+    operationId: postLlmoAgenticTrafficGlobal
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/AgenticTrafficGlobalWeekUpsert'
+    responses:
+      '200':
+        description: Upserted weekly global agentic traffic row
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficGlobalWeek'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
 llmo-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -770,6 +869,11 @@ llmo-onboard:
                 type: string
                 description: The brand name for the site
                 example: "Example Brand"
+              temp-onboarding:
+                type: boolean
+                description: |
+                  When true, skips updating helix-query.yaml in the project-elmo-ui-data GitHub repo
+                  (temporary onboarding; default is false).
             required:
               - domain
               - brandName
@@ -808,6 +912,56 @@ llmo-onboard:
                   format: uuid
                   description: The created or existing site ID
                   example: "987fcdeb-51a2-43d1-9f12-345678901234"
+                detectedCdn:
+                  type:
+                    - string
+                    - 'null'
+                  enum:
+                    - aem-cs-fastly
+                    - commerce-fastly
+                    - byocdn-fastly
+                    - byocdn-akamai
+                    - byocdn-cloudfront
+                    - byocdn-cloudflare
+                    - byocdn-imperva
+                    - byocdn-other
+                    - ams-cloudfront
+                    - ams-frontdoor
+                  description: |
+                    CDN provider detected during onboarding. The enum is the
+                    canonical `CDN_TYPES` vocabulary shared with the radio
+                    selector UI (see
+                    `src/controllers/llmo/llmo-utils.js#CDN_TYPES`), so the
+                    value can drive the UI auto-select directly.
+
+                    Emitted by the detector today (7 of the 10 tokens):
+                      - `aem-cs-fastly` / `commerce-fastly` — Adobe-managed
+                        CDNs identified by the DNS fast-path.
+                      - `byocdn-fastly` / `byocdn-akamai` /
+                        `byocdn-cloudflare` / `byocdn-imperva` — direct
+                        BYOCDN matches from the multi-signal probe (HTTP
+                        headers, CNAME chain, ASN, PTR).
+                      - `byocdn-other` — catch-all. Emitted when Phase 1 +
+                        Phase 2 both run cleanly and no specific signature
+                        matches, OR when the probe identifies a third-party
+                        CDN (CloudFront, Azure Front Door / Azure CDN,
+                        Vercel, Netlify, Bunny, Sucuri, Alibaba, etc.) that
+                        LLMO does not model as a first-class BYOCDN.
+                        CloudFront and Azure Front Door land here today
+                        because the detector cannot disambiguate AMS vs BYO
+                        tenancy from network signals alone.
+
+                    Reserved for future detector revisions (not emitted
+                    today):
+                      - `byocdn-cloudfront`, `ams-cloudfront`,
+                        `ams-frontdoor` — will replace the `byocdn-other`
+                        collapse above once AMS-aware signatures ship;
+                        listed here so consumers don't need a schema bump
+                        at that point.
+
+                    `null` — at least one probe was inconclusive (DNS or
+                    HTTP failure), so the UI auto-select stays neutral.
+                  example: "aem-cs-fastly"
                 status:
                   type: string
                   enum: ["initiated", "in_progress", "completed", "failed"]
@@ -1337,6 +1491,154 @@ llmo-rationale:
     security:
       - api_key: [ ]
 
+llmo-brand-claims:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: model
+      in: query
+      required: false
+      description: AI model name to retrieve brand claims for. If omitted, returns the default model's data.
+      schema:
+        type: string
+        example: 'gpt-4.1'
+  get:
+    tags:
+      - llmo
+    summary: Get brand claims presigned URL
+    description: |
+      Returns a presigned S3 URL for downloading brand claims data for a specific site.
+      The data files are `.json.gz` compressed and can be very large (100MB+ uncompressed),
+      so this endpoint returns a presigned URL rather than the data directly.
+
+      The optional `model` query parameter selects which AI model's data to retrieve.
+      If omitted, the default model's data file is returned.
+
+      S3 key convention:
+      - Default model: `brand_claims/llmo/{siteId}/data.json.gz`
+      - Specific model: `brand_claims/llmo/{siteId}/{model}.json.gz`
+    operationId: getBrandClaims
+    responses:
+      '200':
+        description: Presigned URL for brand claims data generated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site ID
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                model:
+                  type: string
+                  description: The AI model name, or 'default' if no model was specified
+                  example: 'gpt-4.1'
+                presignedUrl:
+                  type: string
+                  format: uri
+                  description: Presigned S3 URL to download the brand claims data file
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp when the presigned URL expires
+                  example: '2025-06-15T12:00:00.000Z'
+              required:
+                - siteId
+                - model
+                - presignedUrl
+                - expiresAt
+      '400':
+        description: Bad request - S3 not configured or other error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'S3 bucket is not configured for this environment'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Brand claims data not found for the specified site
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Brand claims data not found for site 9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-opportunity-workspace-demo-brand-presence:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get presigned URL for summit demo brand presence fixture
+    description: |
+      Returns a presigned S3 URL for downloading the summit demo brand presence fixture.
+      Used by the Opportunity Workspace summit demo to load static performance data
+      without bundling it in the UI.
+
+      S3 key: `workspace/llmo/demo/summit-demo-brand-presence.json`
+    operationId: getDemoBrandPresence
+    responses:
+      '200':
+        description: Presigned URL generated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PresignedUrlResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-opportunity-workspace-demo-recommendations:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get presigned URL for summit demo recommendations fixture
+    description: |
+      Returns a presigned S3 URL for downloading the summit demo recommendations fixture.
+      Used by the Opportunity Workspace summit demo to load static recommendations data
+      without bundling it in the UI.
+
+      S3 key: `workspace/llmo/demo/summit-demo-recommendations.json`
+    operationId: getDemoRecommendations
+    responses:
+      '200':
+        description: Presigned URL generated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PresignedUrlResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-edge-optimize-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -1413,6 +1715,58 @@ site-llmo-edge-optimize-config:
               additionalProperties: true
               description: The metaconfig object stored in S3
       '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-llmo-edge-optimize-config-stage:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: createOrUpdateStageEdgeConfig
+    summary: Add staging domains for edge optimize (stage environment support)
+    description: |
+      Adds one or more staging domains for the specified LLMO prod site. For each domain:
+
+      - Validates that the apex of the staging domain matches the apex of the prod site base URL.
+      - Creates or finds a stage site in Spacecat in the same organization.
+      - Creates edge optimize metaconfig for the stage site with prerender enabled for the whole domain.
+      - Persists the staging domain to site ID mapping in the prod site's edgeOptimizeConfig.
+
+      Returns the complete metaconfig for each stage site in an array (stageConfigs). Each item includes domain, siteId, and all metaconfig properties (apiKeys, enabled, prerender, etc.).
+
+      The staging domains list can be retrieved via GET /sites/{siteId} under config.edgeOptimizeConfig.stagingDomains.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/StageDomainsRequest'
+    responses:
+      '200':
+        description: Staging domains added successfully. Returns an array of stage configs; each element is the staging domain plus full metaconfig (siteId, apiKeys, enabled, enhancements, patches, prerender) for that stage site.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StageConfigsResponse'
+      '400':
+        description: Invalid request (e.g. empty stagingDomains, apex mismatch)
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
@@ -1602,6 +1956,14 @@ llmo-strategy:
       This operation completely overwrites the existing strategy with the provided payload.
       The payload can be any valid JSON object - no schema validation is performed.
       The strategy is stored in S3 at `workspace/llmo/{siteId}/strategy.json`.
+
+      When status changes are detected (either at the strategy level or at the
+      opportunity level), email notifications are sent to the relevant recipients.
+      Initial strategy creation does not trigger strategy status emails. Assignment
+      notifications go to the assignee only (not the strategy owner). Notification
+      delivery is awaited, and a summary of sent/failed/skipped counts is included
+      in the response. Notification failures do not cause the endpoint to return
+      an error.
     operationId: saveStrategy
     requestBody:
       required: true
@@ -1623,14 +1985,64 @@ llmo-strategy:
                   type: string
                   description: The S3 object version ID of the saved strategy
                   example: "abc123def456"
+                notifications:
+                  type: object
+                  description: Summary of notification delivery
+                  properties:
+                    sent:
+                      type: integer
+                      description: Number of emails sent successfully
+                    failed:
+                      type: integer
+                      description: Number of emails that failed to send
+                    skipped:
+                      type: integer
+                      description: Number of changes skipped (e.g. no valid recipients)
+                    changes:
+                      type: integer
+                      description: Number of status changes detected
               required:
                 - version
+                - notifications
       '400':
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-opportunities-reviewed:
+  put:
+    tags:
+      - llmo
+    summary: Mark opportunities as reviewed
+    description: |
+      Marks the LLMO opportunities for a site as reviewed by adding an
+      `opportunitiesReviewed` tag to the site's LLMO configuration.
+      The tag is idempotent — calling this endpoint multiple times will not
+      create duplicate tags.
+    operationId: markOpportunitiesReviewed
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: Opportunities marked as reviewed successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              example:
+                - opportunitiesReviewed
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
     security:
       - api_key: [ ]
 
@@ -1686,3 +2098,1051 @@ llmo-edge-optimize-status:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-agentic-traffic-url-brand-presence:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Brand presence citation detail for a URL
+    description: |
+      Returns brand presence citation data for a specific URL from the Postgres-backed
+      mysticat data service (`rpc_brand_presence_url_detail`). Used by the Agentic
+      Traffic PG dashboard URL details dialog.
+
+      Finds all brand presence LLM executions where the given URL was cited as a source,
+      then aggregates citation stats, a weekly trend, and the top 50 prompts that cited it.
+
+      URL matching tries four variants (with/without `https://`, with/without trailing slash)
+      so the caller can pass the URL exactly as it appears in the agentic traffic table.
+
+      Query parameters:
+      - `url` (**required**): full URL to look up, e.g. `https://www.adobe.com/express/page`
+      - `startDate`: date range start (`YYYY-MM-DD`); defaults to 28 days ago
+      - `endDate`: date range end (`YYYY-MM-DD`); defaults to today
+      - `platform`: UI platform code (e.g. `openai`, `perplexity`); omit for all models
+    operationId: getAgenticTrafficUrlBrandPresence
+    parameters:
+      - name: url
+        in: query
+        required: true
+        description: Full URL to look up brand presence citations for
+        schema:
+          type: string
+          example: 'https://www.adobe.com/express/create/poster'
+      - name: startDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+          example: '2026-01-01'
+      - name: endDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+          example: '2026-03-31'
+      - name: platform
+        in: query
+        required: false
+        description: UI platform code mapped to the DB model value
+        schema:
+          type: string
+          example: 'openai'
+    responses:
+      '200':
+        description: Brand presence citation detail for the URL
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficUrlBrandPresence'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+# ── Common parameter fragment (referenced inline below) ───────────────────────
+# All site-scoped agentic traffic endpoints share these optional query filters.
+# siteId path param is declared at path level via parameters.yaml#/siteId.
+
+llmo-agentic-traffic-kpis:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Aggregated agentic traffic KPIs for a site
+    description: |
+      Returns a single row of aggregated KPI metrics for the site's agentic traffic
+      over the requested date range. Queries `rpc_agentic_traffic_kpis`.
+    operationId: getAgenticTrafficKpis
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Aggregated KPI metrics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficKpis'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-kpis-trend:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic KPI time series for a site
+    description: |
+      Returns KPI metrics per time period (day / week / month) over the requested
+      date range. Queries `rpc_agentic_traffic_kpis_trend`.
+    operationId: getAgenticTrafficKpisTrend
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: interval
+        in: query
+        description: Bucketing interval; defaults to `week`
+        schema:
+          type: string
+          enum: [day, week, month]
+          default: week
+    responses:
+      '200':
+        description: KPI time series
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficKpisTrend'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-region:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by region
+    description: Queries `rpc_agentic_traffic_by_region`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByRegion
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by region
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByRegion'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-category:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by category
+    description: Queries `rpc_agentic_traffic_by_category`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByCategory
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by category
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByCategory'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-page-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by page type
+    description: Queries `rpc_agentic_traffic_by_page_type`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByPageType
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by page type
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByPageType'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by HTTP status code
+    description: Queries `rpc_agentic_traffic_by_status`. Returns rows ordered by total hits descending.
+    operationId: getAgenticTrafficByStatus
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Traffic by HTTP status code
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByStatus'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-user-agent:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Agentic traffic grouped by page type and agent type
+    description: |
+      Queries `rpc_agentic_traffic_by_user_agent`. Powers the User Agent Analysis table.
+      Note: `userAgent` filter is not supported by this RPC.
+    operationId: getAgenticTrafficByUserAgent
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: sortBy
+        in: query
+        schema:
+          type: string
+          enum: [page_type, agent_type, unique_agents, total_hits]
+          default: total_hits
+      - name: sortOrder
+        in: query
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+    responses:
+      '200':
+        description: Traffic by page type and agent type
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByUserAgent'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-by-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Per-URL agentic traffic performance analysis (paginated)
+    description: |
+      Queries `rpc_agentic_traffic_by_url`. Powers the URL Performance table with
+      infinite-scroll pagination. Returns a page of `pageSize` rows (default 50, max 500)
+      plus `totalCount` for pagination context.
+      Supports server-side substring search via `urlPathSearch`.
+    operationId: getAgenticTrafficByUrl
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: pageSize
+        in: query
+        description: Number of rows per page (default 50, max 500)
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: pageOffset
+        in: query
+        description: Zero-based row offset for pagination
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: urlPathSearch
+        in: query
+        description: Substring filter applied to `url_path` server-side
+        schema:
+          type: string
+          example: '/express/create'
+      - name: sortBy
+        in: query
+        schema:
+          type: string
+          enum: [host, url_path, unique_agents, success_rate, avg_ttfb_ms, category_name, total_hits]
+          default: total_hits
+      - name: sortOrder
+        in: query
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+    responses:
+      '200':
+        description: Paginated per-URL performance analysis
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficByUrl'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-filter-dimensions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Distinct filter dimension values for agentic traffic
+    description: |
+      Returns cascading distinct filter values for the agentic traffic dashboard dropdowns.
+      Queries `rpc_agentic_traffic_distinct_filters` — each dimension list respects the
+      other active filters but ignores its own to avoid self-limiting dropdowns.
+    operationId: getAgenticTrafficFilterDimensions
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+    responses:
+      '200':
+        description: Distinct filter values
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficFilterDimensions'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+llmo-agentic-traffic-weeks:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Available ISO weeks for a site's agentic traffic data
+    description: |
+      Returns the list of ISO weeks for which the site has agentic traffic data,
+      derived from the min/max `traffic_date` in `agentic_traffic`. Used to populate
+      the Custom Weeks date picker in the dashboard.
+    operationId: getAgenticTrafficWeeks
+    responses:
+      '200':
+        description: Available ISO weeks
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficWeeks'
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+# ── URL Inspector endpoints ────────────────────────────────────────────────────
+# Org-scoped, site-filtered via query param. Queries mysticat PostgreSQL RPCs.
+
+url-inspector-common-params: &url-inspector-common-params
+  - name: spaceCatId
+    in: path
+    required: true
+    description: Organization (SpaceCat) ID
+    schema:
+      type: string
+      format: uuid
+  - name: brandId
+    in: path
+    required: true
+    description: |
+      Brand UUID to filter by, or the literal string `all` to aggregate across
+      all brands for the given organization. The routing layer registers both
+      `/brands/{brandId}` (UUID) and the concrete `/brands/all/...` path; both
+      resolve to the same operation and this single path parameter
+      (LLMO-4525 review — architect finding).
+    schema:
+      type: string
+      oneOf:
+        - type: string
+          format: uuid
+        - type: string
+          enum: [all]
+
+url-inspector-common-query-params: &url-inspector-common-query-params
+  - name: siteId
+    in: query
+    required: true
+    description: Site ID to scope the query
+    schema:
+      type: string
+      format: uuid
+  - name: startDate
+    in: query
+    required: false
+    schema:
+      type: string
+      format: date
+      example: '2026-01-01'
+  - name: endDate
+    in: query
+    required: false
+    schema:
+      type: string
+      format: date
+      example: '2026-03-31'
+  - name: platform
+    in: query
+    required: false
+    description: |
+      LLM platform / model identifier. Omit (or pass one of the `shouldApplyFilter`
+      "no filter" sentinels) to return data for ALL models. Accepts either the
+      canonical `llmo_execution_model` enum value OR a known alias mapped by
+      `MODEL_QUERY_ALIASES` — e.g. `openai` → `chatgpt-paid`.
+      LLMO-4525 review note: do NOT pin `enum` here because aliases are
+      deliberately accepted. The canonical values (enum mapped by `validateModel`)
+      are listed below for reference.
+    schema:
+      type: string
+      x-canonical-values:
+        - chatgpt-free
+        - chatgpt-paid
+        - perplexity
+        - google-ai-mode
+        - google-ai-overview
+        - gemini
+        - copilot
+      x-known-aliases:
+        openai: chatgpt-paid
+  - name: categoryId
+    in: query
+    required: false
+    description: Category ID or name to filter by
+    schema:
+      type: string
+  - name: regionCode
+    in: query
+    required: false
+    description: Region code to filter by (e.g. US, DE)
+    schema:
+      type: string
+
+url-inspector-stats:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: URL Inspector aggregate stats and weekly sparklines
+    description: |
+      Returns aggregate citation statistics and weekly trend breakdown for the site.
+      Site ID is required via query parameter. Platform is optional — when absent,
+      no model filter is applied.
+    operationId: getUrlInspectorStats
+    parameters: *url-inspector-common-query-params
+    responses:
+      '200':
+        description: Aggregate stats and weekly trends
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorStats'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+url-inspector-owned-urls:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Paginated owned URL citations
+    description: |
+      Returns paginated per-URL citation aggregates with JSONB weekly arrays
+      for week-over-week trends. Owned URLs are those belonging to the site.
+    operationId: getUrlInspectorOwnedUrls
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        schema: { type: string }
+      - name: regionCode
+        in: query
+        required: false
+        schema: { type: string }
+      - name: page
+        in: query
+        required: false
+        description: Zero-based page number
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: pageSize
+        in: query
+        required: false
+        description: Items per page (max 1000)
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 1000
+    responses:
+      '200':
+        description: Paginated owned URL citations
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorOwnedUrls'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+url-inspector-trending-urls:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Paginated non-owned (trending) URL citations
+    description: |
+      Returns paginated non-owned URL citations with per-prompt breakdown.
+      The RPC returns flat rows (one per URL+prompt); this endpoint groups
+      them by URL and calculates totalCitations per URL.
+      Rows with null URLs are filtered out.
+    operationId: getUrlInspectorTrendingUrls
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        schema: { type: string }
+      - name: regionCode
+        in: query
+        required: false
+        schema: { type: string }
+      - name: channel
+        in: query
+        required: false
+        description: Content channel filter (e.g. earned, social)
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: pageSize
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 1000
+    responses:
+      '200':
+        description: Paginated trending URL citations grouped by URL
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorTrendingUrls'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+url-inspector-cited-domains:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Paginated domain-level citation aggregations
+    description: |
+      Returns paginated domain-level citation aggregations with dominant
+      content type per domain.
+    operationId: getUrlInspectorCitedDomains
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        schema: { type: string }
+      - name: regionCode
+        in: query
+        required: false
+        schema: { type: string }
+      - name: channel
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: pageSize
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 1000
+    responses:
+      '200':
+        description: Paginated cited domain aggregations
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorCitedDomains'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+url-inspector-domain-urls:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Paginated URLs within a cited domain (Phase 2 drilldown)
+    description: |
+      Returns paginated URLs within a specific domain. Used as a Phase 2 drilldown
+      from the cited-domains view. The underlying RPC does not accept brand, category,
+      or region filters — domain-level drilldown is already scoped by hostname.
+    operationId: getUrlInspectorDomainUrls
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: hostname
+        in: query
+        required: true
+        description: Domain hostname to drill into
+        schema:
+          type: string
+          example: 'competitor.com'
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        schema: { type: string }
+      - name: channel
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: pageSize
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 1000
+    responses:
+      '200':
+        description: Paginated URLs within the domain
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorDomainUrls'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+url-inspector-url-prompts:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Prompt breakdown for a specific URL (Phase 3 drilldown)
+    description: |
+      Returns the prompts that cited a specific URL. Used as a Phase 3 drilldown
+      from the domain-urls view. The underlying RPC does not accept brand, category,
+      or region filters — URL-level drilldown is scoped by url_id.
+    operationId: getUrlInspectorUrlPrompts
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: urlId
+        in: query
+        required: true
+        description: URL identifier from the domain-urls response
+        schema:
+          type: string
+          example: '44444444-4444-4444-4444-444444444444'
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        schema: { type: string }
+    responses:
+      '200':
+        description: Prompt breakdown for the URL
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorUrlPrompts'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+url-inspector-filter-dimensions:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Filter dimensions for the URL Inspector PG dashboard
+    description: |
+      Returns the distinct categories, regions, and content types present in
+      `url_inspector_domain_stats` for the given site and date range. Used to
+      populate the top-of-page Category, Region, and Channel filter dropdowns.
+
+      Brand scoping is driven by the `brandId` path segment:
+        * `brands/{brandId}` → filter by that specific brand
+        * `brands/all`       → aggregate across all brands (p_brand_id = NULL)
+
+      LLMO-4525 review note: this endpoint is intentionally NOT filtered by
+      category / region / channel — it defines the option universe that those
+      dropdowns choose from.
+    operationId: getUrlInspectorFilterDimensions
+    parameters:
+      - name: siteId
+        in: query
+        required: true
+        description: Site ID to scope the query. Required — RPC is site-scoped.
+        schema: { type: string, format: uuid }
+      - name: startDate
+        in: query
+        required: false
+        description: |
+          ISO date (inclusive) lower bound. Defaults to 28 days before today
+          when omitted.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: |
+          ISO date (inclusive) upper bound. Defaults to today when omitted.
+        schema: { type: string, format: date }
+      - name: platform
+        in: query
+        required: false
+        description: |
+          LLM platform / model identifier. Omit to return dimensions across
+          all models. Accepts canonical `llmo_execution_model` values OR
+          known aliases (e.g. `openai` → `chatgpt-paid`).
+        schema:
+          type: string
+          x-canonical-values:
+            - chatgpt-free
+            - chatgpt-paid
+            - perplexity
+            - google-ai-mode
+            - google-ai-overview
+            - gemini
+            - copilot
+          x-known-aliases:
+            openai: chatgpt-paid
+    responses:
+      '200':
+        description: Filter dimensions for the URL Inspector page
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlInspectorFilterDimensions'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - api_key: []
+      - ims_key: []
+
+llmo-agentic-traffic-movers:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Top and bottom agentic traffic URL movers
+    description: |
+      Returns URLs with the largest hit changes between the oldest and newest traffic
+      dates in the selected range. Queries `rpc_agentic_traffic_movers`.
+      Returns up to `limit` rows each for `direction=up` (top movers) and
+      `direction=down` (bottom movers). Requires at least 2 distinct dates in the range.
+    operationId: getAgenticTrafficMovers
+    parameters:
+      - { name: startDate, in: query, schema: { type: string, format: date } }
+      - { name: endDate, in: query, schema: { type: string, format: date } }
+      - { name: platform, in: query, schema: { type: string } }
+      - { name: categoryName, in: query, schema: { type: string } }
+      - { name: agentType, in: query, schema: { type: string } }
+      - { name: userAgent, in: query, schema: { type: string } }
+      - { name: contentType, in: query, schema: { type: string } }
+      - name: limit
+        in: query
+        description: Max rows per direction (default 5, max 50)
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+    responses:
+      '200':
+        description: Top and bottom URL movers
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficMovers'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []

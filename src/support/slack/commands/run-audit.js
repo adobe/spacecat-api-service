@@ -26,6 +26,7 @@ import { triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
+const PRERENDER = 'prerender';
 const ALL_AUDITS = [
   'apex',
   'cwv',
@@ -47,6 +48,8 @@ const ALL_AUDITS = [
   'prerender',
   'summarization',
   'faqs',
+  'related-urls',
+  'money-pages',
 ];
 
 /**
@@ -99,6 +102,31 @@ function RunAuditCommand(context) {
 
   const { dataAccess, log } = context;
   const { Configuration, Site } = dataAccess;
+
+  const parsePrerenderUrlsFromCsv = async (files, botToken, say) => {
+    if (files.length > 1) {
+      await say(':warning: Please provide only one CSV file.');
+      return null;
+    }
+
+    const file = files[0];
+    if (!file.name.endsWith('.csv')) {
+      await say(':warning: Please provide a CSV file.');
+      return null;
+    }
+
+    const csvData = await parseCSV(file, botToken, 1);
+    const urls = csvData
+      .map((row) => row[0])
+      .filter((url) => isValidUrl(url));
+
+    if (urls.length === 0) {
+      await say(':warning: No valid URLs found in the CSV file.');
+      return null;
+    }
+
+    return urls;
+  };
 
   /**
    * Runs an audit for the given site.
@@ -169,6 +197,55 @@ function RunAuditCommand(context) {
     }
   };
 
+  const runPrerenderAuditForUrls = async (baseURL, auditType, auditData, urls, slackContext) => {
+    const { say } = slackContext;
+
+    try {
+      const site = await Site.findByBaseURL(baseURL);
+      const configuration = await Configuration.findLatest();
+
+      if (!isNonEmptyObject(site)) {
+        await postSiteNotFoundMessage(say, baseURL);
+        return;
+      }
+
+      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
+        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
+        return;
+      }
+
+      const handler = configuration.getHandlers()?.[auditType];
+      if (!isNonEmptyArray(handler?.productCodes)) {
+        await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
+        return;
+      }
+
+      const entitlementChecks = await Promise.all(
+        handler.productCodes.map(async (productCode) => {
+          try {
+            const tierClient = await TierClient.createForSite(context, site, productCode);
+            const tierResult = await tierClient.checkValidEntitlement();
+            return tierResult.entitlement || false;
+          } catch (error) {
+            context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
+            return false;
+          }
+        }),
+      );
+
+      if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+        await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
+        return;
+      }
+
+      await triggerAuditForSite(site, auditType, auditData, slackContext, context, { urls });
+      await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
+    } catch (error) {
+      log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
+      await postErrorMessage(say, error);
+    }
+  };
+
   /**
    * Validates input, fetches the site
    * and triggers a new audit for the given site
@@ -220,14 +297,25 @@ function RunAuditCommand(context) {
         return;
       }
 
-      if (hasValidBaseURL && hasFiles) {
+      const auditType = auditTypeInputArg || LHS_MOBILE;
+      const isPrerenderCsvRun = hasValidBaseURL && hasFiles && auditType === PRERENDER;
+
+      if (hasValidBaseURL && hasFiles && !isPrerenderCsvRun) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
 
-      if (hasFiles) {
+      if (isPrerenderCsvRun) {
+        const urls = await parsePrerenderUrlsFromCsv(files, botToken, say);
+        if (!urls) {
+          return;
+        }
+
+        await say(`:adobe-run: Triggering ${auditType} audit for site ${baseURL} with ${urls.length} URLs.`);
+        await runPrerenderAuditForUrls(baseURL, auditType, auditDataInputArg, urls, slackContext);
+      } else if (hasFiles) {
         const [, auditTypeInput, auditData] = ['', baseURLInputArg, auditTypeInputArg];
-        const auditType = auditTypeInput || LHS_MOBILE;
+        const csvAuditType = auditTypeInput || LHS_MOBILE;
 
         if (files.length > 1) {
           await say(':warning: Please provide only one CSV file.');
@@ -242,20 +330,19 @@ function RunAuditCommand(context) {
 
         const csvData = await parseCSV(file, botToken);
 
-        say(`:adobe-run: Triggering ${auditType} audit for ${csvData.length} sites.`);
+        say(`:adobe-run: Triggering ${csvAuditType} audit for ${csvData.length} sites.`);
 
         await Promise.all(
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             if (isValidUrl(csvBaseURL)) {
-              await runAuditForSite(csvBaseURL, auditType, auditData, slackContext);
+              await runAuditForSite(csvBaseURL, csvAuditType, auditData, slackContext);
             } else {
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
             }
           }),
         );
       } else if (hasValidBaseURL) {
-        const auditType = auditTypeInputArg || LHS_MOBILE;
         say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
         await runAuditForSite(baseURL, auditType, auditDataInputArg, slackContext);
       }
