@@ -346,15 +346,17 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('https://example.com');
   });
 
-  it('reports no-audit when the audit has no dailyAgenticExport field', async () => {
-    const audit = makeAudit({ someOtherField: true });
+  it('reports audit-without-export when the audit has no daily agentic export details', async () => {
+    const audit = { getAuditResult: sinon.stub().returns(null) };
     context.dataAccess.Site.all.resolves([makeSite('site-2', 'https://other.com', audit)]);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('No audit record found');
+    expect(output).to.include('Audit without export details: *1*');
+    expect(output).to.include('Audit found without daily agentic export details');
+    expect(output).to.not.include('No audit record found');
     expect(output).to.include('https://other.com');
   });
 
@@ -510,6 +512,64 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Dashboard-ready');
     expect(output).to.not.include('different date');
     expect(output).to.not.include('batch-newer');
+  });
+
+  it('uses dailyAgenticExports array entries to find the requested traffic date', async () => {
+    const weeklyAudit = makeAudit({
+      dailyAgenticExports: [
+        {
+          success: true,
+          trafficDate: '2026-04-21',
+          batchId: 'batch-array-old',
+          rowCount: 20,
+        },
+        {
+          success: true,
+          trafficDate: '2026-04-22',
+          batchId: 'batch-array-requested',
+          rowCount: 120,
+          classificationCount: 12,
+        },
+      ],
+    });
+    const site = makeSite('site-array-date', 'https://array-date.com', null);
+    context.dataAccess.Site.all.resolves([site]);
+    context.dataAccess.Audit = {
+      allBySiteIdAndAuditType: sinon.stub().resolves([weeklyAudit]),
+    };
+
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-array-requested',
+          scopePrefix: 'site-array-date',
+          outputCount: 132,
+        }),
+        makeProjectionRow({
+          correlationId: 'batch-array-requested:daily-refresh',
+          handlerName: DAILY_REFRESH_HANDLER,
+          scopePrefix: 'site-array-date',
+          outputCount: 40,
+          metadata: { dailyRefreshDates: ['2026-04-22'] },
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
+
+    expect(chain.in.firstCall.args[1]).to.deep.equal([
+      'batch-array-requested',
+      'batch-array-requested:daily-refresh',
+      'batch-array-requested:weekly-refresh',
+    ]);
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Dashboard-ready: *1*');
+    expect(output).to.include('120 traffic rows / 12 classifications');
+    expect(output).to.not.include('batch-array-old');
+    expect(output).to.not.include('No audit record found');
   });
 
   it('falls back to the newest fetched audit when no fetched audit matches the requested traffic date', async () => {

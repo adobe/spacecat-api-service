@@ -106,8 +106,17 @@ function getAuditResult(audit) {
   return audit?.getAuditResult?.() || audit?.auditResult;
 }
 
-function getDailyAgenticExport(audit) {
-  return getAuditResult(audit)?.dailyAgenticExport;
+function getDailyAgenticExports(audit) {
+  const auditResult = getAuditResult(audit) || {};
+  return [
+    auditResult.dailyAgenticExport,
+    ...(Array.isArray(auditResult.dailyAgenticExports) ? auditResult.dailyAgenticExports : []),
+  ].filter(Boolean);
+}
+
+function getDailyAgenticExport(audit, dateStr) {
+  const exports = getDailyAgenticExports(audit);
+  return exports.find((dailyExport) => dailyExport?.trafficDate === dateStr) || exports[0];
 }
 
 async function getAuditForTrafficDate(site, auditCollection, auditType, dateStr) {
@@ -117,9 +126,9 @@ async function getAuditForTrafficDate(site, auditCollection, auditType, dateStr)
       order: 'desc',
       limit: AUDIT_LOOKBACK_LIMIT,
     });
-    const matchingAudit = (audits || []).find(
-      (audit) => getDailyAgenticExport(audit)?.trafficDate === dateStr,
-    );
+    const matchingAudit = (audits || []).find((audit) => (
+      getDailyAgenticExports(audit).some((dailyExport) => dailyExport?.trafficDate === dateStr)
+    ));
     return matchingAudit || audits?.[0] || null;
   }
 
@@ -399,7 +408,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
               return { siteId, baseURL, status: 'no-audit' };
             }
 
-            const dailyExport = getDailyAgenticExport(latestAudit);
+            const dailyExport = getDailyAgenticExport(latestAudit, dateStr);
 
             if (!dailyExport) {
               return { siteId, baseURL, status: 'no-export' };
@@ -525,6 +534,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const importPending = [];
       const skipped = [];
       const noAudit = [];
+      const noExport = [];
       const failed = [];
       const dateMismatch = [];
       const missingBatchId = [];
@@ -625,6 +635,8 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           missingBatchId.push(s);
         } else if (s.status === 'export-failed' || s.status === 'error') {
           failed.push(s);
+        } else if (s.status === 'no-export') {
+          noExport.push(s);
         } else {
           noAudit.push(s);
         }
@@ -650,6 +662,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         `:skip: Skipped: *${skipped.length}*`,
         `:x: Failed: *${failed.length}*`,
         `:warning: Missing batchId: *${missingBatchId.length}*`,
+        `:mag: Audit without export details: *${noExport.length}*`,
         `Sites checked: *${enabledSites.length}*`,
       ];
       if (projectionCheckStatus === 'ok') {
@@ -678,6 +691,9 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         }
         if (missingBatchId.length > 0) {
           lines.push(`${missingBatchId.length} site(s) exported without a batchId. Action: check audit-worker dailyAgenticExport output before DB status can be correlated.`);
+        }
+        if (noExport.length > 0) {
+          lines.push(`${noExport.length} site(s) have a \`${CDN_LOGS_REPORT_AUDIT}\` audit, but no dailyAgenticExport/dailyAgenticExports entry to read. Action: check the audit result payload for ${dateStr}.`);
         }
         if (unknown.length > 0) {
           lines.push(`${unknown.length} site(s) have unknown DB status because projection_audit could not be checked. Action: fix/check PostgREST before trusting pending counts.`);
@@ -807,6 +823,14 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           `• \`${s.baseURL}\``,
           `  siteId: \`${s.siteId}\``,
           `  export: ${formatExportCounts(s)}`,
+        ].join('\n'), renderOmittedSites, fullLines);
+      }
+
+      if (noExport.length > 0) {
+        addDetailHeader('*Audit found without daily agentic export details:*');
+        appendLimitedDetails(lines, noExport, (s) => [
+          `• \`${s.baseURL}\``,
+          `  siteId: \`${s.siteId}\``,
         ].join('\n'), renderOmittedSites, fullLines);
       }
 
