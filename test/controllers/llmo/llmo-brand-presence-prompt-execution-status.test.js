@@ -73,6 +73,22 @@ describe('createPromptExecutionStatusHandler', () => {
     expect(res.status).to.equal(400);
   });
 
+  it('accepts promptIds passed as an array', async () => {
+    const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+    const ctx = makeContext({ promptIds: [PROMPT_ID_1, PROMPT_ID_2] });
+    ctx.dataAccess.Site.postgrestService = makeClient([]);
+    const res = await handler(ctx);
+    expect(res.status).to.equal(200);
+  });
+
+  it('returns 400 when promptIds is a non-string non-array value', async () => {
+    const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+    const ctx = makeContext({ promptIds: 12345 });
+    ctx.dataAccess.Site.postgrestService = makeClient();
+    const res = await handler(ctx);
+    expect(res.status).to.equal(400);
+  });
+
   it('returns aggregated items for valid promptIds', async () => {
     const rows = [
       {
