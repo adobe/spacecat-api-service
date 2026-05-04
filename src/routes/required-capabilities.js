@@ -33,6 +33,8 @@ export const INTERNAL_ROUTES = [
   // Hooks - use hookSecret in path for auth, not JWT
   'POST /hooks/site-detection/cdn/:hookSecret',
   'POST /hooks/site-detection/rum/:hookSecret',
+  // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
+  'POST /webhooks/github',
 
   // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
   'POST /preflight/jobs',
@@ -273,6 +275,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': 'brand:read',
@@ -516,6 +520,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
 
