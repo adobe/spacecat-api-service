@@ -1190,18 +1190,6 @@ function SitesController(ctx, log, env) {
     let organization;
     let site;
 
-    // Builds a 200 response from an org + site (used by ASO_PLG_EXCLUDED_ORGS bypass branches).
-    const okWithSite = async (org, targetSite) => {
-      const isSummitPlgEnabled = await getIsSummitPlgEnabled(targetSite, context);
-      return ok({
-        data: {
-          organization: OrganizationDto.toJSON(org),
-          site: SiteDto.toJSON(targetSite),
-          isSummitPlgEnabled,
-        },
-      });
-    };
-
     try {
       if (hasText(siteId) && isValidUUID(siteId)) {
         site = await Site.findById(siteId);
@@ -1220,43 +1208,41 @@ function SitesController(ctx, log, env) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
               const callerIsInternal = isInternalOrg(orgId, context.env);
+              const failureDetails = { productCode, siteId, organizationId: orgId };
 
+              // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS), remap PLG-wizard-triggering
+              // resolveStatuses ('no_entitlement_for_product', 'aso_pre_onboard') to
+              // 'site_not_enrolled' so the UI shows "No site onboarded" instead of the
+              // PLG onboarding wizard. Internal orgs aren't customers and shouldn't be
+              // prompted to onboard. site_not_enrolled itself is left unchanged.
               if (!entitlement) {
                 if (callerIsInternal) {
-                  log.info(`[resolveSite] Bypass no_entitlement_for_product → 200 for internal org ${orgId}, site ${siteId}`);
-                  return okWithSite(organization, site);
+                  log.info(`[resolveSite] Internal org ${orgId}: remapping no_entitlement_for_product → site_not_enrolled`);
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
                 }
-                return resolveFailure(
-                  'No site found for the provided parameters',
-                  'no_entitlement_for_product',
-                  { productCode, siteId, organizationId: orgId },
-                );
+                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
               }
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
                 if (callerIsInternal) {
-                  log.info(`[resolveSite] Bypass aso_pre_onboard → 200 for internal org ${orgId}, site ${siteId}`);
-                  return okWithSite(organization, site);
+                  log.info(`[resolveSite] Internal org ${orgId}: remapping aso_pre_onboard → site_not_enrolled`);
+                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
                 }
-                return resolveFailure(
-                  'No site found for the provided parameters',
-                  'aso_pre_onboard',
-                  { productCode, siteId, organizationId: orgId },
-                );
+                return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
               }
 
-              // site_not_enrolled is intentionally NOT bypassed for internal orgs:
-              // visible-tier sites without enrollment should show "No site onboarded",
-              // not be silently surfaced as fully-resolved.
               if (!enrollments?.length) {
-                return resolveFailure(
-                  'No site found for the provided parameters',
-                  'site_not_enrolled',
-                  { productCode, siteId, organizationId: orgId },
-                );
+                return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
               }
 
-              return okWithSite(organization, site);
+              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+              return ok({
+                data: {
+                  organization: OrganizationDto.toJSON(organization),
+                  site: SiteDto.toJSON(site),
+                  isSummitPlgEnabled,
+                },
+              });
             }
           }
         }
@@ -1271,18 +1257,14 @@ function SitesController(ctx, log, env) {
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
             || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
-            return okWithSite(organization, enrolledSite);
-          }
-
-          // Fall-through here is a generic 404 (no resolveStatus) → UI shows PLG wizard.
-          // For internal orgs in ASO_PLG_EXCLUDED_ORGS, bypass that wizard by returning a site.
-          if (isInternalOrg(organizationId, context.env)) {
-            const targetSite = enrolledSite
-              ?? (await Site.allByOrganizationId(organizationId))?.[0];
-            if (targetSite) {
-              log.info(`[resolveSite] Bypass organizationId-path 404 → 200 for internal org ${organizationId}`);
-              return okWithSite(organization, targetSite);
-            }
+            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
+            return ok({
+              data: {
+                organization: OrganizationDto.toJSON(organization),
+                site: SiteDto.toJSON(enrolledSite),
+                isSummitPlgEnabled,
+              },
+            });
           }
         }
       } else if (hasText(imsOrg)) {
@@ -1294,18 +1276,14 @@ function SitesController(ctx, log, env) {
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
             || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
-            return okWithSite(organization, enrolledSite);
-          }
-
-          // Same bypass as the organizationId path, here for callers in an internal org.
-          const callerOrgId = organization.getId();
-          if (isInternalOrg(callerOrgId, context.env)) {
-            const targetSite = enrolledSite
-              ?? (await Site.allByOrganizationId(callerOrgId))?.[0];
-            if (targetSite) {
-              log.info(`[resolveSite] Bypass imsOrg-path 404 → 200 for internal org ${callerOrgId}`);
-              return okWithSite(organization, targetSite);
-            }
+            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
+            return ok({
+              data: {
+                organization: OrganizationDto.toJSON(organization),
+                site: SiteDto.toJSON(enrolledSite),
+                isSummitPlgEnabled,
+              },
+            });
           }
         }
       }

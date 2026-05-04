@@ -5140,22 +5140,21 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('No site found for the provided parameters');
     });
 
-    describe('ASO_PLG_EXCLUDED_ORGS bypass (internal / demo orgs)', () => {
+    describe('ASO_PLG_EXCLUDED_ORGS — internal/demo org remapping (siteId path)', () => {
       // testOrganizations[0]: Spacecat UUID '9033554c-...', imsOrgId '1234567890...@AdobeOrg'
-      // testSites[0] belongs to testOrganizations[0] — i.e. lives in the internal org
+      // testSites[0] belongs to testOrganizations[0] (the internal org)
       const INTERNAL_ORG_SPACECAT_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
       const INTERNAL_ORG_IMS_ID = '1234567890ABCDEF12345678@AdobeOrg';
 
       beforeEach(() => {
-        // ASO_PLG_EXCLUDED_ORGS holds internal Spacecat org UUIDs, not IMS org IDs
         context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: INTERNAL_ORG_SPACECAT_ID };
       });
 
       // ────────────────────────────────────────────────────────────────────────────
-      // siteId path
+      // Internal orgs: PLG-wizard triggers are remapped to site_not_enrolled
       // ────────────────────────────────────────────────────────────────────────────
 
-      it('siteId path: bypasses aso_pre_onboard for internal org → 200', async () => {
+      it('internal org with PRE_ONBOARD tier → 404 site_not_enrolled (remapped from aso_pre_onboard)', async () => {
         context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5166,12 +5165,12 @@ describe('Sites Controller', () => {
 
         const response = await sitesController.resolveSite(context);
 
-        expect(response.status).to.equal(200);
+        expect(response.status).to.equal(404);
         const body = await response.json();
-        expect(body.data).to.have.property('site');
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
-      it('siteId path: bypasses no_entitlement_for_product for internal org → 200', async () => {
+      it('internal org with no entitlement → 404 site_not_enrolled (remapped from no_entitlement_for_product)', async () => {
         context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5179,10 +5178,12 @@ describe('Sites Controller', () => {
 
         const response = await sitesController.resolveSite(context);
 
-        expect(response.status).to.equal(200);
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
-      it('siteId path: does NOT bypass site_not_enrolled for internal org (visible tier, no enrollment) → 404', async () => {
+      it('internal org with visible tier but no enrollment → 404 site_not_enrolled (unchanged)', async () => {
         context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
         mockDataAccess.Site.findById.resolves(testSites[0]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5198,70 +5199,92 @@ describe('Sites Controller', () => {
         expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
-      // ────────────────────────────────────────────────────────────────────────────
-      // organizationId path
-      // ────────────────────────────────────────────────────────────────────────────
-
-      it('organizationId path: bypasses fall-through 404 for internal org → 200 with allByOrganizationId', async () => {
-        context.data = { organizationId: INTERNAL_ORG_SPACECAT_ID };
+      it('internal org with visible tier + enrollment → 200 (normal success path, no remap)', async () => {
+        context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
-        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
-        mockDataAccess.Site.allByOrganizationId.resolves([testSites[0]]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [{ getId: () => 'enr-1' }],
+        });
 
         const response = await sitesController.resolveSite(context);
 
         expect(response.status).to.equal(200);
-        expect(mockDataAccess.Site.allByOrganizationId)
-          .to.have.been.calledWith(INTERNAL_ORG_SPACECAT_ID);
       });
 
-      it('organizationId path: 404 when internal org has no sites (bypass cannot find a site)', async () => {
+      // ────────────────────────────────────────────────────────────────────────────
+      // Customer orgs: existing resolveStatus values are preserved (NO remap)
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('customer org with PRE_ONBOARD → 404 aso_pre_onboard (unchanged, NOT remapped)', async () => {
+        // testOrganizations[3]: customer org, NOT in ASO_PLG_EXCLUDED_ORGS
+        context.data = { siteId: SITE_IDS[1], imsOrg: testOrganizations[3].getImsOrgId() };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      });
+
+      it('customer org with no entitlement → 404 no_entitlement_for_product (unchanged, NOT remapped)', async () => {
+        context.data = { siteId: SITE_IDS[1], imsOrg: testOrganizations[3].getImsOrgId() };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      });
+
+      // ────────────────────────────────────────────────────────────────────────────
+      // organizationId / imsOrg paths: no special handling (original flow preserved)
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('organizationId path for internal org: original flow → generic 404 (no resolveStatus)', async () => {
         context.data = { organizationId: INTERNAL_ORG_SPACECAT_ID };
         mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
         mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
-        mockDataAccess.Site.allByOrganizationId.resolves([]);
 
         const response = await sitesController.resolveSite(context);
 
         expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.be.undefined;
+        expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
 
-      // ────────────────────────────────────────────────────────────────────────────
-      // imsOrg path
-      // ────────────────────────────────────────────────────────────────────────────
-
-      it('imsOrg path: bypasses fall-through 404 for internal org → 200 with allByOrganizationId', async () => {
+      it('imsOrg path for internal org (no siteId): original flow → generic 404 (no resolveStatus)', async () => {
         context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
         mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
         mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
-        mockDataAccess.Site.allByOrganizationId.resolves([testSites[0]]);
-
-        const response = await sitesController.resolveSite(context);
-
-        expect(response.status).to.equal(200);
-        expect(mockDataAccess.Site.allByOrganizationId)
-          .to.have.been.calledWith(INTERNAL_ORG_SPACECAT_ID);
-      });
-
-      it('imsOrg path: 404 when internal org has no sites (bypass cannot find a site)', async () => {
-        context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
-        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
-        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
-        mockDataAccess.Site.allByOrganizationId.resolves([]);
 
         const response = await sitesController.resolveSite(context);
 
         expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.be.undefined;
+        expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
 
       // ────────────────────────────────────────────────────────────────────────────
-      // customer orgs (regression — existing behavior must be preserved)
+      // Edge cases (siteId fallthroughs) — original flow preserved
       // ────────────────────────────────────────────────────────────────────────────
 
-      it('customer org via organizationId: still falls through to 404 (no bypass)', async () => {
-        const CUSTOMER_ORG_ID = testOrganizations[1].getId(); // NOT in excluded list
-        context.data = { organizationId: CUSTOMER_ORG_ID };
-        mockDataAccess.Organization.findById.resolves(testOrganizations[1]);
+      it('wrong / non-existent siteId for internal user → original flow (404 via imsOrg path)', async () => {
+        context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(null); // site doesn't exist
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
         mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
 
         const response = await sitesController.resolveSite(context);
@@ -5270,10 +5293,12 @@ describe('Sites Controller', () => {
         expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
 
-      it('customer org via imsOrg: still falls through to 404 (no bypass)', async () => {
-        const CUSTOMER_ORG_IMS = testOrganizations[2].getImsOrgId(); // NOT in excluded list
-        context.data = { imsOrg: CUSTOMER_ORG_IMS };
-        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+      it('siteId belongs to a different org for internal user → original flow (404)', async () => {
+        // testSites[1] belongs to testOrganizations[3], not the internal org
+        context.data = { siteId: SITE_IDS[1], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        // siteId path nulls out the organization due to IMS mismatch, falls to imsOrg path
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
         mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
 
         const response = await sitesController.resolveSite(context);
