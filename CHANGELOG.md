@@ -1,3 +1,38 @@
+## [1.468.1](https://github.com/adobe/spacecat-api-service/compare/v1.468.0...v1.468.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2320](https://github.com/adobe/spacecat-api-service/issues/2320)) ([ebb203a](https://github.com/adobe/spacecat-api-service/commit/ebb203aab4c8cd9957399b31bfcde031fa2044e2))
+
+# [1.468.0](https://github.com/adobe/spacecat-api-service/compare/v1.467.0...v1.468.0) (2026-05-04)
+
+
+### Features
+
+* GitHub webhook handler (POST /webhooks/github) ([#2281](https://github.com/adobe/spacecat-api-service/issues/2281)) ([a525107](https://github.com/adobe/spacecat-api-service/commit/a525107d095e0f62d65b1347785b64bc199eeb59)), closes [#2255](https://github.com/adobe/spacecat-api-service/issues/2255) [adobe/spacecat-infrastructure#469](https://github.com/adobe/spacecat-infrastructure/issues/469) [adobe/spacecat-infrastructure#473](https://github.com/adobe/spacecat-infrastructure/issues/473)
+
+# [1.467.0](https://github.com/adobe/spacecat-api-service/compare/v1.466.1...v1.467.0) (2026-05-04)
+
+
+### Features
+
+* new endpoint to get prompt status ([#2311](https://github.com/adobe/spacecat-api-service/issues/2311)) ([6a0d566](https://github.com/adobe/spacecat-api-service/commit/6a0d566566a6d626ebf6c32508fb1647f64e3323))
+
+## [1.466.1](https://github.com/adobe/spacecat-api-service/compare/v1.466.0...v1.466.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.14.0 ([#2314](https://github.com/adobe/spacecat-api-service/issues/2314)) ([5c01b50](https://github.com/adobe/spacecat-api-service/commit/5c01b50b02c2d66d765ef4424deeaf417b853042))
+
+# [1.466.0](https://github.com/adobe/spacecat-api-service/compare/v1.465.0...v1.466.0) (2026-05-04)
+
+
+### Features
+
+* **llmo:** add edge-optimize connectivity probe endpoint ([#2232](https://github.com/adobe/spacecat-api-service/issues/2232)) ([f5a1a32](https://github.com/adobe/spacecat-api-service/commit/f5a1a32065b3782ef5fccf53291b7e8e98dd98f7))
+
 # [1.465.0](https://github.com/adobe/spacecat-api-service/compare/v1.464.2...v1.465.0) (2026-05-04)
 
 
