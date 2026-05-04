@@ -10,23 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-// Mirrors PlgOnboardingModel.STATUSES — stable DB enum values.
-export const STATUSES = {
-  IN_PROGRESS: 'IN_PROGRESS',
-  ONBOARDED: 'ONBOARDED',
-  PRE_ONBOARDING: 'PRE_ONBOARDING',
-  ERROR: 'ERROR',
-  WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-  WAITLISTED: 'WAITLISTED',
-  INACTIVE: 'INACTIVE',
-};
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
 
-// Mirrors PlgOnboardingModel.REVIEW_DECISIONS — stable DB enum values.
-export const REVIEW_DECISIONS = {
-  BYPASSED: 'BYPASSED',
-  UPHELD: 'UPHELD',
-};
+export const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 
-// Mirrors EntitlementModel.PRODUCT_CODES.ASO and TIERS.PLG.
-export const ASO_PRODUCT_CODE = 'aso_optimizer';
-export const ASO_TIER = 'PLG';
+export const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
+export const ASO_TIER = EntitlementModel.TIERS.PLG;

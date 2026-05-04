@@ -79,6 +79,7 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
  */
 export async function updateLaunchDarklyFlags(site, organization, context) {
   const { log, env } = context;
+  const LaunchDarklyCtor = context.LaunchDarklyClient || LaunchDarklyClient;
 
   const apiToken = env[LD_API_TOKEN_ENV_VAR];
   if (!apiToken) {
@@ -86,7 +87,7 @@ export async function updateLaunchDarklyFlags(site, organization, context) {
     return;
   }
 
-  const ldClient = new LaunchDarklyClient({ apiToken }, log);
+  const ldClient = new LaunchDarklyCtor({ apiToken }, log);
   const imsOrgId = organization?.getImsOrgId?.();
 
   if (!imsOrgId) {

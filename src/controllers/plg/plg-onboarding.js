@@ -23,6 +23,8 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import LaunchDarklyClient from '@adobe/spacecat-shared-launchdarkly-client';
 
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -34,12 +36,13 @@ import {
 } from '../llmo/llmo-onboarding.js';
 import {
   autoResolveAuthorUrl,
+  deriveProjectName,
   findDeliveryType,
+  queueDeliveryConfigWriter,
   resolveWwwUrl,
   updateCodeConfig,
-  queueDeliveryConfigWriter,
 } from '../../support/utils.js';
-import { loadProfileConfig } from '../../utils/slack/base.js';
+import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { STATUSES, REVIEW_DECISIONS } from './plg-onboarding/constants.js';
 import { performAsoPlgOnboarding } from './plg-onboarding/onboarding-flow.js';
@@ -57,12 +60,14 @@ import {
 import { getReviewerIdentity } from './plg-onboarding/internal-org.js';
 
 function withFlowDeps(context) {
-  return {
-    ...context,
+  // Keep request-context identity while giving extracted helpers the monolith's deps.
+  Object.assign(context, {
     badRequest,
     ok,
     Config,
     RUMAPIClient,
+    TierClient,
+    LaunchDarklyClient,
     composeBaseURL,
     detectBotBlocker,
     detectLocale,
@@ -72,13 +77,16 @@ function withFlowDeps(context) {
     enableImports,
     triggerAudits,
     autoResolveAuthorUrl,
+    deriveProjectName,
     findDeliveryType,
     resolveWwwUrl,
     updateCodeConfig,
     queueDeliveryConfigWriter,
     loadProfileConfig,
+    postSlackMessage,
     triggerBrandProfileAgent,
-  };
+  });
+  return context;
 }
 
 // ---------- GET /plg/sites helpers ----------
@@ -348,6 +356,7 @@ function PlgOnboardingController(ctx) {
    */
   const update = async (context) => {
     const { dataAccess: da, params, data } = context;
+    const flowContext = withFlowDeps(context);
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
@@ -402,11 +411,11 @@ function PlgOnboardingController(ctx) {
     // ONBOARDED: revoke ASO enrollments, mark WAITLISTED, persist review (no bypass / re-run)
     if (status === STATUSES.ONBOARDED) {
       try {
-        await revokeAsoSiteEnrollments(onboarding, context);
+        await revokeAsoSiteEnrollments(onboarding, flowContext);
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(justification);
         await onboarding.save();
-        await postPlgOnboardingNotification(onboarding, context);
+        await postPlgOnboardingNotification(onboarding, flowContext);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log.error(`Failed to waitlist onboarded PLG domain ${onboarding.getDomain()}: ${msg}`, err);
@@ -431,13 +440,13 @@ function PlgOnboardingController(ctx) {
         case REVIEW_REASONS.DOMAIN_ALREADY_ONBOARDED_IN_ORG:
           return await bypassDisplaceOnboarded({
             onboarding, reviewedBy, reviewedAt: reviewEntry.reviewedAt,
-          }, withFlowDeps(context));
+          }, flowContext);
         case REVIEW_REASONS.AEM_SITE_CHECK:
-          return await bypassAemSiteCheck({ onboarding, siteConfig }, withFlowDeps(context));
+          return await bypassAemSiteCheck({ onboarding, siteConfig }, flowContext);
         case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED:
           return await bypassDomainAlreadyAssigned(
             { onboarding, siteConfig },
-            withFlowDeps(context),
+            flowContext,
           );
         /* c8 ignore next 2 */
         default:

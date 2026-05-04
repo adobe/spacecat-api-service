@@ -30,7 +30,7 @@ export const PLG_CONFIG_HANDLERS = [
 export async function createOrFindProject(baseURL, organizationId, context) {
   const { dataAccess, log } = context;
   const { Project } = dataAccess;
-  const projectName = deriveProjectName(baseURL);
+  const projectName = (context.deriveProjectName || deriveProjectName)(baseURL);
 
   const existingProject = (
     await Project.allByOrganizationId(organizationId)

@@ -51,11 +51,12 @@ async function disableSummitPlgHandler(site, context) {
 // pre-reassignment).
 export async function ensureAsoEntitlement(site, organization, context) {
   const { log } = context;
+  const tierClient = context.TierClient || TierClient;
   const siteId = site.getId();
   const organizationId = organization.getId();
 
   // Step 1: ensure entitlement on the IMS-resolved organization (no site bound).
-  const orgClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
+  const orgClient = tierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
   let entitlement;
   try {
     ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));

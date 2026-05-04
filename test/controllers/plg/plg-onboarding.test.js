@@ -28,6 +28,7 @@ const TEST_ONBOARDING_ID = 'onboarding-uuid-1';
 const DEFAULT_ORG_ID = 'default-org-id';
 const DEMO_ORG_ID = '66331367-70e6-4a49-8445-4f6d9c265af9';
 const OTHER_CUSTOMER_ORG_ID = 'other-customer-org-id';
+const ASO_PRODUCT_CODE = 'ASO';
 
 describe('PlgOnboardingController', function describePlgOnboarding() {
   // esmock + extensive sinon stubs make individual tests slower than the 2000ms default.
@@ -365,7 +366,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         },
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
-            PRODUCT_CODES: { ASO: 'aso_optimizer' },
+            PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
             TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
           },
         },
@@ -578,7 +579,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
@@ -1552,7 +1553,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
@@ -1809,7 +1810,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
@@ -1919,7 +1920,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
@@ -2527,7 +2528,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns('aso_optimizer'), // matches mocked PRODUCT_CODES.ASO
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
 
@@ -2576,7 +2577,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
@@ -2617,7 +2618,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
-        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
@@ -2994,7 +2995,10 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
 
       mockDataAccess.Entitlement.allByOrganizationId.resolves([
-        { getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID), getProductCode: sandbox.stub().returns('aso_optimizer') },
+        {
+          getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
+          getProductCode: sandbox.stub().returns(ASO_PRODUCT_CODE),
+        },
       ]);
 
       // Simulate enrollment revocation failure on the first call (displacement),
@@ -4096,7 +4100,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
@@ -4589,7 +4593,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
-              PRODUCT_CODES: { ASO: 'aso_optimizer' },
+              PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE },
               TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
             },
           },
@@ -4681,7 +4685,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               Config: { toDynamoItem: sandbox.stub() },
             },
             '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-              Entitlement: { PRODUCT_CODES: { ASO: 'aso_optimizer' }, TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' } },
+              Entitlement: { PRODUCT_CODES: { ASO: ASO_PRODUCT_CODE }, TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' } },
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {
@@ -4806,7 +4810,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('ONBOARDED: revokes ASO enrollments, sets WAITLISTED, appends review', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-onboarded',
           remove: sandbox.stub().resolves(),
@@ -4846,7 +4850,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('ONBOARDED: disables summit-plg handler when revoking enrollment', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-onboarded',
           remove: sandbox.stub().resolves(),
@@ -4876,7 +4880,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('ONBOARDED: logs warning when disabling summit-plg handler fails', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-onboarded',
           remove: sandbox.stub().resolves(),
@@ -4936,7 +4940,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('ONBOARDED: logs warn and continues to WAITLISTED when ASO enrollment revocation fails', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-onboarded',
           remove: sandbox.stub().rejects(new Error('remove failed')),
@@ -5386,7 +5390,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
 
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: revokes ASO enrollments when old domain has a linked site', async () => {
-        const asoEntitlement = { getProductCode: () => 'aso_optimizer' };
+        const asoEntitlement = { getProductCode: () => ASO_PRODUCT_CODE };
         const mockEnrollment = {
           getId: () => 'enroll-1',
           remove: sandbox.stub().resolves(),
@@ -5528,7 +5532,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       it('BYPASS DOMAIN_ALREADY_ONBOARDED_IN_ORG: continues and logs warn when enrollment revocation throws', async () => {
         const failingEnrollment = {
           getId: () => 'enroll-fail',
-          getEntitlement: sandbox.stub().resolves({ getProductCode: () => 'aso_optimizer' }),
+          getEntitlement: sandbox.stub().resolves({ getProductCode: () => ASO_PRODUCT_CODE }),
           remove: sandbox.stub().rejects(new Error('DB error')),
         };
         const oldSite = createMockSite({ siteEnrollments: [failingEnrollment] });

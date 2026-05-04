@@ -57,6 +57,7 @@ const PLG_STATUS_NOTIFICATION_CONFIG = {
  */
 export async function postPlgOnboardingNotification(onboarding, context) {
   const { env, log } = context;
+  const sendSlackMessage = context.postSlackMessage || postSlackMessage;
   const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
   const token = env.SLACK_BOT_TOKEN;
 
@@ -121,7 +122,7 @@ export async function postPlgOnboardingNotification(onboarding, context) {
   }
 
   try {
-    await postSlackMessage(channelId, message, token);
+    await sendSlackMessage(channelId, message, token);
   } catch (slackError) {
     log.error(`Failed to post PLG onboarding notification to Slack: ${slackError.message}`);
   }
