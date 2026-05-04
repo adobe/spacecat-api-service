@@ -1,3 +1,10 @@
+# [1.466.0](https://github.com/adobe/spacecat-api-service/compare/v1.465.0...v1.466.0) (2026-05-04)
+
+
+### Features
+
+* **llmo:** add edge-optimize connectivity probe endpoint ([#2232](https://github.com/adobe/spacecat-api-service/issues/2232)) ([f5a1a32](https://github.com/adobe/spacecat-api-service/commit/f5a1a32065b3782ef5fccf53291b7e8e98dd98f7))
+
 # [1.465.0](https://github.com/adobe/spacecat-api-service/compare/v1.464.2...v1.465.0) (2026-05-04)
 
 
