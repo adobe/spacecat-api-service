@@ -267,8 +267,10 @@ export async function ensureInitialCustomerConfigV2({
  * @returns {string} The data folder name
  */
 export function generateDataFolder(baseURL, env = 'dev') {
-  const { hostname } = new URL(baseURL);
-  const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const url = new URL(baseURL);
+  const host = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const pathSuffix = url.pathname.replace(/^\/|\/$/g, '').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const dataFolderName = pathSuffix ? `${host}-${pathSuffix}` : host;
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 }
 
