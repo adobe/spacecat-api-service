@@ -1807,6 +1807,9 @@ export const onboardSingleSite = async (
       try {
         await latestConfiguration.save();
         log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+        await say(
+          `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
+        );
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
@@ -1899,7 +1902,8 @@ export const onboardSingleSite = async (
         organizationId,
         taskContext: {
           importTypes: importsEnabled || [],
-          // Not sent to task handler; audit disable only when scheduledRun enabled audits
+          // Not sent to task handler; audits are enabled in config only when scheduledRun is true,
+          // so no separate audit-disable list is needed here.
           auditTypes: [],
           scheduledRun,
           slackContext: {
