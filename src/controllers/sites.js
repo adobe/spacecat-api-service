@@ -1169,7 +1169,9 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} Resolved site and organization data response.
    */
   const resolveSite = async (context) => {
-    const { organizationId, imsOrg, siteId } = context.data;
+    const {
+      organizationId, imsOrg, siteId, callerImsOrg,
+    } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
     const productCode = pathInfo.headers[X_PRODUCT_HEADER];
@@ -1186,6 +1188,18 @@ function SitesController(ctx, log, env) {
       404,
       { 'x-error': message },
     );
+
+    // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
+    // independent of which org's data is being requested via organizationId/imsOrg.
+    // We translate it to a Spacecat UUID once, up front, so the per-path remap can
+    // decide whether the caller is an internal/demo org listed in ASO_PLG_EXCLUDED_ORGS.
+    let callerIsInternal = false;
+    if (hasText(callerImsOrg)) {
+      const callerOrg = await Organization.findByImsOrgId(callerImsOrg);
+      if (callerOrg) {
+        callerIsInternal = isInternalOrg(callerOrg.getId(), context.env);
+      }
+    }
 
     let organization;
     let site;
@@ -1207,7 +1221,6 @@ function SitesController(ctx, log, env) {
             if (organization && await accessControlUtil.hasAccess(organization)) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
-              const callerIsInternal = isInternalOrg(orgId, context.env);
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
               // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS), remap PLG-wizard-triggering
@@ -1217,7 +1230,7 @@ function SitesController(ctx, log, env) {
               // prompted to onboard. site_not_enrolled itself is left unchanged.
               if (!entitlement) {
                 if (callerIsInternal) {
-                  log.info(`[resolveSite] Internal org ${orgId}: remapping no_entitlement_for_product → site_not_enrolled`);
+                  log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
                   return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
                 }
                 return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
@@ -1225,7 +1238,7 @@ function SitesController(ctx, log, env) {
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
                 if (callerIsInternal) {
-                  log.info(`[resolveSite] Internal org ${orgId}: remapping aso_pre_onboard → site_not_enrolled`);
+                  log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping aso_pre_onboard → site_not_enrolled for siteId=${siteId}`);
                   return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
                 }
                 return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
