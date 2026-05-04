@@ -273,6 +273,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': 'brand:read',
@@ -516,6 +518,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
 
