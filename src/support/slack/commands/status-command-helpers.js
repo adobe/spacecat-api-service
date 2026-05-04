@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { sendFile } from '../../../utils/slack/base.js';
+
 export const DETAIL_ROW_LIMIT = 8;
 export const REPORT_CHUNK_LIMIT = 2800;
 export const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -102,18 +104,23 @@ function splitReportLine(line) {
   return parts;
 }
 
-export function appendLimitedDetails(lines, rows, renderRow, renderOmitted) {
-  const visibleRows = rows.slice(0, DETAIL_ROW_LIMIT);
-  for (const row of visibleRows) {
-    lines.push(renderRow(row));
+export function appendLimitedDetails(lines, rows, renderRow, renderOmitted, fullLines = null) {
+  const renderedRows = rows.map(renderRow);
+  const visibleRows = renderedRows.slice(0, DETAIL_ROW_LIMIT);
+  lines.push(...visibleRows);
+
+  if (fullLines && fullLines !== lines) {
+    fullLines.push(...renderedRows);
   }
+
   const omitted = rows.length - visibleRows.length;
   if (omitted > 0) {
     lines.push(renderOmitted(omitted));
   }
+  return omitted;
 }
 
-export async function postReport(slackContext, lines) {
+async function sayChunkedReport(slackContext, lines) {
   const { say } = slackContext;
   const fullText = lines.join('\n');
   if (fullText.length <= REPORT_CHUNK_LIMIT) {
@@ -134,5 +141,40 @@ export async function postReport(slackContext, lines) {
   }
   if (chunk) {
     await say(chunk);
+  }
+}
+
+export async function postReport(
+  slackContext,
+  lines,
+  filename = 'status-report',
+  title = 'Status Report',
+  initialComment = 'Full status report',
+  fullLines = lines,
+) {
+  await sayChunkedReport(slackContext, lines);
+
+  const fullText = fullLines.join('\n');
+  if (fullLines === lines || fullText === lines.join('\n')) {
+    return;
+  }
+
+  const canUpload = slackContext.client?.files?.getUploadURLExternal
+    && slackContext.client?.files?.completeUploadExternal
+    && slackContext.channelId;
+  if (!canUpload) {
+    return;
+  }
+
+  try {
+    await sendFile(
+      slackContext,
+      Buffer.from(fullText, 'utf8'),
+      `${filename}.txt`,
+      title,
+      initialComment,
+    );
+  } catch (e) {
+    await slackContext.say(`:warning: Full report upload failed: ${e.message}`);
   }
 }

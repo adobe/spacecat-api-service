@@ -366,8 +366,14 @@ function CheckCdnLogsStatusCommand(context) {
         }
       }
 
+      const fullLines = [...lines];
+      const addDetailHeader = (header) => {
+        lines.push('', header);
+        fullLines.push('', header);
+      };
+
       if (incomplete.length > 0) {
-        lines.push('', '*Sites with missing aggregate hours:*');
+        addDetailHeader('*Sites with missing aggregate hours:*');
         appendLimitedDetails(lines, incomplete, (r) => {
           const providerName = r.cdnProvider === r.cdnFamily
             ? r.cdnProvider
@@ -387,16 +393,16 @@ function CheckCdnLogsStatusCommand(context) {
             `  missing: [${missingStr}]`,
             `  present: ${r.presentCount}/${r.expectedCount}`,
           ].join('\n');
-        }, renderOmittedSites);
+        }, renderOmittedSites, fullLines);
       }
 
       if (errors.length > 0) {
-        lines.push('', '*Sites with errors:*');
+        addDetailHeader('*Sites with errors:*');
         appendLimitedDetails(lines, errors, (r) => [
           `• \`${r.baseURL}\``,
           `  siteId: \`${r.siteId}\``,
           `  error: ${r.error}`,
-        ].join('\n'), renderOmittedSites);
+        ].join('\n'), renderOmittedSites, fullLines);
       }
 
       await postReport(
@@ -405,6 +411,7 @@ function CheckCdnLogsStatusCommand(context) {
         `cdn-logs-status-${dateStr}`,
         `CDN Logs Status ${dateStr}`,
         `CDN logs aggregate status report for ${dateStr}`,
+        fullLines,
       );
     } catch (error) {
       log.error('Error in check-cdn-logs-status:', error);

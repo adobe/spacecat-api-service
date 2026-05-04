@@ -531,8 +531,14 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         lines.push('_Projector refresh enqueue appears disabled via MYSTICAT_AGENTIC_REFRESH_ENABLED=false._');
       }
 
+      const fullLines = [...lines];
+      const addDetailHeader = (header) => {
+        lines.push('', header);
+        fullLines.push('', header);
+      };
+
       if (dashboardReady.length > 0) {
-        lines.push('', '*Dashboard-ready (raw import + required serving refresh complete):*');
+        addDetailHeader('*Dashboard-ready (raw import + required serving refresh complete):*');
         appendLimitedDetails(lines, dashboardReady, (s) => {
           const daily = refreshEnabled
             ? ` — daily refresh: ${formatRefreshStage(s.dailyRefreshProjection)}`
@@ -548,11 +554,11 @@ function CheckAgenticTrafficDbStatusCommand(context) {
             `  ${daily.replace(/^ — /, '')}`,
             weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
           ].filter(Boolean).join('\n');
-        }, renderOmittedSites);
+        }, renderOmittedSites, fullLines);
       }
 
       if (refreshPending.length > 0) {
-        lines.push('', '*Refresh Pending (raw import projected, serving table refresh not yet seen):*');
+        addDetailHeader('*Refresh Pending (raw import projected, serving table refresh not yet seen):*');
         appendLimitedDetails(lines, refreshPending, (s) => {
           const daily = refreshEnabled
             ? ` — daily refresh: ${formatRefreshStage(
@@ -578,11 +584,11 @@ function CheckAgenticTrafficDbStatusCommand(context) {
             `  missing: ${missing}`,
             `  batchId: \`${s.batchId}\``,
           ].filter(Boolean).join('\n');
-        }, renderOmittedSites);
+        }, renderOmittedSites, fullLines);
       }
 
       if (importPending.length > 0) {
-        lines.push('', '*Import Pending (export done, raw DB import not yet seen):*');
+        addDetailHeader('*Import Pending (export done, raw DB import not yet seen):*');
         appendLimitedDetails(lines, importPending, (s) => {
           const weekly = weeklyRefreshExpected ? ' — weekly refresh: waiting on import' : '';
           return [
@@ -594,61 +600,61 @@ function CheckAgenticTrafficDbStatusCommand(context) {
             `  batchId: \`${s.batchId}\``,
             `  export: ${formatExportCounts(s)}`,
           ].filter(Boolean).join('\n');
-        }, renderOmittedSites);
+        }, renderOmittedSites, fullLines);
       }
 
       if (unknown.length > 0) {
-        lines.push('', '*Unknown (projection_audit status could not be checked):*');
+        addDetailHeader('*Unknown (projection_audit status could not be checked):*');
         appendLimitedDetails(lines, unknown, (s) => [
           `• \`${s.baseURL}\``,
           `  siteId: \`${s.siteId}\``,
           `  projection audit check: ${s.projectionCheckStatus}`,
           `  batchId: \`${s.batchId}\``,
           `  export: ${formatExportCounts(s)}`,
-        ].join('\n'), renderOmittedSites);
+        ].join('\n'), renderOmittedSites, fullLines);
       }
 
       if (dateMismatch.length > 0) {
-        lines.push('', `*Latest audit is for a different date (not ${dateStr}):*`);
+        addDetailHeader(`*Latest audit is for a different date (not ${dateStr}):*`);
         appendLimitedDetails(lines, dateMismatch, (s) => [
           `• \`${s.baseURL}\``,
           `  siteId: \`${s.siteId}\``,
           `  latest export was for ${s.exportedDate}`,
-        ].join('\n'), renderOmittedSites);
+        ].join('\n'), renderOmittedSites, fullLines);
       }
 
       if (failed.length > 0) {
-        lines.push('', '*Export failures:*');
+        addDetailHeader('*Export failures:*');
         appendLimitedDetails(lines, failed, (s) => [
           `• \`${s.baseURL}\``,
           `  siteId: \`${s.siteId}\``,
           `  error: ${s.error || 'unknown error'}`,
-        ].join('\n'), renderOmittedSites);
+        ].join('\n'), renderOmittedSites, fullLines);
       }
 
       if (missingBatchId.length > 0) {
-        lines.push('', '*Export missing batchId:*');
+        addDetailHeader('*Export missing batchId:*');
         appendLimitedDetails(lines, missingBatchId, (s) => [
           `• \`${s.baseURL}\``,
           `  siteId: \`${s.siteId}\``,
           `  export: ${formatExportCounts(s)}`,
-        ].join('\n'), renderOmittedSites);
+        ].join('\n'), renderOmittedSites, fullLines);
       }
 
       if (skipped.length > 0) {
-        lines.push('', `*Skipped (no traffic data for ${dateStr}):*`);
+        addDetailHeader(`*Skipped (no traffic data for ${dateStr}):*`);
         appendLimitedDetails(lines, skipped, (s) => [
           `• \`${s.baseURL}\``,
           `  siteId: \`${s.siteId}\``,
-        ].join('\n'), renderOmittedSites);
+        ].join('\n'), renderOmittedSites, fullLines);
       }
 
       if (noAudit.length > 0) {
-        lines.push('', '*No audit record found:*');
+        addDetailHeader('*No audit record found:*');
         appendLimitedDetails(lines, noAudit, (s) => [
           `• \`${s.baseURL}\``,
           `  siteId: \`${s.siteId}\``,
-        ].join('\n'), renderOmittedSites);
+        ].join('\n'), renderOmittedSites, fullLines);
       }
 
       await postReport(
@@ -657,6 +663,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         `agentic-traffic-db-status-${dateStr}`,
         `Agentic Traffic DB Status ${dateStr}`,
         `Agentic traffic DB status report for ${dateStr}`,
+        fullLines,
       );
     } catch (error) {
       log.error('Error in check-agentic-traffic-db-status:', error);

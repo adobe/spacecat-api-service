@@ -13,6 +13,7 @@
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import nock from 'nock';
 
 import CheckAgenticTrafficDbStatusCommand from '../../../../src/support/slack/commands/check-agentic-traffic-db-status.js';
 
@@ -121,6 +122,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
   afterEach(() => {
     sinon.restore();
+    nock.cleanAll();
   });
 
   // ─── Metadata ────────────────────────────────────────────────────────────
@@ -1159,8 +1161,11 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(slackContext.say.args.flat().every((message) => message.length <= 2800)).to.be.true;
   });
 
-  it('keeps long all-site status output in Slack messages even when a file client is available', async () => {
+  it('keeps compact all-site output in Slack and uploads the full report when details are omitted', async () => {
     attachSlackClient();
+    nock('https://slack-upload.test')
+      .post('/agentic-report')
+      .reply(200, 'OK');
     const sites = Array.from({ length: 50 }, (_, i) => ({
       getId: () => `site-${i}`,
       getBaseURL: () => `https://very-long-url-for-site-number-${i}-that-pads-the-output.example.com`,
@@ -1172,8 +1177,16 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     await cmd.handleExecution(['2026-04-22'], slackContext);
 
     expect(slackContext.say).to.have.been.called;
-    expect(slackContext.client.files.getUploadURLExternal).not.to.have.been.called;
-    expect(slackContext.client.files.completeUploadExternal).not.to.have.been.called;
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('… 42 more. Re-run with `siteId=<siteId>` for focused details.');
+    expect(output).not.to.include('site-49');
+    expect(slackContext.client.files.getUploadURLExternal).to.have.been.calledOnce;
+    expect(slackContext.client.files.completeUploadExternal).to.have.been.calledOnce;
+    expect(slackContext.client.files.getUploadURLExternal.firstCall.args[0].filename)
+      .to.equal('agentic-traffic-db-status-2026-04-22.txt');
+    expect(slackContext.client.files.completeUploadExternal.firstCall.args[0].files[0].title)
+      .to.equal('Agentic Traffic DB Status 2026-04-22');
+    expect(nock.isDone()).to.be.true;
   });
 
   // ─── Mixed status summary ─────────────────────────────────────────────────
