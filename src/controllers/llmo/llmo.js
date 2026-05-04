@@ -973,7 +973,7 @@ function LlmoController(ctx) {
       }
 
       const {
-        domain, brandName, imsOrgId: payloadImsOrgId, cadence,
+        domain, brandName, imsOrgId: payloadImsOrgId, cadence, region,
       } = data;
       const tempOnboarding = data['temp-onboarding'] === true;
 
@@ -983,6 +983,13 @@ function LlmoController(ctx) {
 
       if (cadence && !VALID_CADENCES.includes(cadence)) {
         return badRequest(`Invalid cadence. Must be one of: ${VALID_CADENCES.join(', ')}`);
+      }
+
+      // LLMO-4683: optional ISO 3166-1 alpha-2 region for V1 prompt generation.
+      // Forwarded to DRS so the GPT prompt-gen job conditions on the brand's market.
+      // Omitted → DRS client default ('US') applies, preserving prior behavior.
+      if (region !== undefined && !/^[A-Z]{2}$/.test(region)) {
+        return badRequest('Invalid region. Must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)');
       }
 
       let imsOrgId;
@@ -1035,6 +1042,7 @@ function LlmoController(ctx) {
           imsOrgId,
           cadence,
           tempOnboarding,
+          ...(region ? { region } : {}),
         },
         context,
       );

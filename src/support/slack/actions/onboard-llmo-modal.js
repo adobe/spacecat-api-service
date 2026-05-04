@@ -25,6 +25,49 @@ import {
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
+// LLMO-4683: curated ISO 3166-1 alpha-2 region options for the onboarding modal.
+// Operator selects the brand's primary market so DRS prompt generation conditions
+// the LLM on the right region. Omitted → DRS client default ('US') applies.
+const REGION_SELECT_OPTIONS = [
+  { value: 'US', text: 'United States (US)' },
+  { value: 'GB', text: 'United Kingdom (GB)' },
+  { value: 'DE', text: 'Germany (DE)' },
+  { value: 'FR', text: 'France (FR)' },
+  { value: 'IT', text: 'Italy (IT)' },
+  { value: 'ES', text: 'Spain (ES)' },
+  { value: 'NL', text: 'Netherlands (NL)' },
+  { value: 'BR', text: 'Brazil (BR)' },
+  { value: 'MX', text: 'Mexico (MX)' },
+  { value: 'CA', text: 'Canada (CA)' },
+  { value: 'IN', text: 'India (IN)' },
+  { value: 'JP', text: 'Japan (JP)' },
+  { value: 'AU', text: 'Australia (AU)' },
+];
+
+function buildRegionSelectBlock() {
+  return {
+    type: 'input',
+    block_id: 'region_input',
+    optional: true,
+    element: {
+      type: 'static_select',
+      action_id: 'region',
+      placeholder: {
+        type: 'plain_text',
+        text: 'Leave blank for default (US)',
+      },
+      options: REGION_SELECT_OPTIONS.map(({ value, text }) => ({
+        text: { type: 'plain_text', text },
+        value,
+      })),
+    },
+    label: {
+      type: 'plain_text',
+      text: 'Brand Region (optional)',
+    },
+  };
+}
+
 /**
  * Slack button `value` for `start_llmo_onboarding`: plain URL (legacy) or JSON
  * `{ brandURL, tempOnboarding?: true }`.
@@ -176,6 +219,7 @@ async function fullOnboardingModal(body, client, respond, brandURL, tempOnboardi
             text: 'Delivery Type',
           },
         },
+        buildRegionSelectBlock(),
       ],
     },
   });
@@ -258,6 +302,7 @@ async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboardi
             text: 'IMS Organization ID',
           },
         },
+        buildRegionSelectBlock(),
       ],
     },
   });
@@ -364,6 +409,8 @@ export function startLLMOOnboarding(lambdaContext) {
  * @param {string} input.imsOrgId
  * @param {string} [input.deliveryType]
  * @param {boolean} [input.tempOnboarding] If true, skip helix-query.yaml update.
+ * @param {string} [input.region] Optional ISO 3166-1 alpha-2 region code (LLMO-4683)
+ *   forwarded to DRS prompt generation. Omitted → DRS client default ('US') applies.
  * @param {Object} lambdaCtx
  * @param {Object} slackCtx
  */
@@ -371,7 +418,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, env } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId, deliveryType, tempOnboarding,
+    baseURL, brandName, imsOrgId, deliveryType, tempOnboarding, region,
   } = input;
 
   const dataFolder = generateDataFolder(baseURL, env.ENV);
@@ -399,6 +446,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         imsOrgId,
         deliveryType,
         ...(tempOnboarding ? { tempOnboarding: true } : {}),
+        ...(region ? { region } : {}),
       },
       lambdaCtx,
       safeSay,
@@ -406,13 +454,14 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
     const { site, siteId } = result;
 
+    const regionLine = region ? `\n:globe_with_meridians: *Region:* ${region}` : '';
     const message = `:white_check_mark: *LLMO onboarding completed successfully!*
 
 :link: *Site:* ${baseURL}
 :identification_card: *Site ID:* ${siteId}
 :file_folder: *Data Folder:* ${dataFolder}
 :label: *Brand:* ${brandName}
-:identification_card: *IMS Org ID:* ${imsOrgId}
+:identification_card: *IMS Org ID:* ${imsOrgId}${regionLine}
 
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
@@ -462,6 +511,7 @@ export function onboardLLMOModal(lambdaContext) {
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
+      const region = values.region_input?.region?.selected_option?.value;
 
       if (!brandName || !imsOrgId) {
         await ack({
@@ -478,6 +528,7 @@ export function onboardLLMOModal(lambdaContext) {
         brandName,
         imsOrgId,
         deliveryType: deliveryType ?? 'not set',
+        region: region ?? 'not set',
         brandURL,
         originalChannel,
         originalThreadTs,
@@ -512,6 +563,7 @@ export function onboardLLMOModal(lambdaContext) {
         imsOrgId,
         deliveryType,
         ...(tempOnboarding ? { tempOnboarding: true } : {}),
+        ...(region ? { region } : {}),
       }, lambdaContext, slackContext);
 
       log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);

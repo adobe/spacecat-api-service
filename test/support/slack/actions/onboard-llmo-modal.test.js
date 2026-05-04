@@ -432,6 +432,52 @@ describe('onboard-llmo-modal', () => {
       });
     });
 
+    it('should surface region in the success message when supplied (LLMO-4683)', async () => {
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        region: 'IN',
+      };
+
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      expect(sayStub).to.have.been.calledWith(sinon.match(':globe_with_meridians: *Region:* IN'));
+    });
+
+    it('should omit region from the success message when not supplied (LLMO-4683)', async () => {
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      const successCall = sayStub.getCalls().find(
+        (call) => typeof call.args[0] === 'string'
+          && call.args[0].includes('LLMO onboarding completed successfully'),
+      );
+      expect(successCall, 'success message was sent').to.exist;
+      expect(successCall.args[0]).to.not.include(':globe_with_meridians:');
+    });
+
     it('should not call GitHub when tempOnboarding skips helix-query.yaml update', async () => {
       const input = {
         baseURL: 'https://example.com',
@@ -1180,6 +1226,7 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        region: 'not set',
         brandURL: 'https://example.com',
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
@@ -1235,10 +1282,69 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        region: 'not set',
         brandURL: 'https://example.com',
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
         tempOnboarding: true,
+      });
+    });
+
+    it('should forward region from modal selection to onboarding (log and onboardSite) (LLMO-4683)', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand IN' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+              region_input: {
+                region: {
+                  selected_option: { value: 'IN' },
+                },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', {
+        brandName: 'Test Brand IN',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        region: 'IN',
+        brandURL: 'https://example.com',
+        originalChannel: 'C1234567890',
+        originalThreadTs: '1234567890.123456',
+        tempOnboarding: false,
       });
     });
 
@@ -1430,6 +1536,7 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        region: 'not set',
         brandURL: undefined, // Should be undefined when parsing fails
         originalChannel: undefined,
         originalThreadTs: undefined,
