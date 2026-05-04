@@ -14,6 +14,7 @@ import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
 import {
   TrialUser as TrialUserModel,
   Entitlement as EntitlementModel,
+  Consumer as ConsumerModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
@@ -100,34 +101,53 @@ export default class AccessControlUtil {
   /**
    * Verifies the requesting S2S consumer holds the given capability by issuing
    * a fresh DB fetch. Uses `context.s2sConsumer` (set by s2sAuthWrapper) only as
-   * an identity source — extracts `clientId` and `imsOrgId` and re-queries the
+   * an identity source - extracts `clientId` and `imsOrgId` and re-queries the
    * Consumer table. Capabilities are NOT read from the in-context object: a stale
    * or tampered context cannot grant access.
    *
-   * Returns false for non-S2S requests (no `s2sConsumer` in context), suspended
-   * or revoked consumers, missing DB rows, or a consumer that does not hold the
-   * requested capability.
+   * Returns a result object so controllers can audit-log without re-reading
+   * context. The `reason` discriminates denial paths for SOC investigation:
+   * `not-s2s`, `not-found`, `revoked`, `not-active`, `missing-capability`,
+   * `granted`.
    *
    * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the trust-boundary analysis.
    *
    * @param {string} capability - Full capability string, e.g. 'site:readAll'.
-   * @returns {Promise<boolean>}
+   * @returns {Promise<{ allowed: boolean, reason: string,
+   *   consumerId: (string|undefined), clientId: (string|undefined) }>}
    */
   async hasS2SCapability(capability) {
     const { s2sConsumer } = this.context;
     if (!s2sConsumer) {
-      return false;
+      return { allowed: false, reason: 'not-s2s' };
     }
 
+    const clientId = s2sConsumer.getClientId();
     const fresh = await this.context.dataAccess.Consumer.findByClientIdAndImsOrgId(
-      s2sConsumer.getClientId(),
+      clientId,
       s2sConsumer.getImsOrgId(),
     );
-    if (!fresh || fresh.isRevoked() || fresh.getStatus() !== 'ACTIVE') {
-      return false;
+    if (!fresh) {
+      return { allowed: false, reason: 'not-found', clientId };
     }
-
-    return fresh.getCapabilities()?.includes(capability) === true;
+    if (fresh.isRevoked()) {
+      return {
+        allowed: false, reason: 'revoked', clientId, consumerId: fresh.getId(),
+      };
+    }
+    if (fresh.getStatus() !== ConsumerModel.STATUS.ACTIVE) {
+      return {
+        allowed: false, reason: 'not-active', clientId, consumerId: fresh.getId(),
+      };
+    }
+    if (!fresh.getCapabilities()?.includes(capability)) {
+      return {
+        allowed: false, reason: 'missing-capability', clientId, consumerId: fresh.getId(),
+      };
+    }
+    return {
+      allowed: true, reason: 'granted', clientId, consumerId: fresh.getId(),
+    };
   }
 
   /**

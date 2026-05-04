@@ -14,7 +14,7 @@
  * Single source of truth for capability strings shared between
  * `routes/required-capabilities.js` (Layer 1, s2sAuthWrapper) and the controller-level
  * `hasS2SCapability` checks (Layer 2). Both layers must use the same string for the same
- * route — drift is caught by `test/routes/capability-constants.test.js`.
+ * route - drift is caught by `test/routes/capability-constants.test.js`.
  *
  * See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the design.
  */

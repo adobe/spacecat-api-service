@@ -308,7 +308,7 @@ const routeRequiredCapabilities = {
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
 
   // Sites
-  // GET /sites is the cross-tenant list endpoint — guarded by site:readAll, not site:read.
+  // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
   'POST /sites': 'site:write',

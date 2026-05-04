@@ -317,16 +317,19 @@ function SitesController(ctx, log, env) {
 
   /**
    * Gets all sites. Accessible to admin callers (legacy admin path) and to S2S
-   * consumers that hold the `site:readAll` capability — see
+   * consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    * @returns {Promise<Response>} Array of sites response.
    */
-  const getAll = async () => {
+  const getAll = async (context) => {
+    const requestId = context?.invocation?.requestId || context?.invocation?.id || 'unknown';
     const isAdmin = accessControlUtil.hasAdminAccess();
-    const hasS2SReadAll = !isAdmin && await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
-    if (!isAdmin && !hasS2SReadAll) {
-      log.info(`[acl] Denied GET /sites — admin=${isAdmin} s2sReadAll=${hasS2SReadAll}`);
-      return forbidden('Forbidden');
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or site:readAll capability required');
     }
 
     // TODO: implement proper pagination or filtering to stay under AWS Lambda
@@ -342,8 +345,8 @@ function SitesController(ctx, log, env) {
       .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
       .map((site) => SiteDto.toListJSON(site));
 
-    if (hasS2SReadAll) {
-      log.info(`[s2s-readall] GET /sites returned ${sites.length} sites to S2S consumer`);
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
     return ok(sites);

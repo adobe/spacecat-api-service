@@ -82,24 +82,27 @@ function OrganizationsController(ctx, env) {
 
   /**
    * Gets all organizations. Accessible to admin callers (legacy admin path) and to S2S
-   * consumers that hold the `organization:readAll` capability — see
+   * consumers that hold the `organization:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    * @returns {Promise<Response>} Array of organizations response.
    */
-  const getAll = async () => {
+  const getAll = async (context) => {
     const { log } = ctx;
+    const requestId = context?.invocation?.requestId || context?.invocation?.id || 'unknown';
     const isAdmin = accessControlUtil.hasAdminAccess();
-    const hasS2SReadAll = !isAdmin && await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
-    if (!isAdmin && !hasS2SReadAll) {
-      log?.info(`[acl] Denied GET /organizations — admin=${isAdmin} s2sReadAll=${hasS2SReadAll}`);
-      return forbidden('Forbidden');
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /organizations - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or organization:readAll capability required');
     }
 
     const organizations = (await Organization.all())
       .map((organization) => OrganizationDto.toJSON(organization));
 
-    if (hasS2SReadAll) {
-      log?.info(`[s2s-readall] GET /organizations returned ${organizations.length} orgs to S2S consumer`);
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /organizations granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_ORG_READ_ALL} count=${organizations.length} requestId=${requestId}`);
     }
 
     return ok(organizations);

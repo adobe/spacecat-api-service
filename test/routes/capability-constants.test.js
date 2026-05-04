@@ -30,7 +30,7 @@ const READ_ALL_CONSTANTS = Object.entries(Capabilities)
  *
  * The capability strings in `routes/required-capabilities.js` (Layer 1) and the
  * `hasS2SCapability(...)` calls inside controllers (Layer 2) must reference identical
- * strings — they're imported from `routes/capability-constants.js`. These tests fail
+ * strings - they're imported from `routes/capability-constants.js`. These tests fail
  * loudly if a capability appears in only one place.
  *
  * See `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
@@ -64,10 +64,11 @@ describe('capability-constants drift coverage', () => {
     });
   });
 
-  it('every readAll constant is referenced by at least one controller (Layer 2 opt-in)', () => {
-    // Read controller source files and grep for the constant names. This catches the
-    // failure mode where a constant is exported and mapped at Layer 1 but no controller
-    // ever actually checks for it — which would silently make the route admin-only.
+  it('every readAll constant has an actual hasS2SCapability(CONST) call site (Layer 2 opt-in)', () => {
+    // Tighter assertion than "is the constant imported": there must be an actual
+    // hasS2SCapability(...) invocation against the constant (or its literal value).
+    // An import alone could rot if the call site is removed but the import is kept,
+    // silently making the route admin-only - which is the failure mode this guards.
     const controllerFiles = [
       join(projectRoot, 'src/controllers/sites.js'),
       join(projectRoot, 'src/controllers/organizations.js'),
@@ -80,11 +81,14 @@ describe('capability-constants drift coverage', () => {
       if (!name.startsWith('CAP_')) {
         return;
       }
-      const usedAsImport = controllerSource.includes(name);
-      const usedAsLiteral = controllerSource.includes(`'${value}'`);
-      expect(usedAsImport || usedAsLiteral).to.equal(
+      // Match `hasS2SCapability(CAP_NAME)` or `hasS2SCapability('site:readAll')`,
+      // tolerating intervening whitespace from prettier/eslint reflows.
+      const callByName = new RegExp(`hasS2SCapability\\s*\\(\\s*${name}\\b`);
+      const callByLiteral = new RegExp(`hasS2SCapability\\s*\\(\\s*['"]${value}['"]`);
+      const hasCallSite = callByName.test(controllerSource) || callByLiteral.test(controllerSource);
+      expect(hasCallSite).to.equal(
         true,
-        `Constant ${name} ("${value}") is exported and mapped at Layer 1 but no controller (sites.js / organizations.js) imports it for Layer 2 hasS2SCapability check. Without the Layer 2 check the endpoint stays admin-only — this is a silent denial of intended access.`,
+        `Constant ${name} ("${value}") has no hasS2SCapability(...) call site in sites.js / organizations.js. Without the Layer 2 check the endpoint stays admin-only - this is a silent denial of intended access.`,
       );
     });
   });

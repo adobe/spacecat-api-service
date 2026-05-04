@@ -182,12 +182,24 @@ export async function createS2SConsumerToken({ clientId, imsOrgId }) {
 }
 
 /**
- * S2S consumer with NO readAll capabilities (only site:read + site:write — CONSUMER_1).
+ * S2S consumer with NO readAll capabilities (only site:read + site:write - CONSUMER_1).
  * Used to assert that the readAll route remap rejects callers that lack the new capability.
  */
 export async function createS2SConsumerReadOnlyToken() {
   return createS2SConsumerToken({
     clientId: CONSUMER_1_CLIENT_ID,
+    imsOrgId: CONSUMER_1_IMS_ORG_ID,
+  });
+}
+
+/**
+ * S2S token whose (client_id, org) pair has NO Consumer row in the database.
+ * Exercises the Layer 1 trust boundary: a token signed correctly by the auth-service
+ * is still rejected by the wrapper if the Consumer record does not exist.
+ */
+export async function createS2SConsumerUnknownToken() {
+  return createS2SConsumerToken({
+    clientId: 'unknown-client-id-999999999999',
     imsOrgId: CONSUMER_1_IMS_ORG_ID,
   });
 }
@@ -206,7 +218,7 @@ export async function createS2SConsumerReadAllToken() {
 export async function createAllTokens() {
   const [
     admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
-    s2sConsumerReadOnly, s2sConsumerReadAll,
+    s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
     createUserToken(),
@@ -216,6 +228,7 @@ export async function createAllTokens() {
     createDelegatedUserNoSourceToken(),
     createS2SConsumerReadOnlyToken(),
     createS2SConsumerReadAllToken(),
+    createS2SConsumerUnknownToken(),
   ]);
   return {
     admin,
@@ -226,5 +239,6 @@ export async function createAllTokens() {
     delegatedUserNoSource,
     s2sConsumerReadOnly,
     s2sConsumerReadAll,
+    s2sConsumerUnknown,
   };
 }
