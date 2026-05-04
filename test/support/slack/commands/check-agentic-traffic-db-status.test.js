@@ -772,77 +772,140 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('2026-04-22 08:30');
   });
 
-  it('recovers DB status from projection_audit when no matching audit record exists', async () => {
+  it('checks projection_audit directly when batchId is provided', async () => {
     const site = makeSite(TARGET_SITE_ID, 'https://wknd.site', null);
     context.dataAccess.Site.findById.resolves(site);
-    context.dataAccess.Audit = {
-      allBySiteIdAndAuditType: sinon.stub().resolves([]),
-    };
+    const batchId = '7c12d8c3-d845-43c0-bc09-aec50f96f38b';
 
     const chain = makePostgrestChain({
       data: [
         makeProjectionRow({
-          correlationId: '7c12d8c3-d845-43c0-bc09-aec50f96f38b',
+          correlationId: batchId,
           scopePrefix: TARGET_SITE_ID,
           outputCount: 46,
           projectedAt: '2026-05-04T10:07:14.098Z',
         }),
         makeProjectionRow({
-          correlationId: '7c12d8c3-d845-43c0-bc09-aec50f96f38b:daily-refresh',
+          correlationId: `${batchId}:daily-refresh`,
           handlerName: DAILY_REFRESH_HANDLER,
           scopePrefix: TARGET_SITE_ID,
           outputCount: 29,
           projectedAt: '2026-05-04T10:07:14.740Z',
           metadata: { dailyRefreshDates: ['2026-05-03'], dailyRefreshRows: 29 },
         }),
-        makeProjectionRow({
-          correlationId: '7c12d8c3-d845-43c0-bc09-aec50f96f38b:weekly-refresh',
-          handlerName: WEEKLY_REFRESH_HANDLER,
-          scopePrefix: TARGET_SITE_ID,
-          outputCount: 29,
-          projectedAt: '2026-05-04T10:07:15.740Z',
-          metadata: { weeklyRefreshWeeks: ['2026-04-27'], weeklyRefreshRows: 29 },
-        }),
       ],
       error: null,
     });
     postgrestStub.from.returns(chain);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03', `siteId=${TARGET_SITE_ID}`], slackContext);
+    await cmd.handleExecution([`batchId=${batchId}`], slackContext);
 
-    expect(context.dataAccess.Audit.allBySiteIdAndAuditType).to.have.been.calledWith(
-      TARGET_SITE_ID,
-      'cdn-logs-report',
-      { order: 'desc', limit: 50 },
-    );
-    expect(chain.in.firstCall.args).to.deep.equal(['scope_prefix', [TARGET_SITE_ID]]);
-    expect(chain.limit).to.have.been.calledWith(500);
+    expect(context.dataAccess.Configuration.findLatest).not.to.have.been.called;
+    expect(chain.in.firstCall.args).to.deep.equal([
+      'correlation_id',
+      [batchId, `${batchId}:daily-refresh`, `${batchId}:weekly-refresh`],
+    ]);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *DASHBOARD_READY*');
-    expect(output).to.include('Dashboard-ready: *1*');
-    expect(output).to.include('https://wknd.site');
-    expect(output).to.include('batchId');
-    expect(output).not.to.include('No audit record found');
-    expect(output).not.to.include('NO_AUDITS_FOR_DATE');
+    expect(output).to.include(`Agentic Traffic Projection Status — ${batchId}`);
+    expect(output).to.include('Outcome: *RAW_IMPORT_AND_DAILY_REFRESH_PROJECTED*');
+    expect(output).to.include('baseURL: `https://wknd.site`');
+    expect(output).to.include('raw import: projected (46 rows at 2026-05-04 10:07)');
+    expect(output).to.include('daily refresh: projected (29 rows (2026-05-03))');
   });
 
-  it('can recover raw import status from fallback projection date_range metadata', async () => {
-    const site = makeSite(TARGET_SITE_ID, 'https://range.example', null);
-    context.dataAccess.Site.findById.resolves(site);
-    context.dataAccess.Audit = {
-      allBySiteIdAndAuditType: sinon.stub().resolves([]),
-    };
+  it('warns when duplicate batchId arguments are provided', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['batchId=batch-a', 'batchId=batch-b'], slackContext);
 
+    expect(slackContext.say).to.have.been.calledWith(':warning: Duplicate batchId argument.');
+    expect(postgrestStub.from).not.to.have.been.called;
+  });
+
+  it('warns when batchId is empty or malformed', async () => {
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['batchId='], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: Invalid batchId. Expected a non-empty correlation ID.',
+    );
+    expect(postgrestStub.from).not.to.have.been.called;
+  });
+
+  it('reports projection_audit query errors for direct batchId checks', async () => {
+    const chain = makePostgrestChain({
+      data: null,
+      error: { message: 'projection unavailable' },
+    });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['batchId=batch-error'], slackContext);
+
+    expect(context.log.warn).to.have.been.calledWith(
+      sinon.match('projection_audit batchId query failed'),
+    );
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: projection_audit query failed: projection unavailable',
+    );
+  });
+
+  it('reports unavailable PostgREST for direct batchId checks', async () => {
+    context.dataAccess.services = {};
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['batchId=batch-unavailable'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: PostgREST client is unavailable; cannot check projection_audit.',
+    );
+  });
+
+  it('reports raw-import-only direct batchId checks', async () => {
     const chain = makePostgrestChain({
       data: [
         makeProjectionRow({
-          correlationId: 'batch-range',
+          correlationId: 'batch-raw-only',
           scopePrefix: TARGET_SITE_ID,
-          outputCount: 12,
-          projectedAt: '2026-04-22T10:00:00Z',
-          metadata: { date_range: { start: '2026-04-22', end: '2026-04-22' } },
+          outputCount: 10,
+        }),
+      ],
+      error: null,
+    });
+    postgrestStub.from.returns(chain);
+    context.dataAccess.Site.findById.rejects(new Error('lookup failed'));
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['batchId=batch-raw-only'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *RAW_IMPORT_PROJECTED*');
+    expect(output).to.include(`siteId: \`${TARGET_SITE_ID}\``);
+    expect(output).to.include('daily refresh: pending');
+  });
+
+  it('reports no rows for direct batchId checks with an unknown batch', async () => {
+    const chain = makePostgrestChain({ data: null, error: null });
+    postgrestStub.from.returns(chain);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['batchId=batch-missing'], slackContext);
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Outcome: *IMPORT_NOT_FOUND*');
+    expect(output).to.include('siteId: unknown');
+    expect(output).to.include('Rows found: *0*');
+  });
+
+  it('uses refresh rows to show siteId in direct batchId checks when raw import is missing', async () => {
+    const chain = makePostgrestChain({
+      data: [
+        makeProjectionRow({
+          correlationId: 'batch-refresh-only:weekly-refresh',
+          handlerName: WEEKLY_REFRESH_HANDLER,
+          scopePrefix: TARGET_SITE_ID,
+          outputCount: 4,
         }),
       ],
       error: null,
@@ -850,28 +913,22 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     postgrestStub.from.returns(chain);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', `siteId=${TARGET_SITE_ID}`], slackContext);
+    await cmd.handleExecution(['batchId=batch-refresh-only'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Refresh Pending: *1*');
-    expect(output).to.include('source: projection_audit fallback');
-    expect(output).to.include('batch-range');
+    expect(output).to.include('Outcome: *IMPORT_NOT_FOUND*');
+    expect(output).to.include(`siteId: \`${TARGET_SITE_ID}\``);
+    expect(output).to.include('weekly refresh: projected (4 rows)');
   });
 
-  it('keeps audit-missing status when fallback refresh rows have no matching import row', async () => {
-    const site = makeSite(TARGET_SITE_ID, 'https://daily-only.example', null);
-    context.dataAccess.Site.findById.resolves(site);
-    context.dataAccess.Audit = {
-      allBySiteIdAndAuditType: sinon.stub().resolves([]),
-    };
-
+  it('uses daily refresh rows to show siteId in direct batchId checks when raw import is missing', async () => {
     const chain = makePostgrestChain({
       data: [
         makeProjectionRow({
           correlationId: 'batch-daily-only:daily-refresh',
           handlerName: DAILY_REFRESH_HANDLER,
           scopePrefix: TARGET_SITE_ID,
-          metadata: { dailyRefreshDates: ['2026-04-22'] },
+          outputCount: 7,
         }),
       ],
       error: null,
@@ -879,54 +936,12 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     postgrestStub.from.returns(chain);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', `siteId=${TARGET_SITE_ID}`], slackContext);
+    await cmd.handleExecution(['batchId=batch-daily-only'], slackContext);
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('No audit record found');
-    expect(output).to.include('https://daily-only.example');
-    expect(output).not.to.include('batch-daily-only');
-  });
-
-  it('reports checker unreliable when the projection_audit fallback query fails', async () => {
-    const site = makeSite(TARGET_SITE_ID, 'https://fallback-error.example', null);
-    context.dataAccess.Site.findById.resolves(site);
-    context.dataAccess.Audit = {
-      allBySiteIdAndAuditType: sinon.stub().resolves([]),
-    };
-
-    const chain = makePostgrestChain({
-      data: null,
-      error: { message: 'fallback unavailable' },
-    });
-    postgrestStub.from.returns(chain);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', `siteId=${TARGET_SITE_ID}`], slackContext);
-
-    expect(context.log.warn).to.have.been.calledWith(
-      sinon.match('projection_audit fallback query failed'),
-    );
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *CHECKER_UNRELIABLE*');
-    expect(output).to.include('Import daily: unknown (projection audit check error)');
-  });
-
-  it('treats null fallback projection rows as no recovered DB status', async () => {
-    const site = makeSite(TARGET_SITE_ID, 'https://fallback-null.example', null);
-    context.dataAccess.Site.findById.resolves(site);
-    context.dataAccess.Audit = {
-      allBySiteIdAndAuditType: sinon.stub().resolves([]),
-    };
-
-    const chain = makePostgrestChain({ data: null, error: null });
-    postgrestStub.from.returns(chain);
-
-    const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-04-22', `siteId=${TARGET_SITE_ID}`], slackContext);
-
-    const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('No audit record found');
-    expect(output).to.include('https://fallback-null.example');
+    expect(output).to.include('Outcome: *IMPORT_NOT_FOUND*');
+    expect(output).to.include(`siteId: \`${TARGET_SITE_ID}\``);
+    expect(output).to.include('daily refresh: projected (7 rows)');
   });
 
   it('batches projection_audit correlation ID lookups for large all-site checks', async () => {
