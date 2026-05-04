@@ -112,21 +112,21 @@ function inferTrafficDateFromAudit(audit) {
 }
 
 function getDailyAgenticExports(audit) {
-  const auditResult = getAuditResult(audit) || [];
+  const auditResult = getAuditResult(audit);
   if (Array.isArray(auditResult)) {
     const trafficDate = inferTrafficDateFromAudit(audit);
     return auditResult
-      .filter((entry) => entry?.name === 'agentic-db-export')
-      .map((entry) => ({
+      .filter(({ name } = {}) => name === 'agentic-db-export')
+      .map(({ batchId }) => ({
         success: true,
         trafficDate,
-        batchId: entry.batchId,
+        batchId,
       }));
   }
 
   return [
-    auditResult.dailyAgenticExport,
-    ...(Array.isArray(auditResult.dailyAgenticExports) ? auditResult.dailyAgenticExports : []),
+    auditResult?.dailyAgenticExport,
+    ...(Array.isArray(auditResult?.dailyAgenticExports) ? auditResult.dailyAgenticExports : []),
   ].filter(Boolean);
 }
 

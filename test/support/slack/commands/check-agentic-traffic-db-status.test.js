@@ -391,39 +391,23 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
   it('uses agentic-db-export audit_result rows to find the batchId', async () => {
     const audit = makeAudit([
-      {
-        name: 'agentic',
-        success: true,
-        weekOffset: 0,
-      },
-      {
-        name: 'agentic-db-export',
-        batchId: 'batch-audit-row',
-      },
-      {
-        name: 'referral-db-export',
-        batchId: 'referral-batch',
-      },
-    ], '2026-05-04T10:09:18.600Z');
+      { name: 'referral-db-export', batchId: 'referral-batch' },
+      { name: 'agentic-db-export', batchId: 'batch-audit-row' },
+    ], '2026-04-23T10:09:18.600Z');
     context.dataAccess.Site.all.resolves([
-      makeSite('site-audit-row', 'https://audit-row.com', audit),
+      makeSite(TARGET_SITE_ID, 'https://audit-row.com', audit),
     ]);
 
     const chain = makePostgrestChain({
       data: [
         makeProjectionRow({
           correlationId: 'batch-audit-row',
-          scopePrefix: 'site-audit-row',
+          scopePrefix: TARGET_SITE_ID,
         }),
         makeProjectionRow({
           correlationId: 'batch-audit-row:daily-refresh',
           handlerName: DAILY_REFRESH_HANDLER,
-          scopePrefix: 'site-audit-row',
-        }),
-        makeProjectionRow({
-          correlationId: 'batch-audit-row:weekly-refresh',
-          handlerName: WEEKLY_REFRESH_HANDLER,
-          scopePrefix: 'site-audit-row',
+          scopePrefix: TARGET_SITE_ID,
         }),
       ],
       error: null,
@@ -431,7 +415,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     postgrestStub.from.returns(chain);
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
-    await cmd.handleExecution(['2026-05-03'], slackContext);
+    await cmd.handleExecution(['2026-04-22'], slackContext);
 
     expect(chain.in.firstCall.args[1]).to.deep.equal([
       'batch-audit-row',
