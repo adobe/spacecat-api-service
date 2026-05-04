@@ -36,8 +36,12 @@ const AGENTIC_REFRESH_ENABLED_ENV = 'MYSTICAT_AGENTIC_REFRESH_ENABLED';
 const BATCH_SIZE = 10;
 const AUDIT_LOOKBACK_LIMIT = 50;
 const PROJECTION_CORRELATION_ID_BATCH_SIZE = 75;
+const PROJECTION_SCOPE_BATCH_SIZE = 25;
+const PROJECTION_SCOPE_LOOKBACK_LIMIT = 500;
 const STALE_PENDING_THRESHOLD_HOURS = 4;
 const STALE_PENDING_THRESHOLD_MS = STALE_PENDING_THRESHOLD_HOURS * 60 * 60 * 1000;
+const DAILY_REFRESH_CORRELATION_SUFFIX = ':daily-refresh';
+const WEEKLY_REFRESH_CORRELATION_SUFFIX = ':weekly-refresh';
 
 function addUtcDays(date, days) {
   const next = new Date(date.getTime());
@@ -62,6 +66,10 @@ function isRefreshEnabled(env) {
 
 function projectionKey(handlerName, correlationId) {
   return `${handlerName}:${correlationId}`;
+}
+
+function removeCorrelationSuffix(correlationId, suffix) {
+  return correlationId.replace(new RegExp(`${suffix}$`), '');
 }
 
 function formatProjectedAt(projectedAt) {
@@ -160,6 +168,79 @@ function getRefreshStatus(row) {
     return 'pending';
   }
   return row.skipped ? 'skipped' : 'projected';
+}
+
+function getDateRange(metadata) {
+  const dateRange = metadata?.date_range || metadata?.dateRange;
+  if (!dateRange || typeof dateRange !== 'object') {
+    return null;
+  }
+  return {
+    start: dateRange.start_date || dateRange.startDate || dateRange.start,
+    end: dateRange.end_date || dateRange.endDate || dateRange.end,
+  };
+}
+
+function dateRangeIncludes(metadata, dateStr) {
+  const range = getDateRange(metadata);
+  return Boolean(
+    typeof range?.start === 'string'
+    && typeof range?.end === 'string'
+    && range.start <= dateStr
+    && dateStr <= range.end,
+  );
+}
+
+function projectionRowMatchesDate(row, dateStr) {
+  const meta = row.metadata || {};
+  if (
+    row.handler_name === AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER
+    && Array.isArray(meta.dailyRefreshDates)
+  ) {
+    return meta.dailyRefreshDates.includes(dateStr);
+  }
+  return dateRangeIncludes(meta, dateStr);
+}
+
+function addProjectionRow(projectionMap, row) {
+  projectionMap.set(projectionKey(row.handler_name, row.correlation_id), row);
+}
+
+function mapFallbackProjectionsBySite(projectionRows, dateStr) {
+  const rowsByCorrelationId = new Map();
+  const fallbackBySiteId = new Map();
+
+  for (const row of projectionRows) {
+    rowsByCorrelationId.set(row.correlation_id, row);
+  }
+
+  for (const row of projectionRows) {
+    if (!row.scope_prefix || !projectionRowMatchesDate(row, dateStr)) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    const batchId = row.handler_name === AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER
+      ? removeCorrelationSuffix(row.correlation_id, DAILY_REFRESH_CORRELATION_SUFFIX)
+      : row.correlation_id;
+
+    const importProjection = rowsByCorrelationId.get(batchId);
+    const dailyRefreshProjection = rowsByCorrelationId.get(
+      `${batchId}${DAILY_REFRESH_CORRELATION_SUFFIX}`,
+    );
+    const weeklyRefreshProjection = rowsByCorrelationId.get(
+      `${batchId}${WEEKLY_REFRESH_CORRELATION_SUFFIX}`,
+    );
+
+    fallbackBySiteId.set(row.scope_prefix, {
+      batchId,
+      importProjection,
+      dailyRefreshProjection,
+      weeklyRefreshProjection,
+    });
+  }
+
+  return fallbackBySiteId;
 }
 
 function formatProjectedStage(row, projectedAt) {
@@ -343,17 +424,17 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       }
 
       // 3. Collect batchIds for the target date and check projection_audit
-      const exportedSites = siteExports.filter((s) => s.status === 'exported' && s.batchId);
+      let exportedSites = siteExports.filter((s) => s.status === 'exported' && s.batchId);
       const batchIds = exportedSites.map((s) => s.batchId);
       const projectionCorrelationIds = batchIds.flatMap((batchId) => [
         batchId,
-        `${batchId}:daily-refresh`,
-        `${batchId}:weekly-refresh`,
+        `${batchId}${DAILY_REFRESH_CORRELATION_SUFFIX}`,
+        `${batchId}${WEEKLY_REFRESH_CORRELATION_SUFFIX}`,
       ]);
       const siteIdByCorrelationId = new Map(exportedSites.flatMap((s) => [
         [s.batchId, s.siteId],
-        [`${s.batchId}:daily-refresh`, s.siteId],
-        [`${s.batchId}:weekly-refresh`, s.siteId],
+        [`${s.batchId}${DAILY_REFRESH_CORRELATION_SUFFIX}`, s.siteId],
+        [`${s.batchId}${WEEKLY_REFRESH_CORRELATION_SUFFIX}`, s.siteId],
       ]));
 
       const projectionMap = new Map();
@@ -394,12 +475,74 @@ function CheckAgenticTrafficDbStatusCommand(context) {
                 // eslint-disable-next-line no-continue
                 continue;
               }
-              projectionMap.set(projectionKey(row.handler_name, row.correlation_id), row);
+              addProjectionRow(projectionMap, row);
             }
           }
         }
       }
 
+      if (projectionCheckStatus === 'ok' && postgrestClient?.from) {
+        const auditMissingExports = siteExports.filter((s) => [
+          'no-audit',
+          'no-export',
+          'date-mismatch',
+          'no-batchid',
+        ].includes(s.status));
+
+        if (auditMissingExports.length > 0) {
+          const projectionRows = [];
+          const siteIdBatches = chunkArray(
+            auditMissingExports.map((s) => s.siteId),
+            PROJECTION_SCOPE_BATCH_SIZE,
+          );
+          for (const siteIdBatch of siteIdBatches) {
+            // eslint-disable-next-line no-await-in-loop
+            const { data: projRows, error: projError } = await postgrestClient
+              .from('projection_audit')
+              .select('correlation_id,scope_prefix,handler_name,output_count,projected_at,skipped,metadata')
+              .in('scope_prefix', siteIdBatch)
+              .in('handler_name', AGENTIC_TRAFFIC_HANDLERS)
+              .order('projected_at', { ascending: false })
+              .limit(PROJECTION_SCOPE_LOOKBACK_LIMIT);
+
+            if (projError) {
+              projectionCheckStatus = 'error';
+              log.warn(`projection_audit fallback query failed: ${projError.message}`);
+              break;
+            }
+            projectionRows.push(...(projRows || []));
+          }
+
+          if (projectionCheckStatus === 'ok') {
+            const fallbackBySiteId = mapFallbackProjectionsBySite(projectionRows, dateStr);
+            for (const [siteId, fallback] of fallbackBySiteId.entries()) {
+              const siteExportIndex = siteExports.findIndex((s) => s.siteId === siteId);
+              if (siteExportIndex === -1 || !fallback.importProjection) {
+                // eslint-disable-next-line no-continue
+                continue;
+              }
+
+              [
+                fallback.importProjection,
+                fallback.dailyRefreshProjection,
+                fallback.weeklyRefreshProjection,
+              ].filter(Boolean).forEach((row) => addProjectionRow(projectionMap, row));
+
+              siteExports[siteExportIndex] = {
+                ...siteExports[siteExportIndex],
+                status: 'exported',
+                trafficDate: dateStr,
+                batchId: fallback.batchId,
+                rowCount: fallback.importProjection.output_count,
+                dbObserved: true,
+                auditedAt: fallback.importProjection.projected_at,
+              };
+            }
+          }
+        }
+      }
+
+      exportedSites = siteExports.filter((s) => s.status === 'exported' && s.batchId);
       // 4. Build status summary
       const dashboardReady = [];
       const refreshPending = [];
@@ -599,8 +742,10 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           return [
             `• \`${s.baseURL}\``,
             `  siteId: \`${s.siteId}\``,
+            s.dbObserved ? '  source: projection_audit fallback (audit record not found for date)' : '',
             `  import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}`,
             `  export: ${formatExportCounts(s)}`,
+            s.dbObserved ? `  batchId: \`${s.batchId}\`` : '',
             `  ${daily.replace(/^ — /, '')}`,
             weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
           ].filter(Boolean).join('\n');
@@ -628,6 +773,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           return [
             `• \`${s.baseURL}\``,
             `  siteId: \`${s.siteId}\``,
+            s.dbObserved ? '  source: projection_audit fallback (audit record not found for date)' : '',
             `  import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}`,
             `  ${daily.replace(/^ — /, '')}`,
             weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
