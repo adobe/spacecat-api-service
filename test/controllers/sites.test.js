@@ -5142,79 +5142,98 @@ describe('Sites Controller', () => {
 
     describe('ASO_PLG_EXCLUDED_ORGS bypass (internal / demo orgs)', () => {
       // testOrganizations[0]: Spacecat UUID '9033554c-...', imsOrgId '1234567890...@AdobeOrg'
+      // testSites[0] belongs to testOrganizations[0] — i.e. lives in the internal org
       const INTERNAL_ORG_SPACECAT_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
       const INTERNAL_ORG_IMS_ID = '1234567890ABCDEF12345678@AdobeOrg';
 
       beforeEach(() => {
         // ASO_PLG_EXCLUDED_ORGS holds internal Spacecat org UUIDs, not IMS org IDs
         context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: INTERNAL_ORG_SPACECAT_ID };
-        // The top-level bypass looks up the caller org by imsOrg
-        mockDataAccess.Organization.findByImsOrgId.withArgs(INTERNAL_ORG_IMS_ID)
-          .resolves(testOrganizations[0]);
       });
 
-      it('should return 200 when caller imsOrg maps to excluded org, with specific siteId', async () => {
+      // ────────────────────────────────────────────────────────────────────────────
+      // siteId path
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('siteId path: bypasses aso_pre_onboard for internal org → 200', async () => {
         context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
-        mockDataAccess.Site.findById.resolves(testSites[0]); // site belongs to testOrganizations[0]
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [],
+        });
 
         const response = await sitesController.resolveSite(context);
 
         expect(response.status).to.equal(200);
         const body = await response.json();
-        expect(body.data).to.have.property('organization');
         expect(body.data).to.have.property('site');
-        expect(mockTierClientStub.getAllEnrollment).to.not.have.been.called;
-        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
       });
 
-      it('should return 200 when caller imsOrg maps to excluded org, using allByOrganizationId when no siteId', async () => {
-        context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
+      it('siteId path: bypasses no_entitlement_for_product for internal org → 200', async () => {
+        context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({ entitlement: null, enrollments: [] });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+      });
+
+      it('siteId path: does NOT bypass site_not_enrolled for internal org (visible tier, no enrollment) → 404', async () => {
+        context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          enrollments: [],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      // ────────────────────────────────────────────────────────────────────────────
+      // organizationId path
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('organizationId path: bypasses fall-through 404 for internal org → 200 with allByOrganizationId', async () => {
+        context.data = { organizationId: INTERNAL_ORG_SPACECAT_ID };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
         mockDataAccess.Site.allByOrganizationId.resolves([testSites[0]]);
 
         const response = await sitesController.resolveSite(context);
 
         expect(response.status).to.equal(200);
-        const body = await response.json();
-        expect(body.data).to.have.property('organization');
-        expect(body.data).to.have.property('site');
         expect(mockDataAccess.Site.allByOrganizationId)
           .to.have.been.calledWith(INTERNAL_ORG_SPACECAT_ID);
-        expect(mockTierClientStub.getAllEnrollment).to.not.have.been.called;
-        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
       });
 
-      it('should return 404 when caller is excluded org but no sites exist in org (PRE_ONBOARD, no enrollment)', async () => {
-        context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
-        mockDataAccess.Site.allByOrganizationId.resolves([]);
-        // Normal imsOrg fallback: PRE_ONBOARD internal org has no enrollment either
+      it('organizationId path: 404 when internal org has no sites (bypass cannot find a site)', async () => {
+        context.data = { organizationId: INTERNAL_ORG_SPACECAT_ID };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
         mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.Site.allByOrganizationId.resolves([]);
 
         const response = await sitesController.resolveSite(context);
 
         expect(response.status).to.equal(404);
       });
 
-      it('should still enforce tier/enrollment checks for non-excluded orgs (PAID/FREE_TRIAL)', async () => {
-        const CUSTOMER_ORG_IMS = testOrganizations[2].getImsOrgId(); // not in excluded list
-        context.data = { imsOrg: CUSTOMER_ORG_IMS };
-        mockDataAccess.Organization.findByImsOrgId.withArgs(CUSTOMER_ORG_IMS)
-          .resolves(testOrganizations[2]);
-        mockTierClientStub.getFirstEnrollment.resolves({
-          entitlement: { getId: () => 'ent-1', getTier: () => 'FREE_TRIAL' },
-          site: testSites[0],
-        });
+      // ────────────────────────────────────────────────────────────────────────────
+      // imsOrg path
+      // ────────────────────────────────────────────────────────────────────────────
 
-        const response = await sitesController.resolveSite(context);
-
-        expect(response.status).to.equal(200);
-        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
-        expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
-      });
-
-      it('should fall back to allByOrganizationId when provided siteId belongs to a different org', async () => {
-        // testSites[1] belongs to testOrganizations[3], not testOrganizations[0] (the internal one)
-        context.data = { siteId: SITE_IDS[1], imsOrg: INTERNAL_ORG_IMS_ID };
-        mockDataAccess.Site.findById.resolves(testSites[1]);
+      it('imsOrg path: bypasses fall-through 404 for internal org → 200 with allByOrganizationId', async () => {
+        context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
         mockDataAccess.Site.allByOrganizationId.resolves([testSites[0]]);
 
         const response = await sitesController.resolveSite(context);
@@ -5224,10 +5243,37 @@ describe('Sites Controller', () => {
           .to.have.been.calledWith(INTERNAL_ORG_SPACECAT_ID);
       });
 
-      it('should skip bypass when caller lacks access to the excluded org', async () => {
-        accessControlStub.resolves(false);
+      it('imsOrg path: 404 when internal org has no sites (bypass cannot find a site)', async () => {
         context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
-        // Falls through to normal imsOrg path; mock that to return 404
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.Site.allByOrganizationId.resolves([]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+      });
+
+      // ────────────────────────────────────────────────────────────────────────────
+      // customer orgs (regression — existing behavior must be preserved)
+      // ────────────────────────────────────────────────────────────────────────────
+
+      it('customer org via organizationId: still falls through to 404 (no bypass)', async () => {
+        const CUSTOMER_ORG_ID = testOrganizations[1].getId(); // NOT in excluded list
+        context.data = { organizationId: CUSTOMER_ORG_ID };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[1]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
+      });
+
+      it('customer org via imsOrg: still falls through to 404 (no bypass)', async () => {
+        const CUSTOMER_ORG_IMS = testOrganizations[2].getImsOrgId(); // NOT in excluded list
+        context.data = { imsOrg: CUSTOMER_ORG_IMS };
+        mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
         mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
 
         const response = await sitesController.resolveSite(context);

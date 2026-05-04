@@ -1190,46 +1190,19 @@ function SitesController(ctx, log, env) {
     let organization;
     let site;
 
-    try {
-      // Early bypass: if the caller's shell IMS org (imsOrg) maps to a Spacecat org whose UUID
-      // is in ASO_PLG_EXCLUDED_ORGS, skip all tier/enrollment checks. Those checks would produce
-      // a PLG-wizard-triggering 404 for PRE_ONBOARD internal/demo orgs.
-      if (hasText(imsOrg)) {
-        const callerOrg = await Organization.findByImsOrgId(imsOrg);
-        if (callerOrg && isInternalOrg(callerOrg.getId(), context.env)) {
-          const callerOrgId = callerOrg.getId();
-          if (await accessControlUtil.hasAccess(callerOrg)) {
-            log.info(`[resolveSite] ASO_PLG_EXCLUDED_ORGS bypass triggered for internal org ${callerOrgId} (imsOrg=${imsOrg}, siteId=${siteId ?? 'none'})`);
-            let internalSite;
-            if (hasText(siteId) && isValidUUID(siteId)) {
-              internalSite = await Site.findById(siteId);
-              if (internalSite && internalSite.getOrganizationId() !== callerOrgId) {
-                log.warn(`[resolveSite] Bypass: siteId ${siteId} belongs to org ${internalSite.getOrganizationId()}, not caller org ${callerOrgId} — falling back to allByOrganizationId`);
-                internalSite = null;
-              }
-            }
-            if (!internalSite) {
-              const orgSites = await Site.allByOrganizationId(callerOrgId);
-              internalSite = orgSites?.[0];
-            }
-            if (internalSite) {
-              log.info(`[resolveSite] Bypass returning site ${internalSite.getId()} for internal org ${callerOrgId}`);
-              const isSummitPlgEnabled = await getIsSummitPlgEnabled(internalSite, context);
-              return ok({
-                data: {
-                  organization: OrganizationDto.toJSON(callerOrg),
-                  site: SiteDto.toJSON(internalSite),
-                  isSummitPlgEnabled,
-                },
-              });
-            }
-            log.warn(`[resolveSite] Bypass: no site found in internal org ${callerOrgId} — falling through to normal resolution`);
-          } else {
-            log.warn(`[resolveSite] Bypass skipped: caller lacks access to internal org ${callerOrgId} (imsOrg=${imsOrg})`);
-          }
-        }
-      }
+    // Builds a 200 response from an org + site (used by ASO_PLG_EXCLUDED_ORGS bypass branches).
+    const okWithSite = async (org, targetSite) => {
+      const isSummitPlgEnabled = await getIsSummitPlgEnabled(targetSite, context);
+      return ok({
+        data: {
+          organization: OrganizationDto.toJSON(org),
+          site: SiteDto.toJSON(targetSite),
+          isSummitPlgEnabled,
+        },
+      });
+    };
 
+    try {
       if (hasText(siteId) && isValidUUID(siteId)) {
         site = await Site.findById(siteId);
         if (site) {
@@ -1246,8 +1219,13 @@ function SitesController(ctx, log, env) {
             if (organization && await accessControlUtil.hasAccess(organization)) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+              const callerIsInternal = isInternalOrg(orgId, context.env);
 
               if (!entitlement) {
+                if (callerIsInternal) {
+                  log.info(`[resolveSite] Bypass no_entitlement_for_product → 200 for internal org ${orgId}, site ${siteId}`);
+                  return okWithSite(organization, site);
+                }
                 return resolveFailure(
                   'No site found for the provided parameters',
                   'no_entitlement_for_product',
@@ -1256,6 +1234,10 @@ function SitesController(ctx, log, env) {
               }
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+                if (callerIsInternal) {
+                  log.info(`[resolveSite] Bypass aso_pre_onboard → 200 for internal org ${orgId}, site ${siteId}`);
+                  return okWithSite(organization, site);
+                }
                 return resolveFailure(
                   'No site found for the provided parameters',
                   'aso_pre_onboard',
@@ -1263,6 +1245,9 @@ function SitesController(ctx, log, env) {
                 );
               }
 
+              // site_not_enrolled is intentionally NOT bypassed for internal orgs:
+              // visible-tier sites without enrollment should show "No site onboarded",
+              // not be silently surfaced as fully-resolved.
               if (!enrollments?.length) {
                 return resolveFailure(
                   'No site found for the provided parameters',
@@ -1271,14 +1256,7 @@ function SitesController(ctx, log, env) {
                 );
               }
 
-              const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-              const data = {
-                organization: OrganizationDto.toJSON(organization),
-                site: SiteDto.toJSON(site),
-                isSummitPlgEnabled,
-              };
-
-              return ok({ data });
+              return okWithSite(organization, site);
             }
           }
         }
@@ -1293,14 +1271,18 @@ function SitesController(ctx, log, env) {
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
             || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            return ok({
-              data: {
-                organization: OrganizationDto.toJSON(organization),
-                site: SiteDto.toJSON(enrolledSite),
-                isSummitPlgEnabled,
-              },
-            });
+            return okWithSite(organization, enrolledSite);
+          }
+
+          // Fall-through here is a generic 404 (no resolveStatus) → UI shows PLG wizard.
+          // For internal orgs in ASO_PLG_EXCLUDED_ORGS, bypass that wizard by returning a site.
+          if (isInternalOrg(organizationId, context.env)) {
+            const targetSite = enrolledSite
+              ?? (await Site.allByOrganizationId(organizationId))?.[0];
+            if (targetSite) {
+              log.info(`[resolveSite] Bypass organizationId-path 404 → 200 for internal org ${organizationId}`);
+              return okWithSite(organization, targetSite);
+            }
           }
         }
       } else if (hasText(imsOrg)) {
@@ -1312,14 +1294,18 @@ function SitesController(ctx, log, env) {
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
             || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            const data = {
-              organization: OrganizationDto.toJSON(organization),
-              site: SiteDto.toJSON(enrolledSite),
-              isSummitPlgEnabled,
-            };
+            return okWithSite(organization, enrolledSite);
+          }
 
-            return ok({ data });
+          // Same bypass as the organizationId path, here for callers in an internal org.
+          const callerOrgId = organization.getId();
+          if (isInternalOrg(callerOrgId, context.env)) {
+            const targetSite = enrolledSite
+              ?? (await Site.allByOrganizationId(callerOrgId))?.[0];
+            if (targetSite) {
+              log.info(`[resolveSite] Bypass imsOrg-path 404 → 200 for internal org ${callerOrgId}`);
+              return okWithSite(organization, targetSite);
+            }
           }
         }
       }
