@@ -43,6 +43,8 @@ import {
   resolveWwwUrl,
   updateCodeConfig,
   queueDeliveryConfigWriter,
+  parseCommaSeparatedEnvList,
+  isInternalOrg,
 } from '../../support/utils.js';
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -97,14 +99,6 @@ function deriveCheckKey(onboarding) {
   }
 
   return null;
-}
-
-function parseCommaSeparatedEnvList(value) {
-  return (value || '').split(',').map((id) => id.trim()).filter(Boolean);
-}
-
-function isInternalOrg(orgId, env) {
-  return parseCommaSeparatedEnvList(env.ASO_PLG_EXCLUDED_ORGS).includes(orgId);
 }
 
 /**
