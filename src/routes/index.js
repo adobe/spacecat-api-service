@@ -474,6 +474,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': llmoMysticatController.getTopics,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
     'GET /org/:spaceCatId/brands/all/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,

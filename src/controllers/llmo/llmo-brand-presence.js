@@ -2120,6 +2120,89 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
   );
 }
 
+/**
+ * Creates the getPromptExecutionStatus handler.
+ * Returns aggregated execution status — (topicId, prompt, regionCode, matchedModels[]) — for
+ * the given topic IDs in a single query, replacing the N×7 topic-prompts fan-out in the UI.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createPromptExecutionStatusHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'prompt-execution-status',
+    async (ctx, client) => {
+      const { spaceCatId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+
+      const { topicIds } = params;
+      if (!topicIds?.length) {
+        return badRequest('topicIds query parameter is required and must contain at least one valid UUID');
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+
+      let q = client
+        .from('brand_presence_executions_active')
+        .select('topic_id,prompt,region_code,model')
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .in('topic_id', topicIds);
+
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
+      }
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence prompt-execution-status error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const grouped = new Map();
+      for (const row of (data || [])) {
+        const key = `${row.topic_id}|${row.prompt}|${row.region_code}`;
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            topicId: row.topic_id,
+            prompt: row.prompt,
+            regionCode: row.region_code,
+            matchedModels: new Set(),
+          });
+        }
+        if (row.model) {
+          grouped.get(key).matchedModels.add(row.model);
+        }
+      }
+
+      const items = Array.from(grouped.values()).map((entry) => ({
+        topicId: entry.topicId,
+        prompt: entry.prompt,
+        regionCode: entry.regionCode,
+        matchedModels: Array.from(entry.matchedModels).sort(),
+      }));
+
+      return cachedOk({ items });
+    },
+  );
+}
+
 // ── Search ──────────────────────────────────────────────────────────────────
 
 const MAX_SEARCH_QUERY_LENGTH = 500;
