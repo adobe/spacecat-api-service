@@ -64,6 +64,7 @@ import {
   createReferralTrafficByUrlHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
 } from './llmo-referral-traffic.js';
 
 /**
@@ -219,6 +220,7 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByDevice = createReferralTrafficByDeviceHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -268,6 +270,7 @@ function LlmoMysticatController(ctx) {
     getReferralTrafficByUrl,
     getReferralTrafficBusinessImpact,
     getReferralTrafficWeeks,
+    getReferralTrafficByDevice,
   };
 }
 

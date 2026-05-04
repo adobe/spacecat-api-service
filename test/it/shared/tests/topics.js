@@ -86,6 +86,104 @@ export default function topicTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /v2/orgs/:orgId/topics surfaces categoryUuids', () => {
+      before(() => resetData());
+
+      it('returns categoryUuids array on topic response after creation with categoryId', async () => {
+        const http = getHttpClient();
+
+        // Create a category
+        const catRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { id: 'baseurl-awareness', name: 'Awareness', origin: 'human' },
+        );
+        expect(catRes.status).to.equal(201);
+        const categoryUuid = catRes.body.uuid;
+
+        // Create a topic with categoryId — the POST response must already
+        // include categoryUuids so callers don't see an empty array on the
+        // creation response and a populated one on the next GET.
+        const topicRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/topics`,
+          { name: 'Brand Awareness', categoryId: categoryUuid },
+        );
+        expect(topicRes.status).to.equal(201);
+        expect(topicRes.body.categoryUuids).to.be.an('array').with.lengthOf(1);
+        expect(topicRes.body.categoryUuids[0]).to.equal(categoryUuid);
+
+        // GET topics and verify categoryUuids is populated
+        const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/topics`);
+        expect(listRes.status).to.equal(200);
+        const topic = listRes.body.topics.find((t) => t.name === 'Brand Awareness');
+        expect(topic).to.exist;
+        expect(topic.categoryUuids).to.be.an('array').with.lengthOf(1);
+        expect(topic.categoryUuids[0]).to.equal(categoryUuid);
+      });
+
+      it('returns empty categoryUuids array for topics without categories', async () => {
+        const http = getHttpClient();
+
+        // Create a topic without categoryId
+        const topicRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/topics`,
+          { name: 'Uncategorized Topic' },
+        );
+        expect(topicRes.status).to.equal(201);
+        expect(topicRes.body.categoryUuids).to.be.an('array').with.lengthOf(0);
+
+        // GET topics and verify categoryUuids is empty
+        const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/topics`);
+        expect(listRes.status).to.equal(200);
+        const topic = listRes.body.topics.find((t) => t.name === 'Uncategorized Topic');
+        expect(topic).to.exist;
+        expect(topic.categoryUuids).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('drops soft-deleted categories from categoryUuids', async () => {
+        const http = getHttpClient();
+
+        // Create two categories and link both to one topic
+        const catARes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { id: 'soft-del-cat-a', name: 'CatA', origin: 'human' },
+        );
+        const catBRes = await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/categories`,
+          { id: 'soft-del-cat-b', name: 'CatB', origin: 'human' },
+        );
+        expect(catARes.status).to.equal(201);
+        expect(catBRes.status).to.equal(201);
+        const catA = catARes.body.uuid;
+        const catB = catBRes.body.uuid;
+
+        // Create topic linked to catA, then patch a second link to catB via
+        // re-POST (upsert keeps both junction rows).
+        await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/topics`,
+          { id: 'multi-cat-topic', name: 'Multi Cat Topic', categoryId: catA },
+        );
+        await http.admin.post(
+          `/v2/orgs/${ORG_1_ID}/topics`,
+          { id: 'multi-cat-topic', name: 'Multi Cat Topic', categoryId: catB },
+        );
+
+        // Soft-delete catB
+        const delRes = await http.admin.delete(
+          `/v2/orgs/${ORG_1_ID}/categories/soft-del-cat-b`,
+        );
+        expect(delRes.status).to.be.oneOf([200, 204]);
+
+        // GET topics — only catA should appear in categoryUuids
+        const listRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/topics`);
+        expect(listRes.status).to.equal(200);
+        const topic = listRes.body.topics.find((t) => t.id === 'multi-cat-topic');
+        expect(topic).to.exist;
+        expect(topic.categoryUuids).to.be.an('array');
+        expect(topic.categoryUuids).to.include(catA);
+        expect(topic.categoryUuids).to.not.include(catB);
+      });
+    });
+
     describe('Idempotency: duplicate topic with same categoryId', () => {
       before(() => resetData());
 
