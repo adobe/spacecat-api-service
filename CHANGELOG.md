@@ -1,3 +1,10 @@
+# [1.467.0](https://github.com/adobe/spacecat-api-service/compare/v1.466.1...v1.467.0) (2026-05-04)
+
+
+### Features
+
+* new endpoint to get prompt status ([#2311](https://github.com/adobe/spacecat-api-service/issues/2311)) ([6a0d566](https://github.com/adobe/spacecat-api-service/commit/6a0d566566a6d626ebf6c32508fb1647f64e3323))
+
 ## [1.466.1](https://github.com/adobe/spacecat-api-service/compare/v1.466.0...v1.466.1) (2026-05-04)
 
 
