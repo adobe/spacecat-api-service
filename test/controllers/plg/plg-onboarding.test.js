@@ -366,7 +366,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
             PRODUCT_CODES: { ASO: 'aso_optimizer' },
-            TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+            TIERS: {
+              FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+            },
           },
         },
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -579,7 +581,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -771,6 +775,30 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(res.status).to.equal(200);
     });
 
+    it('proceeds when org has a FREE_TRIAL ASO entitlement (not treated as paid)', async () => {
+      const trialEntitlement = {
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getTier: sandbox.stub().returns('FREE_TRIAL'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([trialEntitlement]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+    });
+
+    it('proceeds when org has a PRE_ONBOARD ASO entitlement (not treated as paid)', async () => {
+      const preOnboardEntitlement = {
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getTier: sandbox.stub().returns('PRE_ONBOARD'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([preOnboardEntitlement]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+    });
+
     it('proceeds when org has no entitlements', async () => {
       mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
 
@@ -829,7 +857,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -929,7 +959,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -1033,7 +1065,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -1913,7 +1947,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -2170,7 +2206,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -2280,7 +2318,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -4460,7 +4500,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -4953,7 +4995,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
             Entitlement: {
               PRODUCT_CODES: { ASO: 'aso_optimizer' },
-              TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              TIERS: {
+                FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+              },
             },
           },
           '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
@@ -5044,7 +5088,12 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
               Config: { toDynamoItem: sandbox.stub() },
             },
             '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-              Entitlement: { PRODUCT_CODES: { ASO: 'aso_optimizer' }, TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' } },
+              Entitlement: {
+                PRODUCT_CODES: { ASO: 'aso_optimizer' },
+                TIERS: {
+                  FREE_TRIAL: 'FREE_TRIAL', PAID: 'PAID', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD',
+                },
+              },
             },
             '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
               default: {

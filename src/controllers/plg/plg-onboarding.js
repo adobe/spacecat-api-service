@@ -1342,6 +1342,12 @@ async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
   }
 
   const config = PLG_REJECTION_MESSAGES[reason];
+  /* c8 ignore next 4 */
+  if (!config) {
+    log.error(`Unknown PLG rejection reason: ${reason}`);
+    return;
+  }
+
   const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
     + `• *Domain:* \`${domain}\`\n`
     + `• *IMS Org:* \`${imsOrgId}\``;
@@ -1425,7 +1431,8 @@ function PlgOnboardingController(ctx) {
     if (existingOrg) {
       const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
       const hasPaidEntitlement = entitlements.some(
-        (e) => e.getProductCode() === ASO_PRODUCT_CODE && e.getTier() !== ASO_TIER,
+        (e) => e.getProductCode() === ASO_PRODUCT_CODE
+          && e.getTier() === EntitlementModel.TIERS.PAID,
       );
       if (hasPaidEntitlement) {
         await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
