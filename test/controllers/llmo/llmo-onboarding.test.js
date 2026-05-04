@@ -396,6 +396,13 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(generateDataFolder('https://nba.com', 'prod')).to.equal(generateDataFolder('https://nba.com/', 'prod'));
     });
+
+    it('should generate correct folder name for nested subpaths', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-com-us-kings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-com-us-kings');
+    });
   });
 
   describe('validateSiteNotOnboarded', () => {
