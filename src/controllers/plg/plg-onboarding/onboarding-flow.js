@@ -11,15 +11,7 @@
  */
 
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
-import {
-  composeBaseURL,
-  detectBotBlocker,
-  detectLocale,
-  hasText,
-  resolveCanonicalUrl,
-} from '@adobe/spacecat-shared-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupPlgSiteSuggestionsAndFixes } from '../plg-onboarding-cleanup.js';
 import { hasActiveSuggestions } from './displacement.js';
 import {
@@ -388,6 +380,12 @@ export async function performAsoPlgOnboarding({
   domain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId, updatedBy,
 }, context) {
   const {
+    Config,
+    RUMAPIClient,
+    composeBaseURL,
+    detectBotBlocker,
+    detectLocale,
+    resolveCanonicalUrl,
     createOrFindOrganization,
     enableAudits,
     enableImports,

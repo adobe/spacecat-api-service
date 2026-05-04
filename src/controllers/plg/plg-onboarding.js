@@ -13,7 +13,16 @@
 import {
   badRequest, createResponse, created, forbidden, internalServerError, noContent, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { composeBaseURL, hasText, isValidIMSOrgId } from '@adobe/spacecat-shared-utils';
+import {
+  composeBaseURL,
+  detectBotBlocker,
+  detectLocale,
+  hasText,
+  isValidIMSOrgId,
+  resolveCanonicalUrl,
+} from '@adobe/spacecat-shared-utils';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -52,6 +61,12 @@ function withFlowDeps(context) {
     ...context,
     badRequest,
     ok,
+    Config,
+    RUMAPIClient,
+    composeBaseURL,
+    detectBotBlocker,
+    detectLocale,
+    resolveCanonicalUrl,
     createOrFindOrganization,
     enableAudits,
     enableImports,
