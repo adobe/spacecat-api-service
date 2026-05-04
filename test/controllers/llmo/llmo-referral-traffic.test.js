@@ -344,6 +344,8 @@ describe('llmo-referral-traffic', () => {
         visits: null,
         avgTimeOnSite: null,
         revenue: null,
+        visitors: null,
+        orders: null,
       });
       expect(body.rows[1]).to.deep.equal({
         platform: 'google',
@@ -353,6 +355,8 @@ describe('llmo-referral-traffic', () => {
         visits: null,
         avgTimeOnSite: null,
         revenue: null,
+        visitors: null,
+        orders: null,
       });
     });
 
@@ -379,6 +383,8 @@ describe('llmo-referral-traffic', () => {
         visits: 150,
         avgTimeOnSite: 95,
         revenue: 1200,
+        visitors: null,
+        orders: null,
       });
     });
 
