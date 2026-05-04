@@ -19,6 +19,7 @@ import {
   parseStatusCommandArgs,
   parseUtcDateArg,
   postReport,
+  resolveSiteScope,
   startOfUtcDay,
 } from './status-command-helpers.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
@@ -193,7 +194,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
     name: 'Check Agentic Traffic DB Status',
     description: 'Checks agentic traffic raw, daily, and weekly DB table status per site.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>]`,
+    usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>|baseUrl=<url>]`,
   });
 
   const { dataAccess, log } = context;
@@ -209,7 +210,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         return;
       }
 
-      const { dateArg, siteId: requestedSiteId } = parsedArgs;
+      const { dateArg } = parsedArgs;
       let targetDate;
       if (dateArg) {
         targetDate = parseUtcDateArg(dateArg);
@@ -234,27 +235,29 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const dateStr = formatUtcDate(targetDate);
       const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
       const weeklyExpected = isClosedSunday(targetDate);
-      const siteScopeText = requestedSiteId ? ` for site \`${requestedSiteId}\`` : '';
+      let siteScopeText = '';
+      if (parsedArgs.siteId) {
+        siteScopeText = ` for site \`${parsedArgs.siteId}\``;
+      } else if (parsedArgs.baseURL) {
+        siteScopeText = ` for site \`${parsedArgs.baseURL}\``;
+      }
 
       await say(`:hourglass_flowing_sand: Checking agentic traffic DB tables for *${dateStr}*${siteScopeText}...`);
 
-      const configuration = await Configuration.findLatest();
-      const candidateSites = requestedSiteId
-        ? [await Site.findById(requestedSiteId)].filter(Boolean)
-        : await Site.all();
-
-      if (requestedSiteId && candidateSites.length === 0) {
-        await say(`:warning: No site found with siteId \`${requestedSiteId}\`.`);
+      const scope = await resolveSiteScope(Site, parsedArgs);
+      if (scope.error) {
+        await say(scope.error);
         return;
       }
-
+      const { candidateSites } = scope;
+      const configuration = await Configuration.findLatest();
       const enabledSites = candidateSites.filter(
         (site) => configuration.isHandlerEnabledForSite(CDN_LOGS_REPORT_AUDIT, site),
       );
 
       if (enabledSites.length === 0) {
-        await say(requestedSiteId
-          ? `:information_source: Site \`${requestedSiteId}\` does not have cdn-logs-report enabled.`
+        await say(siteScopeText
+          ? `:information_source: Site${siteScopeText.replace(/^ for site/, '')} does not have cdn-logs-report enabled.`
           : ':information_source: No sites have cdn-logs-report enabled.');
         return;
       }

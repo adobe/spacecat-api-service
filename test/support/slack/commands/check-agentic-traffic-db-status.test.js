@@ -69,6 +69,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
         Site: {
           all: sinon.stub().resolves([]),
           findById: sinon.stub().resolves(null),
+          findByBaseURL: sinon.stub().resolves(null),
         },
         Configuration: { findLatest: sinon.stub().resolves(configStub) },
         services: { postgrestClient: postgrestStub },
@@ -150,6 +151,40 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     expect(slackContext.say).to.have.been.calledWith(
       `:warning: No site found with siteId \`${MISSING_SITE_ID}\`.`,
+    );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+  });
+
+  it('filters the check to one requested baseUrl', async () => {
+    const targetSite = makeSite(TARGET_SITE_ID, 'https://base-url.example.com');
+    context.dataAccess.Site.findByBaseURL.resolves(targetSite);
+    tableRows.agentic_traffic = [
+      { site_id: TARGET_SITE_ID, hits: 8, updated_at: '2026-04-22T08:00:00Z' },
+    ];
+    tableRows.agentic_traffic_daily = [
+      { site_id: TARGET_SITE_ID, hits: 8, updated_at: '2026-04-22T08:01:00Z' },
+    ];
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22', 'baseUrl=https://base-url.example.com'], slackContext);
+
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+    expect(context.dataAccess.Site.findById).not.to.have.been.called;
+    expect(context.dataAccess.Site.findByBaseURL)
+      .to.have.been.calledWith('https://base-url.example.com');
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('for site `https://base-url.example.com`');
+    expect(output).to.include('Raw table: *1/1* sites, 1 rows / 8 hits');
+  });
+
+  it('reports when the requested baseUrl is not found', async () => {
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-22', 'baseUrl=https://missing.example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: No site found with baseUrl `https://missing.example.com`.',
     );
     expect(context.dataAccess.Site.all).not.to.have.been.called;
   });

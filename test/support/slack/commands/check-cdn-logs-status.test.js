@@ -81,6 +81,7 @@ describe('CheckCdnLogsStatusCommand', () => {
         Site: {
           all: sinon.stub(),
           findById: sinon.stub().resolves(null),
+          findByBaseURL: sinon.stub().resolves(null),
         },
         Configuration: { findLatest: sinon.stub() },
       },
@@ -109,7 +110,7 @@ describe('CheckCdnLogsStatusCommand', () => {
     const cmd = CheckCdnLogsStatusCommand(context);
     await cmd.handleExecution(['bad-date'], slackContext);
     expect(slackContext.say).to.have.been.calledWith(
-      sinon.match(':warning: Unrecognized argument. Expected YYYY-MM-DD or siteId=<UUID>.'),
+      sinon.match(':warning: Unrecognized argument. Expected YYYY-MM-DD, siteId=<UUID>, or baseUrl=<URL>.'),
     );
   });
 
@@ -248,6 +249,33 @@ describe('CheckCdnLogsStatusCommand', () => {
     expect(output).to.include('Sites checked: *1*');
   });
 
+  it('filters the check to one requested baseUrl', async () => {
+    const targetSite = makeSite(TARGET_SITE_ID, 'https://base-url.example.com');
+    context.dataAccess.Site.findByBaseURL.resolves(targetSite);
+    context.dataAccess.Configuration.findLatest.resolves({
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    });
+
+    readConfigStub.resolves({ config: { cdnBucketConfig: { cdnProvider: 'cloudflare' } } });
+    s3SendStub.resolves({
+      CommonPrefixes: [{ Prefix: `aggregated/${TARGET_SITE_ID}/2026/04/21/23/` }],
+    });
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21', 'baseUrl=https://base-url.example.com'], slackContext);
+
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+    expect(context.dataAccess.Site.findById).not.to.have.been.called;
+    expect(context.dataAccess.Site.findByBaseURL)
+      .to.have.been.calledWith('https://base-url.example.com');
+    expect(s3SendStub).to.have.been.calledOnce;
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('for site `https://base-url.example.com`');
+    expect(output).to.include('Complete: *1*');
+    expect(output).to.include('Sites checked: *1*');
+  });
+
   it('accepts a bare site UUID as single-site scope', async () => {
     const targetSite = makeSite(TARGET_SITE_ID, 'https://uuid-target.com');
     context.dataAccess.Site.findById.resolves(targetSite);
@@ -282,6 +310,19 @@ describe('CheckCdnLogsStatusCommand', () => {
 
     expect(slackContext.say).to.have.been.calledWith(
       `:warning: No site found with siteId \`${MISSING_SITE_ID}\`.`,
+    );
+    expect(context.dataAccess.Site.all).not.to.have.been.called;
+    expect(s3SendStub).not.to.have.been.called;
+  });
+
+  it('reports when the requested CDN status baseUrl is not found', async () => {
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+
+    const cmd = CheckCdnLogsStatusCommand(context);
+    await cmd.handleExecution(['2026-04-21', 'baseUrl=https://missing.example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWith(
+      ':warning: No site found with baseUrl `https://missing.example.com`.',
     );
     expect(context.dataAccess.Site.all).not.to.have.been.called;
     expect(s3SendStub).not.to.have.been.called;

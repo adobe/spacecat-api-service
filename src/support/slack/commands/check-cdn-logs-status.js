@@ -21,6 +21,7 @@ import {
   parseStatusCommandArgs,
   parseUtcDateArg,
   postReport,
+  resolveSiteScope,
 } from './status-command-helpers.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
 
@@ -185,7 +186,7 @@ function CheckCdnLogsStatusCommand(context) {
     name: 'Check CDN Logs Status',
     description: 'Checks CDN logs aggregate processing status for all sites with cdn-logs-analysis enabled.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>]`,
+    usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>|baseUrl=<url>]`,
   });
 
   const {
@@ -208,7 +209,7 @@ function CheckCdnLogsStatusCommand(context) {
         return;
       }
 
-      const { dateArg, siteId: requestedSiteId } = parsedArgs;
+      const { dateArg } = parsedArgs;
       let targetDate;
       if (dateArg) {
         targetDate = parseUtcDateArg(dateArg);
@@ -227,7 +228,12 @@ function CheckCdnLogsStatusCommand(context) {
 
       const dateStr = formatUtcDate(targetDate);
       const { year, month, day } = getUtcYMD(targetDate);
-      const siteScopeText = requestedSiteId ? ` for site \`${requestedSiteId}\`` : '';
+      let siteScopeText = '';
+      if (parsedArgs.siteId) {
+        siteScopeText = ` for site \`${parsedArgs.siteId}\``;
+      } else if (parsedArgs.baseURL) {
+        siteScopeText = ` for site \`${parsedArgs.baseURL}\``;
+      }
 
       // Resolve default CDN aggregate bucket name from environment. Per-site
       // region overrides are honored below when the site config provides them.
@@ -236,24 +242,21 @@ function CheckCdnLogsStatusCommand(context) {
 
       await say(`:hourglass_flowing_sand: Checking CDN logs status for *${dateStr}*${siteScopeText} in \`${defaultAggregateBucket}\`...`);
 
-      // Find all sites with cdn-logs-analysis enabled
-      const configuration = await Configuration.findLatest();
-      const candidateSites = requestedSiteId
-        ? [await Site.findById(requestedSiteId)].filter(Boolean)
-        : await Site.all();
-
-      if (requestedSiteId && candidateSites.length === 0) {
-        await say(`:warning: No site found with siteId \`${requestedSiteId}\`.`);
+      const scope = await resolveSiteScope(Site, parsedArgs);
+      if (scope.error) {
+        await say(scope.error);
         return;
       }
-
+      const { candidateSites } = scope;
+      // Find all sites with cdn-logs-analysis enabled
+      const configuration = await Configuration.findLatest();
       const enabledSites = candidateSites.filter(
         (site) => configuration.isHandlerEnabledForSite(CDN_LOGS_AUDIT, site),
       );
 
       if (enabledSites.length === 0) {
-        await say(requestedSiteId
-          ? `:information_source: Site \`${requestedSiteId}\` does not have cdn-logs-analysis enabled.`
+        await say(siteScopeText
+          ? `:information_source: Site${siteScopeText.replace(/^ for site/, '')} does not have cdn-logs-analysis enabled.`
           : ':information_source: No sites have cdn-logs-analysis enabled.');
         return;
       }

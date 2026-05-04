@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { sendFile } from '../../../utils/slack/base.js';
+import { extractURLFromSlackInput, sendFile } from '../../../utils/slack/base.js';
 
 export const DETAIL_ROW_LIMIT = 8;
 export const REPORT_CHUNK_LIMIT = 2800;
@@ -18,6 +18,7 @@ export const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
+const BASE_URL_ARG_RE = /^(baseUrl|baseURL|base-url|base_url|baseurl)=(.*)$/i;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -68,10 +69,30 @@ export function parseStatusCommandArgs(args = []) {
       continue;
     }
 
+    const baseURLMatch = arg.match(BASE_URL_ARG_RE);
     const siteIdMatch = arg.match(SITE_ID_ARG_RE);
-    if (siteIdMatch) {
+    if (baseURLMatch) {
+      if (parsed.baseURL) {
+        return { error: ':warning: Duplicate baseUrl argument.' };
+      }
+      if (parsed.siteId) {
+        return { error: ':warning: Cannot combine siteId and baseUrl arguments.' };
+      }
+      const baseURLInput = baseURLMatch[2].trim();
+      if (!baseURLInput) {
+        return { error: ':warning: baseUrl must not be empty.' };
+      }
+      const baseURL = extractURLFromSlackInput(baseURLInput);
+      if (!baseURL) {
+        return { error: ':warning: Invalid baseUrl. Expected URL.' };
+      }
+      parsed.baseURL = baseURL;
+    } else if (siteIdMatch) {
       if (parsed.siteId) {
         return { error: ':warning: Duplicate siteId argument.' };
+      }
+      if (parsed.baseURL) {
+        return { error: ':warning: Cannot combine siteId and baseUrl arguments.' };
       }
       const siteId = siteIdMatch[2].trim();
       if (!siteId) {
@@ -90,13 +111,36 @@ export function parseStatusCommandArgs(args = []) {
       if (parsed.siteId) {
         return { error: ':warning: Duplicate siteId argument.' };
       }
+      if (parsed.baseURL) {
+        return { error: ':warning: Cannot combine siteId and baseUrl arguments.' };
+      }
       parsed.siteId = arg;
     } else {
-      return { error: ':warning: Unrecognized argument. Expected YYYY-MM-DD or siteId=<UUID>.' };
+      return {
+        error: ':warning: Unrecognized argument. Expected YYYY-MM-DD, siteId=<UUID>, or baseUrl=<URL>.',
+      };
     }
   }
 
   return parsed;
+}
+
+export async function resolveSiteScope(Site, { siteId, baseURL } = {}) {
+  if (siteId) {
+    const site = await Site.findById(siteId);
+    return site
+      ? { candidateSites: [site] }
+      : { error: `:warning: No site found with siteId \`${siteId}\`.` };
+  }
+  if (baseURL) {
+    const site = await Site.findByBaseURL(baseURL);
+    return site
+      ? { candidateSites: [site] }
+      : { error: `:warning: No site found with baseUrl \`${baseURL}\`.` };
+  }
+  return {
+    candidateSites: await Site.all(),
+  };
 }
 
 function splitReportLine(line) {

@@ -33,6 +33,38 @@ describe('status command helpers', () => {
     });
   });
 
+  it('parses baseUrl arguments and normalizes Slack links', () => {
+    expect(parseStatusCommandArgs([
+      '2026-04-22',
+      'baseUrl=<https://www.example.com/path/|example>',
+    ])).to.deep.equal({
+      dateArg: '2026-04-22',
+      baseURL: 'https://example.com/path/',
+    });
+  });
+
+  it('rejects invalid and duplicate baseUrl arguments', () => {
+    expect(parseStatusCommandArgs(['baseUrl='])).to.deep.equal({
+      error: ':warning: baseUrl must not be empty.',
+    });
+    expect(parseStatusCommandArgs(['baseUrl=not-a-url'])).to.deep.equal({
+      error: ':warning: Invalid baseUrl. Expected URL.',
+    });
+    expect(parseStatusCommandArgs(['baseUrl=https://one.com', 'baseUrl=https://two.com']))
+      .to.deep.equal({
+        error: ':warning: Duplicate baseUrl argument.',
+      });
+  });
+
+  it('rejects combining siteId and baseUrl', () => {
+    expect(parseStatusCommandArgs([
+      'baseUrl=https://example.com',
+      '11111111-2222-3333-4444-555555555555',
+    ])).to.deep.equal({
+      error: ':warning: Cannot combine siteId and baseUrl arguments.',
+    });
+  });
+
   it('limits row detail and appends an omitted marker', () => {
     const lines = [];
     appendLimitedDetails(
