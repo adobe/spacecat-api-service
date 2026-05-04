@@ -1,14 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# Test Plan: topic_categories junction fix (PR #2195)
+# Test Plan: topic_categories junction (extended for PR #2304 / LLMO-4623 —
+# surfacing categoryUuids on the topics list response). Original junction
+# write-side fix shipped in PR #2195.
 #
 # Validates that POST /v2/orgs/:orgId/topics correctly creates a
-# topic_categories junction row when categoryId is provided.
+# topic_categories junction row when categoryId is provided, and that
+# GET /v2/orgs/:orgId/topics surfaces the linked category UUIDs.
 #
 # Tests:
 #   1. Category creation
-#   2. Topic with categoryId → junction linked (verified via topics list)
-#   3. Topic without categoryId → no regression
+#   2. Topic with categoryId → junction linked (verified via topics list,
+#      including categoryUuids contains the linked UUID — LLMO-4623)
+#   3. Topic without categoryId → no regression (categoryUuids = [])
 #   4. Idempotency → duplicate POST returns same topic UUID
 #   5. Invalid categoryId → topic still created (graceful failure)
 #   6. Cleanup

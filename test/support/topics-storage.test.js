@@ -115,6 +115,32 @@ describe('topics-storage', () => {
       expect(result[0].categoryUuids).to.deep.equal([]);
     });
 
+    it('drops soft-deleted categories from categoryUuids', async () => {
+      const dbRow = {
+        id: 'uuid-4',
+        topic_id: 'mixed-status-topic',
+        name: 'Mixed',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        topic_categories: [
+          { category_id: 'cat-active', categories: { status: 'active' } },
+          { category_id: 'cat-deleted', categories: { status: 'deleted' } },
+          { category_id: 'cat-pending', categories: { status: 'pending' } },
+        ],
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result[0].categoryUuids).to.deep.equal(['cat-active', 'cat-pending']);
+    });
+
     it('returns empty array and defaults status when data is null', async () => {
       const query = createChainableQuery({ data: null, error: null });
       const postgrestClient = { from: sinon.stub().returns(query) };
@@ -202,7 +228,12 @@ describe('topics-storage', () => {
       expect(result.createdBy).to.equal('user@test.com');
     });
 
-    it('upserts topic_categories when categoryId is provided', async () => {
+    it('upserts topic_categories when categoryId is provided and returns populated categoryUuids', async () => {
+      // After the topic upsert + junction upsert, createTopic re-fetches the
+      // topic with the topic_categories embed so the response shape matches
+      // listTopics. We simulate that by populating topic_categories on the
+      // shared mock row — both the upsert .single() and the refetch
+      // .maybeSingle() resolve from the same proxy.
       const dbRow = {
         id: 'uuid-tc',
         topic_id: 'cat-linked-topic',
@@ -210,6 +241,9 @@ describe('topics-storage', () => {
         description: null,
         status: 'active',
         brand_id: null,
+        topic_categories: [
+          { category_id: 'cat-uuid-123', categories: { status: 'active' } },
+        ],
         created_at: '2026-04-01T00:00:00Z',
         created_by: 'system',
         updated_at: '2026-04-01',
@@ -223,13 +257,16 @@ describe('topics-storage', () => {
       fromStub.withArgs('topic_categories').returns(tcQuery);
       const postgrestClient = { from: fromStub };
 
-      await createTopic({
+      const result = await createTopic({
         organizationId: ORG_ID,
         topic: { name: 'Category Linked', categoryId: 'cat-uuid-123' },
         postgrestClient,
       });
 
       expect(fromStub).to.have.been.calledWith('topic_categories');
+      // Response is symmetric with GET /topics — POST callers see the
+      // category they just linked.
+      expect(result.categoryUuids).to.deep.equal(['cat-uuid-123']);
     });
 
     it('warns via log when topic_categories upsert fails', async () => {
