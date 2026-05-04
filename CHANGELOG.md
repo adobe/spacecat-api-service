@@ -1,3 +1,17 @@
+# [1.465.0](https://github.com/adobe/spacecat-api-service/compare/v1.464.2...v1.465.0) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.13.5 ([#2308](https://github.com/adobe/spacecat-api-service/issues/2308)) ([e52c6b5](https://github.com/adobe/spacecat-api-service/commit/e52c6b546a5a22135ede2c1c67480772774716e8))
+* **deps:** update external fixes ([#2306](https://github.com/adobe/spacecat-api-service/issues/2306)) ([78a0504](https://github.com/adobe/spacecat-api-service/commit/78a0504cab35f5ac8e523ba36b98a5fce39f4fcb))
+
+
+### Features
+
+* **llmo:** surface categoryUuids on V2 topics endpoints ([#2304](https://github.com/adobe/spacecat-api-service/issues/2304)) ([5679610](https://github.com/adobe/spacecat-api-service/commit/5679610fa38152c463679d1010273eddcfb9b232)), closes [adobe-rnd/llmo-data-retrieval-service#1512](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1512)
+* referral traffic endpoints follow up | LLMO-4261 ([#2301](https://github.com/adobe/spacecat-api-service/issues/2301)) ([eb4a885](https://github.com/adobe/spacecat-api-service/commit/eb4a8856022239a86c78f36a50b4813389e1bc71))
+
 ## [1.464.2](https://github.com/adobe/spacecat-api-service/compare/v1.464.1...v1.464.2) (2026-05-04)
 
 
