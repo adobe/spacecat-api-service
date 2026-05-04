@@ -5210,6 +5210,31 @@ describe('Sites Controller', () => {
         expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
         expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
+
+      it('should fall back to allByOrganizationId when provided siteId belongs to a different org', async () => {
+        // testSites[1] belongs to testOrganizations[3], not testOrganizations[0] (the internal one)
+        context.data = { siteId: SITE_IDS[1], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Site.allByOrganizationId.resolves([testSites[0]]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        expect(mockDataAccess.Site.allByOrganizationId)
+          .to.have.been.calledWith(INTERNAL_ORG_SPACECAT_ID);
+      });
+
+      it('should skip bypass when caller lacks access to the excluded org', async () => {
+        accessControlStub.resolves(false);
+        context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
+        // Falls through to normal imsOrg path; mock that to return 404
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
+      });
     });
   });
 
