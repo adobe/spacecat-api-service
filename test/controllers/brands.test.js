@@ -2913,6 +2913,19 @@ describe('Brands Controller', () => {
 
   describe('createTopicForOrg', () => {
     beforeEach(() => {
+      // createTopic in topics-storage.js uses .single() for the upsert and
+      // then re-fetches the row with .maybeSingle() so the response carries
+      // the topic_categories embed (categoryUuids). Both must be stubbed.
+      const topicRow = {
+        id: 'topic-uuid',
+        topic_id: 'my-topic',
+        name: 'My Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'user@test.com',
+      };
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
@@ -2920,19 +2933,8 @@ describe('Brands Controller', () => {
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
-          single: sandbox.stub().resolves({
-            data: {
-              id: 'topic-uuid',
-              topic_id: 'my-topic',
-              name: 'My Topic',
-              description: null,
-              status: 'active',
-              brand_id: null,
-              updated_at: '2026-01-01T00:00:00Z',
-              updated_by: 'user@test.com',
-            },
-            error: null,
-          }),
+          single: sandbox.stub().resolves({ data: topicRow, error: null }),
+          maybeSingle: sandbox.stub().resolves({ data: topicRow, error: null }),
         })),
       };
       brandsController = BrandsController(context, loggerStub, mockEnv);

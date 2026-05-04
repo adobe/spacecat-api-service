@@ -12,7 +12,22 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+// Embed shape used by listTopics / createTopic / updateTopic so the response
+// shape is symmetric across the three endpoints. Nesting `categories(status)`
+// inside `topic_categories` lets us drop tombstoned categories client-side
+// without relying on PostgREST inner-join filter semantics.
+const TOPIC_SELECT = '*, topic_categories(category_id, categories(status))';
+
 function mapDbTopicToV2(row) {
+  // Filter out junction rows pointing at soft-deleted categories so consumers
+  // never see a tombstone UUID. Junction rows whose nested `categories` row
+  // is absent (e.g. older test fixtures, or a junction created without an
+  // embed) are treated as "unknown status, include" to avoid silently
+  // dropping data when the embed is missing.
+  const categoryUuids = (row.topic_categories ?? [])
+    .filter((tc) => tc.categories?.status !== 'deleted')
+    .map((tc) => tc.category_id);
+
   return {
     id: row.topic_id,
     uuid: row.id,
@@ -20,6 +35,7 @@ function mapDbTopicToV2(row) {
     description: row.description || null,
     status: row.status || 'active',
     brandId: row.brand_id || null,
+    categoryUuids,
     createdAt: row.created_at,
     createdBy: row.created_by,
     updatedAt: row.updated_at,
@@ -46,7 +62,7 @@ export async function listTopics({
 
   let query = postgrestClient
     .from('topics')
-    .select('*')
+    .select(TOPIC_SELECT)
     .eq('organization_id', organizationId)
     .order('name', { ascending: true });
 
@@ -147,6 +163,23 @@ export async function createTopic({
     }
   }
 
+  // Re-fetch with the topic_categories embed so the response shape matches
+  // listTopics: callers POSTing with categoryId expect categoryUuids to be
+  // populated on the response. The embed cannot be requested on the upsert
+  // itself because the junction row is written in the step above. A refetch
+  // failure is non-fatal — fall back to the upsert payload (categoryUuids:[]).
+  if (data?.id) {
+    const { data: full, error: refetchError } = await postgrestClient
+      .from('topics')
+      .select(TOPIC_SELECT)
+      .eq('id', data.id)
+      .maybeSingle();
+    if (refetchError) {
+      log?.warn?.(`Failed to refetch topic ${data.id} with category embed: ${refetchError.message}`);
+    } else if (full) {
+      return mapDbTopicToV2(full);
+    }
+  }
   return mapDbTopicToV2(data);
 }
 
@@ -187,7 +220,7 @@ export async function updateTopic({
     .update(patch)
     .eq('organization_id', organizationId)
     .eq('topic_id', topicId)
-    .select()
+    .select(TOPIC_SELECT)
     .maybeSingle();
 
   if (error) {
