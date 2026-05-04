@@ -25,45 +25,27 @@ import {
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
-// LLMO-4683: curated ISO 3166-1 alpha-2 region options for the onboarding modal.
-// Operator selects the brand's primary market so DRS prompt generation conditions
-// the LLM on the right region. Omitted → DRS client default ('US') applies.
-const REGION_SELECT_OPTIONS = [
-  { value: 'US', text: 'United States (US)' },
-  { value: 'GB', text: 'United Kingdom (GB)' },
-  { value: 'DE', text: 'Germany (DE)' },
-  { value: 'FR', text: 'France (FR)' },
-  { value: 'IT', text: 'Italy (IT)' },
-  { value: 'ES', text: 'Spain (ES)' },
-  { value: 'NL', text: 'Netherlands (NL)' },
-  { value: 'BR', text: 'Brazil (BR)' },
-  { value: 'MX', text: 'Mexico (MX)' },
-  { value: 'CA', text: 'Canada (CA)' },
-  { value: 'IN', text: 'India (IN)' },
-  { value: 'JP', text: 'Japan (JP)' },
-  { value: 'AU', text: 'Australia (AU)' },
-];
+// LLMO-4683: ISO 3166-1 alpha-2 region for the onboarding modal.
+// Operator types the brand's primary market so DRS prompt generation conditions
+// the LLM on the right region. Empty → DRS client default ('US') applies.
+const REGION_REGEX = /^[A-Z]{2}$/;
 
-function buildRegionSelectBlock() {
+function buildRegionInputBlock() {
   return {
     type: 'input',
     block_id: 'region_input',
     optional: true,
     element: {
-      type: 'static_select',
+      type: 'plain_text_input',
       action_id: 'region',
       placeholder: {
         type: 'plain_text',
-        text: 'Leave blank for default (US)',
+        text: 'e.g. US, IN, BR — leave blank for default (US)',
       },
-      options: REGION_SELECT_OPTIONS.map(({ value, text }) => ({
-        text: { type: 'plain_text', text },
-        value,
-      })),
     },
     label: {
       type: 'plain_text',
-      text: 'Brand Region (optional)',
+      text: 'Brand Region (ISO 3166-1 alpha-2, optional)',
     },
   };
 }
@@ -219,7 +201,7 @@ async function fullOnboardingModal(body, client, respond, brandURL, tempOnboardi
             text: 'Delivery Type',
           },
         },
-        buildRegionSelectBlock(),
+        buildRegionInputBlock(),
       ],
     },
   });
@@ -302,7 +284,7 @@ async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboardi
             text: 'IMS Organization ID',
           },
         },
-        buildRegionSelectBlock(),
+        buildRegionInputBlock(),
       ],
     },
   });
@@ -511,7 +493,8 @@ export function onboardLLMOModal(lambdaContext) {
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
-      const region = values.region_input?.region?.selected_option?.value;
+      const regionRaw = values.region_input?.region?.value;
+      const region = regionRaw ? regionRaw.trim().toUpperCase() : undefined;
 
       if (!brandName || !imsOrgId) {
         await ack({
@@ -519,6 +502,16 @@ export function onboardLLMOModal(lambdaContext) {
           errors: {
             brand_name_input: !brandName ? 'Brand name is required' : undefined,
             ims_org_input: !imsOrgId ? 'IMS Org ID is required' : undefined,
+          },
+        });
+        return;
+      }
+
+      if (region && !REGION_REGEX.test(region)) {
+        await ack({
+          response_action: 'errors',
+          errors: {
+            region_input: 'Region must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)',
           },
         });
         return;

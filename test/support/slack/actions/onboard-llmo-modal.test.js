@@ -1307,9 +1307,7 @@ example-com:
                 },
               },
               region_input: {
-                region: {
-                  selected_option: { value: 'IN' },
-                },
+                region: { value: 'IN' },
               },
             },
           },
@@ -1345,6 +1343,78 @@ example-com:
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
         tempOnboarding: false,
+      });
+    });
+
+    it('should normalize lowercase / whitespace region to uppercase ISO code (LLMO-4683)', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: { brand_name: { value: 'Test Brand BR' } },
+              ims_org_input: { ims_org_id: { value: 'ABC123@AdobeOrg' } },
+              delivery_type_input: { delivery_type: { selected_option: { value: 'aem_edge' } } },
+              region_input: { region: { value: '  br  ' } },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = { chat: { postMessage: sandbox.stub().resolves() } };
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.info).to.have.been.calledWith(
+        'Onboarding request with parameters:',
+        sinon.match({ region: 'BR' }),
+      );
+    });
+
+    it('should reject invalid region with a Slack input error (LLMO-4683)', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: { brand_name: { value: 'Test Brand' } },
+              ims_org_input: { ims_org_id: { value: 'ABC123@AdobeOrg' } },
+              delivery_type_input: { delivery_type: { selected_option: { value: 'aem_edge' } } },
+              region_input: { region: { value: 'usa' } },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = { chat: { postMessage: sandbox.stub().resolves() } };
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockAck).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          region_input: 'Region must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)',
+        },
       });
     });
 
