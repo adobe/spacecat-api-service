@@ -2137,9 +2137,19 @@ export function createPromptExecutionStatusHandler(getOrgAndValidateAccess) {
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
 
-      const { topicIds } = params;
-      if (!topicIds?.length) {
-        return badRequest('topicIds query parameter is required and must contain at least one valid UUID');
+      const rawPromptIds = ctx.data?.promptIds;
+      let promptIds = [];
+      if (Array.isArray(rawPromptIds)) {
+        promptIds = rawPromptIds;
+      } else if (typeof rawPromptIds === 'string') {
+        promptIds = rawPromptIds.split(',').map((s) => s.trim());
+      } else if (rawPromptIds != null) {
+        promptIds = [String(rawPromptIds)];
+      }
+      promptIds = promptIds.filter((id) => id != null && isValidUUID(String(id)));
+
+      if (!promptIds.length) {
+        return badRequest('promptIds query parameter is required and must contain at least one valid UUID');
       }
 
       if (shouldApplyFilter(params.siteId)) {
@@ -2162,7 +2172,7 @@ export function createPromptExecutionStatusHandler(getOrgAndValidateAccess) {
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
         .lte('execution_date', endDate)
-        .in('topic_id', topicIds);
+        .in('prompt_id', promptIds);
 
       if (shouldApplyFilter(params.siteId)) {
         q = q.eq('site_id', params.siteId);

@@ -3160,10 +3160,10 @@ brand-presence-prompt-execution-status:
       topic-prompts fan-out used by the Prompts Management status column.
     operationId: getPromptExecutionStatus
     parameters:
-      - name: topicIds
+      - name: promptIds
         in: query
         required: true
-        description: Comma-separated list of topic UUIDs to query (at least one required)
+        description: Comma-separated list of prompt UUIDs (V2Prompt.id) currently visible on the page (at least one required)
         schema:
           type: string
           example: 'aaaaaaaa-0000-7000-8000-000000000001,bbbbbbbb-0000-7000-8000-000000000002'

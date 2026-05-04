@@ -18,6 +18,8 @@ const ORG_ID = '0178a3f0-1234-7000-8000-000000000001';
 const SITE_ID = 'aabbccdd-0000-7000-8000-000000000002';
 const TOPIC_ID_1 = 'aaaaaaaa-0000-7000-8000-000000000001';
 const TOPIC_ID_2 = 'bbbbbbbb-0000-7000-8000-000000000002';
+const PROMPT_ID_1 = 'cccccccc-0000-7000-8000-000000000001';
+const PROMPT_ID_2 = 'dddddddd-0000-7000-8000-000000000002';
 
 function makeContext(data = {}, params = {}) {
   return {
@@ -55,7 +57,7 @@ describe('createPromptExecutionStatusHandler', () => {
     getOrgAndValidateAccess = sinon.stub().resolves({ organization: {} });
   });
 
-  it('returns 400 when topicIds is missing', async () => {
+  it('returns 400 when promptIds is missing', async () => {
     const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
     const ctx = makeContext({});
     ctx.dataAccess.Site.postgrestService = makeClient();
@@ -63,15 +65,15 @@ describe('createPromptExecutionStatusHandler', () => {
     expect(res.status).to.equal(400);
   });
 
-  it('returns 400 when topicIds contains no valid UUIDs', async () => {
+  it('returns 400 when promptIds contains no valid UUIDs', async () => {
     const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
-    const ctx = makeContext({ topicIds: 'not-a-uuid,also-bad' });
+    const ctx = makeContext({ promptIds: 'not-a-uuid,also-bad' });
     ctx.dataAccess.Site.postgrestService = makeClient();
     const res = await handler(ctx);
     expect(res.status).to.equal(400);
   });
 
-  it('returns aggregated items for valid topicIds', async () => {
+  it('returns aggregated items for valid promptIds', async () => {
     const rows = [
       {
         topic_id: TOPIC_ID_1, prompt: 'What is AI?', region_code: 'US', model: 'chatgpt-free',
@@ -88,7 +90,7 @@ describe('createPromptExecutionStatusHandler', () => {
     ];
     const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
     const ctx = makeContext({
-      topicIds: `${TOPIC_ID_1},${TOPIC_ID_2}`,
+      promptIds: `${PROMPT_ID_1},${PROMPT_ID_2}`,
       startDate: '2026-04-28',
       endDate: '2026-05-04',
     });
@@ -115,11 +117,11 @@ describe('createPromptExecutionStatusHandler', () => {
     expect(t2Item.matchedModels).to.deep.equal(['perplexity']);
   });
 
-  it('passes siteId filter when provided', async () => {
+  it('filters by prompt_id and passes siteId filter when provided', async () => {
     const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
     const client = makeClient([]);
     const ctx = makeContext({
-      topicIds: TOPIC_ID_1,
+      promptIds: PROMPT_ID_1,
       siteId: SITE_ID,
       startDate: '2026-04-28',
       endDate: '2026-05-04',
@@ -127,6 +129,7 @@ describe('createPromptExecutionStatusHandler', () => {
     ctx.dataAccess.Site.postgrestService = client;
 
     await handler(ctx);
+    expect(client.execChain.in.calledWith('prompt_id', [PROMPT_ID_1])).to.be.true;
     expect(client.execChain.eq.calledWith('site_id', SITE_ID)).to.be.true;
   });
 
@@ -134,7 +137,7 @@ describe('createPromptExecutionStatusHandler', () => {
     const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
     const client = makeClient([], []); // empty site rows → site not in org
     const ctx = makeContext({
-      topicIds: TOPIC_ID_1,
+      promptIds: PROMPT_ID_1,
       siteId: SITE_ID,
     });
     ctx.dataAccess.Site.postgrestService = client;
@@ -154,7 +157,7 @@ describe('createPromptExecutionStatusHandler', () => {
       limit: sinon.stub().resolves({ data: null, error: { message: 'db error' } }),
     };
     const client = { from: sinon.stub().returns(execChain) };
-    const ctx = makeContext({ topicIds: TOPIC_ID_1 });
+    const ctx = makeContext({ promptIds: PROMPT_ID_1 });
     ctx.dataAccess.Site.postgrestService = client;
 
     const res = await handler(ctx);
@@ -163,7 +166,7 @@ describe('createPromptExecutionStatusHandler', () => {
 
   it('returns 400 when PostgREST service is unavailable', async () => {
     const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
-    const ctx = makeContext({ topicIds: TOPIC_ID_1 });
+    const ctx = makeContext({ promptIds: PROMPT_ID_1 });
     ctx.dataAccess.Site.postgrestService = null;
 
     const res = await handler(ctx);
@@ -172,8 +175,28 @@ describe('createPromptExecutionStatusHandler', () => {
 
   it('returns empty items when no execution rows match', async () => {
     const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
-    const ctx = makeContext({ topicIds: TOPIC_ID_1 });
+    const ctx = makeContext({ promptIds: PROMPT_ID_1 });
     ctx.dataAccess.Site.postgrestService = makeClient([]);
+
+    const res = await handler(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items).to.deep.equal([]);
+  });
+
+  it('returns empty items when PostgREST returns null data without error', async () => {
+    const handler = createPromptExecutionStatusHandler(getOrgAndValidateAccess);
+    const execChain = {
+      select: sinon.stub().returnsThis(),
+      eq: sinon.stub().returnsThis(),
+      gte: sinon.stub().returnsThis(),
+      lte: sinon.stub().returnsThis(),
+      in: sinon.stub().returnsThis(),
+      limit: sinon.stub().resolves({ data: null, error: null }),
+    };
+    const client = { from: sinon.stub().returns(execChain) };
+    const ctx = makeContext({ promptIds: PROMPT_ID_1 });
+    ctx.dataAccess.Site.postgrestService = client;
 
     const res = await handler(ctx);
     expect(res.status).to.equal(200);
