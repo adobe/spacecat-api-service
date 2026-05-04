@@ -21,6 +21,12 @@ const SITE_ID_ARG_RE = /^(siteId|site-id|site_id)=(.*)$/i;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
+export function addUtcDays(date, days) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
 export function formatUtcDate(date) {
   return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
@@ -118,6 +124,15 @@ export function appendLimitedDetails(lines, rows, renderRow, renderOmitted, full
     lines.push(renderOmitted(omitted));
   }
   return omitted;
+}
+
+export function appendStatusDetails(lines, fullLines, header, rows, renderRow, renderOmitted) {
+  if (rows.length === 0) {
+    return;
+  }
+  lines.push('', header);
+  fullLines.push('', header);
+  appendLimitedDetails(lines, rows, renderRow, renderOmitted, fullLines);
 }
 
 async function sayChunkedReport(slackContext, lines) {

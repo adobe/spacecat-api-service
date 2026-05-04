@@ -17,6 +17,10 @@ import {
 } from '../../../utils/slack/base.js';
 
 import BaseCommand from './base.js';
+import {
+  addUtcDays,
+  formatUtcDate,
+} from './status-command-helpers.js';
 
 const PHRASES = ['backfill-llmo'];
 
@@ -42,16 +46,6 @@ function parseArgs(args) {
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
-
-function formatUtcDate(date) {
-  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
-}
-
-function addUtcDays(date, days) {
-  const next = new Date(date.getTime());
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
 
 function isDbBackfillMode(parsed) {
   return parsed.mode?.toLowerCase() === 'db';

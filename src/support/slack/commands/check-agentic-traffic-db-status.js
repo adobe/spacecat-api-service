@@ -12,7 +12,8 @@
 
 import BaseCommand from './base.js';
 import {
-  appendLimitedDetails,
+  addUtcDays,
+  appendStatusDetails,
   formatUtcDate,
   isFutureUtcDate,
   parseStatusCommandArgs,
@@ -24,29 +25,30 @@ import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['check agentic traffic db status'];
 const CDN_LOGS_REPORT_AUDIT = 'cdn-logs-report';
-const AGENTIC_TRAFFIC_IMPORT_HANDLER = 'wrpc_import_agentic_traffic';
-const AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER = 'wrpc_refresh_agentic_traffic_daily';
-const AGENTIC_TRAFFIC_WEEKLY_REFRESH_HANDLER = 'wrpc_refresh_agentic_traffic_weekly';
-const AGENTIC_TRAFFIC_HANDLERS = [
-  AGENTIC_TRAFFIC_IMPORT_HANDLER,
-  AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER,
-  AGENTIC_TRAFFIC_WEEKLY_REFRESH_HANDLER,
+const BATCH_SIZE = 25;
+const AGENTIC_TRAFFIC_TABLES = [
+  {
+    key: 'raw',
+    label: 'raw import',
+    table: 'agentic_traffic',
+    dateColumn: 'traffic_date',
+    select: 'site_id,hits,updated_at',
+  },
+  {
+    key: 'daily',
+    label: 'daily serving',
+    table: 'agentic_traffic_daily',
+    dateColumn: 'traffic_date',
+    select: 'site_id,hits,updated_at',
+  },
+  {
+    key: 'weekly',
+    label: 'weekly serving',
+    table: 'agentic_traffic_weekly',
+    dateColumn: 'week_start',
+    select: 'site_id,hits,updated_at',
+  },
 ];
-const AGENTIC_REFRESH_ENABLED_ENV = 'MYSTICAT_AGENTIC_REFRESH_ENABLED';
-const BATCH_SIZE = 10;
-const AUDIT_LOOKBACK_LIMIT = 50;
-const PROJECTION_CORRELATION_ID_BATCH_SIZE = 75;
-const STALE_PENDING_THRESHOLD_HOURS = 4;
-const STALE_PENDING_THRESHOLD_MS = STALE_PENDING_THRESHOLD_HOURS * 60 * 60 * 1000;
-const DAILY_REFRESH_CORRELATION_SUFFIX = ':daily-refresh';
-const WEEKLY_REFRESH_CORRELATION_SUFFIX = ':weekly-refresh';
-const BATCH_ID_ARG_RE = /^batchId=([0-9A-Za-z._:-]+)$/i;
-
-function addUtcDays(date, days) {
-  const next = new Date(date.getTime());
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
 
 function startOfUtcIsoWeek(date) {
   const midnight = startOfUtcDay(date);
@@ -59,98 +61,6 @@ function isClosedSunday(date, now = new Date()) {
   return date.getUTCDay() === 0 && date < startOfUtcIsoWeek(now);
 }
 
-function isRefreshEnabled(env) {
-  return env[AGENTIC_REFRESH_ENABLED_ENV]?.toLowerCase() !== 'false';
-}
-
-function projectionKey(handlerName, correlationId) {
-  return `${handlerName}:${correlationId}`;
-}
-
-function formatProjectedAt(projectedAt) {
-  if (!projectedAt) {
-    return 'unknown time';
-  }
-  const date = new Date(projectedAt);
-  if (Number.isNaN(date.getTime())) {
-    return projectedAt;
-  }
-  return date.toISOString().slice(0, 16).replace('T', ' ');
-}
-
-function parseTimestamp(timestamp) {
-  if (!timestamp) {
-    return null;
-  }
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function isStalePending(since, now) {
-  const sinceDate = parseTimestamp(since);
-  if (!sinceDate) {
-    return false;
-  }
-  return now.getTime() - sinceDate.getTime() >= STALE_PENDING_THRESHOLD_MS;
-}
-
-function formatPendingStatus(stale) {
-  return stale ? `stale pending (>${STALE_PENDING_THRESHOLD_HOURS}h)` : 'pending';
-}
-
-function getAuditTimestamp(latestAudit) {
-  return latestAudit.getAuditedAt?.() || latestAudit.auditedAt;
-}
-
-function getAuditResult(audit) {
-  return audit?.getAuditResult?.() || audit?.auditResult;
-}
-
-function inferTrafficDateFromAudit(audit) {
-  const auditedAt = parseTimestamp(getAuditTimestamp(audit));
-  return auditedAt ? formatUtcDate(addUtcDays(auditedAt, -1)) : undefined;
-}
-
-function getDailyAgenticExports(audit) {
-  const auditResult = getAuditResult(audit);
-  if (Array.isArray(auditResult)) {
-    const trafficDate = inferTrafficDateFromAudit(audit);
-    return auditResult
-      .filter(({ name } = {}) => name === 'agentic-db-export')
-      .map(({ batchId }) => ({
-        success: true,
-        trafficDate,
-        batchId,
-      }));
-  }
-
-  return [
-    auditResult?.dailyAgenticExport,
-    ...(Array.isArray(auditResult?.dailyAgenticExports) ? auditResult.dailyAgenticExports : []),
-  ].filter(Boolean);
-}
-
-function getDailyAgenticExport(audit, dateStr) {
-  const exports = getDailyAgenticExports(audit);
-  return exports.find((dailyExport) => dailyExport?.trafficDate === dateStr) || exports[0];
-}
-
-async function getAuditForTrafficDate(site, auditCollection, auditType, dateStr) {
-  const siteId = site.getId();
-  if (auditCollection?.allBySiteIdAndAuditType) {
-    const audits = await auditCollection.allBySiteIdAndAuditType(siteId, auditType, {
-      order: 'desc',
-      limit: AUDIT_LOOKBACK_LIMIT,
-    });
-    const matchingAudit = (audits || []).find((audit) => (
-      getDailyAgenticExports(audit).some((dailyExport) => dailyExport?.trafficDate === dateStr)
-    ));
-    return matchingAudit || audits?.[0] || null;
-  }
-
-  return site.getLatestAuditByAuditType(auditType);
-}
-
 function chunkArray(items, size) {
   const chunks = [];
   for (let i = 0; i < items.length; i += size) {
@@ -159,100 +69,120 @@ function chunkArray(items, size) {
   return chunks;
 }
 
+function rowsEmptySummary() {
+  return { rows: 0, hits: 0, latestUpdate: null };
+}
+
+function addRowSummary(summaries, row) {
+  const siteId = row.site_id;
+  if (!siteId) {
+    return;
+  }
+  const summary = summaries.get(siteId) || rowsEmptySummary();
+  const hits = Number(row.hits || 0);
+  summary.rows += 1;
+  summary.hits += Number.isFinite(hits) ? hits : 0;
+  if (row.updated_at && (!summary.latestUpdate || row.updated_at > summary.latestUpdate)) {
+    summary.latestUpdate = row.updated_at;
+  }
+  summaries.set(siteId, summary);
+}
+
+function summarizeRows(rows = []) {
+  const summaries = new Map();
+  for (const row of rows) {
+    addRowSummary(summaries, row);
+  }
+  return summaries;
+}
+
+function getTableSummary(tableSummaries, tableKey, siteId) {
+  return tableSummaries[tableKey].get(siteId) || rowsEmptySummary();
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString('en-US');
+}
+
+function formatUpdateTime(value) {
+  if (!value) {
+    return 'n/a';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toISOString().slice(0, 16).replace('T', ' ');
+}
+
+function formatTableSummary(summary) {
+  return `${formatNumber(summary.rows)} rows / ${formatNumber(summary.hits)} hits`;
+}
+
+function sumTable(siteStatuses, tableKey) {
+  return siteStatuses.reduce((summary, siteStatus) => {
+    const tableSummary = siteStatus[tableKey];
+    return {
+      rows: summary.rows + tableSummary.rows,
+      hits: summary.hits + tableSummary.hits,
+      latestUpdate: !summary.latestUpdate || tableSummary.latestUpdate > summary.latestUpdate
+        ? tableSummary.latestUpdate
+        : summary.latestUpdate,
+    };
+  }, rowsEmptySummary());
+}
+
 function renderOmittedSites(omitted) {
-  return `… ${omitted} more. Re-run with \`siteId=<siteId>\` for focused details.`;
+  return `... ${omitted} more. Re-run with \`siteId=<siteId>\` for focused details.`;
 }
 
-function formatExportCounts(siteExport) {
-  const trafficRows = siteExport.rowCount ?? 'unknown';
-  const classificationRows = siteExport.classificationCount;
-  if (classificationRows === undefined) {
-    return `${trafficRows} traffic rows`;
-  }
-  return `${trafficRows} traffic rows / ${classificationRows} classifications`;
-}
-
-function formatRefreshRow(row) {
-  const meta = row.metadata || {};
-  if (Array.isArray(meta.dailyRefreshDates) && meta.dailyRefreshDates.length > 0) {
-    return `${row.output_count} rows (${meta.dailyRefreshDates.join(', ')})`;
-  }
-  if (Array.isArray(meta.weeklyRefreshWeeks) && meta.weeklyRefreshWeeks.length > 0) {
-    return `${row.output_count} rows (${meta.weeklyRefreshWeeks.join(', ')})`;
-  }
-  return `${row.output_count} rows`;
-}
-
-function getRefreshStatus(row) {
-  if (!row) {
-    return 'pending';
-  }
-  return row.skipped ? 'skipped' : 'projected';
-}
-
-function addProjectionRow(projectionMap, row) {
-  projectionMap.set(projectionKey(row.handler_name, row.correlation_id), row);
-}
-
-function formatProjectedStage(row, projectedAt) {
-  return `projected (${row.output_count} rows at ${projectedAt})`;
-}
-
-function formatRefreshStage(row, stale = false) {
-  const status = getRefreshStatus(row);
-  if (status === 'pending') {
-    return formatPendingStatus(stale);
-  }
-  if (status !== 'projected') {
-    return status;
-  }
-  return `${status} (${formatRefreshRow(row)})`;
-}
-
-function projectionCorrelationIdsForBatch(batchId) {
+function renderSite(siteStatus) {
   return [
-    batchId,
-    `${batchId}${DAILY_REFRESH_CORRELATION_SUFFIX}`,
-    `${batchId}${WEEKLY_REFRESH_CORRELATION_SUFFIX}`,
-  ];
+    `• \`${siteStatus.baseURL}\``,
+    `  siteId: \`${siteStatus.siteId}\``,
+    `  raw: ${formatTableSummary(siteStatus.raw)} (updated ${formatUpdateTime(siteStatus.raw.latestUpdate)})`,
+    `  daily: ${formatTableSummary(siteStatus.daily)} (updated ${formatUpdateTime(siteStatus.daily.latestUpdate)})`,
+    `  weekly: ${formatTableSummary(siteStatus.weekly)} for week ${siteStatus.weekStart} (updated ${formatUpdateTime(siteStatus.weekly.latestUpdate)})`,
+    siteStatus.missing.length > 0 ? `  missing: ${siteStatus.missing.join(', ')}` : '',
+  ].filter(Boolean).join('\n');
 }
 
-function parseBatchIdArg(args = []) {
-  const remainingArgs = [];
-  let batchId;
+async function queryTable(postgrestClient, tableDef, siteIds, dateValue) {
+  const { data, error } = await postgrestClient
+    .from(tableDef.table)
+    .select(tableDef.select)
+    .in('site_id', siteIds)
+    .eq(tableDef.dateColumn, dateValue);
 
-  for (const rawArg of args) {
-    const arg = String(rawArg || '').trim();
-    if (!arg) {
-      remainingArgs.push(rawArg);
-      // eslint-disable-next-line no-continue
-      continue;
-    }
+  if (error) {
+    throw new Error(`${tableDef.table}: ${error.message}`);
+  }
+  return data || [];
+}
 
-    const match = arg.match(BATCH_ID_ARG_RE);
-    if (match) {
-      if (batchId) {
-        return { error: ':warning: Duplicate batchId argument.' };
-      }
-      [, batchId] = match;
-    } else if (/^batchId=/i.test(arg)) {
-      return { error: ':warning: Invalid batchId. Expected a non-empty correlation ID.' };
-    } else {
-      remainingArgs.push(rawArg);
+async function queryTrafficTables(postgrestClient, siteIds, dateStr, weekStartStr) {
+  const summaries = { raw: new Map(), daily: new Map(), weekly: new Map() };
+
+  for (const siteIdBatch of chunkArray(siteIds, BATCH_SIZE)) {
+    for (const tableDef of AGENTIC_TRAFFIC_TABLES) {
+      const dateValue = tableDef.key === 'weekly' ? weekStartStr : dateStr;
+      // eslint-disable-next-line no-await-in-loop
+      const rows = await queryTable(postgrestClient, tableDef, siteIdBatch, dateValue);
+      summaries[tableDef.key] = new Map([
+        ...summaries[tableDef.key],
+        ...summarizeRows(rows),
+      ]);
     }
   }
 
-  return { batchId, remainingArgs };
+  return summaries;
 }
 
 /**
  * Factory function to create the CheckAgenticTrafficDbStatusCommand object.
  *
- * Checks the processing status of the daily agentic traffic export pipeline:
- *  1. Reads the latest cdn-logs-report audit per site (which stores an
- *     agentic-db-export audit_result entry when runDailyAgenticExport completes).
- *  2. Queries projection_audit with those batchIds to see which have been projected
- *     into the agentic_traffic table by the projector service.
+ * Checks whether agentic traffic has reached the raw import table and the
+ * serving tables that power the dashboard.
  *
  * @param {Object} context - The context object.
  * @returns {CheckAgenticTrafficDbStatusCommand} The command object.
@@ -261,98 +191,19 @@ function CheckAgenticTrafficDbStatusCommand(context) {
   const baseCommand = BaseCommand({
     id: 'check-agentic-traffic-db-status',
     name: 'Check Agentic Traffic DB Status',
-    description: 'Checks the agentic traffic daily export + projection status per site.',
+    description: 'Checks agentic traffic raw, daily, and weekly DB table status per site.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} [YYYY-MM-DD] [siteId=<siteId>]`,
   });
 
-  const { dataAccess, log, env = {} } = context;
-  const { Site, Configuration, Audit } = dataAccess;
+  const { dataAccess, log } = context;
+  const { Site, Configuration } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
 
     try {
-      const batchArg = parseBatchIdArg(args);
-      if (batchArg.error) {
-        await say(batchArg.error);
-        return;
-      }
-
-      if (batchArg.batchId) {
-        const postgrestClient = dataAccess?.services?.postgrestClient;
-        if (!postgrestClient?.from) {
-          await say(':warning: PostgREST client is unavailable; cannot check projection_audit.');
-          return;
-        }
-
-        const { batchId } = batchArg;
-        await say(`:hourglass_flowing_sand: Checking projection_audit for batchId \`${batchId}\`...`);
-
-        const { data: projectionRows, error: projectionError } = await postgrestClient
-          .from('projection_audit')
-          .select('correlation_id,scope_prefix,handler_name,output_entity,output_record_id,output_count,projected_at,skipped,metadata')
-          .in('correlation_id', projectionCorrelationIdsForBatch(batchId))
-          .in('handler_name', AGENTIC_TRAFFIC_HANDLERS)
-          .order('projected_at', { ascending: false });
-
-        if (projectionError) {
-          log.warn(`projection_audit batchId query failed: ${projectionError.message}`);
-          await say(`:warning: projection_audit query failed: ${projectionError.message}`);
-          return;
-        }
-
-        const projectionMap = new Map();
-        for (const row of projectionRows || []) {
-          addProjectionRow(projectionMap, row);
-        }
-
-        const importProjection = projectionMap.get(
-          projectionKey(AGENTIC_TRAFFIC_IMPORT_HANDLER, batchId),
-        );
-        const dailyRefreshProjection = projectionMap.get(projectionKey(
-          AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER,
-          `${batchId}${DAILY_REFRESH_CORRELATION_SUFFIX}`,
-        ));
-        const weeklyRefreshProjection = projectionMap.get(projectionKey(
-          AGENTIC_TRAFFIC_WEEKLY_REFRESH_HANDLER,
-          `${batchId}${WEEKLY_REFRESH_CORRELATION_SUFFIX}`,
-        ));
-        const siteId = importProjection?.scope_prefix
-          || dailyRefreshProjection?.scope_prefix
-          || weeklyRefreshProjection?.scope_prefix;
-        const site = siteId ? await Site.findById(siteId).catch(() => null) : null;
-
-        let outcome = 'IMPORT_NOT_FOUND';
-        if (importProjection && dailyRefreshProjection) {
-          outcome = 'RAW_IMPORT_AND_DAILY_REFRESH_PROJECTED';
-        } else if (importProjection) {
-          outcome = 'RAW_IMPORT_PROJECTED';
-        }
-        const lines = [
-          `*Agentic Traffic Projection Status — ${batchId}*`,
-          `Outcome: *${outcome}*`,
-          siteId ? `siteId: \`${siteId}\`` : 'siteId: unknown',
-          site?.getBaseURL ? `baseURL: \`${site.getBaseURL()}\`` : '',
-          `Rows found: *${(projectionRows || []).length}*`,
-          '',
-          '*Projection rows:*',
-          `raw import: ${importProjection ? formatProjectedStage(importProjection, formatProjectedAt(importProjection.projected_at)) : 'pending'}`,
-          `daily refresh: ${formatRefreshStage(dailyRefreshProjection)}`,
-          `weekly refresh: ${formatRefreshStage(weeklyRefreshProjection)}`,
-        ].filter(Boolean);
-
-        await postReport(
-          slackContext,
-          lines,
-          `agentic-traffic-projection-${batchId}`,
-          `Agentic Traffic Projection ${batchId}`,
-          `Agentic traffic projection report for ${batchId}`,
-        );
-        return;
-      }
-
-      const parsedArgs = parseStatusCommandArgs(batchArg.remainingArgs);
+      const parsedArgs = parseStatusCommandArgs(args);
       if (parsedArgs.error) {
         await say(parsedArgs.error);
         return;
@@ -367,20 +218,26 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           return;
         }
       } else {
-        targetDate = new Date();
-        targetDate.setUTCDate(targetDate.getUTCDate() - 1);
+        targetDate = addUtcDays(new Date(), -1);
       }
       if (isFutureUtcDate(targetDate)) {
         await say(':warning: Cannot check a future traffic date.');
         return;
       }
 
+      const postgrestClient = dataAccess?.services?.postgrestClient;
+      if (!postgrestClient?.from) {
+        await say(':warning: PostgREST client is unavailable; cannot check agentic traffic tables.');
+        return;
+      }
+
       const dateStr = formatUtcDate(targetDate);
+      const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
+      const weeklyExpected = isClosedSunday(targetDate);
       const siteScopeText = requestedSiteId ? ` for site \`${requestedSiteId}\`` : '';
 
-      await say(`:hourglass_flowing_sand: Checking agentic traffic export + projection status for *${dateStr}*${siteScopeText}...`);
+      await say(`:hourglass_flowing_sand: Checking agentic traffic DB tables for *${dateStr}*${siteScopeText}...`);
 
-      // 1. Find all sites with cdn-logs-report enabled (those run the daily agentic export)
       const configuration = await Configuration.findLatest();
       const candidateSites = requestedSiteId
         ? [await Site.findById(requestedSiteId)].filter(Boolean)
@@ -404,466 +261,116 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       await say(`:gear: Checking ${enabledSites.length} site${enabledSites.length === 1 ? '' : 's'} with cdn-logs-report enabled...`);
 
-      // 2. Read latest cdn-logs-report audit per site to extract batchId
-      const siteExports = [];
-      for (let i = 0; i < enabledSites.length; i += BATCH_SIZE) {
-        const batch = enabledSites.slice(i, i + BATCH_SIZE);
-        // eslint-disable-next-line no-await-in-loop
-        const batchResults = await Promise.all(batch.map(async (site) => {
-          const siteId = site.getId();
-          const baseURL = site.getBaseURL();
+      const tableSummaries = await queryTrafficTables(
+        postgrestClient,
+        enabledSites.map((site) => site.getId()),
+        dateStr,
+        weekStartStr,
+      );
 
-          try {
-            const latestAudit = await getAuditForTrafficDate(
-              site,
-              Audit,
-              CDN_LOGS_REPORT_AUDIT,
-              dateStr,
-            );
-            if (!latestAudit) {
-              return { siteId, baseURL, status: 'no-audit' };
-            }
-
-            const dailyExport = getDailyAgenticExport(latestAudit, dateStr);
-
-            if (!dailyExport) {
-              return { siteId, baseURL, status: 'no-export' };
-            }
-            if (dailyExport.skipped) {
-              return {
-                siteId,
-                baseURL,
-                status: 'skipped',
-                trafficDate: dailyExport.trafficDate,
-              };
-            }
-            if (!dailyExport.success) {
-              return {
-                siteId,
-                baseURL,
-                status: 'export-failed',
-                trafficDate: dailyExport.trafficDate,
-                error: dailyExport.error,
-              };
-            }
-            if (dailyExport.trafficDate !== dateStr) {
-              return {
-                siteId,
-                baseURL,
-                status: 'date-mismatch',
-                exportedDate: dailyExport.trafficDate,
-                batchId: dailyExport.batchId,
-              };
-            }
-            if (!dailyExport.batchId) {
-              return {
-                siteId,
-                baseURL,
-                status: 'no-batchid',
-                trafficDate: dailyExport.trafficDate,
-                rowCount: dailyExport.rowCount,
-                classificationCount: dailyExport.classificationCount,
-              };
-            }
-
-            return {
-              siteId,
-              baseURL,
-              status: 'exported',
-              trafficDate: dailyExport.trafficDate,
-              batchId: dailyExport.batchId,
-              rowCount: dailyExport.rowCount,
-              classificationCount: dailyExport.classificationCount,
-              auditedAt: getAuditTimestamp(latestAudit),
-            };
-          } catch (e) {
-            log.warn(`Failed to read audit for site ${siteId}: ${e.message}`);
-            return {
-              siteId,
-              baseURL,
-              status: 'error',
-              error: e.message,
-            };
-          }
-        }));
-        siteExports.push(...batchResults);
-      }
-
-      // 3. Collect batchIds for the target date and check projection_audit
-      let exportedSites = siteExports.filter((s) => s.status === 'exported' && s.batchId);
-      const batchIds = exportedSites.map((s) => s.batchId);
-      const projectionCorrelationIds = batchIds.flatMap(projectionCorrelationIdsForBatch);
-      const siteIdByCorrelationId = new Map(exportedSites.flatMap((s) => [
-        [s.batchId, s.siteId],
-        [`${s.batchId}${DAILY_REFRESH_CORRELATION_SUFFIX}`, s.siteId],
-        [`${s.batchId}${WEEKLY_REFRESH_CORRELATION_SUFFIX}`, s.siteId],
-      ]));
-
-      const projectionMap = new Map();
-      const postgrestClient = dataAccess?.services?.postgrestClient;
-      let projectionCheckStatus = 'ok';
-
-      if (projectionCorrelationIds.length > 0) {
-        if (!postgrestClient?.from) {
-          projectionCheckStatus = 'unavailable';
-        } else {
-          const projectionRows = [];
-          const correlationIdBatches = chunkArray(
-            projectionCorrelationIds,
-            PROJECTION_CORRELATION_ID_BATCH_SIZE,
-          );
-          for (const correlationIdBatch of correlationIdBatches) {
-            // eslint-disable-next-line no-await-in-loop
-            const { data: projRows, error: projError } = await postgrestClient
-              .from('projection_audit')
-              .select('correlation_id,scope_prefix,handler_name,output_count,projected_at,skipped,metadata')
-              .in('correlation_id', correlationIdBatch)
-              .in('handler_name', AGENTIC_TRAFFIC_HANDLERS)
-              .order('projected_at', { ascending: false });
-
-            if (projError) {
-              projectionCheckStatus = 'error';
-              log.warn(`projection_audit query failed: ${projError.message}`);
-              break;
-            }
-            projectionRows.push(...(projRows || []));
-          }
-
-          if (projectionCheckStatus === 'ok') {
-            for (const row of projectionRows) {
-              const expectedSiteId = siteIdByCorrelationId.get(row.correlation_id);
-              if (row.scope_prefix && expectedSiteId && row.scope_prefix !== expectedSiteId) {
-                log.warn(`Ignoring projection_audit row with mismatched scope_prefix for ${row.correlation_id}: expected ${expectedSiteId}, got ${row.scope_prefix}`);
-                // eslint-disable-next-line no-continue
-                continue;
-              }
-              addProjectionRow(projectionMap, row);
-            }
-          }
-        }
-      }
-
-      exportedSites = siteExports.filter((s) => s.status === 'exported' && s.batchId);
-      // 4. Build status summary
       const dashboardReady = [];
-      const refreshPending = [];
-      const importPending = [];
-      const skipped = [];
-      const noAudit = [];
-      const noExport = [];
-      const failed = [];
-      const dateMismatch = [];
-      const missingBatchId = [];
-      const unknown = [];
-      let rawImportsProjected = 0;
-      let dailyRefreshProjected = 0;
-      let weeklyRefreshProjected = 0;
-      let weeklyRefreshAvailableCount = 0;
-      let stalePendingSites = 0;
-      const refreshEnabled = isRefreshEnabled(env);
-      const weeklyRefreshExpected = refreshEnabled && isClosedSunday(targetDate);
-      const now = new Date();
+      const rawMissing = [];
+      const dailyMissing = [];
+      const weeklyMissing = [];
 
-      for (const s of siteExports) {
-        if (s.status === 'exported') {
-          if (projectionCheckStatus !== 'ok') {
-            unknown.push({ ...s, projectionCheckStatus });
-          } else {
-            const importProjection = projectionMap.get(
-              projectionKey(AGENTIC_TRAFFIC_IMPORT_HANDLER, s.batchId),
-            );
-            if (importProjection && !importProjection.skipped) {
-              rawImportsProjected += 1;
-              const dailyRefreshProjection = refreshEnabled
-                ? projectionMap.get(projectionKey(
-                  AGENTIC_TRAFFIC_DAILY_REFRESH_HANDLER,
-                  `${s.batchId}:daily-refresh`,
-                ))
-                : null;
-              const weeklyRefreshProjection = projectionMap.get(projectionKey(
-                AGENTIC_TRAFFIC_WEEKLY_REFRESH_HANDLER,
-                `${s.batchId}:weekly-refresh`,
-              ));
-              const weeklyRefreshAvailable = weeklyRefreshExpected
-                || Boolean(weeklyRefreshProjection);
-              if (weeklyRefreshAvailable) {
-                weeklyRefreshAvailableCount += 1;
-              }
+      const siteStatuses = enabledSites.map((site) => {
+        const siteId = site.getId();
+        const status = {
+          siteId,
+          baseURL: site.getBaseURL(),
+          weekStart: weekStartStr,
+          raw: getTableSummary(tableSummaries, 'raw', siteId),
+          daily: getTableSummary(tableSummaries, 'daily', siteId),
+          weekly: getTableSummary(tableSummaries, 'weekly', siteId),
+          missing: [],
+        };
 
-              if (dailyRefreshProjection && !dailyRefreshProjection.skipped) {
-                dailyRefreshProjected += 1;
-              }
-              if (weeklyRefreshAvailable
-                && weeklyRefreshProjection
-                && !weeklyRefreshProjection.skipped) {
-                weeklyRefreshProjected += 1;
-              }
-
-              const missingRefreshes = [];
-              const staleRefreshes = [];
-              if (refreshEnabled && (!dailyRefreshProjection || dailyRefreshProjection.skipped)) {
-                missingRefreshes.push('daily refresh');
-                if (!dailyRefreshProjection && isStalePending(importProjection.projected_at, now)) {
-                  staleRefreshes.push('daily refresh');
-                }
-              }
-              if (weeklyRefreshAvailable
-                && (!weeklyRefreshProjection || weeklyRefreshProjection.skipped)) {
-                missingRefreshes.push('weekly refresh');
-                if (!weeklyRefreshProjection
-                  && isStalePending(importProjection.projected_at, now)) {
-                  staleRefreshes.push('weekly refresh');
-                }
-              }
-
-              const enrichedSite = {
-                ...s,
-                importProjection,
-                importOutputCount: importProjection.output_count,
-                importProjectedAt: formatProjectedAt(importProjection.projected_at),
-                dailyRefreshProjection,
-                weeklyRefreshProjection,
-                weeklyRefreshAvailable,
-                staleRefreshes,
-              };
-
-              if (missingRefreshes.length > 0) {
-                if (staleRefreshes.length > 0) {
-                  stalePendingSites += 1;
-                }
-                refreshPending.push({ ...enrichedSite, missingRefreshes });
-              } else {
-                dashboardReady.push(enrichedSite);
-              }
-            } else {
-              const importStalePending = isStalePending(s.auditedAt, now);
-              if (importStalePending) {
-                stalePendingSites += 1;
-              }
-              importPending.push({ ...s, importStalePending });
-            }
-          }
-        } else if (s.status === 'skipped') {
-          skipped.push(s);
-        } else if (s.status === 'date-mismatch') {
-          dateMismatch.push(s);
-        } else if (s.status === 'no-batchid') {
-          missingBatchId.push(s);
-        } else if (s.status === 'export-failed' || s.status === 'error') {
-          failed.push(s);
-        } else if (s.status === 'no-export') {
-          noExport.push(s);
-        } else {
-          noAudit.push(s);
+        if (status.raw.rows === 0) {
+          status.missing.push('raw');
         }
-      }
+        if (status.daily.rows === 0) {
+          status.missing.push('daily');
+        }
+        if (weeklyExpected && status.weekly.rows === 0) {
+          status.missing.push('weekly');
+        }
+
+        if (status.missing.length === 0) {
+          dashboardReady.push(status);
+        } else {
+          if (status.raw.rows === 0) {
+            rawMissing.push(status);
+          }
+          if (status.daily.rows === 0) {
+            dailyMissing.push(status);
+          }
+          if (weeklyExpected && status.weekly.rows === 0) {
+            weeklyMissing.push(status);
+          }
+        }
+        return status;
+      });
+
+      const rawPresent = siteStatuses.filter((s) => s.raw.rows > 0).length;
+      const dailyPresent = siteStatuses.filter((s) => s.daily.rows > 0).length;
+      const weeklyPresent = siteStatuses.filter((s) => s.weekly.rows > 0).length;
+      const rawTotal = sumTable(siteStatuses, 'raw');
+      const dailyTotal = sumTable(siteStatuses, 'daily');
+      const weeklyTotal = sumTable(siteStatuses, 'weekly');
 
       let outcome = 'ACTION_REQUIRED';
-      if (projectionCheckStatus !== 'ok') {
-        outcome = 'CHECKER_UNRELIABLE';
-      } else if (noAudit.length === enabledSites.length) {
-        outcome = 'NO_AUDITS_FOR_DATE';
-      } else if (dashboardReady.length === enabledSites.length) {
+      if (dashboardReady.length === enabledSites.length) {
         outcome = 'DASHBOARD_READY';
+      } else if (
+        rawPresent === 0 && dailyPresent === 0 && (!weeklyExpected || weeklyPresent === 0)
+      ) {
+        outcome = 'NO_DB_ROWS_FOR_DATE';
       }
 
       const lines = [
-        `*Agentic Traffic Export + Serving Status — ${dateStr}*`,
+        `*Agentic Traffic DB Table Status — ${dateStr}*`,
         `Outcome: *${outcome}*`,
         `:white_check_mark: Dashboard-ready: *${dashboardReady.length}*`,
-        `:arrows_counterclockwise: Refresh Pending: *${refreshPending.length}*`,
-        `:hourglass_flowing_sand: Import Pending: *${importPending.length}*`,
-        `:warning: Stale Pending: *${stalePendingSites}*`,
-        `:grey_question: Unknown: *${unknown.length}*`,
-        `:skip: Skipped: *${skipped.length}*`,
-        `:x: Failed: *${failed.length}*`,
-        `:warning: Missing batchId: *${missingBatchId.length}*`,
-        `:mag: Audit without export details: *${noExport.length}*`,
+        `:hourglass_flowing_sand: Missing raw import: *${rawMissing.length}*`,
+        `:arrows_counterclockwise: Missing daily serving: *${dailyMissing.length}*`,
+        weeklyExpected ? `:calendar: Missing weekly serving: *${weeklyMissing.length}*` : '',
         `Sites checked: *${enabledSites.length}*`,
-      ];
-      if (projectionCheckStatus === 'ok') {
-        lines.push(`Import daily: *${rawImportsProjected}/${exportedSites.length}*`);
-        lines.push(`Refresh daily: *${dailyRefreshProjected}/${refreshEnabled ? rawImportsProjected : 0}*`);
-        if (weeklyRefreshAvailableCount > 0) {
-          lines.push(`Refresh weekly: *${weeklyRefreshProjected}/${weeklyRefreshAvailableCount}*`);
-        }
-      } else {
-        lines.push(`Import daily: unknown (projection audit check ${projectionCheckStatus})`);
-      }
+        `Raw table: *${rawPresent}/${enabledSites.length}* sites, ${formatTableSummary(rawTotal)}`,
+        `Daily table: *${dailyPresent}/${enabledSites.length}* sites, ${formatTableSummary(dailyTotal)}`,
+        `Weekly table (${weekStartStr}): *${weeklyPresent}/${enabledSites.length}* sites, ${formatTableSummary(weeklyTotal)}`,
+        '',
+        '*Actionable insight:*',
+      ].filter(Boolean);
 
-      lines.push('', '*Actionable insight:*');
-      if (noAudit.length === enabledSites.length) {
-        lines.push(`No \`${CDN_LOGS_REPORT_AUDIT}\` audit has run for any of the *${enabledSites.length}* enabled sites for ${dateStr}.`);
-        lines.push('Action: run the daily DB import backfill for the target site, or wait for the scheduled audit, then rerun this status check.');
+      if (dashboardReady.length === enabledSites.length) {
+        lines.push('All checked sites have raw and serving rows for the requested date.');
       } else {
-        if (dashboardReady.length > 0) {
-          lines.push(`${dashboardReady.length} site(s) are dashboard-ready. No action needed for those sites.`);
+        if (rawMissing.length > 0) {
+          lines.push(`${rawMissing.length} site(s) have no \`agentic_traffic\` rows for ${dateStr}. Action: check the DB import/backfill for those sites.`);
         }
-        if (importPending.length > 0) {
-          lines.push(`${importPending.length} site(s) exported data but raw DB import is not visible yet. Action: check projector/import processing for the listed batchId(s).`);
+        if (dailyMissing.length > 0) {
+          lines.push(`${dailyMissing.length} site(s) have raw data missing from \`agentic_traffic_daily\`. Action: run or check the daily refresh.`);
         }
-        if (refreshPending.length > 0) {
-          lines.push(`${refreshPending.length} site(s) completed raw import but serving refresh is missing. Action: check daily/weekly refresh projection for the listed batchId(s).`);
+        if (weeklyExpected && weeklyMissing.length > 0) {
+          lines.push(`${weeklyMissing.length} site(s) are missing \`agentic_traffic_weekly\` rows for week ${weekStartStr}. Action: run or check the weekly refresh.`);
         }
-        if (missingBatchId.length > 0) {
-          lines.push(`${missingBatchId.length} site(s) exported without a batchId. Action: check audit-worker dailyAgenticExport output before DB status can be correlated.`);
-        }
-        if (noExport.length > 0) {
-          lines.push(`${noExport.length} site(s) have a \`${CDN_LOGS_REPORT_AUDIT}\` audit, but no agentic DB export batchId to read. Action: check the audit result payload for ${dateStr}.`);
-        }
-        if (unknown.length > 0) {
-          lines.push(`${unknown.length} site(s) have unknown DB status because projection_audit could not be checked. Action: fix/check PostgREST before trusting pending counts.`);
-        }
-        if (failed.length > 0) {
-          lines.push(`${failed.length} export failure(s) found. Action: check the export error before retrying DB import.`);
-        }
-        if (dateMismatch.length > 0) {
-          lines.push(`${dateMismatch.length} site(s) have a latest audit for a different date. Action: run or wait for ${dateStr} before checking DB status.`);
-        }
-        if (skipped.length > 0) {
-          lines.push(`${skipped.length} site(s) were skipped because no traffic data was exported for ${dateStr}.`);
-        }
-        if (noAudit.length > 0) {
-          lines.push(`${noAudit.length} site(s) have no latest audit record. Action: run the daily DB import backfill for specific sites that need investigation.`);
-        }
-      }
-
-      if (!refreshEnabled) {
-        lines.push('_Projector refresh enqueue appears disabled via MYSTICAT_AGENTIC_REFRESH_ENABLED=false._');
       }
 
       const fullLines = [...lines];
-      const addDetailHeader = (header) => {
-        lines.push('', header);
-        fullLines.push('', header);
-      };
+      const addDetails = (header, rows) => appendStatusDetails(
+        lines,
+        fullLines,
+        header,
+        rows,
+        renderSite,
+        renderOmittedSites,
+      );
 
-      if (dashboardReady.length > 0) {
-        addDetailHeader('*Dashboard-ready (raw import + required serving refresh complete):*');
-        appendLimitedDetails(lines, dashboardReady, (s) => {
-          const daily = refreshEnabled
-            ? ` — daily refresh: ${formatRefreshStage(s.dailyRefreshProjection)}`
-            : ' — daily refresh: disabled';
-          const weekly = s.weeklyRefreshAvailable
-            ? ` — weekly refresh: ${formatRefreshStage(s.weeklyRefreshProjection)}`
-            : '';
-          return [
-            `• \`${s.baseURL}\``,
-            `  siteId: \`${s.siteId}\``,
-            `  import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}`,
-            `  export: ${formatExportCounts(s)}`,
-            `  ${daily.replace(/^ — /, '')}`,
-            weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
-          ].filter(Boolean).join('\n');
-        }, renderOmittedSites, fullLines);
-      }
-
-      if (refreshPending.length > 0) {
-        addDetailHeader('*Refresh Pending (raw import projected, serving table refresh not yet seen):*');
-        appendLimitedDetails(lines, refreshPending, (s) => {
-          const daily = refreshEnabled
-            ? ` — daily refresh: ${formatRefreshStage(
-              s.dailyRefreshProjection,
-              s.staleRefreshes.includes('daily refresh'),
-            )}`
-            : ' — daily refresh: disabled';
-          const weekly = s.weeklyRefreshAvailable
-            ? ` — weekly refresh: ${formatRefreshStage(
-              s.weeklyRefreshProjection,
-              s.staleRefreshes.includes('weekly refresh'),
-            )}`
-            : '';
-          const missing = s.missingRefreshes
-            .map((name) => (s.staleRefreshes.includes(name) ? `${name} (stale)` : name))
-            .join(', ');
-          return [
-            `• \`${s.baseURL}\``,
-            `  siteId: \`${s.siteId}\``,
-            `  import daily: ${formatProjectedStage(s.importProjection, s.importProjectedAt)}`,
-            `  ${daily.replace(/^ — /, '')}`,
-            weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
-            `  missing: ${missing}`,
-            `  batchId: \`${s.batchId}\``,
-          ].filter(Boolean).join('\n');
-        }, renderOmittedSites, fullLines);
-      }
-
-      if (importPending.length > 0) {
-        addDetailHeader('*Import Pending (export done, raw DB import not yet seen):*');
-        appendLimitedDetails(lines, importPending, (s) => {
-          const weekly = weeklyRefreshExpected ? ' — weekly refresh: waiting on import' : '';
-          return [
-            `• \`${s.baseURL}\``,
-            `  siteId: \`${s.siteId}\``,
-            `  import daily: ${formatPendingStatus(s.importStalePending)}`,
-            '  daily refresh: waiting on import',
-            weekly ? `  ${weekly.replace(/^ — /, '')}` : '',
-            `  batchId: \`${s.batchId}\``,
-            `  export: ${formatExportCounts(s)}`,
-          ].filter(Boolean).join('\n');
-        }, renderOmittedSites, fullLines);
-      }
-
-      if (unknown.length > 0) {
-        addDetailHeader('*Unknown (projection_audit status could not be checked):*');
-        appendLimitedDetails(lines, unknown, (s) => [
-          `• \`${s.baseURL}\``,
-          `  siteId: \`${s.siteId}\``,
-          `  projection audit check: ${s.projectionCheckStatus}`,
-          `  batchId: \`${s.batchId}\``,
-          `  export: ${formatExportCounts(s)}`,
-        ].join('\n'), renderOmittedSites, fullLines);
-      }
-
-      if (dateMismatch.length > 0) {
-        addDetailHeader(`*Latest audit is for a different date (not ${dateStr}):*`);
-        appendLimitedDetails(lines, dateMismatch, (s) => [
-          `• \`${s.baseURL}\``,
-          `  siteId: \`${s.siteId}\``,
-          `  latest export was for ${s.exportedDate}`,
-        ].join('\n'), renderOmittedSites, fullLines);
-      }
-
-      if (failed.length > 0) {
-        addDetailHeader('*Export failures:*');
-        appendLimitedDetails(lines, failed, (s) => [
-          `• \`${s.baseURL}\``,
-          `  siteId: \`${s.siteId}\``,
-          `  error: ${s.error || 'unknown error'}`,
-        ].join('\n'), renderOmittedSites, fullLines);
-      }
-
-      if (missingBatchId.length > 0) {
-        addDetailHeader('*Export missing batchId:*');
-        appendLimitedDetails(lines, missingBatchId, (s) => [
-          `• \`${s.baseURL}\``,
-          `  siteId: \`${s.siteId}\``,
-          `  export: ${formatExportCounts(s)}`,
-        ].join('\n'), renderOmittedSites, fullLines);
-      }
-
-      if (noExport.length > 0) {
-        addDetailHeader('*Audit found without daily agentic export details:*');
-        appendLimitedDetails(lines, noExport, (s) => [
-          `• \`${s.baseURL}\``,
-          `  siteId: \`${s.siteId}\``,
-        ].join('\n'), renderOmittedSites, fullLines);
-      }
-
-      if (skipped.length > 0) {
-        addDetailHeader(`*Skipped (no traffic data for ${dateStr}):*`);
-        appendLimitedDetails(lines, skipped, (s) => [
-          `• \`${s.baseURL}\``,
-          `  siteId: \`${s.siteId}\``,
-        ].join('\n'), renderOmittedSites, fullLines);
-      }
-
-      if (noAudit.length > 0) {
-        addDetailHeader('*No audit record found:*');
-        appendLimitedDetails(lines, noAudit, (s) => [
-          `• \`${s.baseURL}\``,
-          `  siteId: \`${s.siteId}\``,
-        ].join('\n'), renderOmittedSites, fullLines);
+      addDetails('*Dashboard-ready:*', dashboardReady);
+      addDetails('*Missing raw import:*', rawMissing);
+      addDetails('*Missing daily serving:*', dailyMissing);
+      if (weeklyExpected) {
+        addDetails('*Missing weekly serving:*', weeklyMissing);
       }
 
       await postReport(

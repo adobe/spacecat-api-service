@@ -14,7 +14,7 @@ import { llmoConfig as llmo } from '@adobe/spacecat-shared-utils';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import BaseCommand from './base.js';
 import {
-  appendLimitedDetails,
+  appendStatusDetails,
   formatUtcDate,
   getUtcYMD,
   isFutureUtcDate,
@@ -367,43 +367,38 @@ function CheckCdnLogsStatusCommand(context) {
       }
 
       const fullLines = [...lines];
-      const addDetailHeader = (header) => {
-        lines.push('', header);
-        fullLines.push('', header);
-      };
+      const addDetails = (header, rows, renderRow) => appendStatusDetails(
+        lines,
+        fullLines,
+        header,
+        rows,
+        renderRow,
+        renderOmittedSites,
+      );
 
-      if (incomplete.length > 0) {
-        addDetailHeader('*Sites with missing aggregate hours:*');
-        appendLimitedDetails(lines, incomplete, (r) => {
-          const providerName = r.cdnProvider === r.cdnFamily
-            ? r.cdnProvider
-            : `${r.cdnProvider} => ${r.cdnFamily}`;
-          const providerTag = r.isDailyOnly ? `${providerName} [daily-only]` : providerName;
-          const configWarning = r.configReadFailed ? ' — config unavailable, using fallback' : '';
-          let missingStr;
-          if (r.missingHours.length <= 6) {
-            missingStr = r.missingHours.join(', ');
-          } else {
-            missingStr = `${r.missingHours.slice(0, 6).join(', ')} (+${r.missingHours.length - 6} more)`;
-          }
-          return [
-            `• \`${r.baseURL}\``,
-            `  siteId: \`${r.siteId}\``,
-            `  CDN: ${providerTag}${configWarning}`,
-            `  missing: [${missingStr}]`,
-            `  present: ${r.presentCount}/${r.expectedCount}`,
-          ].join('\n');
-        }, renderOmittedSites, fullLines);
-      }
-
-      if (errors.length > 0) {
-        addDetailHeader('*Sites with errors:*');
-        appendLimitedDetails(lines, errors, (r) => [
+      addDetails('*Sites with missing aggregate hours:*', incomplete, (r) => {
+        const providerName = r.cdnProvider === r.cdnFamily
+          ? r.cdnProvider
+          : `${r.cdnProvider} => ${r.cdnFamily}`;
+        const providerTag = r.isDailyOnly ? `${providerName} [daily-only]` : providerName;
+        const configWarning = r.configReadFailed ? ' — config unavailable, using fallback' : '';
+        const missingStr = r.missingHours.length <= 6
+          ? r.missingHours.join(', ')
+          : `${r.missingHours.slice(0, 6).join(', ')} (+${r.missingHours.length - 6} more)`;
+        return [
           `• \`${r.baseURL}\``,
           `  siteId: \`${r.siteId}\``,
-          `  error: ${r.error}`,
-        ].join('\n'), renderOmittedSites, fullLines);
-      }
+          `  CDN: ${providerTag}${configWarning}`,
+          `  missing: [${missingStr}]`,
+          `  present: ${r.presentCount}/${r.expectedCount}`,
+        ].join('\n');
+      });
+
+      addDetails('*Sites with errors:*', errors, (r) => [
+        `• \`${r.baseURL}\``,
+        `  siteId: \`${r.siteId}\``,
+        `  error: ${r.error}`,
+      ].join('\n'));
 
       await postReport(
         slackContext,
