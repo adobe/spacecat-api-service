@@ -128,6 +128,12 @@ DeliveryConfig:
       description: The site ID
       type: string
       example: '1234'
+    contentSourcePath:
+      description: >-
+        AEM content root path for a site. Corresponds to `/content/<site-name>` in the AEM repository.
+        Used to disambiguate multiple sites that share the same Cloud Manager program and environment.
+      type: string
+      example: '/content/aboutus'
   additionalProperties: true
 AuditType:
   type: string
@@ -7302,6 +7308,21 @@ V2Topic:
         - 'null'
       format: uuid
       description: Optional brand UUID this topic belongs to
+    categoryUuids:
+      type: array
+      uniqueItems: true
+      items:
+        type: string
+        format: uuid
+      description: |
+        UUIDs of non-deleted categories linked to this topic via the
+        topic_categories junction table. Always present; empty array when no
+        categories are linked. Never null. Entries are unique (enforced by the
+        topic_categories UNIQUE(topic_id, category_id) constraint). Order is
+        not guaranteed; clients that need a stable order must sort client-side.
+      example:
+        - '019d4464-5784-74d1-8469-e5d3cddc8e52'
+        - '019d4465-2110-7c8a-9f12-7b8e8a3c4d11'
     updatedAt:
       type: string
       format: date-time

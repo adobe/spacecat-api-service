@@ -19,6 +19,7 @@ import {
   createSearchHandler,
   createTopicDetailHandler,
   createPromptDetailHandler,
+  createPromptDetailByPromptIdHandler,
   createExecutionSourcesHandler,
   createSentimentMoversHandler,
   createShareOfVoiceHandler,
@@ -51,7 +52,20 @@ import {
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
+  createAgenticTrafficHasDataHandler,
 } from './llmo-agentic-traffic.js';
+import {
+  createReferralTrafficFilterDimensionsHandler,
+  createReferralTrafficKpisHandler,
+  createReferralTrafficTrendHandler,
+  createReferralTrafficByPlatformHandler,
+  createReferralTrafficByRegionHandler,
+  createReferralTrafficByPageIntentHandler,
+  createReferralTrafficByUrlHandler,
+  createReferralTrafficBusinessImpactHandler,
+  createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
+} from './llmo-referral-traffic.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -116,6 +130,7 @@ function LlmoMysticatController(ctx) {
   const getSearch = createSearchHandler(getOrgAndValidateAccess);
   const getTopicDetail = createTopicDetailHandler(getOrgAndValidateAccess);
   const getPromptDetail = createPromptDetailHandler(getOrgAndValidateAccess);
+  const getPromptDetailByPromptId = createPromptDetailByPromptIdHandler(getOrgAndValidateAccess);
   const getExecutionSources = createExecutionSourcesHandler(getOrgAndValidateAccess);
   const getSentimentMovers = createSentimentMoversHandler(getOrgAndValidateAccess);
   const getShareOfVoice = createShareOfVoiceHandler(getOrgAndValidateAccess);
@@ -184,6 +199,28 @@ function LlmoMysticatController(ctx) {
   const getAgenticTrafficUrlBrandPresence = createAgenticTrafficUrlBrandPresenceHandler(
     getSiteAndValidateAccess,
   );
+  const getAgenticTrafficHasData = createAgenticTrafficHasDataHandler(getSiteAndValidateAccess);
+
+  const getReferralTrafficFilterDimensions = createReferralTrafficFilterDimensionsHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficKpis = createReferralTrafficKpisHandler(getSiteAndValidateAccess);
+  const getReferralTrafficTrend = createReferralTrafficTrendHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByPlatform = createReferralTrafficByPlatformHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByRegion = createReferralTrafficByRegionHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByPageIntent = createReferralTrafficByPageIntentHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficByUrl = createReferralTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getReferralTrafficBusinessImpact = createReferralTrafficBusinessImpactHandler(
+    getSiteAndValidateAccess,
+  );
+  const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
+  const getReferralTrafficByDevice = createReferralTrafficByDeviceHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -196,6 +233,7 @@ function LlmoMysticatController(ctx) {
     getSearch,
     getTopicDetail,
     getPromptDetail,
+    getPromptDetailByPromptId,
     getExecutionSources,
     getSentimentMovers,
     getShareOfVoice,
@@ -222,6 +260,17 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,
     getAgenticTrafficUrlBrandPresence,
+    getAgenticTrafficHasData,
+    getReferralTrafficFilterDimensions,
+    getReferralTrafficKpis,
+    getReferralTrafficTrend,
+    getReferralTrafficByPlatform,
+    getReferralTrafficByRegion,
+    getReferralTrafficByPageIntent,
+    getReferralTrafficByUrl,
+    getReferralTrafficBusinessImpact,
+    getReferralTrafficWeeks,
+    getReferralTrafficByDevice,
   };
 }
 
