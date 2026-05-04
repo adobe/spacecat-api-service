@@ -49,6 +49,7 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { createAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -1859,6 +1860,27 @@ function SuggestionsController(ctx, sqs, env) {
             geoExperimentId,
             errors: markFailures.map((r) => r.reason?.message),
           });
+        }
+
+        // Append an Atomic Strategy entry to the site's LLMO strategy blob.
+        // Failure here MUST NOT roll back the GeoExperiment — the helper
+        // emits [atomic-strategy-create-failed] internally and we proceed.
+        try {
+          await createAtomicStrategy({
+            siteId,
+            geoExperimentId,
+            opportunityId,
+            opportunityType: opportunity.getType(),
+            name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+            profile,
+            s3: context.s3,
+            log: context.log,
+          });
+        } catch (atomicError) {
+          // Defensive: helper is documented to never throw, but if it does,
+          // we still must not impact the GeoExperiment response.
+          /* c8 ignore next 2 */
+          context.log.error(`[atomic-strategy-create-failed] unexpected throw from helper: ${atomicError.message}`, atomicError);
         }
 
         const experimentResponse = {

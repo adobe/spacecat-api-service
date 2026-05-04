@@ -175,6 +175,20 @@ describe('atomic-strategy-helper', () => {
     expect(payload.intendedStrategy).to.include({ id: baseArgs.geoExperimentId, type: 'atomic' });
   });
 
+  it('defaults missing opportunities/strategies fields when readStrategy returns partial data', async () => {
+    // exists:true with a data object that has no opportunities/strategies keys —
+    // exercises the nullish-coalescing fallback inside the helper.
+    readStrategyStub.resolves({ exists: true, data: {}, version: 1 });
+    writeStrategyStub.resolves({ version: 2 });
+
+    const result = await createAtomicStrategy(baseArgs);
+
+    expect(result.success).to.be.true;
+    const writtenData = writeStrategyStub.firstCall.args[1];
+    expect(writtenData.opportunities).to.deep.equal([]);
+    expect(writtenData.strategies).to.have.lengthOf(1);
+  });
+
   it('initializes the blob when readStrategy reports exists:false', async () => {
     readStrategyStub.resolves({ exists: false, data: null, version: null });
     writeStrategyStub.resolves({ version: 1 });

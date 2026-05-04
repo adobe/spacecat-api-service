@@ -5963,6 +5963,7 @@ describe('Suggestions Controller', () => {
         const id = payload.geoExperimentId;
         return {
           getId: () => id,
+          getName: () => payload.name,
           setPreScheduleId: sandbox.stub(),
           setStatus: sandbox.stub(),
           setUpdatedBy: sandbox.stub(),
@@ -7667,6 +7668,185 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
       expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+    });
+
+    it('appends an atomic strategy after geoExperiment.save() in the async branch', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({
+        success: true,
+        strategyId: 'will-be-overwritten',
+        attempts: 1,
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      const args = createAtomicStrategyStub.firstCall.args[0];
+      expect(args).to.include.keys([
+        'siteId', 'geoExperimentId', 'opportunityId', 'opportunityType',
+        'name', 'profile', 's3', 'log',
+      ]);
+      // strategy.id is geoExperimentId — single-anchor design
+      expect(args.geoExperimentId).to.match(/^[0-9a-f-]{36}$/);
+      expect(args.siteId).to.equal(SITE_ID);
+      expect(args.opportunityId).to.equal(OPPORTUNITY_ID);
+      expect(args.opportunityType).to.equal('headings');
+      // Same UUID appears in the 207 response
+      const body = await response.json();
+      expect(args.geoExperimentId).to.equal(body.geoExperimentId);
+    });
+
+    it('still returns the standard 207 response when atomic-strategy helper terminally fails', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({
+        success: false,
+        strategyId: 'irrelevant',
+        attempts: 3,
+      });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Response shape unchanged — no strategyId field
+      expect(body).to.have.all.keys([
+        'suggestions', 'metadata', 'geoExperimentId',
+        'geoExperimentStatus', 'geoExperimentPhase', 'prePhaseScheduleId',
+      ]);
+      expect(body).to.not.have.property('strategyId');
+    });
+
+    it('logs an error and still returns 207 when atomic-strategy helper unexpectedly throws', async () => {
+      // Defensive coverage: helper is documented to never throw, but the
+      // controller has a defensive try/catch in case it does.
+      const createAtomicStrategyStub = sandbox.stub().rejects(new Error('unexpected boom'));
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/atomic-strategy-create-failed.*unexpected throw/);
+    });
+
+    it('falls back to <type>-<date> name when geoExperiment.getName() returns falsy', async () => {
+      // Override GeoExperiment.create to return a mock whose getName() yields ''
+      mockSuggestionDataAccess.GeoExperiment.create.callsFake(async (payload) => ({
+        getId: () => payload.geoExperimentId,
+        getName: () => '',
+        setPreScheduleId: sandbox.stub(),
+        setStatus: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+        remove: sandbox.stub().resolves(),
+      }));
+
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true, attempts: 1 });
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(createAtomicStrategyStub).to.have.been.calledOnce;
+      const args = createAtomicStrategyStub.firstCall.args[0];
+      expect(args.name).to.match(/^headings-\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('does not invoke atomic-strategy helper when Prefer: respond-async is absent (sync path)', async () => {
+      const createAtomicStrategyStub = sandbox.stub().resolves({ success: true });
+
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          createAtomicStrategy: createAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const mockTokowakaClient = {
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      await controllerWithAtomicStub.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(createAtomicStrategyStub).to.not.have.been.called;
     });
   });
 
