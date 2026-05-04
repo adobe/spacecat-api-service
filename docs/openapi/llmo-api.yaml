@@ -3254,3 +3254,56 @@ llmo-agentic-traffic-movers:
       - api_key: []
       - ims_key: []
       - scoped_api_key: []
+
+brand-presence-prompt-execution-status:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Aggregated prompt execution status for a batch of topics
+    description: |
+      Returns one `{ topicId, prompt, regionCode, matchedModels[] }` item per unique
+      (topic, prompt, region) combination found in execution data for the given date
+      range and topic IDs. A single call replaces the previous N×7 per-model
+      topic-prompts fan-out used by the Prompts Management status column.
+    operationId: getPromptExecutionStatus
+    parameters:
+      - name: promptIds
+        in: query
+        required: true
+        description: Comma-separated list of prompt UUIDs (V2Prompt.id) currently visible on the page (at least one required)
+        schema:
+          type: string
+          example: 'aaaaaaaa-0000-7000-8000-000000000001,bbbbbbbb-0000-7000-8000-000000000002'
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+        description: Start of date range (defaults to 28 days ago)
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+        description: End of date range (defaults to today)
+      - name: siteId
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+        description: Optional site UUID to narrow results to a single site
+    responses:
+      '200':
+        description: Aggregated execution status items
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PromptExecutionStatusResponse'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []

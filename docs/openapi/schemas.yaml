@@ -8383,3 +8383,38 @@ UrlInspectorFilterDimensions:
           label: { type: string }
         required: [id, label]
   required: [categories, regions, content_types]
+
+PromptExecutionStatusItem:
+  type: object
+  description: Execution status for a single (topic, prompt, region) combination.
+  properties:
+    topicId:
+      type: string
+      format: uuid
+      description: Topic UUID
+      example: 'aaaaaaaa-0000-7000-8000-000000000001'
+    prompt:
+      type: string
+      description: Prompt text
+      example: 'What is the best photo editor?'
+    regionCode:
+      type: string
+      description: Two-character region code
+      example: 'US'
+    matchedModels:
+      type: array
+      description: LLM models that have execution data for this (topic, prompt, region) in the queried date range
+      items:
+        type: string
+      example: ['chatgpt-free', 'google']
+  required: [topicId, prompt, regionCode, matchedModels]
+
+PromptExecutionStatusResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      description: One item per unique (topicId, prompt, regionCode) combination
+      items:
+        $ref: '#/PromptExecutionStatusItem'
+  required: [items]
