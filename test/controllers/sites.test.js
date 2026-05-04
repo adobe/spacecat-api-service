@@ -165,6 +165,7 @@ describe('Sites Controller', () => {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
+        allByOrganizationId: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
         // NOTE: findByBaseURL defaults to returning sites[0] (existing site).
         // eslint-disable-next-line max-len
@@ -5137,6 +5138,78 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    describe('ASO_PLG_EXCLUDED_ORGS bypass (internal / demo orgs)', () => {
+      // testOrganizations[0]: Spacecat UUID '9033554c-...', imsOrgId '1234567890...@AdobeOrg'
+      const INTERNAL_ORG_SPACECAT_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
+      const INTERNAL_ORG_IMS_ID = '1234567890ABCDEF12345678@AdobeOrg';
+
+      beforeEach(() => {
+        // ASO_PLG_EXCLUDED_ORGS holds internal Spacecat org UUIDs, not IMS org IDs
+        context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: INTERNAL_ORG_SPACECAT_ID };
+        // The top-level bypass looks up the caller org by imsOrg
+        mockDataAccess.Organization.findByImsOrgId.withArgs(INTERNAL_ORG_IMS_ID)
+          .resolves(testOrganizations[0]);
+      });
+
+      it('should return 200 when caller imsOrg maps to excluded org, with specific siteId', async () => {
+        context.data = { siteId: SITE_IDS[0], imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.findById.resolves(testSites[0]); // site belongs to testOrganizations[0]
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data).to.have.property('organization');
+        expect(body.data).to.have.property('site');
+        expect(mockTierClientStub.getAllEnrollment).to.not.have.been.called;
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('should return 200 when caller imsOrg maps to excluded org, using allByOrganizationId when no siteId', async () => {
+        context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.allByOrganizationId.resolves([testSites[0]]);
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data).to.have.property('organization');
+        expect(body.data).to.have.property('site');
+        expect(mockDataAccess.Site.allByOrganizationId)
+          .to.have.been.calledWith(INTERNAL_ORG_SPACECAT_ID);
+        expect(mockTierClientStub.getAllEnrollment).to.not.have.been.called;
+        expect(mockTierClientStub.getFirstEnrollment).to.not.have.been.called;
+      });
+
+      it('should return 404 when caller is excluded org but no sites exist in org (PRE_ONBOARD, no enrollment)', async () => {
+        context.data = { imsOrg: INTERNAL_ORG_IMS_ID };
+        mockDataAccess.Site.allByOrganizationId.resolves([]);
+        // Normal imsOrg fallback: PRE_ONBOARD internal org has no enrollment either
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+      });
+
+      it('should still enforce tier/enrollment checks for non-excluded orgs (PAID/FREE_TRIAL)', async () => {
+        const CUSTOMER_ORG_IMS = testOrganizations[2].getImsOrgId(); // not in excluded list
+        context.data = { imsOrg: CUSTOMER_ORG_IMS };
+        mockDataAccess.Organization.findByImsOrgId.withArgs(CUSTOMER_ORG_IMS)
+          .resolves(testOrganizations[2]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getId: () => 'ent-1', getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        expect(mockTierClientStub.getFirstEnrollment).to.have.been.called;
+        expect(mockDataAccess.Site.allByOrganizationId).to.not.have.been.called;
+      });
     });
   });
 

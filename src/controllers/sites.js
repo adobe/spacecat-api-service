@@ -42,7 +42,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import {
-  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
@@ -1191,6 +1191,45 @@ function SitesController(ctx, log, env) {
     let site;
 
     try {
+      // Early bypass: if the caller's shell IMS org (imsOrg) maps to a Spacecat org whose UUID
+      // is in ASO_PLG_EXCLUDED_ORGS, skip all tier/enrollment checks. Those checks would produce
+      // a PLG-wizard-triggering 404 for PRE_ONBOARD internal/demo orgs.
+      if (hasText(imsOrg)) {
+        const callerOrg = await Organization.findByImsOrgId(imsOrg);
+        if (callerOrg && isInternalOrg(callerOrg.getId(), context.env)) {
+          const callerOrgId = callerOrg.getId();
+          if (await accessControlUtil.hasAccess(callerOrg)) {
+            log.info(`[resolveSite] ASO_PLG_EXCLUDED_ORGS bypass triggered for internal org ${callerOrgId} (imsOrg=${imsOrg}, siteId=${siteId ?? 'none'})`);
+            let internalSite;
+            if (hasText(siteId) && isValidUUID(siteId)) {
+              internalSite = await Site.findById(siteId);
+              if (internalSite && internalSite.getOrganizationId() !== callerOrgId) {
+                log.warn(`[resolveSite] Bypass: siteId ${siteId} belongs to org ${internalSite.getOrganizationId()}, not caller org ${callerOrgId} — falling back to allByOrganizationId`);
+                internalSite = null;
+              }
+            }
+            if (!internalSite) {
+              const orgSites = await Site.allByOrganizationId(callerOrgId);
+              internalSite = orgSites?.[0];
+            }
+            if (internalSite) {
+              log.info(`[resolveSite] Bypass returning site ${internalSite.getId()} for internal org ${callerOrgId}`);
+              const isSummitPlgEnabled = await getIsSummitPlgEnabled(internalSite, context);
+              return ok({
+                data: {
+                  organization: OrganizationDto.toJSON(callerOrg),
+                  site: SiteDto.toJSON(internalSite),
+                  isSummitPlgEnabled,
+                },
+              });
+            }
+            log.warn(`[resolveSite] Bypass: no site found in internal org ${callerOrgId} — falling through to normal resolution`);
+          } else {
+            log.warn(`[resolveSite] Bypass skipped: caller lacks access to internal org ${callerOrgId} (imsOrg=${imsOrg})`);
+          }
+        }
+      }
+
       if (hasText(siteId) && isValidUUID(siteId)) {
         site = await Site.findById(siteId);
         if (site) {
@@ -1255,13 +1294,13 @@ function SitesController(ctx, log, env) {
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
             || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            const data = {
-              organization: OrganizationDto.toJSON(organization),
-              site: SiteDto.toJSON(enrolledSite),
-              isSummitPlgEnabled,
-            };
-
-            return ok({ data });
+            return ok({
+              data: {
+                organization: OrganizationDto.toJSON(organization),
+                site: SiteDto.toJSON(enrolledSite),
+                isSummitPlgEnabled,
+              },
+            });
           }
         }
       } else if (hasText(imsOrg)) {
