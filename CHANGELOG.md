@@ -1,3 +1,11 @@
+## [1.464.2](https://github.com/adobe/spacecat-api-service/compare/v1.464.1...v1.464.2) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.6.0 ([#2303](https://github.com/adobe/spacecat-api-service/issues/2303)) ([612723a](https://github.com/adobe/spacecat-api-service/commit/612723af08f79a0fab7a174fad5ce5297d78e91e))
+* Update docker-compose.yml ([#2307](https://github.com/adobe/spacecat-api-service/issues/2307)) ([0170eb0](https://github.com/adobe/spacecat-api-service/commit/0170eb070f98ee726696afc1b4e915c6784fcd65))
+
 ## [1.464.1](https://github.com/adobe/spacecat-api-service/compare/v1.464.0...v1.464.1) (2026-04-30)
 
 
