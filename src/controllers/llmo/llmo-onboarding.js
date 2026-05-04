@@ -263,25 +263,32 @@ export async function ensureInitialCustomerConfigV2({
 /**
  * Generates the data folder name from a baseURL.
  *
- * The hostname and (if present) each URL path segment are individually sanitized
- * (non-alphanumeric replaced with `-`, lowercased) and joined with `--` as a
- * path-segment delimiter. The double-hyphen delimiter cannot appear in a sanitized
- * segment, so distinct paths cannot collide.
+ * The hostname and (if present) each URL path segment are percent-decoded,
+ * individually sanitized (non-alphanumeric replaced with `-`, lowercased —
+ * paths are case-folded deliberately so /Kings and /kings map to the same folder),
+ * and joined with `--` as a path-segment delimiter. The double-hyphen delimiter
+ * cannot appear in a sanitized segment, so distinct paths cannot collide.
  *
  * Examples:
- *   https://nba.com         -> nba-com
- *   https://nba.com/kings   -> nba-com--kings
- *   https://nba.com/us/kings -> nba-com--us--kings
+ *   https://nba.com           -> nba-com
+ *   https://nba.com/kings     -> nba-com--kings
+ *   https://nba.com/us/kings  -> nba-com--us--kings
  *
- * @param {string} baseURL - The site base URL
- * @param {string} env - The environment (prod, dev, etc.)
- * @returns {string} The data folder name
+ * @param {string} baseURL - The site's base URL (must be a fully-qualified URL).
+ * @param {string} env - The environment ('prod' or anything else, treated as dev).
+ * @returns {string} The data folder name (prefixed with 'dev/' for non-prod).
  */
 export function generateDataFolder(baseURL, env = 'dev') {
   const url = new URL(baseURL);
   const host = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
   const segments = url.pathname.split('/').filter(Boolean)
-    .map((seg) => seg.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase());
+    .map((seg) => {
+      let decoded = seg;
+      try {
+        decoded = decodeURIComponent(seg);
+      } catch { /* keep raw on malformed percent-encoding */ }
+      return decoded.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().replace(/-+/g, '-');
+    });
   const dataFolderName = segments.length > 0 ? `${host}--${segments.join('--')}` : host;
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 }

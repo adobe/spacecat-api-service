@@ -416,6 +416,26 @@ describe('LLMO Onboarding Functions', () => {
       expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
         .to.not.equal(generateDataFolder('https://nba.com/us-kings', 'prod'));
     });
+
+    it('should normalize percent-encoded path segments', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod')).to.equal('nba-com--k-nig');
+    });
+
+    it('should case-fold path segments so /Kings and /kings resolve to the same folder', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(generateDataFolder('https://nba.com/Kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should handle double slashes in paths correctly', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(generateDataFolder('https://nba.com//kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
   });
 
   describe('validateSiteNotOnboarded', () => {
