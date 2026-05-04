@@ -296,6 +296,20 @@ sites-resolve:
         description: UUID of a specific site to validate against the organization
         schema:
           $ref: './schemas.yaml#/Id'
+      - name: callerImsOrg
+        in: query
+        required: false
+        description: |
+          IMS Organization ID of the *caller* (the org their AEC shell is currently in),
+          independent of which org's data is being requested via organizationId/imsOrg.
+          When provided, it is translated to a Spacecat UUID and used to determine if
+          the caller is an internal/demo org listed in `ASO_PLG_EXCLUDED_ORGS`. For
+          internal callers, PLG-wizard-triggering resolveStatuses
+          (`no_entitlement_for_product`, `aso_pre_onboard`) are remapped to
+          `site_not_enrolled` so the UI shows "No site onboarded" instead of the PLG
+          onboarding wizard.
+        schema:
+          $ref: './schemas.yaml#/ImsOrganizationId'
     responses:
       '200':
         description: Successfully resolved site and organization data
