@@ -122,12 +122,12 @@ describe('createPromptExecutionStatusHandler', () => {
       (i) => i.topicId === TOPIC_ID_1 && i.prompt === 'What is AI?' && i.regionCode === 'US',
     );
     expect(usItem).to.exist;
-    expect(usItem.matchedModels).to.deep.equal(['chatgpt-free', 'google']);
+    expect(usItem.matchedModels).to.deep.equal(['chatgpt', 'google']);
 
     const deItem = body.items.find(
       (i) => i.topicId === TOPIC_ID_1 && i.prompt === 'What is AI?' && i.regionCode === 'DE',
     );
-    expect(deItem.matchedModels).to.deep.equal(['chatgpt-free']);
+    expect(deItem.matchedModels).to.deep.equal(['chatgpt']);
 
     const t2Item = body.items.find((i) => i.topicId === TOPIC_ID_2);
     expect(t2Item.matchedModels).to.deep.equal(['perplexity']);

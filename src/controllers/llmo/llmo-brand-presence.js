@@ -54,6 +54,16 @@ const MODEL_QUERY_ALIASES = new Map([
   ['openai', 'chatgpt-paid'], // UI PLATFORM_CODES.ChatGPTPaid sends 'openai'
 ]);
 
+/**
+ * Maps DB llmo_execution_model enum values to the UI platform codes used in
+ * PLATFORM_CODES (project-elmo-ui). Only the two mismatched names need entries;
+ * the other five values are identical in both systems.
+ */
+const DB_MODEL_TO_PLATFORM_CODE = new Map([
+  ['chatgpt-paid', 'openai'],
+  ['chatgpt-free', 'chatgpt'],
+]);
+
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
@@ -2197,7 +2207,8 @@ export function createPromptExecutionStatusHandler(getOrgAndValidateAccess) {
           });
         }
         if (row.model) {
-          grouped.get(key).matchedModels.add(row.model);
+          const platformCode = DB_MODEL_TO_PLATFORM_CODE.get(row.model) ?? row.model;
+          grouped.get(key).matchedModels.add(platformCode);
         }
       }
 
