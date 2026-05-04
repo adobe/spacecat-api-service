@@ -730,6 +730,65 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     });
   });
 
+  // --- Early-return guards ---
+
+  describe('onboard - early-return guards', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('returns 400 when imsOrgId is an internal org', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: TEST_IMS_ORG_ID };
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('internal organizations');
+    });
+
+    it('returns 400 when org already has a non-PLG ASO entitlement (paid customer)', async () => {
+      const paidEntitlement = {
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getTier: sandbox.stub().returns('PAID'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([paidEntitlement]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('paid customers');
+    });
+
+    it('proceeds when org has a PLG-tier ASO entitlement', async () => {
+      const plgEntitlement = {
+        getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getTier: sandbox.stub().returns('PLG'),
+      };
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([plgEntitlement]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+    });
+
+    it('proceeds when org has no entitlements', async () => {
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+    });
+
+    it('proceeds when org does not exist yet (new customer)', async () => {
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
+    });
+  });
+
   // --- Idempotency: already onboarded ---
 
   describe('onboard - already ONBOARDED domain', () => {
@@ -2528,6 +2587,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
         getProductCode: sandbox.stub().returns('aso_optimizer'), // matches mocked PRODUCT_CODES.ASO
+        getTier: sandbox.stub().returns('PLG'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
 
@@ -2577,6 +2637,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
         getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getTier: sandbox.stub().returns('PLG'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
@@ -2618,6 +2679,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const mockAsoEntitlement = {
         getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID),
         getProductCode: sandbox.stub().returns('aso_optimizer'),
+        getTier: sandbox.stub().returns('PLG'),
       };
       mockDataAccess.Entitlement.allByOrganizationId.resolves([mockAsoEntitlement]);
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
@@ -2901,8 +2963,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(onboardedRecord.setStatus).to.have.been.calledWith('WAITLISTED');
       expect(onboardedRecord.save).to.have.been.called;
 
-      // No enrollment revocation attempted (no org ID)
-      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.called;
+      // No enrollment revocation attempted for displaced record (no org ID on old record)
+      expect(mockDataAccess.Entitlement.allByOrganizationId).not.to.have.been.calledWith(null);
 
       // New domain is onboarded
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
@@ -2994,7 +3056,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       mockDataAccess.Opportunity.allBySiteId.resolves([]); // no suggestions
 
       mockDataAccess.Entitlement.allByOrganizationId.resolves([
-        { getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID), getProductCode: sandbox.stub().returns('aso_optimizer') },
+        { getId: sandbox.stub().returns(ASO_ENTITLEMENT_ID), getProductCode: sandbox.stub().returns('aso_optimizer'), getTier: sandbox.stub().returns('PLG') },
       ]);
 
       // Simulate enrollment revocation failure on the first call (displacement),

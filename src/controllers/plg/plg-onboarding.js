@@ -1390,6 +1390,22 @@ function PlgOnboardingController(ctx) {
 
     const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
+    if (isInternalOrg(imsOrgId, context.env)) {
+      return badRequest('PLG onboarding is not available for internal organizations');
+    }
+
+    const { Organization, Entitlement } = context.dataAccess;
+    const existingOrg = await Organization.findByImsOrgId(imsOrgId);
+    if (existingOrg) {
+      const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
+      const hasPaidEntitlement = entitlements.some(
+        (e) => e.getProductCode() === ASO_PRODUCT_CODE && e.getTier() !== ASO_TIER,
+      );
+      if (hasPaidEntitlement) {
+        return badRequest('PLG onboarding is not available for paid customers');
+      }
+    }
+
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId, updatedBy }, context);
       return ok(PlgOnboardingDto.toJSON(onboarding));
