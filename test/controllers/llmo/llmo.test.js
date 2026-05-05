@@ -195,6 +195,7 @@ describe('LlmoController', () => {
       createMetaconfig: sinon.stub(),
       updateMetaconfig: sinon.stub(),
       checkEdgeOptimizeStatus: sinon.stub(),
+      checkWafConnectivity: sinon.stub(),
     };
     exchangePromiseTokenStub = sinon.stub().resolves({ access_token: 'fake-ims-token' });
 
@@ -7865,6 +7866,119 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.include('Preview failed');
+    });
+  });
+
+  describe('checkWafConnectivity (GET /llmo/probes/edge-optimize)', () => {
+    const validSiteId = '12345678-1234-4123-8123-123456789012';
+    let probeContext;
+
+    beforeEach(() => {
+      probeContext = {
+        ...mockContext,
+        params: { siteId: validSiteId },
+      };
+      mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockTokowakaClient.checkWafConnectivity.reset();
+      mockTokowakaClient.checkWafConnectivity.resolves({
+        reachable: true,
+        blocked: false,
+        statusCode: 200,
+        probedUrl: 'https://www.example.com/',
+      });
+    });
+
+    it('should return 200 with probe result from TokowakaClient', async () => {
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.reachable).to.be.true;
+      expect(body.blocked).to.be.false;
+      expect(body.statusCode).to.equal(200);
+      expect(mockTokowakaClient.checkWafConnectivity).to.have.been.calledWith(mockSite);
+    });
+
+    it('should pass through blocked result with edgeOptimizeEnabled from shared lib', async () => {
+      mockTokowakaClient.checkWafConnectivity.resolves({
+        reachable: false,
+        blocked: true,
+        statusCode: 403,
+        probedUrl: 'https://www.example.com/',
+        edgeOptimizeEnabled: false,
+      });
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.reachable).to.be.false;
+      expect(body.blocked).to.be.true;
+      expect(body.edgeOptimizeEnabled).to.be.false;
+    });
+
+    it('should pass through timeout result with edgeOptimizeEnabled from shared lib', async () => {
+      mockTokowakaClient.checkWafConnectivity.resolves({
+        reachable: false,
+        blocked: null,
+        reason: 'timeout',
+        probedUrl: 'https://www.example.com/',
+        edgeOptimizeEnabled: true,
+      });
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.reason).to.equal('timeout');
+      expect(body.edgeOptimizeEnabled).to.be.true;
+    });
+
+    it('should return 400 when siteId is invalid', async () => {
+      probeContext.params.siteId = 'not-a-uuid';
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Invalid siteId');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('should return 404 when site does not exist', async () => {
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.include(validSiteId);
+      expect(mockTokowakaClient.checkWafConnectivity).to.not.have.been.called;
+    });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const result = await deniedController.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(403);
+      expect(mockTokowakaClient.checkWafConnectivity).to.not.have.been.called;
+    });
+
+    it('should return 500 when site has no baseURL configured', async () => {
+      mockSite.getBaseURL.returns(null);
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.include('no baseURL');
+      expect(mockTokowakaClient.checkWafConnectivity).to.not.have.been.called;
     });
   });
 });
