@@ -2135,8 +2135,8 @@ llmo-probe-edge-optimize:
     responses:
       '200':
         description: >
-          Probe result (always 200 — inspect `reachable` and `blocked` fields
-          for the actual connectivity status).
+          Probe result (always 200 — inspect `reachable`, `blocked`, and `llmBotAgents`
+          fields for the actual connectivity status).
         content:
           application/json:
             schema:
@@ -2144,6 +2144,7 @@ llmo-probe-edge-optimize:
               required:
                 - probedUrl
                 - reachable
+                - llmBotAgents
               properties:
                 reachable:
                   type: boolean
@@ -2153,7 +2154,7 @@ llmo-probe-edge-optimize:
                     - boolean
                     - 'null'
                   description: >
-                    `true` — WAF/Bot Manager is blocking the UA.
+                    `true` — WAF/Bot Manager is blocking the `AdobeEdgeOptimize/1.0` UA.
                     `false` — not blocked.
                     `null` — could not determine (network/timeout error).
                 statusCode:
@@ -2164,34 +2165,141 @@ llmo-probe-edge-optimize:
                   type: string
                   description: The URL that was probed.
                   example: 'https://www.acme.com/'
+                llmBotAgents:
+                  type: object
+                  description: >
+                    Results of the SpaceCat baseline probe and LLM bot agent probes.
+                    All probes run from SpaceCat infrastructure. Use `spacecatBaseline`
+                    to determine whether SpaceCat IPs/UA are themselves blocked before
+                    interpreting the LLM bot agent results.
+                  required:
+                    - anyBlocked
+                    - spacecatBaseline
+                    - agents
+                  properties:
+                    anyBlocked:
+                      type: boolean
+                      description: '`true` if at least one LLM bot agent was blocked.'
+                    spacecatBaseline:
+                      type: object
+                      description: >
+                        Probe result using SpaceCat infrastructure identity
+                        (SPACECAT_USER_AGENT injected by tracingFetch). If blocked,
+                        SpaceCat audits are also impaired — fix this before
+                        interpreting the LLM bot agent results.
+                      properties:
+                        blocked:
+                          type:
+                            - boolean
+                            - 'null'
+                          description: >
+                            `true` — blocked.
+                            `false` — clean pass.
+                            `null` — network/timeout error.
+                        statusCode:
+                          type: integer
+                          description: HTTP status code (absent when `error` is true).
+                          example: 200
+                        error:
+                          type: boolean
+                          description: Present and `true` only when the probe request failed.
+                    agents:
+                      type: array
+                      description: Per-agent probe result.
+                      items:
+                        type: object
+                        required:
+                          - name
+                          - userAgent
+                        properties:
+                          name:
+                            type: string
+                            description: Display name of the LLM bot agent.
+                            example: ChatGPT-User
+                          userAgent:
+                            type: string
+                            description: The user-agent string sent in the probe request.
+                            example: 'ChatGPT-User/1.0'
+                          blocked:
+                            type:
+                              - boolean
+                              - 'null'
+                            description: >
+                              `true` — blocked.
+                              `false` — clean pass.
+                              `null` — network/timeout error.
+                          statusCode:
+                            type: integer
+                            description: HTTP status code observed (absent when `error` is true).
+                            example: 403
+                          error:
+                            type: boolean
+                            description: >
+                              Present and `true` only when the probe request failed
+                              (network error or timeout).
             examples:
               hardBlock:
-                summary: WAF hard block (403)
+                summary: Edge-optimize blocked; SpaceCat and ChatGPT-User also blocked
                 value:
                   reachable: false
                   blocked: true
                   statusCode: 403
                   probedUrl: 'https://www.acme.com/'
-              softBlock:
-                summary: Soft block — bot-challenge page (200)
-                value:
-                  reachable: false
-                  blocked: true
-                  statusCode: 200
-                  probedUrl: 'https://www.acme.com/'
+                  llmBotAgents:
+                    anyBlocked: true
+                    spacecatBaseline:
+                      blocked: true
+                      statusCode: 403
+                    agents:
+                      - name: ChatGPT-User
+                        userAgent: 'ChatGPT-User/1.0'
+                        blocked: true
+                        statusCode: 403
+                      - name: Perplexity-User
+                        userAgent: 'Perplexity-User/1.0'
+                        blocked: false
+                        statusCode: 200
               cleanPass:
-                summary: No WAF blocking
+                summary: No WAF blocking for any probe
                 value:
                   reachable: true
                   blocked: false
                   statusCode: 200
                   probedUrl: 'https://www.acme.com/'
+                  llmBotAgents:
+                    anyBlocked: false
+                    spacecatBaseline:
+                      blocked: false
+                      statusCode: 200
+                    agents:
+                      - name: ChatGPT-User
+                        userAgent: 'ChatGPT-User/1.0'
+                        blocked: false
+                        statusCode: 200
+                      - name: Perplexity-User
+                        userAgent: 'Perplexity-User/1.0'
+                        blocked: false
+                        statusCode: 200
               networkTimeout:
                 summary: Origin unreachable (network/timeout)
                 value:
                   reachable: false
                   blocked: null
                   probedUrl: 'https://www.acme.com/'
+                  llmBotAgents:
+                    anyBlocked: false
+                    spacecatBaseline:
+                      blocked: null
+                      error: true
+                    agents:
+                      - name: ChatGPT-User
+                        userAgent: 'ChatGPT-User/1.0'
+                        blocked: null
+                        error: true
+                      - name: Perplexity-User
+                        userAgent: 'Perplexity-User/1.0'
+                        blocked: null
+                        error: true
       '400':
         $ref: './responses.yaml#/400'
       '401':
