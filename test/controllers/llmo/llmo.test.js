@@ -7769,6 +7769,11 @@ describe('LlmoController', () => {
         statusCode: 200,
         probedUrl: 'https://www.example.com/',
       });
+      tracingFetchStub.resolves({
+        status: 200,
+        headers: { get: () => null },
+        text: async () => '<html>Welcome</html>',
+      });
     });
 
     it('should return 200 with probe result from TokowakaClient', async () => {
@@ -7892,6 +7897,9 @@ describe('LlmoController', () => {
       const body = await result.json();
       expect(body.llmBotAgents).to.exist;
       expect(body.llmBotAgents.anyBlocked).to.be.false;
+      expect(body.llmBotAgents.spacecatBaseline).to.exist;
+      expect(body.llmBotAgents.spacecatBaseline.blocked).to.be.false;
+      expect(body.llmBotAgents.spacecatBaseline.statusCode).to.equal(200);
       expect(body.llmBotAgents.agents).to.have.lengthOf(2);
       expect(body.llmBotAgents.agents[0].name).to.equal('ChatGPT-User');
       expect(body.llmBotAgents.agents[1].name).to.equal('Perplexity-User');
@@ -7913,9 +7921,44 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.llmBotAgents.anyBlocked).to.be.true;
+      expect(body.llmBotAgents.spacecatBaseline.blocked).to.be.true;
+      expect(body.llmBotAgents.spacecatBaseline.statusCode).to.equal(403);
       body.llmBotAgents.agents.forEach((agent) => {
         expect(agent.blocked).to.be.true;
         expect(agent.statusCode).to.equal(403);
+      });
+    });
+
+    it('should include spacecatBaseline with blocked null when baseline fetch throws', async () => {
+      tracingFetchStub.onFirstCall().rejects(new Error('Network timeout'));
+      tracingFetchStub.resolves({
+        status: 200,
+        headers: { get: () => null },
+        text: async () => '<html>Welcome</html>',
+      });
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.llmBotAgents.spacecatBaseline.blocked).to.be.null;
+      expect(body.llmBotAgents.spacecatBaseline.error).to.be.true;
+      expect(body.llmBotAgents.agents).to.have.lengthOf(2);
+    });
+
+    it('should set agent error true when an LLM bot agent fetch throws', async () => {
+      // First call: baseline (clean). Second and third: agents reject.
+      tracingFetchStub.onSecondCall().rejects(new Error('Connection refused'));
+      tracingFetchStub.onThirdCall().rejects(new Error('Connection refused'));
+
+      const result = await controller.checkWafConnectivity(probeContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.llmBotAgents.spacecatBaseline.blocked).to.be.false;
+      body.llmBotAgents.agents.forEach((agent) => {
+        expect(agent.blocked).to.be.null;
+        expect(agent.error).to.be.true;
       });
     });
   });

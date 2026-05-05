@@ -1957,7 +1957,9 @@ function LlmoController(ctx) {
    * Combined WAF connectivity probe. Runs two checks in parallel:
    *   1. Edge Optimize probe (via the Optimize at Edge proxy) — detects whether
    *      the AdobeEdgeOptimize/1.0 UA is blocked at the customer's origin.
-   *   2. LLM bot agent probe (direct from SpaceCat infra, IPs already allowlisted)
+   *   2. SpaceCat baseline probe (no explicit UA → tracingFetch injects SPACECAT_USER_AGENT)
+   *      — verifies SpaceCat infra is not itself blocked; a prerequisite for LLM bot results.
+   *   3. LLM bot agent probe (direct from SpaceCat infra, IPs already allowlisted)
    *      — detects UA-based WAF rules that would block ChatGPT-User or Perplexity-User.
    *
    * @param {object} context - Request context.
@@ -1995,8 +1997,22 @@ function LlmoController(ctx) {
 
     const tokowakaClient = TokowakaClient.createFrom(context);
 
-    const [edgeOptimizeResult, agentResults] = await Promise.all([
+    const [edgeOptimizeResult, spacecatBaseline, agentResults] = await Promise.all([
       tokowakaClient.checkWafConnectivity(site),
+      // No explicit User-Agent → tracingFetch injects SPACECAT_USER_AGENT automatically.
+      // Detects whether SpaceCat Lambda IPs/UA are themselves WAF-blocked.
+      (async () => {
+        try {
+          const response = await fetch(probeUrl, {
+            method: 'GET',
+            signal: AbortSignal.timeout(BOT_PROBE_TIMEOUT_MS),
+          });
+          return classifyBotAgentResponse(response, 'Spacecat', log);
+        } catch (err) {
+          log.warn(`[llm-bot-probe] Spacecat baseline probe failed on ${probeUrl}: ${err.message}`);
+          return { blocked: null, error: true };
+        }
+      })(),
       Promise.all(
         LLM_BOT_AGENTS.map(async ({ name, userAgent }) => {
           try {
@@ -2018,9 +2034,12 @@ function LlmoController(ctx) {
     ]);
 
     const anyBlocked = agentResults.some((r) => r.blocked === true);
-    log.info(`[edge-optimize-probe] Result for site ${siteId}: reachable=${edgeOptimizeResult.reachable}, blocked=${edgeOptimizeResult.blocked}, llmBotsAnyBlocked=${anyBlocked}`);
+    log.info(`[edge-optimize-probe] Result for site ${siteId}: reachable=${edgeOptimizeResult.reachable}, blocked=${edgeOptimizeResult.blocked}, spacecatBlocked=${spacecatBaseline.blocked}, llmBotsAnyBlocked=${anyBlocked}`);
 
-    return ok({ ...edgeOptimizeResult, llmBotAgents: { anyBlocked, agents: agentResults } });
+    return ok({
+      ...edgeOptimizeResult,
+      llmBotAgents: { anyBlocked, spacecatBaseline, agents: agentResults },
+    });
   };
 
   return {

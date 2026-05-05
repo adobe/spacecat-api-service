@@ -2168,16 +2168,41 @@ llmo-probe-edge-optimize:
                 llmBotAgents:
                   type: object
                   description: >
-                    Results of the LLM bot agent probes. Probes are sent directly
-                    from SpaceCat infrastructure (IPs already allowlisted), so any
-                    block detected here is user-agent-based.
+                    Results of the SpaceCat baseline probe and LLM bot agent probes.
+                    All probes run from SpaceCat infrastructure. Use `spacecatBaseline`
+                    to determine whether SpaceCat IPs/UA are themselves blocked before
+                    interpreting the LLM bot agent results.
                   required:
                     - anyBlocked
+                    - spacecatBaseline
                     - agents
                   properties:
                     anyBlocked:
                       type: boolean
                       description: '`true` if at least one LLM bot agent was blocked.'
+                    spacecatBaseline:
+                      type: object
+                      description: >
+                        Probe result using SpaceCat infrastructure identity
+                        (SPACECAT_USER_AGENT injected by tracingFetch). If blocked,
+                        SpaceCat audits are also impaired — fix this before
+                        interpreting the LLM bot agent results.
+                      properties:
+                        blocked:
+                          type:
+                            - boolean
+                            - 'null'
+                          description: >
+                            `true` — blocked.
+                            `false` — clean pass.
+                            `null` — network/timeout error.
+                        statusCode:
+                          type: integer
+                          description: HTTP status code (absent when `error` is true).
+                          example: 200
+                        error:
+                          type: boolean
+                          description: Present and `true` only when the probe request failed.
                     agents:
                       type: array
                       description: Per-agent probe result.
@@ -2214,7 +2239,7 @@ llmo-probe-edge-optimize:
                               (network error or timeout).
             examples:
               hardBlock:
-                summary: Edge-optimize blocked; ChatGPT-User also blocked
+                summary: Edge-optimize blocked; SpaceCat and ChatGPT-User also blocked
                 value:
                   reachable: false
                   blocked: true
@@ -2222,6 +2247,9 @@ llmo-probe-edge-optimize:
                   probedUrl: 'https://www.acme.com/'
                   llmBotAgents:
                     anyBlocked: true
+                    spacecatBaseline:
+                      blocked: true
+                      statusCode: 403
                     agents:
                       - name: ChatGPT-User
                         userAgent: 'ChatGPT-User/1.0'
@@ -2240,6 +2268,9 @@ llmo-probe-edge-optimize:
                   probedUrl: 'https://www.acme.com/'
                   llmBotAgents:
                     anyBlocked: false
+                    spacecatBaseline:
+                      blocked: false
+                      statusCode: 200
                     agents:
                       - name: ChatGPT-User
                         userAgent: 'ChatGPT-User/1.0'
@@ -2257,6 +2288,9 @@ llmo-probe-edge-optimize:
                   probedUrl: 'https://www.acme.com/'
                   llmBotAgents:
                     anyBlocked: false
+                    spacecatBaseline:
+                      blocked: null
+                      error: true
                     agents:
                       - name: ChatGPT-User
                         userAgent: 'ChatGPT-User/1.0'
