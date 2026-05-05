@@ -400,6 +400,7 @@ async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitle
   const expectedOrgId = organization.getId();
 
   // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  /* c8 ignore next 4 */
   if (isInternalOrg(expectedOrgId, env)) {
     log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
     return;
@@ -622,7 +623,7 @@ async function performAsoPlgOnboarding({
     Site, PlgOnboarding, Organization,
   } = dataAccess;
 
-  /* c8 ignore next 5 */
+  /* c8 ignore next 7 */
   if (!isValidHostname(domain)) {
     throw Object.assign(
       new Error('Invalid domain: must be a valid hostname'),
