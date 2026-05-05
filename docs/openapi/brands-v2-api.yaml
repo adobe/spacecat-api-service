@@ -225,7 +225,7 @@ v2-brand-for-org-site:
       `brand_id` to thread onto Job records.
 
       Gating: returns 404 unless the organization is v2-eligible — meaning
-      `brandalf=true` OR `brandalf-migration=true`. The migration flag
+      `brandalf=true` OR `brandalf_migration=true`. The migration flag
       surfaces brands during the dual-publish window (BP DB sync is on,
       v2 brand records exist) so the BP runner can enter the v2 path
       before brandalf flips fully. Pure-v1 organizations receive 404,

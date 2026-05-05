@@ -30,7 +30,7 @@ import {
  * Validates:
  *  - resolver gating on `resolveLlmoOnboardingMode === v2`
  *  - primary `brands.site_id` lookup
- *  - 404 on v1 / brandalf-migration / no-active-brand
+ *  - 404 on v1 / brandalf_migration / no-active-brand
  *  - 403 on tenant isolation (site does not belong to org)
  *  - 404 on missing org / site
  *  - 403 on cross-org user access
@@ -50,7 +50,7 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
   describe('GET /v2/orgs/:spaceCatId/sites/:siteId/brand (LLMO-4716)', () => {
     /**
      * Sets a feature flag for the given org. Used to set brandalf=true (the
-     * primary gate) and brandalf-migration=true (the dual-publish window
+     * primary gate) and brandalf_migration=true (the dual-publish window
      * Adobe is in today).
      */
     async function setFlag(orgId, flagName, value) {
@@ -70,7 +70,7 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
     }
 
     const setBrandalfTrue = (orgId) => setFlag(orgId, 'brandalf', true);
-    const setBrandalfMigrationTrue = (orgId) => setFlag(orgId, 'brandalf-migration', true);
+    const setBrandalfMigrationTrue = (orgId) => setFlag(orgId, 'brandalf_migration', true);
 
     /**
      * Maps BRAND_1 to a specific site by setting `brands.site_id`. This is the
@@ -125,9 +125,9 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
       });
     });
 
-    describe('brandalf-migration org (Adobe dual-publish window)', () => {
+    describe('brandalf_migration org (Adobe dual-publish window)', () => {
       // Adobe's prod state right now: brandalf=false (or unset) but
-      // brandalf-migration=true. The endpoint's gate must surface the brand
+      // brandalf_migration=true. The endpoint's gate must surface the brand
       // for these orgs so the BP runner can enter the v2 path during the
       // migration window.
       before(async () => {
@@ -136,7 +136,7 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
         await bindBrandToSite(BRAND_1_ID, SITE_1_ID);
       });
 
-      it('returns 200 with the brand when brandalf-migration=true', async () => {
+      it('returns 200 with the brand when brandalf_migration=true', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(
           `/v2/orgs/${ORG_1_ID}/sites/${SITE_1_ID}/brand`,

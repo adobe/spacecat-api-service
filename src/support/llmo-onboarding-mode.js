@@ -14,7 +14,7 @@ import { readFeatureFlag, upsertFeatureFlag } from './feature-flags-storage.js';
 
 export const LLMO_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const LLMO_BRANDALF_FLAG = 'brandalf';
-export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf-migration';
+export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf_migration';
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
 
@@ -41,14 +41,14 @@ export async function readBrandalfFlagOverride(organizationId, postgrestClient) 
 }
 
 /**
- * Reads the `brandalf-migration` flag for an org (LLMO-4723). The migration
+ * Reads the `brandalf_migration` flag for an org (LLMO-4723). The migration
  * flag is the safety-net state during the cohort rollout: orgs in this mode
  * still take v1 reads for *content*, but BP DB sync is on so v2 brand records
  * exist. The (org, site) → brand resolver endpoint treats this state as
  * v2-eligible so the BP Fargate runner can enter the v2 path during the
  * dual-publish window even before brandalf flips fully.
  *
- * TEMPORARY — remove with the rest of the brandalf-migration plumbing once
+ * TEMPORARY — remove with the rest of the brandalf_migration plumbing once
  * all customers have been migrated to brandalf=true.
  */
 export async function readBrandalfMigrationFlagOverride(organizationId, postgrestClient) {
@@ -149,12 +149,12 @@ export async function hasPreBrandalfSites(organizationId, context) {
  *   endpoints called from BP refresh and the DRS scheduler) should pass
  *   `readOnly: true` so a GET never mutates org-level feature-flag state.
  * @param {boolean} [options.brandalfMigrationCountsAsV2=false] When true, an
- *   org with `brandalf-migration=true` (regardless of brandalf) is treated as
+ *   org with `brandalf_migration=true` (regardless of brandalf) is treated as
  *   v2. Used by the (org, site) → brand resolver endpoint so orgs in the
  *   migration safety-net window (Adobe today) can still surface their v2
  *   brand to the BP Fargate runner. Default false preserves the resolver's
  *   onboarding-mode contract for everyone else (LLMO-4723's truth table:
- *   brandalf=true → v2, brandalf-migration alone → v1).
+ *   brandalf=true → v2, brandalf_migration alone → v1).
  * @returns {Promise<'v1'|'v2'>}
  */
 export async function resolveLlmoOnboardingMode(organizationId, context, options = {}) {
@@ -176,8 +176,8 @@ export async function resolveLlmoOnboardingMode(organizationId, context, options
 
   // 1b. Brandalf-migration override: callers that treat the dual-publish
   //     migration window as v2-eligible (currently only the LLMO-4716 brand
-  //     resolver endpoint) short-circuit to v2 when brandalf-migration=true.
-  //     This must run BEFORE the env-level kill switch so brandalf-migration
+  //     resolver endpoint) short-circuit to v2 when brandalf_migration=true.
+  //     This must run BEFORE the env-level kill switch so brandalf_migration
   //     orgs aren't accidentally pinned to v1 by ops.
   if (!brandalfEnabled && brandalfMigrationCountsAsV2) {
     try {
@@ -188,13 +188,13 @@ export async function resolveLlmoOnboardingMode(organizationId, context, options
       if (migrationEnabled === true) {
         log.info(
           `LLMO mode resolution: organization ${organizationId} has `
-          + 'brandalf-migration=true (caller treats as v2-eligible) — using v2',
+          + 'brandalf_migration=true (caller treats as v2-eligible) — using v2',
         );
         return LLMO_ONBOARDING_MODE_V2;
       }
     } catch (migrationFlagError) {
       log.warn(
-        `Failed to read brandalf-migration flag for org ${organizationId}: ${migrationFlagError.message} — proceeding with brandalf-only resolution`,
+        `Failed to read brandalf_migration flag for org ${organizationId}: ${migrationFlagError.message} — proceeding with brandalf-only resolution`,
       );
     }
   }
