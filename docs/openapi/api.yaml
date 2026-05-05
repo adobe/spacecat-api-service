@@ -113,6 +113,8 @@ paths:
     $ref: './hooks-api.yaml#/site-detection-rum'
   /hooks/site-integration/analytics/{hookSecret}:
     $ref: './hooks-api.yaml#/site-integration-analytics'
+  /webhooks/github:
+    $ref: './webhooks-api.yaml#/github-webhook'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
@@ -598,6 +600,11 @@ components:
       in: cookie
       name: sessionToken
       description: 'Authentication using session cookie'
+    github_webhook_signature:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: 'HMAC-SHA256 signature of the request body, provided by GitHub on webhook delivery'
   schemas:
     $ref: './schemas.yaml'
   examples:

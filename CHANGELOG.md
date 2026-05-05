@@ -1,3 +1,10 @@
+# [1.468.0](https://github.com/adobe/spacecat-api-service/compare/v1.467.0...v1.468.0) (2026-05-04)
+
+
+### Features
+
+* GitHub webhook handler (POST /webhooks/github) ([#2281](https://github.com/adobe/spacecat-api-service/issues/2281)) ([a525107](https://github.com/adobe/spacecat-api-service/commit/a525107d095e0f62d65b1347785b64bc199eeb59)), closes [#2255](https://github.com/adobe/spacecat-api-service/issues/2255) [adobe/spacecat-infrastructure#469](https://github.com/adobe/spacecat-infrastructure/issues/469) [adobe/spacecat-infrastructure#473](https://github.com/adobe/spacecat-infrastructure/issues/473)
+
 # [1.467.0](https://github.com/adobe/spacecat-api-service/compare/v1.466.1...v1.467.0) (2026-05-04)
 
 

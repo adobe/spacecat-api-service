@@ -1,0 +1,71 @@
+github-webhook:
+  post:
+    tags:
+      - hooks
+    summary: Receive GitHub App webhook events
+    description: |
+      HMAC-SHA256 authenticated endpoint for receiving GitHub App webhook events.
+      Validates the webhook signature, applies trigger rules, and enqueues
+      accepted events to the Mysticat GitHub Service jobs queue.
+
+      Authentication is performed via GitHub's HMAC-SHA256 webhook signature
+      in the X-Hub-Signature-256 header, using a custom auth handler that
+      plugs into the existing authHandlers array (not the standard JWT/IMS/API key flow).
+
+      Trigger rules are applied from the webhook payload only (no GitHub API
+      calls). On-demand triggers (review_requested, labeled) are accepted.
+      Auto-trigger events (opened, ready_for_review) return 204 until
+      per-repo configuration support is implemented in Phase 3.
+
+      Supported events: pull_request. All other subscribed events (issue_comment)
+      return 204 silently.
+    operationId: processGitHubWebhook
+    parameters:
+      - name: X-Hub-Signature-256
+        in: header
+        required: true
+        description: HMAC-SHA256 signature of the request body (format sha256=<hex>)
+        schema:
+          type: string
+      - name: X-GitHub-Event
+        in: header
+        required: true
+        description: GitHub event type (e.g. pull_request)
+        schema:
+          type: string
+      - name: X-GitHub-Delivery
+        in: header
+        required: false
+        description: Unique delivery GUID for tracing
+        schema:
+          type: string
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: GitHub webhook payload (schema owned by GitHub, not validated beyond required fields)
+    responses:
+      '202':
+        description: Event accepted and enqueued for processing
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/WebhookAccepted'
+      '204':
+        description: Valid event but skipped (unsupported action, draft PR, bot author, etc.)
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        # Custom 401 (not $ref responses.yaml#/401) because HMAC failures need
+        # a message body for debugging; the shared 401 response has no body schema.
+        description: Invalid or missing HMAC signature
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/WebhookUnauthorized'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - github_webhook_signature: []
