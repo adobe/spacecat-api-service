@@ -1705,6 +1705,7 @@ export const onboardSingleSite = async (
     }
 
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
+    // Falsy check covers null (timeout), undefined (unexpected), and '' (empty resolution)
     if (!resolvedUrl) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
       await say(`:warning: Could not resolve canonical URL for ${baseURL}. Using base URL as fallback.`);

@@ -597,7 +597,9 @@ export function onboardSiteModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     let siteUrl;
-    let responseChannel;
+    // Initialize responseChannel early so the catch block can always notify the user.
+    // Falls back to DM if the channel context is not yet resolved.
+    let responseChannel = body?.user?.id;
     let responseThreadTs;
     let user;
     let profile;
@@ -736,9 +738,14 @@ export function onboardSiteModal(lambdaContext) {
       let botProtectionResult = { crawlable: true, type: 'unknown', confidence: 0 };
       try {
         botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
-        log.info(`[onboard] bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable}, type=${botProtectionResult.type}`);
+        log.info(`Bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable}, type=${botProtectionResult.type}`);
       } catch (e) {
-        log.warn(`[onboard] bot blocker detection failed for ${siteUrl}: ${e.message}, proceeding with onboarding`);
+        log.warn(`Bot blocker detection failed for ${siteUrl}, proceeding with onboarding`, e);
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: `:warning: Bot protection detection skipped for ${siteUrl} — audits may be affected if the site has bot protection.`,
+          thread_ts: responseThreadTs,
+        });
       }
 
       // Send warning if bot protection is detected
@@ -757,7 +764,6 @@ export function onboardSiteModal(lambdaContext) {
         });
       }
 
-      log.info(`[onboard] starting onboardSingleSiteFromModal for ${siteUrl}`);
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,
         imsOrgId,
@@ -768,7 +774,6 @@ export function onboardSiteModal(lambdaContext) {
         lambdaContext,
         additionalParams,
       );
-      log.info(`[onboard] onboardSingleSiteFromModal completed for ${siteUrl} status=${reportLine.status}`);
 
       // Note: Configuration is already saved by sharedOnboardSingleSite in utils.js
       // No need to call configuration.save() here as it would overwrite the changes
@@ -829,14 +834,24 @@ ${deliveryConfigInfo}${previewConfigInfo}
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
     } catch (error) {
       log.error('Error handling onboard site modal:', error);
+      const safeMessage = (error?.message || 'unknown error').slice(0, 200);
       try {
-        await client.chat.postMessage({
-          channel: responseChannel,
-          text: `:x: Onboarding failed for \`${siteUrl}\``
-            + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile} | *IMS Org:* ${imsOrgId || 'unknown'}`
-            + `\n*Error:* ${error.message}`,
-          thread_ts: responseThreadTs,
-        });
+        if (responseChannel) {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: `:x: Onboarding failed for \`${siteUrl || 'unknown site'}\``
+              + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile || 'unknown'}`
+              + `\n*Error:* ${safeMessage}`,
+            thread_ts: responseThreadTs,
+          });
+        } else {
+          await ack({
+            response_action: 'errors',
+            errors: {
+              site_url_input: 'There was an error processing the onboarding request.',
+            },
+          });
+        }
       } catch (postError) {
         log.error('Failed to notify channel of onboarding error:', postError);
       }

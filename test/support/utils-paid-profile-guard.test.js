@@ -474,6 +474,8 @@ describe('onboardSingleSite — paid profile guard', () => {
   describe('canonical URL resolution', () => {
     let onboardSingleSiteWithDifferentUrl;
     let onboardSingleSiteWithNullUrl;
+    let onboardSingleSiteWithUndefinedUrl;
+    let onboardSingleSiteWithEmptyUrl;
 
     const makeCanonicalSite = (updateFetchConfigStub) => {
       const updateOnboardConfigStub = sinon.stub();
@@ -562,6 +564,28 @@ describe('onboardSingleSite — paid profile guard', () => {
           },
         },
       ));
+
+      ({ onboardSingleSite: onboardSingleSiteWithUndefinedUrl } = await esmock(
+        '../../src/support/utils.js',
+        {
+          ...sharedMocks,
+          '@adobe/spacecat-shared-utils': {
+            ...sharedUtils,
+            resolveCanonicalUrl: sinon.stub().resolves(undefined),
+          },
+        },
+      ));
+
+      ({ onboardSingleSite: onboardSingleSiteWithEmptyUrl } = await esmock(
+        '../../src/support/utils.js',
+        {
+          ...sharedMocks,
+          '@adobe/spacecat-shared-utils': {
+            ...sharedUtils,
+            resolveCanonicalUrl: sinon.stub().resolves(''),
+          },
+        },
+      ));
     });
 
     it('calls updateFetchConfig when resolveCanonicalUrl returns a different origin', async () => {
@@ -599,6 +623,58 @@ describe('onboardSingleSite — paid profile guard', () => {
 
       try {
         await onboardSingleSiteWithNullUrl(
+          SITE_URL,
+          IMS_ORG_ID,
+          {},
+          demoProfile,
+          300,
+          slackContext(),
+          ctx,
+          {},
+          { profileName: 'demo' },
+        );
+      } catch {
+        // Downstream deps not fully mocked — expected.
+      }
+
+      expect(updateFetchConfigStub).not.to.have.been.called;
+      expect(updateOnboardConfigStub).to.have.been.calledOnce;
+    });
+
+    it('falls back to baseURL when resolveCanonicalUrl returns undefined', async () => {
+      const updateFetchConfigStub = sinon.stub();
+      const { site, updateOnboardConfigStub } = makeCanonicalSite(updateFetchConfigStub);
+      const ctx = makeContext(site);
+      ctx.dataAccess.Site.findByBaseURL = sandbox.stub().resolves(site);
+
+      try {
+        await onboardSingleSiteWithUndefinedUrl(
+          SITE_URL,
+          IMS_ORG_ID,
+          {},
+          demoProfile,
+          300,
+          slackContext(),
+          ctx,
+          {},
+          { profileName: 'demo' },
+        );
+      } catch {
+        // Downstream deps not fully mocked — expected.
+      }
+
+      expect(updateFetchConfigStub).not.to.have.been.called;
+      expect(updateOnboardConfigStub).to.have.been.calledOnce;
+    });
+
+    it('falls back to baseURL when resolveCanonicalUrl returns empty string', async () => {
+      const updateFetchConfigStub = sinon.stub();
+      const { site, updateOnboardConfigStub } = makeCanonicalSite(updateFetchConfigStub);
+      const ctx = makeContext(site);
+      ctx.dataAccess.Site.findByBaseURL = sandbox.stub().resolves(site);
+
+      try {
+        await onboardSingleSiteWithEmptyUrl(
           SITE_URL,
           IMS_ORG_ID,
           {},
