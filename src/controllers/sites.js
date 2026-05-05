@@ -1210,12 +1210,16 @@ function SitesController(ctx, log, env) {
     log.info(`[resolveSite] ASO_PLG_EXCLUDED_ORGS=${context.env.ASO_PLG_EXCLUDED_ORGS ?? '(not set)'} callerImsOrg=${callerImsOrg ?? '(not provided)'}`);
     let callerIsInternal = false;
     if (hasText(callerImsOrg)) {
-      const callerOrg = await Organization.findByImsOrgId(callerImsOrg);
-      if (callerOrg) {
-        callerIsInternal = isInternalOrg(callerOrg.getId(), context.env);
-        log.info(`[resolveSite] callerOrg UUID=${callerOrg.getId()} callerIsInternal=${callerIsInternal}`);
-      } else {
-        log.info(`[resolveSite] callerImsOrg=${callerImsOrg} not found in DB`);
+      try {
+        const callerOrg = await Organization.findByImsOrgId(callerImsOrg);
+        if (callerOrg) {
+          callerIsInternal = isInternalOrg(callerOrg.getId(), context.env);
+          log.info(`[resolveSite] callerOrg UUID=${callerOrg.getId()} callerIsInternal=${callerIsInternal}`);
+        } else {
+          log.info(`[resolveSite] callerImsOrg=${callerImsOrg} not found in DB`);
+        }
+      } catch (e) {
+        log.warn('[resolveSite] caller org lookup failed, treating as non-internal', e);
       }
     }
 
