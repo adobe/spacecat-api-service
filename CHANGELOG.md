@@ -1,3 +1,31 @@
+# [1.469.0](https://github.com/adobe/spacecat-api-service/compare/v1.468.2...v1.469.0) (2026-05-05)
+
+
+### Features
+
+* **s2s:** implement readAll capability for cross-tenant list endpoints ([#2305](https://github.com/adobe/spacecat-api-service/issues/2305)) ([c487f78](https://github.com/adobe/spacecat-api-service/commit/c487f7839e71ce1e2f752679ce86246c405097e2))
+
+## [1.468.2](https://github.com/adobe/spacecat-api-service/compare/v1.468.1...v1.468.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.56.1 ([#2323](https://github.com/adobe/spacecat-api-service/issues/2323)) ([47c032b](https://github.com/adobe/spacecat-api-service/commit/47c032be7314c3b8d16166932d0d15946f48900a))
+
+## [1.468.1](https://github.com/adobe/spacecat-api-service/compare/v1.468.0...v1.468.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2320](https://github.com/adobe/spacecat-api-service/issues/2320)) ([ebb203a](https://github.com/adobe/spacecat-api-service/commit/ebb203aab4c8cd9957399b31bfcde031fa2044e2))
+
+# [1.468.0](https://github.com/adobe/spacecat-api-service/compare/v1.467.0...v1.468.0) (2026-05-04)
+
+
+### Features
+
+* GitHub webhook handler (POST /webhooks/github) ([#2281](https://github.com/adobe/spacecat-api-service/issues/2281)) ([a525107](https://github.com/adobe/spacecat-api-service/commit/a525107d095e0f62d65b1347785b64bc199eeb59)), closes [#2255](https://github.com/adobe/spacecat-api-service/issues/2255) [adobe/spacecat-infrastructure#469](https://github.com/adobe/spacecat-infrastructure/issues/469) [adobe/spacecat-infrastructure#473](https://github.com/adobe/spacecat-infrastructure/issues/473)
+
 # [1.467.0](https://github.com/adobe/spacecat-api-service/compare/v1.466.1...v1.467.0) (2026-05-04)
 
 
