@@ -415,6 +415,23 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
         .to.not.equal(generateDataFolder('https://nba.com/us-kings', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us..kings', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us--kings', 'prod'));
+    });
+
+    it('should not collide hostname with consecutive dots and a subpath with the same text', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(generateDataFolder('https://nba--com/', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba/com', 'prod'));
+    });
+
+    it('should handle malformed percent-encoded path segments without throwing', async () => {
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+
+      expect(() => generateDataFolder('https://a.com/%FF', 'prod')).to.not.throw();
     });
 
     it('should normalize percent-encoded path segments', async () => {
