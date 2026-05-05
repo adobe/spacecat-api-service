@@ -4532,7 +4532,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/access-control-util.js': {
             default: {
-              fromContext: () => ({ hasAdminAccess: () => true, hasAdminReadAccess: () => true }),
+              fromContext: () => ({ hasAdminAccess: () => true }),
             },
           },
         },
@@ -4583,6 +4583,138 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Authentication information is required');
+    });
+
+    describe('read-only admin denial', () => {
+      // PLG onboarding flow is gated by hasAdminAccess() (full admin only).
+      // A read-only admin token has hasAdminAccess()=false and falls through to
+      // the tenant-match path, so it cannot bypass the org check the way a full
+      // admin can.
+      let ReadOnlyAdminPlgController;
+
+      beforeEach(async () => {
+        ReadOnlyAdminPlgController = (await esmock(
+          '../../../src/controllers/plg/plg-onboarding.js',
+          {
+            '@adobe/spacecat-shared-utils': {
+              composeBaseURL: composeBaseURLStub,
+              detectBotBlocker: detectBotBlockerStub,
+              detectLocale: detectLocaleStub,
+              hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+              isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+              resolveCanonicalUrl: resolveCanonicalUrlStub,
+            },
+            '@adobe/spacecat-shared-http-utils': {
+              badRequest: (msg) => ({ status: 400, value: msg }),
+              created: (data) => ({ status: 201, value: data }),
+              createResponse: (body, status) => ({ status, value: body }),
+              forbidden: (msg) => ({ status: 403, value: msg }),
+              internalServerError: (msg) => ({ status: 500, value: msg }),
+              noContent: () => ({ status: 204 }),
+              notFound: (msg) => ({ status: 404, value: msg }),
+              ok: (data) => ({ status: 200, value: data }),
+            },
+            '@adobe/spacecat-shared-rum-api-client': {
+              default: {
+                createFrom: sandbox.stub().returns({
+                  retrieveDomainkey: rumRetrieveDomainkeyStub,
+                }),
+              },
+            },
+            '@adobe/spacecat-shared-launchdarkly-client': {
+              default: ldCreateFromStub,
+            },
+            '@adobe/spacecat-shared-tier-client': {
+              default: {
+                createForSite: tierClientCreateForSiteStub,
+                createForOrg: tierClientCreateForOrgStub,
+              },
+            },
+            '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+              Config: { toDynamoItem: configToDynamoItemStub },
+            },
+            '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+              Entitlement: {
+                PRODUCT_CODES: { ASO: 'aso_optimizer' },
+                TIERS: { FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG', PRE_ONBOARD: 'PRE_ONBOARD' },
+              },
+            },
+            '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+              default: {
+                STATUSES: {
+                  IN_PROGRESS: 'IN_PROGRESS',
+                  ONBOARDED: 'ONBOARDED',
+                  PRE_ONBOARDING: 'PRE_ONBOARDING',
+                  ERROR: 'ERROR',
+                  WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+                  WAITLISTED: 'WAITLISTED',
+                  INACTIVE: 'INACTIVE',
+                },
+              },
+            },
+            '../../../src/controllers/llmo/llmo-onboarding.js': {
+              createOrFindOrganization: createOrFindOrganizationStub,
+              enableAudits: enableAuditsStub,
+              enableImports: enableImportsStub,
+              triggerAudits: triggerAuditsStub,
+            },
+            '../../../src/support/utils.js': {
+              autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+              updateCodeConfig: updateCodeConfigStub,
+              findDeliveryType: findDeliveryTypeStub,
+              deriveProjectName: deriveProjectNameStub,
+            },
+            '../../../src/utils/slack/base.js': {
+              loadProfileConfig: loadProfileConfigStub,
+            },
+            '../../../src/support/brand-profile-trigger.js': {
+              triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+            },
+            // Read-only admin: hasAdminAccess() is false, hasAdminReadAccess() is true.
+            // The controller should NOT use hasAdminReadAccess for this flow.
+            '../../../src/support/access-control-util.js': {
+              default: {
+                fromContext: () => ({
+                  hasAdminAccess: () => false,
+                  hasAdminReadAccess: () => true,
+                }),
+              },
+            },
+          },
+        )).default;
+      });
+
+      it('falls through to tenant check; denies read-only admin on a non-matching org', async () => {
+        const res = await ReadOnlyAdminPlgController({ log: mockLog }).getStatus({
+          dataAccess: mockDataAccess,
+          params: { imsOrgId: 'COMPLETELY_DIFFERENT@AdobeOrg' },
+          attributes: {
+            authInfo: {
+              getProfile: sandbox.stub().returns({
+                tenants: [{ id: 'READONLY_TENANT' }],
+              }),
+            },
+          },
+        });
+
+        expect(res.status).to.equal(403);
+        expect(mockDataAccess.PlgOnboarding.allByImsOrgId).to.not.have.been.called;
+      });
+
+      it('does not bypass when read-only admin has no tenants in profile', async () => {
+        const res = await ReadOnlyAdminPlgController({ log: mockLog }).getStatus({
+          dataAccess: mockDataAccess,
+          params: { imsOrgId: TEST_IMS_ORG_ID },
+          attributes: {
+            authInfo: { getProfile: sandbox.stub().returns({}) },
+          },
+        });
+
+        // Full admin would have returned 200; read-only admin falls through to
+        // the tenant-not-found branch and receives 400.
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('User profile or organization ID not found in authentication token');
+      });
     });
 
     describe('getAllOnboardings', () => {
