@@ -88,7 +88,7 @@ describe('LlmoOpportunitiesController', () => {
         },
         Opportunity: {
           allBySiteId: sandbox.stub().resolves([]),
-          allByScopeId: sandbox.stub().resolves([]),
+          allByScope: sandbox.stub().resolves([]),
         },
         services: {
           postgrestClient: {
@@ -438,7 +438,7 @@ describe('LlmoOpportunitiesController', () => {
 
     it('returns empty when brand has no scoped opportunities', async () => {
       mockContext.params.brandId = 'brand-uuid';
-      mockContext.dataAccess.Opportunity.allByScopeId.withArgs('brand', 'brand-uuid').resolves([]);
+      mockContext.dataAccess.Opportunity.allByScope.withArgs('brand', 'brand-uuid').resolves([]);
 
       LlmoOpportunitiesController = await esmock(
         '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
@@ -468,7 +468,7 @@ describe('LlmoOpportunitiesController', () => {
       const opp = createMockOpportunity({
         id: 'opp-1', siteId: 'site-1', scopeType: 'brand', scopeId: 'brand-uuid',
       });
-      mockContext.dataAccess.Opportunity.allByScopeId
+      mockContext.dataAccess.Opportunity.allByScope
         .withArgs('brand', 'brand-uuid').resolves([opp]);
 
       LlmoOpportunitiesController = await esmock(
@@ -503,7 +503,7 @@ describe('LlmoOpportunitiesController', () => {
       });
       const site = createMockSite({ id: 'site-1', baseURL: 'https://nba.com' });
       mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
-      mockContext.dataAccess.Opportunity.allByScopeId
+      mockContext.dataAccess.Opportunity.allByScope
         .withArgs('brand', 'brand-a').resolves([kingsOpp]);
 
       mockContext.params.brandId = 'brand-a';
@@ -724,7 +724,7 @@ describe('LlmoOpportunitiesController', () => {
       const opp = createMockOpportunity({
         id: 'opp-1', siteId: 'site-1', scopeType: 'brand', scopeId: 'brand-uuid',
       });
-      mockContext.dataAccess.Opportunity.allByScopeId
+      mockContext.dataAccess.Opportunity.allByScope
         .withArgs('brand', 'brand-uuid').resolves([opp]);
 
       LlmoOpportunitiesController = await esmock(
@@ -753,7 +753,7 @@ describe('LlmoOpportunitiesController', () => {
       const opp = createMockOpportunity({
         id: 'opp-1', siteId: 'site-missing', scopeType: 'brand', scopeId: 'brand-uuid',
       });
-      mockContext.dataAccess.Opportunity.allByScopeId
+      mockContext.dataAccess.Opportunity.allByScope
         .withArgs('brand', 'brand-uuid').resolves([opp]);
 
       LlmoOpportunitiesController = await esmock(
@@ -777,8 +777,8 @@ describe('LlmoOpportunitiesController', () => {
 
     it('handles brand with undefined siteIds when no filterSiteId is provided', async () => {
       mockContext.params.brandId = 'brand-uuid';
-      // allByScopeId returns empty — brand exists but has no scoped opportunities
-      mockContext.dataAccess.Opportunity.allByScopeId.withArgs('brand', 'brand-uuid').resolves([]);
+      // allByScope returns empty — brand exists but has no scoped opportunities
+      mockContext.dataAccess.Opportunity.allByScope.withArgs('brand', 'brand-uuid').resolves([]);
 
       LlmoOpportunitiesController = await esmock(
         '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',

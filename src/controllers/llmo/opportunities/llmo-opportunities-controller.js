@@ -244,7 +244,7 @@ function LlmoOpportunitiesController(ctx) {
 
       // Query opportunities directly by brand scope — avoids cross-brand contamination
       // on sites shared by multiple brands (e.g. nba.com with kings and lakers brands)
-      const allScopedOpps = await Opportunity.allByScopeId('brand', brandId);
+      const allScopedOpps = await Opportunity.allByScope('brand', brandId);
       const filteredOpps = allScopedOpps.filter(
         (opp) => isLlmoOpportunity(opp)
           && VALID_STATUSES.has(opp.getStatus())
