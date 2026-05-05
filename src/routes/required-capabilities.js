@@ -118,6 +118,7 @@ export const INTERNAL_ROUTES = [
   'GET /plg/sites',
   'GET /plg/onboard/status/:imsOrgId',
   'PATCH /plg/onboard/:onboardingId',
+  'PATCH /plg/onboard/:onboardingId/status',
   'POST /plg/records',
   'PATCH /plg/records/:plgOnboardingId',
   'DELETE /plg/records/:plgOnboardingId',
