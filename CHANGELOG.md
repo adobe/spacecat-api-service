@@ -1,3 +1,31 @@
+## [1.472.1](https://github.com/adobe/spacecat-api-service/compare/v1.472.0...v1.472.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **scrape:** sanitize x-error header to prevent ERR_INVALID_CHAR on non-ASCII ([#2331](https://github.com/adobe/spacecat-api-service/issues/2331)) ([56500f9](https://github.com/adobe/spacecat-api-service/commit/56500f92eaeebd9e9354da5e0e439ec6c69eddf6))
+
+# [1.472.0](https://github.com/adobe/spacecat-api-service/compare/v1.471.0...v1.472.0) (2026-05-05)
+
+
+### Features
+
+* read only admin support ([#2062](https://github.com/adobe/spacecat-api-service/issues/2062)) ([d9a7782](https://github.com/adobe/spacecat-api-service/commit/d9a7782a1d48a5871afa07b35f2510a7f8037490))
+
+# [1.471.0](https://github.com/adobe/spacecat-api-service/compare/v1.470.0...v1.471.0) (2026-05-05)
+
+
+### Features
+
+* enhance referral traffic endpoint response | LLMO-4261 ([#2319](https://github.com/adobe/spacecat-api-service/issues/2319)) ([1974182](https://github.com/adobe/spacecat-api-service/commit/1974182460ecc30ea13910d7c4b5407b69c212bf))
+
+# [1.470.0](https://github.com/adobe/spacecat-api-service/compare/v1.469.0...v1.470.0) (2026-05-05)
+
+
+### Features
+
+* **plg:** reject onboarding for internal orgs and paid customers ([#2322](https://github.com/adobe/spacecat-api-service/issues/2322)) ([e1d74d6](https://github.com/adobe/spacecat-api-service/commit/e1d74d6ece717be53ed22815953a18c8f032458d))
+
 # [1.469.0](https://github.com/adobe/spacecat-api-service/compare/v1.468.2...v1.469.0) (2026-05-05)
 
 

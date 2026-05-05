@@ -165,6 +165,28 @@ export async function createDelegatedUserNoSourceToken() {
 }
 
 /**
+ * Read-only admin — is_admin: false, is_read_only_admin: true.
+ * The readOnlyAdminWrapper evaluates a LaunchDarkly feature flag before granting
+ * access; without LD configured (e.g. in IT tests) the wrapper is fail-closed
+ * and returns 403 for all routes. Use this persona to verify fail-closed behaviour
+ * or in environments where the LD flag is enabled.
+ */
+export async function createReadOnlyAdminToken() {
+  return signToken({
+    sub: 'test-readonly-admin@adobe.com',
+    email: 'test-readonly-admin@adobe.com',
+    is_admin: false,
+    is_read_only_admin: true,
+    is_llmo_administrator: false,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
  * Mints an S2S consumer JWT. The wrapper looks up
  * `Consumer.findByClientIdAndImsOrgId(client_id, org)`, so the seeded Consumer row
  * must use these same identifiers and ACTIVE status for the request to be honored.
@@ -218,6 +240,7 @@ export async function createS2SConsumerReadAllToken() {
 export async function createAllTokens() {
   const [
     admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    readOnlyAdmin,
     s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
@@ -226,6 +249,7 @@ export async function createAllTokens() {
     createDelegatedUserToken(),
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
+    createReadOnlyAdminToken(),
     createS2SConsumerReadOnlyToken(),
     createS2SConsumerReadAllToken(),
     createS2SConsumerUnknownToken(),
@@ -237,6 +261,7 @@ export async function createAllTokens() {
     delegatedUser,
     delegatedUserTruncated,
     delegatedUserNoSource,
+    readOnlyAdmin,
     s2sConsumerReadOnly,
     s2sConsumerReadAll,
     s2sConsumerUnknown,

@@ -315,6 +315,18 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new Organizations');
   });
 
+  it('returns forbidden for read-only admin when creating an organization', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    const controller = OrganizationsController(context, env);
+    const response = await controller.createOrganization({
+      data: { name: 'Org 1' },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new Organizations');
+  });
+
   it('returns bad request when creating an organization fails', async () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
     const response = await organizationsController.createOrganization({
@@ -449,6 +461,17 @@ describe('Organizations Controller', () => {
     expect(resultOrganizations).to.be.an('array').with.lengthOf(4);
     expect(resultOrganizations[0]).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
     expect(resultOrganizations[1]).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
+  });
+
+  it('gets all organizations for read-only admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    mockDataAccess.Organization.all.resolves(organizations);
+
+    const result = await organizationsController.getAll();
+
+    expect(result.status).to.equal(200);
+    const resultOrgs = await result.json();
+    expect(resultOrgs).to.be.an('array').with.lengthOf(4);
   });
 
   it('gets all organizations for non admin users', async () => {

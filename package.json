@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.469.0",
+  "version": "1.472.1",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -88,7 +88,7 @@
     "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-drs-client": "1.6.0",
     "@adobe/spacecat-shared-gpt-client": "1.6.22",
-    "@adobe/spacecat-shared-http-utils": "1.26.0",
+    "@adobe/spacecat-shared-http-utils": "1.26.1",
     "@adobe/spacecat-shared-ims-client": "1.12.6",
     "@adobe/spacecat-shared-launchdarkly-client": "^1.1.0",
     "@adobe/spacecat-shared-rum-api-client": "2.40.12",
