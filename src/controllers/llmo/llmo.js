@@ -1076,6 +1076,7 @@ function LlmoController(ctx) {
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
+        ...(region ? { region } : {}),
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);

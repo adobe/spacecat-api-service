@@ -1195,6 +1195,8 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} [params.deliveryType] - The delivery type for site creation
  * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
  *   HTTP clients set this via the `temp-onboarding` body field.
+ * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
+ *   prompt generation. Omitted → DRS client default ('US') applies.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result

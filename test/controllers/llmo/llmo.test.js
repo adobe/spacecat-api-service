@@ -3228,6 +3228,8 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
       expect(performLlmoOnboardingStub.firstCall.args[0].region).to.equal('IN');
+      const responseBody = await result.json();
+      expect(responseBody.region).to.equal('IN');
     });
 
     it('should not forward a region key when not supplied (LLMO-4683)', async () => {
@@ -3266,6 +3268,8 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
       expect(performLlmoOnboardingStub.firstCall.args[0]).to.not.have.property('region');
+      const responseBody = await result.json();
+      expect(responseBody).to.not.have.property('region');
     });
 
     it('should handle errors and log them', async () => {
