@@ -563,13 +563,13 @@ describe('llmo-onboarding-mode', () => {
       });
     });
 
-    // ── brandalfMigrationCountsAsV2 option (LLMO-4716) ────────────────────
+    // ── brandalf_migration short-circuit (LLMO-4716) ──────────────────────
 
     /**
      * Postgrest stub that returns different flag values based on which flag
      * is being queried (third `.eq()` call captures the flag_name). Used to
-     * test the brandalfMigrationCountsAsV2 path where brandalf and
-     * brandalf_migration must be read independently.
+     * test the brandalf_migration short-circuit, which requires reading
+     * brandalf and brandalf_migration independently.
      */
     function makeMultiFlagContext(flags, sites = []) {
       const maybeSingle = sinon.stub();
@@ -600,82 +600,74 @@ describe('llmo-onboarding-mode', () => {
       };
     }
 
-    it('brandalfMigrationCountsAsV2: returns v2 when brandalf_migration=true and brandalf is unset', async () => {
-      const ctx = makeMultiFlagContext({
-        brandalf: null,
-        brandalf_migration: true,
+    describe('brandalf_migration short-circuit', () => {
+      it('returns v2 when brandalf_migration=true and brandalf is unset', async () => {
+        const ctx = makeMultiFlagContext({
+          brandalf: null,
+          brandalf_migration: true,
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v2');
+        expect(ctx.log.info).to.have.been.calledWithMatch(/brandalf_migration=true.*using v2/);
+        // Short-circuit: site lookup must not happen — neither for legacy
+        // protection nor for kill-switch downgrade.
+        expect(ctx.dataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
-      const mode = await resolveLlmoOnboardingMode('org-1', ctx, {
-        brandalfMigrationCountsAsV2: true,
-      });
-      expect(mode).to.equal('v2');
-      expect(ctx.log.info).to.have.been.calledWithMatch(/brandalf_migration=true.*using v2/);
-      // Site lookup should NOT happen — we short-circuit on the migration flag.
-      expect(ctx.dataAccess.Site.allByOrganizationId).to.not.have.been.called;
-    });
 
-    it('brandalfMigrationCountsAsV2: returns v2 when both brandalf and brandalf_migration are true (brandalf wins normal path; migration short-circuit not reached)', async () => {
-      const ctx = makeMultiFlagContext({
-        brandalf: true,
-        brandalf_migration: true,
+      it('skips migration read when brandalf=true (brandalf wins normal path)', async () => {
+        const ctx = makeMultiFlagContext({
+          brandalf: true,
+          brandalf_migration: true,
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v2');
+        // The brandalf=true branch logs "using v2" — not the migration branch.
+        expect(ctx.log.info).to.have.been.calledWithMatch(/brandalf=true.*using v2/);
+        expect(ctx.log.info).to.not.have.been.calledWithMatch(/brandalf_migration=true.*using v2/);
       });
-      const mode = await resolveLlmoOnboardingMode('org-1', ctx, {
-        brandalfMigrationCountsAsV2: true,
-      });
-      expect(mode).to.equal('v2');
-      // The brandalf=true branch logs "using v2" — not the migration branch.
-      expect(ctx.log.info).to.have.been.calledWithMatch(/brandalf=true.*using v2/);
-    });
 
-    it('default behaviour (option off): brandalf_migration=true alone still resolves to v2 via post-cutoff fallthrough but NOT via the migration short-circuit', async () => {
-      // With no brandalf_migration short-circuit and no brandalf flag set,
-      // the resolver falls through to the legacy-customer check. With no
-      // pre-cutoff sites it returns v2 by default — confirming the option
-      // off path does NOT log the migration-specific message.
-      const ctx = makeMultiFlagContext({
-        brandalf: null,
-        brandalf_migration: true,
+      it('runs BEFORE the env-level kill switch so ops cannot pin a migrating org back to v1', async () => {
+        const ctx = makeMultiFlagContext({
+          brandalf: null,
+          brandalf_migration: true,
+        });
+        ctx.env.LLMO_ONBOARDING_DEFAULT_VERSION = 'v1';
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v2');
       });
-      const mode = await resolveLlmoOnboardingMode('org-1', ctx); // no options
-      expect(mode).to.equal('v2');
-      expect(ctx.log.info).to.not.have.been.calledWithMatch(/brandalf_migration=true.*using v2/);
-    });
 
-    it('brandalfMigrationCountsAsV2: returns v1 when brandalf_migration=false and org has pre-cutoff sites', async () => {
-      const ctx = makeMultiFlagContext(
-        { brandalf: null, brandalf_migration: false },
-        [makeSite(BEFORE_CUTOFF)],
-      );
-      const mode = await resolveLlmoOnboardingMode('org-1', ctx, {
-        brandalfMigrationCountsAsV2: true,
+      it('returns v1 when brandalf_migration=false and org has pre-cutoff sites', async () => {
+        const ctx = makeMultiFlagContext(
+          { brandalf: null, brandalf_migration: false },
+          [makeSite(BEFORE_CUTOFF)],
+        );
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        expect(mode).to.equal('v1');
       });
-      expect(mode).to.equal('v1');
-    });
 
-    it('brandalfMigrationCountsAsV2: warns and falls through when brandalf_migration read throws', async () => {
-      const maybeSingle = sinon.stub();
-      // First call: brandalf read returns null
-      maybeSingle.onFirstCall().resolves({ data: null, error: null });
-      // Second call: brandalf_migration read returns a DB error
-      maybeSingle.onSecondCall().resolves({ data: null, error: { message: 'boom' } });
-      const flagNameEq = sinon.stub().returns({ maybeSingle });
-      const productEq = sinon.stub().returns({ eq: flagNameEq });
-      const orgEq = sinon.stub().returns({ eq: productEq });
-      const select = sinon.stub().returns({ eq: orgEq });
-      const ctx = {
-        env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(CUTOFF) },
-        log: { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() },
-        dataAccess: {
-          Site: { allByOrganizationId: sinon.stub().resolves([]) },
-          services: { postgrestClient: { from: sinon.stub().returns({ select }) } },
-        },
-      };
-      const mode = await resolveLlmoOnboardingMode('org-1', ctx, {
-        brandalfMigrationCountsAsV2: true,
+      it('warns and falls through when brandalf_migration read throws', async () => {
+        const maybeSingle = sinon.stub();
+        // First call: brandalf read returns null
+        maybeSingle.onFirstCall().resolves({ data: null, error: null });
+        // Second call: brandalf_migration read returns a DB error
+        maybeSingle.onSecondCall().resolves({ data: null, error: { message: 'boom' } });
+        const flagNameEq = sinon.stub().returns({ maybeSingle });
+        const productEq = sinon.stub().returns({ eq: flagNameEq });
+        const orgEq = sinon.stub().returns({ eq: productEq });
+        const select = sinon.stub().returns({ eq: orgEq });
+        const ctx = {
+          env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(CUTOFF) },
+          log: { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() },
+          dataAccess: {
+            Site: { allByOrganizationId: sinon.stub().resolves([]) },
+            services: { postgrestClient: { from: sinon.stub().returns({ select }) } },
+          },
+        };
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
+        // Defaults to v2 via the legacy-customer fallthrough (no pre-cutoff sites).
+        expect(mode).to.equal('v2');
+        expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read brandalf_migration flag/);
       });
-      // Defaults to v2 via the legacy-customer fallthrough (no pre-cutoff sites).
-      expect(mode).to.equal('v2');
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read brandalf_migration flag/);
     });
   });
 });

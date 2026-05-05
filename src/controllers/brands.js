@@ -656,10 +656,10 @@ function BrandsController(ctx, log, env) {
    * Resolves the active brand for a (organization, site) pair.
    *
    * Gated by `resolveLlmoOnboardingMode` — returns 404 when the org is in v1
-   * mode (no flags, brandalf_migration-only, or kill-switch downgrade). When
-   * v2 and an active brand row matches the site (primary: brands.site_id;
-   * fallback: brand_sites join per LLMO-4592), returns the full V2 brand
-   * object so callers can pick `id` (or any other field).
+   * mode (neither brandalf nor brandalf_migration set, or kill-switch
+   * downgrade). When v2 and an active brand row matches the site (primary:
+   * brands.site_id; fallback: brand_sites join per LLMO-4592), returns the
+   * full V2 brand object so callers can pick `id` (or any other field).
    *
    * @returns {Promise<Response>} The active brand, or 404.
    */
@@ -702,16 +702,8 @@ function BrandsController(ctx, log, env) {
       // kill-switch remediation (which writes to feature_flags) only fires
       // from explicit onboarding/admin write paths, never from a high-traffic
       // resolver hit by BP refresh and the DRS scheduler.
-      //
-      // brandalfMigrationCountsAsV2: true so orgs in the dual-publish migration
-      // window (Adobe today, before brandalf flips) still surface their v2
-      // brand to the BP runner. Per LLMO-4723 the resolver's general contract
-      // pins brandalf_migration to v1; this endpoint is the deliberate
-      // exception because v2 brand records exist in the DB during the window
-      // even while v1 readers still take the spreadsheet path.
       const mode = await resolveLlmoOnboardingMode(spaceCatId, context, {
         readOnly: true,
-        brandalfMigrationCountsAsV2: true,
       });
       if (mode !== LLMO_ONBOARDING_MODE_V2) {
         return notFound('No v2 brand configured for this organization');
