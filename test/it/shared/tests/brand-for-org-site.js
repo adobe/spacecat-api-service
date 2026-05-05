@@ -49,24 +49,28 @@ import {
 export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgrestClient) {
   describe('GET /v2/orgs/:spaceCatId/sites/:siteId/brand (LLMO-4716)', () => {
     /**
-     * Sets brandalf=true for the given org so resolveLlmoOnboardingMode
-     * returns v2 (the gate the new endpoint enforces).
+     * Sets a feature flag for the given org. Used to set brandalf=true (the
+     * primary gate) and brandalf-migration=true (the dual-publish window
+     * Adobe is in today).
      */
-    async function setBrandalfTrue(orgId) {
+    async function setFlag(orgId, flagName, value) {
       const pg = getPostgrestClient();
       const { error } = await pg
         .from('feature_flags')
         .upsert({
           organization_id: orgId,
           product: 'LLMO',
-          flag_name: 'brandalf',
-          flag_value: true,
+          flag_name: flagName,
+          flag_value: value,
           updated_by: 'it-setup',
         }, { onConflict: 'organization_id,product,flag_name' });
       if (error) {
-        throw new Error(`Failed to set brandalf flag: ${error.message}`);
+        throw new Error(`Failed to set ${flagName} flag: ${error.message}`);
       }
     }
+
+    const setBrandalfTrue = (orgId) => setFlag(orgId, 'brandalf', true);
+    const setBrandalfMigrationTrue = (orgId) => setFlag(orgId, 'brandalf-migration', true);
 
     /**
      * Maps BRAND_1 to a specific site by setting `brands.site_id`. This is the
@@ -118,6 +122,27 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
           `/v2/orgs/${ORG_1_ID}/sites/${SITE_2_ID}/brand`,
         );
         expect(res.status).to.equal(404);
+      });
+    });
+
+    describe('brandalf-migration org (Adobe dual-publish window)', () => {
+      // Adobe's prod state right now: brandalf=false (or unset) but
+      // brandalf-migration=true. The endpoint's gate must surface the brand
+      // for these orgs so the BP runner can enter the v2 path during the
+      // migration window.
+      before(async () => {
+        await resetData();
+        await setBrandalfMigrationTrue(ORG_1_ID);
+        await bindBrandToSite(BRAND_1_ID, SITE_1_ID);
+      });
+
+      it('returns 200 with the brand when brandalf-migration=true', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `/v2/orgs/${ORG_1_ID}/sites/${SITE_1_ID}/brand`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.id).to.equal(BRAND_1_ID);
       });
     });
 

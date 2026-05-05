@@ -2265,7 +2265,11 @@ describe('Brands Controller', () => {
       expect(getBrandBySiteStub).to.not.have.been.called;
     });
 
-    it('passes readOnly: true to resolveLlmoOnboardingMode so the GET stays idempotent', async () => {
+    it('passes readOnly: true and brandalfMigrationCountsAsV2: true to resolveLlmoOnboardingMode', async () => {
+      // readOnly keeps the GET idempotent (no flag-flip side effect under
+      // kill switch). brandalfMigrationCountsAsV2 lets orgs in the
+      // dual-publish migration window (Adobe today) surface their v2 brand
+      // to the BP runner.
       const { controller, resolveLlmoOnboardingModeStub } = await buildController({
         mode: 'v2',
         brand: SAMPLE_BRAND,
@@ -2279,7 +2283,10 @@ describe('Brands Controller', () => {
 
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const callArgs = resolveLlmoOnboardingModeStub.firstCall.args;
-      expect(callArgs[2]).to.deep.equal({ readOnly: true });
+      expect(callArgs[2]).to.deep.equal({
+        readOnly: true,
+        brandalfMigrationCountsAsV2: true,
+      });
     });
 
     it('returns 503 when postgrestClient is unavailable', async () => {

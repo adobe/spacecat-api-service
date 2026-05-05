@@ -702,7 +702,17 @@ function BrandsController(ctx, log, env) {
       // kill-switch remediation (which writes to feature_flags) only fires
       // from explicit onboarding/admin write paths, never from a high-traffic
       // resolver hit by BP refresh and the DRS scheduler.
-      const mode = await resolveLlmoOnboardingMode(spaceCatId, context, { readOnly: true });
+      //
+      // brandalfMigrationCountsAsV2: true so orgs in the dual-publish migration
+      // window (Adobe today, before brandalf flips) still surface their v2
+      // brand to the BP runner. Per LLMO-4723 the resolver's general contract
+      // pins brandalf-migration to v1; this endpoint is the deliberate
+      // exception because v2 brand records exist in the DB during the window
+      // even while v1 readers still take the spreadsheet path.
+      const mode = await resolveLlmoOnboardingMode(spaceCatId, context, {
+        readOnly: true,
+        brandalfMigrationCountsAsV2: true,
+      });
       if (mode !== LLMO_ONBOARDING_MODE_V2) {
         return notFound('No v2 brand configured for this organization');
       }
