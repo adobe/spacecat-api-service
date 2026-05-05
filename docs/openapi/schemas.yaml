@@ -7937,6 +7937,27 @@ AgenticTrafficByUrlRow:
     deployedAtEdge:
       type: boolean
       example: true
+    hitsTrend:
+      type: array
+      description: |
+        Multi-week sparkline for this URL — array of `{weekStart, value}` points
+        scoped by the same filters (including `agentTypes`). Used by the URL
+        Inspector PG dialog to render per-URL agentic charts without a second
+        request. Empty array when the URL has no agentic activity in the
+        requested window. The `value` field name (rather than `hits`) is
+        preserved from the underlying `rpc_agentic_traffic_by_url` week_series
+        payload to stay aligned with `UrlInspectorOwnedUrlRow.agenticHitsTrend`.
+      items:
+        type: object
+        properties:
+          weekStart:
+            type: string
+            format: date
+            example: '2026-02-09'
+          value:
+            type: integer
+            example: 12
+        required: [weekStart, value]
   required:
     - host
     - urlPath
@@ -8160,6 +8181,35 @@ UrlInspectorOwnedUrlRow:
       items:
         type: object
       description: Weekly prompts-cited breakdown (JSONB from RPC)
+    agenticHits:
+      type: integer
+      description: |
+        Total agentic Citation Attempts for this URL across the requested
+        window, scoped by `agentTypes` if supplied (the URL Inspector PG
+        page passes `Chatbots,Research`). Defaults to 0 when the URL has
+        no agentic activity. Server-side join from `agentic_traffic_weekly`
+        added in LLMO-4526 — replaces the previous client-side merge that
+        silently truncated owned URLs ranked beyond 500.
+      example: 1248
+    agenticHitsTrend:
+      type: array
+      description: |
+        Per-week agentic Citation Attempts for this URL — array of
+        `{weekStart, value}` points scoped by the same filters. Empty
+        array when there is no agentic activity. Added in LLMO-4526.
+      items:
+        type: object
+        properties:
+          weekStart:
+            oneOf:
+              - type: string
+                format: date
+              - type: 'null'
+            example: '2026-02-09'
+          value:
+            type: integer
+            example: 21
+        required: [value]
 
 UrlInspectorOwnedUrls:
   type: object
