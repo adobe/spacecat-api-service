@@ -27,6 +27,7 @@ import {
   AdobeImsHandler,
   JwtHandler,
   s2sAuthWrapper,
+  readOnlyAdminWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
@@ -355,6 +356,10 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // Wrapper execution order (helix-shared-wrap: last .with() = outermost = runs first):
 // 1. s2sAuthWrapper — intercepts S2S JWT bearer tokens, passes through non-S2S to authWrapper
 // 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
+// 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
+//    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
+//    (fail-closed), so unmapped routes are blocked for read-only admins
+//
 // authHandlers order contract:
 //  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
 //  - GitHubWebhookHmacHandler next: path-scoped to /webhooks/* and returns null
@@ -376,6 +381,7 @@ const AUTH_HANDLERS = [
 ];
 
 const wrappedMain = wrap(run)
+  .with(readOnlyAdminWrapper, { routeCapabilities: routeRequiredCapabilities })
   .with(authWrapper, { authHandlers: AUTH_HANDLERS })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
