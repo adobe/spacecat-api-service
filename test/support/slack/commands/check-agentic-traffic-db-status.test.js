@@ -40,10 +40,14 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
       select: sinon.stub(),
       in: sinon.stub(),
       eq: sinon.stub(),
+      gte: sinon.stub(),
+      lte: sinon.stub(),
     };
     chain.select.returns(chain);
     chain.in.returns(chain);
+    chain.gte.returns(chain);
     chain.eq.resolves(result);
+    chain.lte.resolves(result);
     return chain;
   };
 
@@ -241,6 +245,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
       'agentic_traffic',
       'agentic_traffic_daily',
       'agentic_traffic_weekly',
+      'agentic_traffic',
     ]);
 
     const output = slackContext.say.args.flat().join('\n');
@@ -248,7 +253,8 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Outcome: *DASHBOARD_READY*');
     expect(output).to.include('Raw table: *1/1* sites, 2 rows / 54 hits');
     expect(output).to.include('Daily table: *1/1* sites, 1 rows / 54 hits');
-    expect(output).to.include('Weekly table (2026-04-27): *1/1* sites, 1 rows / 500 hits');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 2 rows / 54 hits');
+    expect(output).to.include('Weekly table (2026-04-27): *1/1* raw-week sites, 1 rows / 500 hits');
     expect(output).to.include('https://wknd.site');
   });
 
@@ -377,7 +383,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Outcome: *ACTION_REQUIRED*');
     expect(output).to.not.include('Outcome: *NO_DB_ROWS_FOR_DATE*');
-    expect(output).to.include('Weekly table (2026-04-27): *1/1* sites, 1 rows / 12 hits');
+    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows / 0 hits');
   });
 
   it('marks weekly as required for a closed Sunday', async () => {
@@ -398,8 +404,25 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Missing weekly serving: *1*');
-    expect(output).to.include('Weekly table (2026-04-27): *0/1* sites, 0 rows / 0 hits');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows / 10 hits');
+    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows / 0 hits');
     expect(output).to.include('missing: weekly');
+  });
+
+  it('does not mark weekly missing when a closed week has no raw week data for the site', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([
+      makeSite(TARGET_SITE_ID, 'https://no-raw-week.com'),
+    ]);
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-05-03'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Missing weekly serving: *0*');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *0/1* sites, 0 rows / 0 hits');
+    expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows / 0 hits');
   });
 
   it('surfaces table query errors through the generic Slack error handler', async () => {

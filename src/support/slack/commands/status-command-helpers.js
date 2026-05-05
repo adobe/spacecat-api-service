@@ -55,6 +55,13 @@ export function startOfUtcDay(date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
+export function startOfUtcIsoWeek(date) {
+  const midnight = startOfUtcDay(date);
+  const day = midnight.getUTCDay();
+  const diffToMonday = -((day + 6) % 7);
+  return addUtcDays(midnight, diffToMonday);
+}
+
 export function isFutureUtcDate(date, now = new Date()) {
   return startOfUtcDay(date) > startOfUtcDay(now);
 }

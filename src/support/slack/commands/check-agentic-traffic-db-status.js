@@ -20,7 +20,7 @@ import {
   parseUtcDateArg,
   postReport,
   resolveSiteScope,
-  startOfUtcDay,
+  startOfUtcIsoWeek,
 } from './status-command-helpers.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
 
@@ -50,13 +50,6 @@ const AGENTIC_TRAFFIC_TABLES = [
     select: 'site_id,hits,updated_at',
   },
 ];
-
-function startOfUtcIsoWeek(date) {
-  const midnight = startOfUtcDay(date);
-  const day = midnight.getUTCDay();
-  const diffToMonday = -((day + 6) % 7);
-  return addUtcDays(midnight, diffToMonday);
-}
 
 function isClosedSunday(date, now = new Date()) {
   return date.getUTCDay() === 0 && date < startOfUtcIsoWeek(now);
@@ -143,6 +136,7 @@ function renderSite(siteStatus) {
     `  siteId: \`${siteStatus.siteId}\``,
     `  raw: ${formatTableSummary(siteStatus.raw)} (updated ${formatUpdateTime(siteStatus.raw.latestUpdate)})`,
     `  daily: ${formatTableSummary(siteStatus.daily)} (updated ${formatUpdateTime(siteStatus.daily.latestUpdate)})`,
+    siteStatus.rawWeek.rows > 0 ? `  raw week: ${formatTableSummary(siteStatus.rawWeek)} for ${siteStatus.weekStart}..${siteStatus.weekEnd}` : '',
     `  weekly: ${formatTableSummary(siteStatus.weekly)} for week ${siteStatus.weekStart} (updated ${formatUpdateTime(siteStatus.weekly.latestUpdate)})`,
     siteStatus.missing.length > 0 ? `  missing: ${siteStatus.missing.join(', ')}` : '',
   ].filter(Boolean).join('\n');
@@ -159,6 +153,38 @@ async function queryTable(postgrestClient, tableDef, siteIds, dateValue) {
     throw new Error(`${tableDef.table}: ${error.message}`);
   }
   return data || [];
+}
+
+async function queryRawWeekTable(postgrestClient, siteIds, weekStartStr, weekEndStr) {
+  const summaries = new Map();
+
+  for (const siteIdBatch of chunkArray(siteIds, BATCH_SIZE)) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data, error } = await postgrestClient
+      .from('agentic_traffic')
+      .select('site_id,hits,updated_at')
+      .in('site_id', siteIdBatch)
+      .gte('traffic_date', weekStartStr)
+      .lte('traffic_date', weekEndStr);
+
+    if (error) {
+      throw new Error(`agentic_traffic weekly range: ${error.message}`);
+    }
+
+    const batchSummary = summarizeRows(data || []);
+    for (const [siteId, summary] of batchSummary.entries()) {
+      const existing = summaries.get(siteId) || rowsEmptySummary();
+      summaries.set(siteId, {
+        rows: existing.rows + summary.rows,
+        hits: existing.hits + summary.hits,
+        latestUpdate: !existing.latestUpdate || summary.latestUpdate > existing.latestUpdate
+          ? summary.latestUpdate
+          : existing.latestUpdate,
+      });
+    }
+  }
+
+  return summaries;
 }
 
 async function queryTrafficTables(postgrestClient, siteIds, dateStr, weekStartStr) {
@@ -270,6 +296,15 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         dateStr,
         weekStartStr,
       );
+      const weekEndStr = formatUtcDate(addUtcDays(startOfUtcIsoWeek(targetDate), 6));
+      tableSummaries.rawWeek = weeklyExpected
+        ? await queryRawWeekTable(
+          postgrestClient,
+          enabledSites.map((site) => site.getId()),
+          weekStartStr,
+          weekEndStr,
+        )
+        : new Map();
 
       const dashboardReady = [];
       const rawMissing = [];
@@ -282,9 +317,11 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           siteId,
           baseURL: site.getBaseURL(),
           weekStart: weekStartStr,
+          weekEnd: weekEndStr,
           raw: getTableSummary(tableSummaries, 'raw', siteId),
           daily: getTableSummary(tableSummaries, 'daily', siteId),
           weekly: getTableSummary(tableSummaries, 'weekly', siteId),
+          rawWeek: getTableSummary(tableSummaries, 'rawWeek', siteId),
           missing: [],
         };
 
@@ -294,7 +331,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         if (status.daily.rows === 0) {
           status.missing.push('daily');
         }
-        if (weeklyExpected && status.weekly.rows === 0) {
+        if (weeklyExpected && status.rawWeek.rows > 0 && status.weekly.rows === 0) {
           status.missing.push('weekly');
         }
 
@@ -307,7 +344,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           if (status.daily.rows === 0) {
             dailyMissing.push(status);
           }
-          if (weeklyExpected && status.weekly.rows === 0) {
+          if (weeklyExpected && status.rawWeek.rows > 0 && status.weekly.rows === 0) {
             weeklyMissing.push(status);
           }
         }
@@ -320,6 +357,13 @@ function CheckAgenticTrafficDbStatusCommand(context) {
       const rawTotal = sumTable(siteStatuses, 'raw');
       const dailyTotal = sumTable(siteStatuses, 'daily');
       const weeklyTotal = sumTable(siteStatuses, 'weekly');
+      const weeklySourceStatuses = weeklyExpected
+        ? siteStatuses.filter((s) => s.rawWeek.rows > 0)
+        : [];
+      const rawWeekTotal = sumTable(weeklySourceStatuses, 'rawWeek');
+      const weeklyForRawWeekTotal = sumTable(weeklySourceStatuses, 'weekly');
+      const weeklyPresentForRawWeek = weeklySourceStatuses
+        .filter((s) => s.weekly.rows > 0).length;
 
       let outcome = 'ACTION_REQUIRED';
       if (dashboardReady.length === enabledSites.length) {
@@ -340,7 +384,10 @@ function CheckAgenticTrafficDbStatusCommand(context) {
         `Sites checked: *${enabledSites.length}*`,
         `Raw table: *${rawPresent}/${enabledSites.length}* sites, ${formatTableSummary(rawTotal)}`,
         `Daily table: *${dailyPresent}/${enabledSites.length}* sites, ${formatTableSummary(dailyTotal)}`,
-        `Weekly table (${weekStartStr}): *${weeklyPresent}/${enabledSites.length}* sites, ${formatTableSummary(weeklyTotal)}`,
+        weeklyExpected ? `Raw week (${weekStartStr}..${weekEndStr}): *${weeklySourceStatuses.length}/${enabledSites.length}* sites, ${formatTableSummary(rawWeekTotal)}` : '',
+        weeklyExpected
+          ? `Weekly table (${weekStartStr}): *${weeklyPresentForRawWeek}/${weeklySourceStatuses.length}* raw-week sites, ${formatTableSummary(weeklyForRawWeekTotal)}`
+          : `Weekly table (${weekStartStr}): *${weeklyPresent}/${enabledSites.length}* sites, ${formatTableSummary(weeklyTotal)}`,
         '',
         '*Actionable insight:*',
       ].filter(Boolean);
@@ -355,7 +402,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
           lines.push(`${dailyMissing.length} site(s) have raw data missing from \`agentic_traffic_daily\`. Action: run or check the daily refresh.`);
         }
         if (weeklyExpected && weeklyMissing.length > 0) {
-          lines.push(`${weeklyMissing.length} site(s) are missing \`agentic_traffic_weekly\` rows for week ${weekStartStr}. Action: run or check the weekly refresh.`);
+          lines.push(`${weeklyMissing.length} site(s) have raw week data but no \`agentic_traffic_weekly\` rows for week ${weekStartStr}. Action: run or check the weekly refresh.`);
         }
       }
 

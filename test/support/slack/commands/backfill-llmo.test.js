@@ -32,11 +32,16 @@ describe('BackfillLlmoCommand', () => {
   let sqsStub;
   let configStub;
   let siteStub;
+  let postgrestStub;
 
   beforeEach(() => {
+    postgrestStub = {
+      rpc: sinon.stub().resolves({ data: [], error: null }),
+    };
     dataAccessStub = {
       Configuration: { findLatest: sinon.stub() },
       Site: { findByBaseURL: sinon.stub(), all: sinon.stub() },
+      services: { postgrestClient: postgrestStub },
     };
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
@@ -275,7 +280,7 @@ describe('BackfillLlmoCommand', () => {
       ], slackContext);
 
       expect(slackContext.say.calledWith(
-        ':warning: For cdn-logs-report daily DB import, use mode=db with date=YYYY-MM-DD.',
+        ':warning: For cdn-logs-report DB refreshes, use mode=db or mode=weekly-db with date=YYYY-MM-DD.',
       )).to.be.true;
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
@@ -295,6 +300,133 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
+    it('runs a cdn-logs-report weekly DB refresh through the weekly WRPC', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      postgrestStub.rpc.resolves({
+        data: [{ week_start: '2026-04-27', rows_inserted: 42 }],
+        error: null,
+      });
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=weekly-db',
+        'date=2026-05-03',
+      ], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(
+        `:rocket: Running ${AUDIT_TYPES.CDN_LOGS_REPORT} weekly DB refresh for https://example.com (2026-04-27..2026-05-03)...`,
+      );
+      expect(postgrestStub.rpc).to.have.been.calledOnceWith(
+        'wrpc_refresh_agentic_traffic_weekly',
+        {
+          p_site_id: 'test-site-id',
+          p_start_date: '2026-04-27',
+          p_end_date: '2026-05-03',
+          p_updated_by: 'slack:backfill-llmo-weekly-db',
+        },
+      );
+      expect(slackContext.say.secondCall.args[0]).to.include('rows_inserted=42');
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('infers cdn-logs-report for weekly DB refresh when audit is omitted', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      postgrestStub.rpc.resolves({
+        data: [{ week_start: '2026-04-27', rows_inserted: 42 }],
+        error: null,
+      });
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        'mode=weekly-db',
+        'date=2026-05-03',
+      ], slackContext);
+
+      expect(slackContext.say.firstCall.args[0]).to.include(
+        `:rocket: Running ${AUDIT_TYPES.CDN_LOGS_REPORT} weekly DB refresh for https://example.com (2026-04-27..2026-05-03)...`,
+      );
+      expect(postgrestStub.rpc).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects weekly DB refresh for the current incomplete ISO week', async () => {
+      const clock = sinon.useFakeTimers(new Date('2026-05-05T12:00:00Z').getTime());
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        'mode=weekly-db',
+        'date=2026-05-04',
+      ], slackContext);
+      clock.restore();
+
+      expect(slackContext.say.calledWith(
+        ':warning: mode=weekly-db only supports completed ISO weeks. Week 2026-05-04..2026-05-10 is not complete yet.',
+      )).to.be.true;
+      expect(postgrestStub.rpc).not.to.have.been.called;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects cdn-logs-report weekly DB refresh without a date', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=weekly-db',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: mode=weekly-db requires date=YYYY-MM-DD within the ISO week to refresh.',
+      )).to.be.true;
+      expect(postgrestStub.rpc).not.to.have.been.called;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects cdn-logs-report weekly DB refresh for all sites', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=all',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=weekly-db',
+        'date=2026-05-03',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: mode=weekly-db requires a specific baseurl. Run the weekly status check first, then refresh only the missing sites.',
+      )).to.be.true;
+      expect(dataAccessStub.Site.all).not.to.have.been.called;
+      expect(postgrestStub.rpc).not.to.have.been.called;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('surfaces weekly WRPC errors through the generic Slack error handler', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      postgrestStub.rpc.resolves({
+        data: null,
+        error: { message: 'statement timeout' },
+      });
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'mode=weekly-db',
+        'date=2026-05-03',
+      ], slackContext);
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Error in LLMO backfill:',
+        sinon.match.instanceOf(Error),
+      );
+      const output = slackContext.say.args.flat().join('\n');
+      expect(output).to.include('statement timeout');
+    });
+
     it('rejects unsupported cdn-logs-report mode', async () => {
       const command = BackfillLlmoCommand(context);
 
@@ -305,7 +437,7 @@ describe('BackfillLlmoCommand', () => {
       ], slackContext);
 
       expect(slackContext.say.calledWith(
-        ':warning: Unsupported mode for cdn-logs-report. Use mode=db for daily DB imports, or omit mode for weekly report backfill.',
+        ':warning: Unsupported mode for cdn-logs-report. Use mode=db for daily DB imports, mode=weekly-db for weekly DB refresh, or omit mode for weekly report backfill.',
       )).to.be.true;
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
