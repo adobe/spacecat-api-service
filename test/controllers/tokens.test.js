@@ -306,6 +306,39 @@ describe('Tokens Controller', () => {
       expect((await result.json()).message).to.equal('Access denied to this site');
     });
 
+    it('uses default limit when context.data is not provided', async () => {
+      const context = {
+        params: { siteId },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await tokensController.getAll(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.pagination.limit).to.equal(100);
+      expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
+        siteId,
+        { limit: 100, cursor: undefined, returnCursor: true },
+      );
+    });
+
+    it('handles results without data property gracefully', async () => {
+      mockDataAccess.Token.allBySiteId.resolves({ cursor: null });
+
+      const context = {
+        params: { siteId },
+        data: {},
+        log: { error: sinon.stub() },
+      };
+
+      const result = await tokensController.getAll(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.tokens).to.deep.equal([]);
+    });
+
     it('returns 500 on database failure', async () => {
       mockDataAccess.Token.allBySiteId.rejects(new Error('DB down'));
 
