@@ -400,6 +400,7 @@ async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitle
   const expectedOrgId = organization.getId();
 
   // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  /* c8 ignore next 4 */
   if (isInternalOrg(expectedOrgId, env)) {
     log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
     return;
@@ -622,6 +623,7 @@ async function performAsoPlgOnboarding({
     Site, PlgOnboarding, Organization,
   } = dataAccess;
 
+  /* c8 ignore next 7 */
   if (!isValidHostname(domain)) {
     throw Object.assign(
       new Error('Invalid domain: must be a valid hostname'),
@@ -1328,6 +1330,37 @@ async function performAsoPlgOnboarding({
   }
 }
 
+const PLG_REJECTION_MESSAGES = {
+  'internal-org': { emoji: ':no_entry:', label: 'Rejected — Internal Org' },
+  'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
+};
+
+async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  const config = PLG_REJECTION_MESSAGES[reason];
+  /* c8 ignore next 4 */
+  if (!config) {
+    log.error(`Unknown PLG rejection reason: ${reason}`);
+    return;
+  }
+
+  const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *IMS Org:* \`${imsOrgId}\``;
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (err) {
+    log.error(`Failed to post PLG rejection notification: ${err.message}`);
+  }
+}
+
 /**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
@@ -1390,7 +1423,30 @@ function PlgOnboardingController(ctx) {
 
     const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
+    if (!isValidHostname(domain)) {
+      return badRequest('Invalid domain: must be a valid hostname');
+    }
+
     try {
+      const { Organization, Entitlement } = context.dataAccess;
+      const existingOrg = await Organization.findByImsOrgId(imsOrgId);
+      if (existingOrg) {
+        if (isInternalOrg(existingOrg.getId(), context.env)) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
+          return badRequest('PLG onboarding is not available for internal organizations');
+        }
+
+        const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
+        const hasPaidEntitlement = entitlements.some(
+          (e) => e.getProductCode() === ASO_PRODUCT_CODE
+            && e.getTier() === EntitlementModel.TIERS.PAID,
+        );
+        if (hasPaidEntitlement) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
+          return badRequest('PLG onboarding is not available for paid customers');
+        }
+      }
+
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId, updatedBy }, context);
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
