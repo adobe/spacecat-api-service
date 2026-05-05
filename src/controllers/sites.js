@@ -1304,6 +1304,20 @@ function SitesController(ctx, log, env) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
           const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();
+          const failureDetails = { productCode, organizationId: organization.getId() };
+
+          if (!imsOrgEntitlement) {
+            if (callerIsInternal) {
+              return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+            }
+            return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+          }
+
+          if (!CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement.getTier())) {
+            if (!callerIsInternal) {
+              return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+            }
+          }
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
             || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
@@ -1316,6 +1330,8 @@ function SitesController(ctx, log, env) {
               },
             });
           }
+
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
         }
       }
 
