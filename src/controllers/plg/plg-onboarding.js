@@ -1421,26 +1421,30 @@ function PlgOnboardingController(ctx) {
 
     const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
+    if (!isValidHostname(domain)) {
+      return badRequest('Invalid domain: must be a valid hostname');
+    }
+
     if (isInternalOrg(imsOrgId, context.env)) {
       await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
       return badRequest('PLG onboarding is not available for internal organizations');
     }
 
-    const { Organization, Entitlement } = context.dataAccess;
-    const existingOrg = await Organization.findByImsOrgId(imsOrgId);
-    if (existingOrg) {
-      const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
-      const hasPaidEntitlement = entitlements.some(
-        (e) => e.getProductCode() === ASO_PRODUCT_CODE
-          && e.getTier() === EntitlementModel.TIERS.PAID,
-      );
-      if (hasPaidEntitlement) {
-        await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
-        return badRequest('PLG onboarding is not available for paid customers');
-      }
-    }
-
     try {
+      const { Organization, Entitlement } = context.dataAccess;
+      const existingOrg = await Organization.findByImsOrgId(imsOrgId);
+      if (existingOrg) {
+        const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
+        const hasPaidEntitlement = entitlements.some(
+          (e) => e.getProductCode() === ASO_PRODUCT_CODE
+            && e.getTier() === EntitlementModel.TIERS.PAID,
+        );
+        if (hasPaidEntitlement) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
+          return badRequest('PLG onboarding is not available for paid customers');
+        }
+      }
+
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId, updatedBy }, context);
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
