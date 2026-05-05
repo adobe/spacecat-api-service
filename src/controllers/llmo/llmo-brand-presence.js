@@ -54,6 +54,16 @@ const MODEL_QUERY_ALIASES = new Map([
   ['openai', 'chatgpt-paid'], // UI PLATFORM_CODES.ChatGPTPaid sends 'openai'
 ]);
 
+/**
+ * Maps DB llmo_execution_model enum values to the UI platform codes used in
+ * PLATFORM_CODES (project-elmo-ui). Only the two mismatched names need entries;
+ * the other five values are identical in both systems.
+ */
+const DB_MODEL_TO_PLATFORM_CODE = new Map([
+  ['chatgpt-paid', 'openai'],
+  ['chatgpt-free', 'chatgpt'],
+]);
+
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
@@ -2116,6 +2126,100 @@ export function createTopicPromptsHandler(getOrgAndValidateAccess) {
         topic: topicResponseLabel,
         topicId: topicIdResponse,
       });
+    },
+  );
+}
+
+/**
+ * Creates the getPromptExecutionStatus handler.
+ * Returns aggregated execution status — (topicId, prompt, regionCode, matchedModels[]) — for
+ * the given topic IDs in a single query, replacing the N×7 topic-prompts fan-out in the UI.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createPromptExecutionStatusHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'prompt-execution-status',
+    async (ctx, client) => {
+      const { spaceCatId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+
+      const rawPromptIds = ctx.data?.promptIds;
+      let promptIds = [];
+      if (Array.isArray(rawPromptIds)) {
+        promptIds = rawPromptIds;
+      } else if (typeof rawPromptIds === 'string') {
+        promptIds = rawPromptIds.split(',').map((s) => s.trim());
+      } else if (rawPromptIds != null) {
+        promptIds = [String(rawPromptIds)];
+      }
+      promptIds = promptIds.filter((id) => id != null && isValidUUID(String(id)));
+
+      if (!promptIds.length) {
+        return badRequest('promptIds query parameter is required and must contain at least one valid UUID');
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+
+      let q = client
+        .from('brand_presence_executions_active')
+        .select('topic_id,prompt,region_code,model')
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .in('prompt_id', promptIds);
+
+      if (shouldApplyFilter(params.siteId)) {
+        q = q.eq('site_id', params.siteId);
+      }
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence prompt-execution-status error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const grouped = new Map();
+      for (const row of (data || [])) {
+        const key = `${row.topic_id}|${row.prompt}|${row.region_code}`;
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            topicId: row.topic_id,
+            prompt: row.prompt,
+            regionCode: row.region_code,
+            matchedModels: new Set(),
+          });
+        }
+        if (row.model) {
+          const platformCode = DB_MODEL_TO_PLATFORM_CODE.get(row.model) ?? row.model;
+          grouped.get(key).matchedModels.add(platformCode);
+        }
+      }
+
+      const items = Array.from(grouped.values()).map((entry) => ({
+        topicId: entry.topicId,
+        prompt: entry.prompt,
+        regionCode: entry.regionCode,
+        matchedModels: Array.from(entry.matchedModels).sort(),
+      }));
+
+      return cachedOk({ items });
     },
   );
 }

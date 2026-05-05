@@ -265,6 +265,17 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Queue error');
     });
 
+    it('should sanitize non-ASCII and control chars in x-error header', async () => {
+      baseContext.sqs.sendMessage = sandbox.stub().throws(new Error('Failed: https://пример.com/page\r\nX-Injected: yes'));
+      const response = await scrapeJobController.createScrapeJob(baseContext);
+      expect(response.status).to.equal(500);
+      const xerr = response.headers.get('x-error');
+      expect(xerr).to.be.a('string');
+      expect(/[^\x20-\x7E]/.test(xerr)).to.equal(false);
+      expect(xerr).to.not.include('\r');
+      expect(xerr).to.not.include('\n');
+    });
+
     it('should start a new scrape job', async () => {
       baseContext.data.customHeaders = {
         ...exampleCustomHeaders,
