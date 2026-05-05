@@ -425,6 +425,45 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Weekly table (2026-04-27): *0/0* raw-week sites, 0 rows / 0 hits');
   });
 
+  it('merges raw week batches and ignores empty batch responses', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
+    const sites = Array.from({ length: 51 }, (_, index) => {
+      const id = index === 0 || index === 25
+        ? TARGET_SITE_ID
+        : `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      return makeSite(id, `https://batch-${index}.com`);
+    });
+    context.dataAccess.Site.all.resolves(sites);
+    postgrestStub.from.resetBehavior();
+    for (let i = 0; i < 9; i += 1) {
+      postgrestStub.from.onCall(i).returns(makePostgrestChain({
+        data: [],
+        error: null,
+      }));
+    }
+    postgrestStub.from.onCall(9).returns(makePostgrestChain({
+      data: [{ site_id: TARGET_SITE_ID, hits: 10, updated_at: '2026-05-04T09:00:00Z' }],
+      error: null,
+    }));
+    postgrestStub.from.onCall(10).returns(makePostgrestChain({
+      data: [{ site_id: TARGET_SITE_ID, hits: 20, updated_at: '2026-05-04T08:00:00Z' }],
+      error: null,
+    }));
+    postgrestStub.from.onCall(11).returns(makePostgrestChain({
+      data: null,
+      error: null,
+    }));
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-05-03'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03):');
+    expect(output).to.include('https://batch-0.com');
+    expect(output).to.include('raw week: 2 rows / 30 hits');
+  });
+
   it('surfaces table query errors through the generic Slack error handler', async () => {
     const targetSite = makeSite(TARGET_SITE_ID, 'https://error.com');
     context.dataAccess.Site.all.resolves([targetSite]);
@@ -450,5 +489,40 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     );
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('relation missing');
+  });
+
+  it('surfaces raw week query errors through the generic Slack error handler', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([
+      makeSite(TARGET_SITE_ID, 'https://weekly-error.com'),
+    ]);
+    postgrestStub.from.resetBehavior();
+    postgrestStub.from.onCall(0).returns(makePostgrestChain({
+      data: [{ site_id: TARGET_SITE_ID, hits: 10 }],
+      error: null,
+    }));
+    postgrestStub.from.onCall(1).returns(makePostgrestChain({
+      data: [{ site_id: TARGET_SITE_ID, hits: 10 }],
+      error: null,
+    }));
+    postgrestStub.from.onCall(2).returns(makePostgrestChain({
+      data: [],
+      error: null,
+    }));
+    postgrestStub.from.onCall(3).returns(makePostgrestChain({
+      data: null,
+      error: { message: 'weekly range failed' },
+    }));
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-05-03'], slackContext);
+    clock.restore();
+
+    expect(context.log.error).to.have.been.calledWith(
+      'Error in check-agentic-traffic-db-status:',
+      sinon.match.instanceOf(Error),
+    );
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('weekly range failed');
   });
 });

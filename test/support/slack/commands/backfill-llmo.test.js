@@ -352,6 +352,40 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
 
+    it('handles a single-row weekly DB refresh response without rows_inserted', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      postgrestStub.rpc.resolves({
+        data: { week_start: '2026-04-27' },
+        error: null,
+      });
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        'mode=weekly-db',
+        'date=2026-05-03',
+      ], slackContext);
+
+      expect(slackContext.say.secondCall.args[0]).to.include('rows_inserted=0');
+    });
+
+    it('handles an empty weekly DB refresh response', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      postgrestStub.rpc.resolves({
+        data: null,
+        error: null,
+      });
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        'mode=weekly-db',
+        'date=2026-05-03',
+      ], slackContext);
+
+      expect(slackContext.say.secondCall.args[0]).to.include('rows_inserted=0');
+    });
+
     it('rejects weekly DB refresh for the current incomplete ISO week', async () => {
       const clock = sinon.useFakeTimers(new Date('2026-05-05T12:00:00Z').getTime());
       const command = BackfillLlmoCommand(context);
@@ -425,6 +459,27 @@ describe('BackfillLlmoCommand', () => {
       );
       const output = slackContext.say.args.flat().join('\n');
       expect(output).to.include('statement timeout');
+    });
+
+    it('surfaces unavailable PostgREST when running weekly DB refresh', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      context.dataAccess.services = {};
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        'mode=weekly-db',
+        'date=2026-05-03',
+      ], slackContext);
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Error in LLMO backfill:',
+        sinon.match.instanceOf(Error),
+      );
+      const output = slackContext.say.args.flat().join('\n');
+      expect(output).to.include(
+        'PostgREST client is unavailable; cannot refresh agentic weekly rollup.',
+      );
     });
 
     it('rejects unsupported cdn-logs-report mode', async () => {
