@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { CAP_ORG_READ_ALL, CAP_SITE_READ_ALL } from './capability-constants.js';
+
 /**
  * Routes that are intentionally excluded from S2S consumer access.
  *
@@ -33,6 +35,8 @@ export const INTERNAL_ROUTES = [
   // Hooks - use hookSecret in path for auth, not JWT
   'POST /hooks/site-detection/cdn/:hookSecret',
   'POST /hooks/site-detection/rum/:hookSecret',
+  // GitHub App webhook - authenticated by HMAC-SHA256 signature, not S2S JWT
+  'POST /webhooks/github',
 
   // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
   'POST /preflight/jobs',
@@ -111,6 +115,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/referral-traffic/by-region',
   'GET /sites/:siteId/referral-traffic/by-page-intent',
   'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-device',
   'GET /sites/:siteId/referral-traffic/business-impact',
   'GET /sites/:siteId/referral-traffic/weeks',
 
@@ -229,7 +234,7 @@ const routeRequiredCapabilities = {
   'PATCH /configurations/sites/audits': 'configuration:write',
 
   // Organizations
-  'GET /organizations': 'organization:read',
+  'GET /organizations': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
@@ -272,6 +277,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': 'brand:read',
@@ -301,7 +308,9 @@ const routeRequiredCapabilities = {
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
 
   // Sites
-  'GET /sites': 'site:read',
+  // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
+  // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
+  'GET /sites': CAP_SITE_READ_ALL,
   'POST /sites': 'site:write',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',
@@ -515,6 +524,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/strategy': 'site:read',
   'PUT /sites/:siteId/llmo/strategy': 'site:write',
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
+  'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
   'POST /llmo/agentic-traffic/global': 'report:write',
 

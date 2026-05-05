@@ -131,6 +131,13 @@ export const CONSUMER_1_CLIENT_ID = '111111111111111111111111';
 export const CONSUMER_1_TECHNICAL_ACCOUNT_ID = '111111111111111111111111@techacct.adobe.com';
 export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
+// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll.
+// Used to exercise the readAll capability path through GET /sites and /organizations.
+export const CONSUMER_2_ID = '11111111-1111-4111-b112-222222222222';
+export const CONSUMER_2_CLIENT_ID = '222222222222222222222222';
+export const CONSUMER_2_TECHNICAL_ACCOUNT_ID = '222222222222222222222222@techacct.adobe.com';
+export const CONSUMER_2_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
+
 // ── PlgOnboardings ──
 
 export const PLG_ONBOARDING_1_ID = 'd1111111-1111-4111-b111-111111111111';
