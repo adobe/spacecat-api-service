@@ -15,11 +15,17 @@ import {
   CONSUMER_1_CLIENT_ID,
   CONSUMER_1_TECHNICAL_ACCOUNT_ID,
   CONSUMER_1_IMS_ORG_ID,
+  CONSUMER_2_ID,
+  CONSUMER_2_CLIENT_ID,
+  CONSUMER_2_TECHNICAL_ACCOUNT_ID,
+  CONSUMER_2_IMS_ORG_ID,
 } from '../../shared/seed-ids.js';
 
 /**
  * Immutable baseline consumers for IT tests.
- * Consumer 1 — ACTIVE, used for GET/update/revoke tests.
+ * Consumer 1 — ACTIVE with site:read + site:write (no readAll).
+ * Consumer 2 — ACTIVE with site:readAll + organization:readAll. Used to exercise
+ *   the readAll capability path through GET /sites and GET /organizations.
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -32,6 +38,19 @@ export const consumers = [
     consumer_name: 'IT Test Consumer',
     status: 'ACTIVE',
     capabilities: ['site:read', 'site:write'],
+    revoked_at: null,
+    created_at: '2026-01-15T10:00:00.000Z',
+    updated_at: '2026-01-15T10:00:00.000Z',
+    updated_by: 'system',
+  },
+  {
+    id: CONSUMER_2_ID,
+    client_id: CONSUMER_2_CLIENT_ID,
+    technical_account_id: CONSUMER_2_TECHNICAL_ACCOUNT_ID,
+    ims_org_id: CONSUMER_2_IMS_ORG_ID,
+    consumer_name: 'IT Test Consumer (readAll)',
+    status: 'ACTIVE',
+    capabilities: ['site:readAll', 'organization:readAll'],
     revoked_at: null,
     created_at: '2026-01-15T10:00:00.000Z',
     updated_at: '2026-01-15T10:00:00.000Z',

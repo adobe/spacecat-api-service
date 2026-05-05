@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { CAP_ORG_READ_ALL, CAP_SITE_READ_ALL } from './capability-constants.js';
+
 /**
  * Routes that are intentionally excluded from S2S consumer access.
  *
@@ -178,6 +180,10 @@ export const INTERNAL_ROUTES = [
   'PATCH /consumers/:consumerId',
   'POST /consumers/:consumerId/revoke',
 
+  // API Keys - scoped API key management; end-user/admin flow, not exposed to S2S consumers
+  'POST /tools/api-keys',
+  'DELETE /tools/api-keys/:id',
+  'GET /tools/api-keys',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -232,7 +238,7 @@ const routeRequiredCapabilities = {
   'PATCH /configurations/sites/audits': 'configuration:write',
 
   // Organizations
-  'GET /organizations': 'organization:read',
+  'GET /organizations': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
@@ -306,7 +312,9 @@ const routeRequiredCapabilities = {
   'GET /projects/by-project-name/:projectName/sites': 'site:read',
 
   // Sites
-  'GET /sites': 'site:read',
+  // GET /sites is the cross-tenant list endpoint - guarded by site:readAll, not site:read.
+  // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
+  'GET /sites': CAP_SITE_READ_ALL,
   'POST /sites': 'site:write',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',
@@ -450,11 +458,6 @@ const routeRequiredCapabilities = {
   // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
 
-  // API Keys
-  'POST /tools/api-keys': 'apiKey:write',
-  'DELETE /tools/api-keys/:id': 'apiKey:write',
-  'GET /tools/api-keys': 'apiKey:read',
-
   // Import Jobs
   'POST /tools/import/jobs': 'importJob:write',
   'GET /tools/import/jobs/:jobId': 'importJob:read',
@@ -494,9 +497,13 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
-  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:write',
-  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:write',
+  // These POST sheet-data routes use POST only to accommodate complex query payloads that exceed
+  // URL length limits. They are non-mutating (no side effects) and intentionally require
+  // only site:read, which also allows read-only admins and S2S consumers with read-only tokens
+  // to query sheet data.
+  'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'site:read',
+  'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data': 'site:read',
   'GET /sites/:siteId/llmo/data/:dataSource': 'site:read',
   'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': 'site:read',

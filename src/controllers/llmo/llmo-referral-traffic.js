@@ -296,9 +296,10 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
 /**
  * GET /sites/:siteId/referral-traffic/by-platform
  *
- * Returns [{ platform, pageviews, bounceRate, channels, visits, avgTimeOnSite, revenue }]
+ * Returns [{ platform, pageviews, bounceRate, channels, visits, avgTimeOnSite, revenue,
+ *          visitors, orders }]
  * sorted descending. Empty trf_platform values are returned as 'unknown' by the RPC.
- * visits/avgTimeOnSite/revenue are null for optel and cdn sources.
+ * visits/avgTimeOnSite/revenue/visitors/orders are null for optel and cdn sources.
  */
 export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficByPlatform(context) {
@@ -328,6 +329,8 @@ export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess)
             visits: row.visits != null ? Number(row.visits) : null,
             avgTimeOnSite: row.avg_time_on_site != null ? Number(row.avg_time_on_site) : null,
             revenue: row.revenue != null ? Number(row.revenue) : null,
+            visitors: row.visitors != null ? Number(row.visitors) : null,
+            orders: row.orders != null ? Number(row.orders) : null,
           })),
         });
       },

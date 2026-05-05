@@ -83,6 +83,128 @@ describe('Access Control Util', () => {
     expect(authInfo.isS2SAdmin).to.have.been.calledOnce;
   });
 
+  describe('hasS2SCapability', () => {
+    function buildContext({ s2sConsumer, fresh } = {}) {
+      const Consumer = {
+        findByClientIdAndImsOrgId: sinon.stub().resolves(fresh),
+      };
+      return {
+        pathInfo: { headers: {} },
+        attributes: { authInfo: new AuthInfo().withType('jwt').withProfile({ user_id: 'u' }) },
+        dataAccess: {
+          Consumer,
+          Entitlement: { findByOrganizationIdAndProductCode: sinon.stub() },
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+        s2sConsumer,
+      };
+    }
+
+    function makeS2SConsumer(clientId = 'client-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg') {
+      return {
+        getClientId: () => clientId,
+        getImsOrgId: () => imsOrgId,
+      };
+    }
+
+    function makeFresh({
+      id = 'consumer-id-1',
+      capabilities = ['site:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    it('returns reason=not-s2s when context has no s2sConsumer', async () => {
+      const ctx = buildContext({ s2sConsumer: null });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('not-s2s');
+      expect(ctx.dataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
+    });
+
+    it('returns reason=not-found when re-fetch returns null (deleted between L1 and L2)', async () => {
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh: null });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('not-found');
+      expect(result.clientId).to.equal('client-1');
+      expect(result.consumerId).to.be.undefined;
+    });
+
+    it('returns reason=not-active when re-fetched consumer is SUSPENDED', async () => {
+      const fresh = makeFresh({ status: 'SUSPENDED' });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('not-active');
+      expect(result.consumerId).to.equal('consumer-id-1');
+    });
+
+    it('returns reason=revoked when re-fetched consumer was revoked between L1 and L2', async () => {
+      const fresh = makeFresh({ revoked: true });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('revoked');
+      expect(result.consumerId).to.equal('consumer-id-1');
+    });
+
+    it('returns reason=missing-capability when consumer is ACTIVE without the capability', async () => {
+      const fresh = makeFresh({ capabilities: ['site:read', 'organization:read'] });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('missing-capability');
+      expect(result.consumerId).to.equal('consumer-id-1');
+      expect(result.clientId).to.equal('client-1');
+    });
+
+    it('returns allowed=true with full identity when consumer is ACTIVE and holds the capability', async () => {
+      const fresh = makeFresh({ capabilities: ['site:readAll'] });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.true;
+      expect(result.reason).to.equal('granted');
+      expect(result.consumerId).to.equal('consumer-id-1');
+      expect(result.clientId).to.equal('client-1');
+    });
+
+    it('uses identity from context.s2sConsumer for the DB lookup (not from authInfo)', async () => {
+      const fresh = makeFresh();
+      const consumer = makeS2SConsumer('client-X', 'BBB222222222222222222222@AdobeOrg');
+      const ctx = buildContext({ s2sConsumer: consumer, fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      await util.hasS2SCapability('site:readAll');
+      expect(ctx.dataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnceWith(
+        'client-X',
+        'BBB222222222222222222222@AdobeOrg',
+      );
+    });
+
+    it('denies when consumer.getCapabilities() returns null/undefined', async () => {
+      const fresh = makeFresh({ capabilities: null });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('missing-capability');
+    });
+  });
+
   it('should throw an error if entity is not provided', async () => {
     const context = {
       pathInfo: {
@@ -1779,6 +1901,86 @@ describe('Access Control Util', () => {
     });
   });
 
+  // Merged both test suites, keeping their setup isolated
+  describe('hasAdminReadAccess', () => {
+    function makeContext(authInfoOverrides) {
+      const authInfo = {
+        getType: () => 'jwt',
+        isAdmin: () => false,
+        isReadOnlyAdmin: () => false,
+        getScopes: () => [],
+        hasOrganization: sinon.stub().returns(false),
+        hasScope: sinon.stub().returns(false),
+        ...authInfoOverrides,
+      };
+      return {
+        log: {
+          info: () => {}, error: () => {}, warn: () => {}, debug: () => {},
+        },
+        pathInfo: { headers: { 'x-product': 'test' } },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+    }
+
+    it('returns true when user is a full admin', () => {
+      const ctx = makeContext({ isAdmin: () => true, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.true;
+    });
+
+    it('returns true when user is a read-only admin', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.true;
+    });
+
+    it('returns false when user is neither admin nor read-only admin', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.false;
+    });
+
+    it('hasAdminAccess returns false for read-only admin (write guard is unchanged)', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminAccess()).to.be.false;
+    });
+
+    it('hasAccess bypasses org check for read-only admin', async () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      const org = { getImsOrgId: () => 'some-org-id' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      const result = await util.hasAccess(org);
+      expect(result).to.be.true;
+    });
+
+    it('hasAccess still enforces org check for regular non-admin user', async () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      const org = { getImsOrgId: () => 'some-org-id' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      // hasOrganization is stubbed to return false → access denied
+      const result = await util.hasAccess(org);
+      expect(result).to.be.false;
+    });
+
+    it('hasAdminReadAccess returns false when isReadOnlyAdmin is absent (legacy authInfo)', () => {
+      // Legacy authInfo objects may not have isReadOnlyAdmin at all; optional chaining must
+      // handle the missing method gracefully without throwing.
+      const ctx = makeContext({ isAdmin: () => false });
+      // Ensure the method is truly absent, not just returning false
+      delete ctx.attributes.authInfo.isReadOnlyAdmin;
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.false;
+    });
+  });
+
   describe('isLLMOAdministrator — delegation-aware', () => {
     let mockSiteImsOrgAccess;
     let mockGrant;
@@ -1842,10 +2044,10 @@ describe('Access Control Util', () => {
         pathInfo: { headers: { 'x-product': 'llmo' } },
         attributes: { authInfo: mockAuthInfo },
         dataAccess: {
+          SiteImsOrgAccess: mockSiteImsOrgAccess,
           Entitlement: {},
           TrialUser: {},
           OrganizationIdentityProvider: {},
-          SiteImsOrgAccess: mockSiteImsOrgAccess,
         },
       };
     });
