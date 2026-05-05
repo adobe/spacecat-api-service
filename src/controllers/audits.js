@@ -96,7 +96,7 @@ function AuditsController(ctx) {
       return badRequest('Audit type required');
     }
 
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Admin access required');
     }
 
