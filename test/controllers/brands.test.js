@@ -2245,7 +2245,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(404);
     });
 
-    it('returns 404 when site does not belong to the organization', async () => {
+    it('returns 403 when site does not belong to the organization (matches triggerConfigSync)', async () => {
       const otherOrgSite = {
         getOrganizationId: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
       };
@@ -2260,9 +2260,26 @@ describe('Brands Controller', () => {
         params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
         dataAccess: mockDataAccess,
       });
-      expect(response.status).to.equal(404);
+      expect(response.status).to.equal(403);
       // Resolver and storage should never be reached when site/org mismatch.
       expect(getBrandBySiteStub).to.not.have.been.called;
+    });
+
+    it('passes readOnly: true to resolveLlmoOnboardingMode so the GET stays idempotent', async () => {
+      const { controller, resolveLlmoOnboardingModeStub } = await buildController({
+        mode: 'v2',
+        brand: SAMPLE_BRAND,
+      });
+
+      await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
+      const callArgs = resolveLlmoOnboardingModeStub.firstCall.args;
+      expect(callArgs[2]).to.deep.equal({ readOnly: true });
     });
 
     it('returns 503 when postgrestClient is unavailable', async () => {

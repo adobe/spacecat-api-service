@@ -324,6 +324,23 @@ describe('llmo-onboarding-mode', () => {
         expect(ctx.log.error).to.have.been.calledWithMatch(/Failed to revert brandalf flag.*Flag may still be true/);
       });
 
+      it('row 1 in readOnly mode: returns v1 WITHOUT mutating the brandalf flag', async () => {
+        // LLMO-4716: read-only callers (resolver endpoint hit by BP refresh +
+        // DRS scheduler) must compute the same downgrade decision but never
+        // write to feature_flags from a GET request.
+        const ctx = makeContext({
+          sites: [makeSite(BEFORE_CUTOFF)],
+          env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
+          brandalfValue: true,
+        });
+        const mode = await resolveLlmoOnboardingMode('org-1', ctx, { readOnly: true });
+        expect(mode).to.equal('v1');
+        // No upsert side effect.
+        expect(ctx.dataAccess.services.postgrestClient.getUpsertStub()).to.not.have.been.called;
+        // Info log explains the read-only downgrade for triage.
+        expect(ctx.log.info).to.have.been.calledWithMatch(/read-only.*pre-cutoff.*v1/);
+      });
+
       it('row 3: kill switch + no pre-cutoff + brandalf=true → v2', async () => {
         const ctx = makeContext({
           sites: [makeSite(AFTER_CUTOFF)],

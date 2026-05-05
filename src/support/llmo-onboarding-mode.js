@@ -117,9 +117,16 @@ export async function hasPreBrandalfSites(organizationId, context) {
  *
  * @param {string} organizationId
  * @param {object} context - Request context
+ * @param {object} [options]
+ * @param {boolean} [options.readOnly=false] When true, the resolver computes the
+ *   mode but skips the row-1 remediation that flips the brandalf flag back to
+ *   false in the database. Read-only callers (e.g. high-traffic resolver
+ *   endpoints called from BP refresh and the DRS scheduler) should pass
+ *   `readOnly: true` so a GET never mutates org-level feature-flag state.
  * @returns {Promise<'v1'|'v2'>}
  */
-export async function resolveLlmoOnboardingMode(organizationId, context) {
+export async function resolveLlmoOnboardingMode(organizationId, context, options = {}) {
+  const { readOnly = false } = options;
   const { log = console } = context || {};
   const postgrestClient = context?.dataAccess?.services?.postgrestClient;
 
@@ -139,28 +146,38 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
     const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
 
     // Row 1: kill switch active + pre-cutoff sites + brandalf=true
-    // → revert flag to false and force v1.
+    // → revert flag to false and force v1. Read-only callers compute the
+    //   same downgrade decision but skip the upsert side effect — write
+    //   paths (onboarding controllers) handle remediation explicitly.
     if (configuredDefault === LLMO_ONBOARDING_MODE_V1) {
       try {
         if (await hasPreBrandalfSites(organizationId, context)) {
-          try {
-            await upsertFeatureFlag({
-              organizationId,
-              product: LLMO_FEATURE_FLAG_PRODUCT,
-              flagName: LLMO_BRANDALF_FLAG,
-              value: false,
-              updatedBy: 'llmo-onboarding-mode-resolution',
-              postgrestClient,
-            });
-            log.warn(
-              `LLMO mode resolution: organization ${organizationId} has brandalf=true but also has `
-              + 'pre-cutoff sites while kill switch is active. Reverted brandalf flag to false. '
-              + 'This org has sites that require migration before it can use v2.',
-            );
-          } catch (revertError) {
-            log.error(
-              `Failed to revert brandalf flag for org ${organizationId}: ${revertError.message}. `
-              + 'Flag may still be true — manual intervention required.',
+          if (!readOnly) {
+            try {
+              await upsertFeatureFlag({
+                organizationId,
+                product: LLMO_FEATURE_FLAG_PRODUCT,
+                flagName: LLMO_BRANDALF_FLAG,
+                value: false,
+                updatedBy: 'llmo-onboarding-mode-resolution',
+                postgrestClient,
+              });
+              log.warn(
+                `LLMO mode resolution: organization ${organizationId} has brandalf=true but also has `
+                + 'pre-cutoff sites while kill switch is active. Reverted brandalf flag to false. '
+                + 'This org has sites that require migration before it can use v2.',
+              );
+            } catch (revertError) {
+              log.error(
+                `Failed to revert brandalf flag for org ${organizationId}: ${revertError.message}. `
+                + 'Flag may still be true — manual intervention required.',
+              );
+            }
+          } else {
+            log.info(
+              `LLMO mode resolution (read-only): organization ${organizationId} has `
+              + 'brandalf=true but kill switch is active and org has pre-cutoff sites. '
+              + 'Returning v1 without flipping the brandalf flag.',
             );
           }
           return LLMO_ONBOARDING_MODE_V1;

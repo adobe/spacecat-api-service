@@ -251,12 +251,14 @@ v2-brand-for-org-site:
       '400':
         $ref: './responses.yaml#/400'
       '403':
-        description: User does not have access to this organization
+        description: |
+          User does not have access to this organization, OR the site does not
+          belong to the organization (tenant isolation — matches the same
+          check on `POST /v2/orgs/{spaceCatId}/sites/{siteId}/sync-config`).
       '404':
         description: |
-          Organization not found, site not found, site does not belong to the
-          organization, organization is not in v2 mode, or no active brand for
-          this site.
+          Organization not found, site not found, organization is not in v2
+          mode, or no active brand for this site.
       '500':
         $ref: './responses.yaml#/500'
       '503':

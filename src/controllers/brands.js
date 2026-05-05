@@ -687,7 +687,10 @@ function BrandsController(ctx, log, env) {
         return notFound(`Site not found: ${siteId}`);
       }
       if (site.getOrganizationId() !== spaceCatId) {
-        return notFound(`Site ${siteId} does not belong to organization ${spaceCatId}`);
+        // Same tenant-isolation check as triggerConfigSync — return forbidden
+        // so the controller is internally consistent (different status codes
+        // for the identical check would be incoherent for clients).
+        return forbidden('Site does not belong to this organization');
       }
 
       const unavailable = requirePostgrestForV2Config(context);
@@ -695,7 +698,11 @@ function BrandsController(ctx, log, env) {
         return unavailable;
       }
 
-      const mode = await resolveLlmoOnboardingMode(spaceCatId, context);
+      // readOnly: true keeps this GET endpoint idempotent — the resolver's
+      // kill-switch remediation (which writes to feature_flags) only fires
+      // from explicit onboarding/admin write paths, never from a high-traffic
+      // resolver hit by BP refresh and the DRS scheduler.
+      const mode = await resolveLlmoOnboardingMode(spaceCatId, context, { readOnly: true });
       if (mode !== LLMO_ONBOARDING_MODE_V2) {
         return notFound('No v2 brand configured for this organization');
       }
