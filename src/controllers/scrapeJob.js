@@ -48,7 +48,7 @@ function ScrapeJobController(context) {
 
   function createErrorResponse(error) {
     return createResponse({}, error.status || 500, {
-      [HEADER_ERROR]: cleanupHeaderValue(error.message),
+      [HEADER_ERROR]: cleanupHeaderValue(error.message ?? ''),
     });
   }
 
