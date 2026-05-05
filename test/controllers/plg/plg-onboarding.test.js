@@ -744,7 +744,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     it('returns 400 when imsOrgId is an internal org', async () => {
       const context = buildContext({ domain: TEST_DOMAIN });
-      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: TEST_IMS_ORG_ID };
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: TEST_ORG_ID };
       const res = await controller.onboard(context);
       expect(res.status).to.equal(400);
       expect(res.value).to.include('internal organizations');
@@ -904,7 +904,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const context = buildContext({ domain: TEST_DOMAIN });
       context.env = {
         ...context.env,
-        ASO_PLG_EXCLUDED_ORGS: TEST_IMS_ORG_ID,
+        ASO_PLG_EXCLUDED_ORGS: TEST_ORG_ID,
         SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123',
         SLACK_BOT_TOKEN: 'xoxb-test',
       };
@@ -1112,7 +1112,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       const context = buildContext({ domain: TEST_DOMAIN });
       context.env = {
         ...context.env,
-        ASO_PLG_EXCLUDED_ORGS: TEST_IMS_ORG_ID,
+        ASO_PLG_EXCLUDED_ORGS: TEST_ORG_ID,
         SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C123',
         SLACK_BOT_TOKEN: 'xoxb-test',
       };
@@ -3698,21 +3698,15 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
     it('refuses revocation when the resolved customer org is internal/demo', async () => {
       mockOrganization.getId.returns(DEMO_ORG_ID);
-      // Keep the guard-2 invariant intact so only the internal-org guard is the blocker.
-      tierClientCreateEntitlementStub.resolves({
-        entitlement: { getId: () => 'ent-1', getOrganizationId: () => DEMO_ORG_ID },
-        siteEnrollment: { getId: () => 'enroll-1' },
-      });
       const sibling = buildSiblingEnrollment('enroll-sib', 'prev-site-1');
       mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([sibling]);
 
       const context = buildContext({ domain: TEST_DOMAIN });
-      await controller.onboard(context);
+      const res = await controller.onboard(context);
 
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('internal organizations');
       expect(sibling.remove).to.not.have.been.called;
-      expect(mockLog.error).to.have.been.calledWithMatch(
-        /Refusing to revoke sibling ASO enrollments.*internal\/demo/,
-      );
     });
 
     it('continues past individual remove failures', async () => {

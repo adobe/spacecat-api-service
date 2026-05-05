@@ -1426,15 +1426,15 @@ function PlgOnboardingController(ctx) {
       return badRequest('Invalid domain: must be a valid hostname');
     }
 
-    if (isInternalOrg(imsOrgId, context.env)) {
-      await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
-      return badRequest('PLG onboarding is not available for internal organizations');
-    }
-
     try {
       const { Organization, Entitlement } = context.dataAccess;
       const existingOrg = await Organization.findByImsOrgId(imsOrgId);
       if (existingOrg) {
+        if (isInternalOrg(existingOrg.getId(), context.env)) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
+          return badRequest('PLG onboarding is not available for internal organizations');
+        }
+
         const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
         const hasPaidEntitlement = entitlements.some(
           (e) => e.getProductCode() === ASO_PRODUCT_CODE
