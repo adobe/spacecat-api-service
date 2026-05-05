@@ -2564,6 +2564,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(reviews[0].decision).to.equal('CLOSED');
       expect(reviews[0].reviewedBy).to.equal('system');
       expect(reviews[0].reason).to.match(/new onboarding was started for domain/);
+      expect(reviews[0].justification).to.match(/Automatically closed by system/);
       expect(staleWaitlisted.save).to.have.been.called;
 
       // The new domain still gets onboarded
@@ -2658,6 +2659,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(onboardedRecord.setStatus).to.have.been.calledWith('OUTDATED');
       expect(onboardedRecord.setWaitlistReason).to.have.been.calledWith(null);
       expect(onboardedRecord.setReviews).to.have.been.called;
+      const offboardedReviews = onboardedRecord.setReviews.lastCall.args[0];
+      expect(offboardedReviews[offboardedReviews.length - 1].justification).to.match(/Automatically offboarded by system/);
       expect(onboardedRecord.setUpdatedBy).to.have.been.calledWith('system');
       expect(onboardedRecord.save).to.have.been.called;
 
@@ -4654,6 +4657,77 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(res.value[0].updatedBy).to.be.null;
         expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
       });
+
+      it('resolves createdBy to email via getImsAdminProfile when createdBy is set', async () => {
+        const record = createMockOnboarding({ createdBy: 'creator-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'creator@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('creator@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('creator-ims-id@AdobeID');
+      });
+
+      it('falls back to IMS ID for createdBy when getImsAdminProfile returns no email', async () => {
+        const record = createMockOnboarding({ createdBy: 'creator-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({}),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('creator-ims-id@AdobeID');
+      });
+
+      it('skips IMS resolution for createdBy when value is "system"', async () => {
+        const record = createMockOnboarding({ createdBy: 'system' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = { getImsAdminProfile: sandbox.stub() };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('system');
+        expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
+
+      it('deduplicates IMS IDs across createdBy and updatedBy', async () => {
+        const sharedImsId = 'shared-ims-id@AdobeID';
+        const record = createMockOnboarding({ createdBy: sharedImsId, updatedBy: sharedImsId });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'shared@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('shared@example.com');
+        expect(res.value[0].updatedBy).to.equal('shared@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnce;
+      });
     });
   });
 
@@ -4985,7 +5059,28 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(reviews[0].decision).to.equal('UPHELD');
         expect(reviews[0].justification).to.equal('Not ready to proceed');
         expect(record.setStatus).to.have.been.calledWith('REJECTED');
+        expect(record.setWaitlistReason).to.have.been.calledWith(null);
         expect(record.save).to.have.been.calledOnce;
+      });
+
+      it('clears waitlistReason when UPHELD transitions WAITLISTED to REJECTED', async () => {
+        const record = createMockOnboarding({
+          status: 'WAITLISTED',
+          waitlistReason: 'Domain site-a.com is another domain is already onboarded for this IMS org',
+        });
+        mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+        const res = await AdminAccessPlgController({ log: mockLog }).update({
+          dataAccess: mockDataAccess,
+          params: { onboardingId: TEST_ONBOARDING_ID },
+          data: { decision: 'UPHELD', justification: 'Rejected — domain does not qualify' },
+          attributes: adminAuthAttributes,
+          env: {},
+        });
+
+        expect(res.status).to.equal(200);
+        expect(record.setWaitlistReason).to.have.been.calledWith(null);
+        expect(record.setStatus).to.have.been.calledWith('REJECTED');
       });
 
       it('uses authInfo.profile when getProfile is unavailable', async () => {

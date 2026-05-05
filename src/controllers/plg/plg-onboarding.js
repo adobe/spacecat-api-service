@@ -704,7 +704,7 @@ async function performAsoPlgOnboarding({
       decision: REVIEW_DECISIONS.CLOSED,
       reviewedBy: 'system',
       reviewedAt: new Date().toISOString(),
-      justification: `Automatically closed — superseded by new onboarding for domain ${domain}.`,
+      justification: `Automatically closed by system — superseded by new onboarding for domain ${domain}.`,
     }]);
     await r.save();
     await postPlgOnboardingNotification(r, context);
@@ -737,7 +737,7 @@ async function performAsoPlgOnboarding({
         decision: REVIEW_DECISIONS.OFFBOARDED,
         reviewedBy: 'system',
         reviewedAt: new Date().toISOString(),
-        justification: `Automatically offboarded — displaced by new onboarding for domain ${domain}.`,
+        justification: `Automatically offboarded by system — displaced by new onboarding for domain ${domain}.`,
       }]);
       await alreadyOnboarded.save();
       await postPlgOnboardingNotification(alreadyOnboarded, context);
@@ -1524,9 +1524,13 @@ function PlgOnboardingController(ctx) {
       // This would eliminate the N * IMS_CONCURRENCY API calls on every list load and
       // significantly improve performance as the PLG onboarding table grows.
       const { imsClient } = context;
-      // Collect all unique IMS IDs from updatedBy and reviewedBy fields
+      // Collect all unique IMS IDs from createdBy, updatedBy, and reviewedBy fields
       const imsIds = new Set();
       for (const r of records) {
+        const createdBy = r.getCreatedBy();
+        if (hasText(createdBy) && createdBy !== 'system') {
+          imsIds.add(createdBy);
+        }
         const updatedBy = r.getUpdatedBy();
         if (hasText(updatedBy) && updatedBy !== 'system') {
           imsIds.add(updatedBy);
@@ -1558,9 +1562,11 @@ function PlgOnboardingController(ctx) {
       try {
         payload = records.map((record) => {
           const json = PlgOnboardingDto.toAdminJSON(record);
+          const createdBy = record.getCreatedBy();
           const updatedBy = record.getUpdatedBy();
           return {
             ...json,
+            createdBy: createdBy ? (emailMap[createdBy] ?? createdBy) : createdBy,
             updatedBy: updatedBy ? (emailMap[updatedBy] ?? updatedBy) : null,
             reviews: json.reviews.map((review) => ({
               ...review,
@@ -1663,6 +1669,7 @@ function PlgOnboardingController(ctx) {
     // UPHOLD: reject the domain — transition to REJECTED (terminal)
     if (decision === REVIEW_DECISIONS.UPHELD) {
       onboarding.setStatus(STATUSES.REJECTED);
+      onboarding.setWaitlistReason(null);
       await onboarding.save();
       await postPlgOnboardingNotification(onboarding, context);
       return ok(PlgOnboardingDto.toAdminJSON(onboarding));

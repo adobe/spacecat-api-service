@@ -19,6 +19,7 @@ import {
   PLG_ONBOARDING_1_DOMAIN,
   PLG_ONBOARDING_2_ID,
   PLG_ONBOARDING_3_ID,
+  PLG_ONBOARDING_4_ID,
   NON_EXISTENT_IMS_ORG_ID,
 } from '../seed-ids.js';
 
@@ -250,9 +251,9 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         expect(res.status).to.equal(404);
       });
 
-      it('returns 400 when onboarding is not WAITLISTED or ONBOARDED', async () => {
+      it('returns 400 when onboarding is not WAITLISTED', async () => {
         const http = getHttpClient();
-        // PLG_ONBOARDING_3 is IN_PROGRESS — admin PATCH is only allowed for WAITLISTED or ONBOARDED
+        // PLG_ONBOARDING_3 is IN_PROGRESS — admin PATCH is only allowed for WAITLISTED
         const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_3_ID}`, {
           decision: 'BYPASSED',
           justification: 'test',
@@ -260,29 +261,22 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         expect(res.status).to.equal(400);
         expect(res.body).to.be.an('object');
         expect(res.body.message).to.equal(
-          'Onboarding record must be in WAITLISTED or ONBOARDED state',
+          'Onboarding record must be in WAITLISTED state',
         );
       });
 
       if (!skipPlgOnboardingTests) {
-        it('ONBOARDED: transitions to WAITLISTED with justification as waitlist reason', async () => {
+        it('ONBOARDED: returns 400 because only WAITLISTED records can be reviewed', async () => {
           const http = getHttpClient();
           const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_1_ID}`, {
             decision: 'UPHELD',
             justification: 'Rejecting onboarded domain per request',
           });
-          expect(res.status).to.equal(200);
-          expectPlgOnboardingDto(res.body);
-          expect(res.body.status).to.equal('WAITLISTED');
-          expect(res.body.waitlistReason).to.equal('Rejecting onboarded domain per request');
-          expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
-          expect(res.body.reviews[0].decision).to.equal('UPHELD');
-          expect(res.body.reviews[0].justification).to.equal('Rejecting onboarded domain per request');
-          expect(res.body.reviews[0].reviewedBy).to.be.a('string');
-          expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
+          expect(res.status).to.equal(400);
+          expect(res.body.message).to.equal('Onboarding record must be in WAITLISTED state');
         });
 
-        it('UPHELD: stores review and keeps WAITLISTED status', async () => {
+        it('UPHELD: stores review and transitions WAITLISTED to REJECTED', async () => {
           const http = getHttpClient();
           const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}`, {
             decision: 'UPHELD',
@@ -290,13 +284,107 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           });
           expect(res.status).to.equal(200);
           expectPlgOnboardingDto(res.body);
-          expect(res.body.status).to.equal('WAITLISTED');
+          expect(res.body.status).to.equal('REJECTED');
           expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
           expect(res.body.reviews[0].decision).to.equal('UPHELD');
           expect(res.body.reviews[0].justification).to.equal('Not ready to proceed');
           expect(res.body.reviews[0].reason).to.include('already onboarded');
           expect(res.body.reviews[0].reviewedBy).to.be.a('string');
           expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
+        });
+      }
+    });
+
+    // ── PATCH /plg/onboard/:onboardingId/status ──
+
+    describe('PATCH /plg/onboard/:onboardingId/status', () => {
+      it('returns 403 for non-admin user', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/plg/onboard/${PLG_ONBOARDING_4_ID}/status`, {
+          status: 'OUTDATED',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 for missing status', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_4_ID}/status`, {
+          justification: 'test',
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for invalid status value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_4_ID}/status`, {
+          status: 'REJECTED',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for missing justification', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_4_ID}/status`, {
+          status: 'OUTDATED',
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 404 for non-existent onboardingId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch('/plg/onboard/aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee/status', {
+          status: 'OUTDATED',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 when record is IN_PROGRESS (not a valid source status)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_3_ID}/status`, {
+          status: 'OUTDATED',
+          justification: 'test',
+        });
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.include('IN_PROGRESS');
+      });
+
+      if (!skipPlgOnboardingTests) {
+        it('ONBOARDED: transitions to OUTDATED with OFFBOARDED review', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_1_ID}/status`, {
+            status: 'OUTDATED',
+            justification: 'Offboarding domain at customer request',
+          });
+          expect(res.status).to.equal(200);
+          expectPlgOnboardingDto(res.body);
+          expect(res.body.status).to.equal('OUTDATED');
+          expect(res.body.reviews).to.be.an('array').with.lengthOf(1);
+          expect(res.body.reviews[0].decision).to.equal('OFFBOARDED');
+          expect(res.body.reviews[0].justification).to.equal('Offboarding domain at customer request');
+          expect(res.body.reviews[0].reason).to.include('site1.example.com');
+          expect(res.body.reviews[0].reviewedBy).to.be.a('string');
+          expectISOTimestamp(res.body.reviews[0].reviewedAt, 'reviewedAt');
+        });
+
+        // PLG_ONBOARDING_2 was transitioned to REJECTED by the UPHELD test above
+        it('REJECTED: transitions to OUTDATED with REOPENED review', async () => {
+          const http = getHttpClient();
+          const res = await http.admin.patch(`/plg/onboard/${PLG_ONBOARDING_2_ID}/status`, {
+            status: 'OUTDATED',
+            justification: 'Re-opening rejected domain for new attempt',
+          });
+          expect(res.status).to.equal(200);
+          expectPlgOnboardingDto(res.body);
+          expect(res.body.status).to.equal('OUTDATED');
+          expect(res.body.reviews).to.be.an('array').with.lengthOf(2);
+          expect(res.body.reviews[1].decision).to.equal('REOPENED');
+          expect(res.body.reviews[1].justification).to.equal('Re-opening rejected domain for new attempt');
+          expect(res.body.reviews[1].reason).to.include('waitlisted-site.example.com');
+          expect(res.body.reviews[1].reviewedBy).to.be.a('string');
+          expectISOTimestamp(res.body.reviews[1].reviewedAt, 'reviewedAt');
         });
       }
     });

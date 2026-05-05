@@ -13,8 +13,12 @@
 /**
  * Immutable baseline PLG onboardings for IT tests.
  *
- * - PLG_1: ORG_1 IMS org, site1.example.com, ONBOARDED
- * - PLG_3: ORG_1 IMS org, in-progress-plg-it.example.com, IN_PROGRESS (PATCH admin negative case)
+ * - PLG_1: ORG_1, site1.example.com, ONBOARDED (used for ONBOARDED→OUTDATED transition test)
+ * - PLG_2: ORG_1, waitlisted-site.example.com, WAITLISTED
+ *          (UPHELD test → REJECTED, then REJECTED→OUTDATED)
+ * - PLG_3: ORG_1, in-progress-plg-it.example.com, IN_PROGRESS (negative case for PATCH)
+ * - PLG_4: ORG_1, waitlisted-for-transition.example.com, WAITLISTED
+ *          (WAITLISTED→OUTDATED transition test)
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -55,6 +59,18 @@ export const plgOnboardings = [
     base_url: 'https://www.in-progress-plg-it.example.com',
     status: 'IN_PROGRESS',
     organization_id: '11111111-1111-4111-b111-111111111111',
+    steps: {
+      orgResolved: true,
+    },
+  },
+  {
+    id: 'd4444444-4444-4444-b444-444444444444',
+    ims_org_id: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
+    domain: 'waitlisted-for-transition.example.com',
+    base_url: 'https://www.waitlisted-for-transition.example.com',
+    status: 'WAITLISTED',
+    organization_id: '11111111-1111-4111-b111-111111111111',
+    waitlist_reason: 'Waitlisted pending manual review',
     steps: {
       orgResolved: true,
     },
