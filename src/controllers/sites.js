@@ -1300,7 +1300,14 @@ function SitesController(ctx, log, env) {
         }
       } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
-        if (organization && await accessControlUtil.hasAccess(organization)) {
+        if (!organization) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            { productCode },
+          );
+        }
+        if (await accessControlUtil.hasAccess(organization)) {
           const tierClient = TierClient.createForOrg(context, organization, productCode);
           const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
             .getFirstEnrollment();
@@ -1314,7 +1321,7 @@ function SitesController(ctx, log, env) {
           }
 
           if (!CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement.getTier())) {
-            if (!callerIsInternal) {
+            if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
               return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
             }
           }

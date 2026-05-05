@@ -4849,13 +4849,15 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', false);
     });
 
-    it('should return not found for non-existent imsOrg', async () => {
+    it('should return 404 with no_entitlement_for_product resolveStatus for non-existent imsOrg (external caller)', async () => {
       context.data = { imsOrg: 'nonexistent@AdobeOrg' };
       mockDataAccess.Organization.findByImsOrgId.resolves(null);
 
       const response = await sitesController.resolveSite(context);
 
       expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('nonexistent@AdobeOrg');
     });
 
@@ -5518,7 +5520,7 @@ describe('Sites Controller', () => {
         expect(body.resolveStatus).to.be.undefined;
       });
 
-      it('internal caller, imsOrg path (no siteId): original flow → generic 404 (no resolveStatus)', async () => {
+      it('internal caller, imsOrg path (no siteId): no entitlement → 404 site_not_enrolled', async () => {
         context.data = {
           imsOrg: INTERNAL_ORG_IMS_ID,
           callerImsOrg: INTERNAL_ORG_IMS_ID,
@@ -5529,7 +5531,7 @@ describe('Sites Controller', () => {
 
         expect(response.status).to.equal(404);
         const body = await response.json();
-        expect(body.resolveStatus).to.be.undefined;
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
     });
   });
