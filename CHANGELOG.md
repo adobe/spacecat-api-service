@@ -1,3 +1,10 @@
+# [1.471.0](https://github.com/adobe/spacecat-api-service/compare/v1.470.0...v1.471.0) (2026-05-05)
+
+
+### Features
+
+* enhance referral traffic endpoint response | LLMO-4261 ([#2319](https://github.com/adobe/spacecat-api-service/issues/2319)) ([1974182](https://github.com/adobe/spacecat-api-service/commit/1974182460ecc30ea13910d7c4b5407b69c212bf))
+
 # [1.470.0](https://github.com/adobe/spacecat-api-service/compare/v1.469.0...v1.470.0) (2026-05-05)
 
 
