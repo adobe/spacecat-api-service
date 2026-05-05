@@ -938,7 +938,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/referral-traffic/by-device',
       'GET /sites/:siteId/referral-traffic/by-page-intent',
       'GET /sites/:siteId/referral-traffic/by-url',
-      'GET /sites/:siteId/referral-traffic/url-trend',
+      'GET /sites/:siteId/referral-traffic/by-url-trend',
       'GET /sites/:siteId/referral-traffic/business-impact',
       'GET /sites/:siteId/referral-traffic/weeks',
       'GET /admin/users/:userId',

@@ -631,11 +631,11 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
 const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics']);
 
 // ============================================================================
-// /url-trend
+// /by-url-trend
 // ============================================================================
 
 /**
- * GET /sites/:siteId/referral-traffic/url-trend
+ * GET /sites/:siteId/referral-traffic/by-url-trend
  *
  * Weekly pageview totals for a single URL path.
  * Required query param: urlPath (exact path, e.g. /blog/my-post).
@@ -646,10 +646,10 @@ export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
     return withReferralTrafficAuth(
       context,
       getSiteAndValidateAccess,
-      'url-trend',
+      'by-url-trend',
       async (ctx, client, siteId) => {
         const q = ctx.data || {};
-        const urlPath = q.urlPath || q.url_path || null;
+        const urlPath = (q.urlPath || '').trim() || null;
 
         if (!urlPath) {
           return badRequest('urlPath query parameter is required');
@@ -663,11 +663,11 @@ export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
         });
 
         if (error) {
-          ctx.log.error(`Referral traffic url-trend PostgREST error: ${error.message}`);
+          ctx.log.error(`Referral traffic by-url-trend PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch referral traffic URL trend');
         }
 
-        /* c8 ignore next 2 — PostgREST guarantees non-null data when error is null */
+        /* c8 ignore next 2 — same null-safety pattern as sibling handlers */
         return ok({
           trend: (data ?? []).map((row) => ({
             weekStart: row.week_start,

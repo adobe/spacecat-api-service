@@ -459,7 +459,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
     'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
     'GET /sites/:siteId/referral-traffic/by-url': llmoMysticatController.getReferralTrafficByUrl,
-    'GET /sites/:siteId/referral-traffic/url-trend': llmoMysticatController.getReferralTrafficUrlTrend,
+    'GET /sites/:siteId/referral-traffic/by-url-trend': llmoMysticatController.getReferralTrafficUrlTrend,
     'GET /sites/:siteId/referral-traffic/by-device': llmoMysticatController.getReferralTrafficByDevice,
     'GET /sites/:siteId/referral-traffic/business-impact': llmoMysticatController.getReferralTrafficBusinessImpact,
     'GET /sites/:siteId/referral-traffic/weeks': llmoMysticatController.getReferralTrafficWeeks,

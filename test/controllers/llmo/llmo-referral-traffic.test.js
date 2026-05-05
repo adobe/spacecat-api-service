@@ -686,9 +686,9 @@ describe('llmo-referral-traffic', () => {
     });
   });
 
-  // ── /url-trend ────────────────────────────────────────────────────────────
+  // ── /by-url-trend ─────────────────────────────────────────────────────────
 
-  describe('url-trend', () => {
+  describe('by-url-trend', () => {
     it('returns 400 when urlPath param is missing', async () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
@@ -696,12 +696,11 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(400);
     });
 
-    it('accepts url_path snake_case alias', async () => {
+    it('returns 400 when urlPath is only whitespace', async () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
-      const res = await handler(makeContext({ client, data: { url_path: '/blog' } }));
-      expect(res.status).to.equal(200);
-      expect(client.rpc.getCall(0).args[1].p_url_path).to.equal('/blog');
+      const res = await handler(makeContext({ client, data: { urlPath: '   ' } }));
+      expect(res.status).to.equal(400);
     });
 
     it('returns empty trend array when RPC returns no rows', async () => {
@@ -775,12 +774,12 @@ describe('llmo-referral-traffic', () => {
     });
 
     it('returns 500 and logs error on PostgREST failure', async () => {
-      const client = makeRpcClient({ data: null, error: { message: 'url-trend-fail' } });
+      const client = makeRpcClient({ data: null, error: { message: 'by-url-trend-fail' } });
       const ctx = makeContext({ client, data: { urlPath: '/fail' } });
       const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
-      expect(ctx.log.error).to.have.been.calledWithMatch(/url-trend-fail/);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/by-url-trend-fail/);
     });
   });
 
