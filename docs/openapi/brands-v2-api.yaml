@@ -231,10 +231,12 @@ v2-brand-for-org-site:
       before brandalf flips fully. Pure-v1 organizations receive 404,
       which callers interpret as "no v2 brand — fall back to v1 path."
 
-      Lookup order:
-        1. `brands.site_id == siteId` (primary, set during v2 onboarding).
-        2. `brand_sites` join (legacy fallback, brands created before
-           `baseSiteId` was wired).
+      Lookup: `brands.site_id == siteId` AND `status == 'active'` AND
+      `organization_id == orgId`. `brands.site_id` is the authoritative
+      mapping from a brand to its primary site (set during v2 onboarding).
+      `brand_sites` is intentionally not consulted — that join table also
+      stores citation entries, so a `brand_sites` match does not imply a
+      brand IS the brand for that site.
 
       LLMO-4592 invariant: ACTIVE brands have a unique `(organization_id,
       site_id)` pair. If the data violates that invariant, the first row

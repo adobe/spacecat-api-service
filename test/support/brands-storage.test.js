@@ -348,59 +348,16 @@ describe('brands-storage', () => {
       expect(result).to.include({ id: BRAND_ID, name: 'TestBrand', status: 'active' });
     });
 
-    it('falls back to brand_sites join when primary returns empty', async () => {
-      const fallbackRow = makeBrandRow({
-        brand_sites: [
-          { site_id: SITE_ID, paths: [], sites: { base_url: 'https://other.com' } },
-        ],
-      });
-      const fromStub = sinon.stub();
-      fromStub.onCall(0).returns(createChainableQuery({ data: [], error: null }));
-      fromStub.onCall(1).returns(createChainableQuery({ data: [fallbackRow], error: null }));
-      const postgrestClient = { from: fromStub };
-
-      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
-      expect(result).to.include({ id: BRAND_ID });
-      expect(fromStub).to.have.been.calledTwice;
-    });
-
-    it('returns null when neither primary nor fallback match', async () => {
-      const fromStub = sinon.stub();
-      fromStub.onCall(0).returns(createChainableQuery({ data: [], error: null }));
-      fromStub.onCall(1).returns(createChainableQuery({ data: [], error: null }));
-      const postgrestClient = { from: fromStub };
+    it('returns null when no brand has site_id matching the site', async () => {
+      // brand_sites is intentionally NOT used as a fallback (it stores
+      // citation entries too), so a brand with site_id=NULL never matches.
+      const query = createChainableQuery({ data: [], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
 
       expect(await getBrandBySite(ORG_ID, SITE_ID, postgrestClient)).to.be.null;
     });
 
-    it('drops fallback rows whose brand_sites do not contain the siteId (PostgREST embedded filter caveat)', async () => {
-      // PostgREST returns parent rows even when the embedded filter matches
-      // nothing — re-check brand_sites client-side. This row has no matching
-      // brand_sites entry → must be filtered out.
-      const otherSiteRow = makeBrandRow({
-        brand_sites: [{ site_id: 'some-other-site', paths: [], sites: { base_url: 'https://x.com' } }],
-      });
-      const fromStub = sinon.stub();
-      fromStub.onCall(0).returns(createChainableQuery({ data: [], error: null }));
-      fromStub.onCall(1).returns(createChainableQuery({ data: [otherSiteRow], error: null }));
-      const postgrestClient = { from: fromStub };
-
-      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
-      expect(result).to.be.null;
-    });
-
-    it('also drops fallback rows whose brand_sites is missing entirely', async () => {
-      const noJoinRow = makeBrandRow({ brand_sites: undefined });
-      const fromStub = sinon.stub();
-      fromStub.onCall(0).returns(createChainableQuery({ data: [], error: null }));
-      fromStub.onCall(1).returns(createChainableQuery({ data: [noJoinRow], error: null }));
-      const postgrestClient = { from: fromStub };
-
-      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
-      expect(result).to.be.null;
-    });
-
-    it('returns the first row deterministically and warns when multiple primary matches violate LLMO-4592', async () => {
+    it('returns the first row deterministically and warns when multiple matches violate LLMO-4592', async () => {
       const r1 = makeBrandRow({ id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'A-Brand' });
       const r2 = makeBrandRow({ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'B-Brand' });
       const query = createChainableQuery({ data: [r1, r2], error: null });
@@ -413,27 +370,6 @@ describe('brands-storage', () => {
       expect(log.warn.firstCall.args[0]).to.match(/LLMO-4592/);
     });
 
-    it('warns when multiple fallback matches', async () => {
-      const r1 = makeBrandRow({
-        id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-        brand_sites: [{ site_id: SITE_ID, paths: [], sites: { base_url: 'https://a.com' } }],
-      });
-      const r2 = makeBrandRow({
-        id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
-        brand_sites: [{ site_id: SITE_ID, paths: [], sites: { base_url: 'https://b.com' } }],
-      });
-      const fromStub = sinon.stub();
-      fromStub.onCall(0).returns(createChainableQuery({ data: [], error: null }));
-      fromStub.onCall(1).returns(createChainableQuery({ data: [r1, r2], error: null }));
-      const postgrestClient = { from: fromStub };
-      const log = { warn: sinon.stub() };
-
-      const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient, log);
-      expect(result.id).to.equal('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
-      expect(log.warn).to.have.been.calledOnce;
-      expect(log.warn.firstCall.args[0]).to.match(/Multiple active brands via brand_sites/);
-    });
-
     it('logs nothing when log has no warn method (single match)', async () => {
       const dbRow = makeBrandRow({ site_id: SITE_ID });
       const query = createChainableQuery({ data: [dbRow], error: null });
@@ -444,19 +380,9 @@ describe('brands-storage', () => {
       expect(result.id).to.equal(BRAND_ID);
     });
 
-    it('throws on primary query database error', async () => {
+    it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
       const postgrestClient = { from: sinon.stub().returns(query) };
-
-      await expect(getBrandBySite(ORG_ID, SITE_ID, postgrestClient))
-        .to.be.rejectedWith('Failed to resolve brand for site');
-    });
-
-    it('throws on fallback query database error', async () => {
-      const fromStub = sinon.stub();
-      fromStub.onCall(0).returns(createChainableQuery({ data: [], error: null }));
-      fromStub.onCall(1).returns(createChainableQuery({ data: null, error: { message: 'fallback DB error' } }));
-      const postgrestClient = { from: fromStub };
 
       await expect(getBrandBySite(ORG_ID, SITE_ID, postgrestClient))
         .to.be.rejectedWith('Failed to resolve brand for site');

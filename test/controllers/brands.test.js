@@ -2109,7 +2109,12 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body).to.deep.equal(SAMPLE_BRAND);
-      expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnceWith(ORGANIZATION_ID);
+      expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
+      const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
+      expect(orgArg).to.equal(ORGANIZATION_ID);
+      // readOnly: true is load-bearing — without it the resolver could write
+      // to feature_flags from a GET (row-1 brandalf-revert side effect).
+      expect(optsArg).to.deep.equal({ readOnly: true });
       expect(getBrandBySiteStub).to.have.been.calledOnce;
       expect(getBrandBySiteStub.firstCall.args[0]).to.equal(ORGANIZATION_ID);
       expect(getBrandBySiteStub.firstCall.args[1]).to.equal(SITE_ID);
@@ -2263,28 +2268,6 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(403);
       // Resolver and storage should never be reached when site/org mismatch.
       expect(getBrandBySiteStub).to.not.have.been.called;
-    });
-
-    it('passes readOnly: true to resolveLlmoOnboardingMode', async () => {
-      // readOnly keeps the GET idempotent (no flag-flip side effect under
-      // kill switch). The resolver itself unconditionally treats
-      // brandalf_migration=true as v2, so orgs in the dual-publish window
-      // (Adobe today) surface their v2 brand to the BP runner without an
-      // opt-in option.
-      const { controller, resolveLlmoOnboardingModeStub } = await buildController({
-        mode: 'v2',
-        brand: SAMPLE_BRAND,
-      });
-
-      await controller.getBrandForOrgSite({
-        ...context,
-        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
-        dataAccess: mockDataAccess,
-      });
-
-      expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
-      const callArgs = resolveLlmoOnboardingModeStub.firstCall.args;
-      expect(callArgs[2]).to.deep.equal({ readOnly: true });
     });
 
     it('returns 503 when postgrestClient is unavailable', async () => {

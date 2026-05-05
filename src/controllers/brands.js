@@ -657,9 +657,10 @@ function BrandsController(ctx, log, env) {
    *
    * Gated by `resolveLlmoOnboardingMode` — returns 404 when the org is in v1
    * mode (neither brandalf nor brandalf_migration set, or kill-switch
-   * downgrade). When v2 and an active brand row matches the site (primary:
-   * brands.site_id; fallback: brand_sites join per LLMO-4592), returns the
-   * full V2 brand object so callers can pick `id` (or any other field).
+   * downgrade). When v2 and an active brand row exists with
+   * `brands.site_id === siteId` (the authoritative site mapping per
+   * LLMO-4592), returns the full V2 brand object so callers can pick `id`
+   * (or any other field).
    *
    * @returns {Promise<Response>} The active brand, or 404.
    */
