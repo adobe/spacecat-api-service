@@ -7919,11 +7919,13 @@ AgenticTrafficByUrlRow:
     hitsTrend:
       type: array
       description: |
-        Multi-week sparkline for this URL — array of `{weekStart, hits}` points
+        Multi-week sparkline for this URL — array of `{weekStart, value}` points
         scoped by the same filters (including `agentTypes`). Used by the URL
         Inspector PG dialog to render per-URL agentic charts without a second
         request. Empty array when the URL has no agentic activity in the
-        requested window.
+        requested window. The `value` field name (rather than `hits`) is
+        preserved from the underlying `rpc_agentic_traffic_by_url` week_series
+        payload to stay aligned with `UrlInspectorOwnedUrlRow.agenticHitsTrend`.
       items:
         type: object
         properties:
@@ -7931,10 +7933,10 @@ AgenticTrafficByUrlRow:
             type: string
             format: date
             example: '2026-02-09'
-          hits:
+          value:
             type: integer
             example: 12
-        required: [weekStart, hits]
+        required: [weekStart, value]
   required:
     - host
     - urlPath
