@@ -1331,7 +1331,7 @@ function SitesController(ctx, log, env) {
           }
 
           if (enrolledSite && (accessControlUtil.hasAdminAccess()
-            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement?.getTier()))) {
+            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement.getTier()))) {
             const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             return ok({
               data: {
