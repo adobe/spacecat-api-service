@@ -2099,6 +2099,114 @@ llmo-edge-optimize-status:
     security:
       - api_key: [ ]
 
+llmo-probe-edge-optimize:
+  get:
+    tags:
+      - llmo
+      - llmo-probes
+    summary: Edge Optimize connectivity probe — detect WAF/Bot Manager blocking
+    description: |
+      Checks whether a WAF or Bot Manager is silently blocking the
+      `AdobeEdgeOptimize/1.0` user-agent at the customer's origin.
+
+      This is the first entry in the **`/llmo/probes/`** namespace.  Each LLMO
+      feature that depends on origin reachability can expose its own probe
+      endpoint here.
+
+      **How it works**:
+      The request is proxied through the Optimize at Edge worker
+      (`live.edgeoptimize.net`), which originates the fetch using the
+      production `AdobeEdgeOptimize/1.0` user-agent from the same edge IPs
+      as real optimizer traffic. This is critical because WAFs that combine
+      UA-matching with IP-reputation (e.g. Akamai BOTMAN) only trigger on
+      traffic from the optimizer's actual edge IPs.
+
+      **Detection logic**:
+      | Outcome | Condition | Result |
+      |---------|-----------|--------|
+      | Hard block | HTTP 401, 403, 406, 429, or 503 | `reachable: false, blocked: true` |
+      | CF challenge | `cf-mitigated: challenge` header (any status) | `reachable: false, blocked: true` |
+      | Soft block | 2xx HTML body containing WAF/bot-challenge keywords | `reachable: false, blocked: true` |
+      | Clean pass | 2xx with real content | `reachable: true, blocked: false` |
+      | Network/timeout | Fetch fails or times out | `reachable: false, blocked: null` |
+    operationId: probeEdgeOptimizeConnectivity
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: >
+          Probe result (always 200 — inspect `reachable` and `blocked` fields
+          for the actual connectivity status).
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - probedUrl
+                - reachable
+              properties:
+                reachable:
+                  type: boolean
+                  description: Whether the origin returned real content (not a WAF block).
+                blocked:
+                  type:
+                    - boolean
+                    - 'null'
+                  description: >
+                    `true` — WAF/Bot Manager is blocking the UA.
+                    `false` — not blocked.
+                    `null` — could not determine (network/timeout error).
+                statusCode:
+                  type: integer
+                  description: HTTP status code observed from the origin (absent on network errors).
+                  example: 403
+                probedUrl:
+                  type: string
+                  description: The URL that was probed.
+                  example: 'https://www.acme.com/'
+            examples:
+              hardBlock:
+                summary: WAF hard block (403)
+                value:
+                  reachable: false
+                  blocked: true
+                  statusCode: 403
+                  probedUrl: 'https://www.acme.com/'
+              softBlock:
+                summary: Soft block — bot-challenge page (200)
+                value:
+                  reachable: false
+                  blocked: true
+                  statusCode: 200
+                  probedUrl: 'https://www.acme.com/'
+              cleanPass:
+                summary: No WAF blocking
+                value:
+                  reachable: true
+                  blocked: false
+                  statusCode: 200
+                  probedUrl: 'https://www.acme.com/'
+              networkTimeout:
+                summary: Origin unreachable (network/timeout)
+                value:
+                  reachable: false
+                  blocked: null
+                  probedUrl: 'https://www.acme.com/'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
 llmo-agentic-traffic-url-brand-presence:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -3136,6 +3244,59 @@ llmo-agentic-traffic-movers:
           application/json:
             schema:
               $ref: './schemas.yaml#/AgenticTrafficMovers'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '500': { $ref: './responses.yaml#/500' }
+      '503':
+        description: PostgREST / mysticat not configured for this deployment
+    security:
+      - api_key: []
+      - ims_key: []
+      - scoped_api_key: []
+
+brand-presence-prompt-execution-status:
+  parameters: *url-inspector-common-params
+  get:
+    tags:
+      - llmo
+    summary: Aggregated prompt execution status for a batch of topics
+    description: |
+      Returns one `{ topicId, prompt, regionCode, matchedModels[] }` item per unique
+      (topic, prompt, region) combination found in execution data for the given date
+      range and topic IDs. A single call replaces the previous N×7 per-model
+      topic-prompts fan-out used by the Prompts Management status column.
+    operationId: getPromptExecutionStatus
+    parameters:
+      - name: promptIds
+        in: query
+        required: true
+        description: Comma-separated list of prompt UUIDs (V2Prompt.id) currently visible on the page (at least one required)
+        schema:
+          type: string
+          example: 'aaaaaaaa-0000-7000-8000-000000000001,bbbbbbbb-0000-7000-8000-000000000002'
+      - name: startDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+        description: Start of date range (defaults to 28 days ago)
+      - name: endDate
+        in: query
+        required: false
+        schema: { type: string, format: date }
+        description: End of date range (defaults to today)
+      - name: siteId
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+        description: Optional site UUID to narrow results to a single site
+    responses:
+      '200':
+        description: Aggregated execution status items
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PromptExecutionStatusResponse'
       '400': { $ref: './responses.yaml#/400' }
       '401': { $ref: './responses.yaml#/401' }
       '403': { $ref: './responses.yaml#/403' }
