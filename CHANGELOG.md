@@ -1,3 +1,10 @@
+# [1.474.0](https://github.com/adobe/spacecat-api-service/compare/v1.473.1...v1.474.0) (2026-05-05)
+
+
+### Features
+
+* **llmo:** forward agentTypes to agentic-traffic RPCs | LLMO-4526 ([#2290](https://github.com/adobe/spacecat-api-service/issues/2290)) ([72cc475](https://github.com/adobe/spacecat-api-service/commit/72cc475195796325c914d918f66a6ab9fbae08aa)), closes [adobe/mysticat-data-service#490](https://github.com/adobe/mysticat-data-service/issues/490) [mysticat#490](https://github.com/mysticat/issues/490) [adobe/mysticat-data-service#490](https://github.com/adobe/mysticat-data-service/issues/490) [adobe/project-elmo-ui#1640](https://github.com/adobe/project-elmo-ui/issues/1640) [mysticat#490](https://github.com/mysticat/issues/490)
+
 ## [1.473.1](https://github.com/adobe/spacecat-api-service/compare/v1.473.0...v1.473.1) (2026-05-05)
 
 
