@@ -17,6 +17,7 @@ import {
 } from '../../../utils/slack/base.js';
 
 import { findDeliveryType } from '../../utils.js';
+import { ensureSiteLocale } from '../../locale.js';
 
 import BaseCommand from './base.js';
 
@@ -91,6 +92,8 @@ function AddSiteCommand(context) {
         await say(':x: Problem adding the site. Please contact the admins.');
         return;
       }
+
+      await ensureSiteLocale(newSite, baseURL, log);
 
       let message = `:white_check_mark: *Successfully added new site <${baseURL}|${baseURL}>*.\n`;
       message += `:delivrer: *Delivery type:* ${deliveryType}.\n`;

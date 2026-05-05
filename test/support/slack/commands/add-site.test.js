@@ -14,8 +14,7 @@ import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import nock from 'nock';
-
-import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
+import esmock from 'esmock';
 
 use(sinonChai);
 
@@ -26,8 +25,26 @@ describe('AddSiteCommand', () => {
   let slackContext;
   let dataAccessStub;
   let sqsStub;
+  let AddSiteCommand;
+  let ensureSiteLocaleStub;
+
+  before(async function loadModule() {
+    this.timeout(10000);
+    ensureSiteLocaleStub = sinon.stub().resolves();
+    ({ default: AddSiteCommand } = await esmock(
+      '../../../../src/support/slack/commands/add-site.js',
+      {
+        '../../../../src/support/locale.js': {
+          ensureSiteLocale: (...args) => ensureSiteLocaleStub(...args),
+        },
+      },
+    ));
+  });
 
   beforeEach(() => {
+    ensureSiteLocaleStub.resetHistory();
+    ensureSiteLocaleStub.resetBehavior();
+    ensureSiteLocaleStub.resolves();
     const configuration = {
       isHandlerEnabledForSite: sinon.stub(),
     };
@@ -100,9 +117,20 @@ describe('AddSiteCommand', () => {
       expect(dataAccessStub.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
       });
+      expect(ensureSiteLocaleStub).to.have.been.calledOnce;
+      expect(ensureSiteLocaleStub.firstCall.args[1]).to.equal(baseURL);
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
       expect(slackContext.client.chat.postMessage.calledOnce).to.be.true;
       expect(slackContext.client.chat.update.calledOnce).to.be.true;
+    });
+
+    it('does not call ensureSiteLocale when site is already added', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({});
+
+      const command = AddSiteCommand(context);
+      await command.handleExecution(['example.com'], slackContext);
+
+      expect(ensureSiteLocaleStub).to.not.have.been.called;
     });
 
     it('warns when an invalid site base URL is provided', async () => {

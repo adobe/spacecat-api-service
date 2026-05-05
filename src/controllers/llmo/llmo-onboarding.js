@@ -35,6 +35,7 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
+import { ensureSiteLocale } from '../../support/locale.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -957,7 +958,7 @@ export async function determineOverrideBaseURL(baseURL, context) {
  * @returns {Promise<object>} The site object
  */
 export async function createOrFindSite(baseURL, organizationId, context, deliveryType) {
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
   const { Site } = dataAccess;
 
   const site = await Site.findByBaseURL(baseURL);
@@ -981,6 +982,7 @@ export async function createOrFindSite(baseURL, organizationId, context, deliver
   }
 
   const newSite = await Site.create(siteData);
+  await ensureSiteLocale(newSite, baseURL, log);
   return newSite;
 }
 
