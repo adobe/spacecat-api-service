@@ -16,6 +16,11 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
+import {
+  LLM_BOT_AGENTS,
+  BOT_PROBE_TIMEOUT_MS,
+  classifyBotAgentResponse,
+} from '@adobe/spacecat-shared-tokowaka-client';
 import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
 import { UnauthorizedProductError } from '../../../src/support/errors.js';
 
@@ -182,6 +187,9 @@ describe('LlmoController', () => {
         }
       },
       getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+      LLM_BOT_AGENTS,
+      BOT_PROBE_TIMEOUT_MS,
+      classifyBotAgentResponse,
     },
   });
 
@@ -308,6 +316,9 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+        LLM_BOT_AGENTS,
+        BOT_PROBE_TIMEOUT_MS,
+        classifyBotAgentResponse,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -377,6 +388,9 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+        LLM_BOT_AGENTS,
+        BOT_PROBE_TIMEOUT_MS,
+        classifyBotAgentResponse,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -421,6 +435,9 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+        LLM_BOT_AGENTS,
+        BOT_PROBE_TIMEOUT_MS,
+        classifyBotAgentResponse,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),
@@ -462,6 +479,9 @@ describe('LlmoController', () => {
           }
         },
         getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+        LLM_BOT_AGENTS,
+        BOT_PROBE_TIMEOUT_MS,
+        classifyBotAgentResponse,
       },
       '../../../src/utils/slack/base.js': {
         postSlackMessage: (...args) => postSlackMessageStub(...args),

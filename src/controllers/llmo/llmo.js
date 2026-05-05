@@ -32,7 +32,12 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, {
+  calculateForwardedHost,
+  LLM_BOT_AGENTS,
+  BOT_PROBE_TIMEOUT_MS,
+  classifyBotAgentResponse,
+} from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
@@ -67,11 +72,6 @@ import {
   appendRowsToQueryIndex,
   previewAndPublishQueryIndex,
 } from './llmo-onboarding.js';
-import {
-  LLM_BOT_AGENTS,
-  BOT_PROBE_TIMEOUT_MS,
-  classifyBotAgentResponse,
-} from '../../support/llm-bot-probe-utils.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
