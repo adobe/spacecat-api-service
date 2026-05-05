@@ -288,6 +288,9 @@ export async function ensureInitialCustomerConfigV2({
  */
 export function generateDataFolder(baseURL, env = 'dev') {
   const url = new URL(baseURL);
+  if (!url.hostname) {
+    throw new TypeError('Invalid baseURL: hostname is required');
+  }
   const sanitize = (s) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
   const host = sanitize(url.hostname);
   const segments = url.pathname.split('/').filter(Boolean)

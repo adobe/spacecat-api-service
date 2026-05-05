@@ -413,6 +413,11 @@ describe('LLMO Onboarding Functions', () => {
     it('should throw on a malformed base URL', () => {
       expect(() => generateDataFolder('not a url', 'prod')).to.throw(TypeError);
     });
+
+    it('should throw when baseURL has no hostname', () => {
+      expect(() => generateDataFolder('file:///etc/passwd', 'prod'))
+        .to.throw(TypeError, 'hostname is required');
+    });
   });
 
   describe('validateSiteNotOnboarded', () => {
