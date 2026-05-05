@@ -261,13 +261,20 @@ export async function ensureInitialCustomerConfigV2({
 }
 
 /**
- * Generates the data folder name from a baseURL.
+ * Generates the SharePoint data folder name from a baseURL.
  *
- * The hostname and (if present) each URL path segment are percent-decoded and
- * individually sanitized (non-alphanumeric runs replaced with `-`, lowercased -
- * paths are case-folded deliberately so /Kings and /kings map to the same folder),
- * then joined with `--` as a path-segment delimiter. The double-hyphen delimiter
- * cannot appear in a sanitized segment, so distinct paths cannot collide.
+ * The hostname (per RFC 1035, case-insensitive) and each URL path segment are
+ * percent-decoded and individually sanitized: runs of non-alphanumeric characters
+ * are replaced with a single `-`, leading/trailing `-` are trimmed, and the
+ * result is lowercased. Segments that reduce to empty after sanitization are
+ * dropped. Sanitized parts are joined with `--` as the path-segment delimiter.
+ *
+ * The `--` delimiter cannot appear inside a sanitized segment (any run of
+ * non-alphanumeric characters collapses to a single `-`), so URLs that differ
+ * in path structure produce distinct folder names. Path segments differing only
+ * in punctuation (e.g. `us-kings` vs `us_kings`) produce the same sanitized
+ * segment and therefore the same folder; this is an inherent limitation of
+ * lossy sanitization.
  *
  * Examples:
  *   https://nba.com           -> nba-com
@@ -275,20 +282,23 @@ export async function ensureInitialCustomerConfigV2({
  *   https://nba.com/us/kings  -> nba-com--us--kings
  *
  * @param {string} baseURL - The site's base URL (must be a fully-qualified URL).
- * @param {string} env - The environment ('prod' or anything else, treated as dev).
+ * @param {string} env - The environment ('prod' for production, anything else is
+ *   treated as dev and prefixed with 'dev/').
  * @returns {string} The data folder name (prefixed with 'dev/' for non-prod).
  */
 export function generateDataFolder(baseURL, env = 'dev') {
   const url = new URL(baseURL);
-  const host = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().replace(/-+/g, '-');
+  const sanitize = (s) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  const host = sanitize(url.hostname);
   const segments = url.pathname.split('/').filter(Boolean)
     .map((seg) => {
       let decoded = seg;
       try {
         decoded = decodeURIComponent(seg);
-      } catch { /* keep raw on malformed percent-encoding (e.g. non-UTF-8 sequences like %FF) */ }
-      return decoded.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().replace(/-+/g, '-');
-    });
+      } catch { /* keep raw on percent-encoded sequences that are not valid UTF-8 */ }
+      return sanitize(decoded);
+    })
+    .filter(Boolean);
   const dataFolderName = segments.length > 0 ? `${host}--${segments.join('--')}` : host;
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 }
