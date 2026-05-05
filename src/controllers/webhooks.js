@@ -1,0 +1,175 @@
+/*
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+// The request body is HMAC-verified by GitHubWebhookHmacHandler.
+// Headers (x-github-event, x-github-delivery) are NOT part of GitHub's signed
+// material - only the body is signed. Pass header-derived values as structured
+// log context, never interpolated into log message strings (log injection risk).
+
+import {
+  accepted, noContent, badRequest, internalServerError,
+} from '@adobe/spacecat-shared-http-utils';
+import wrap from '@adobe/helix-shared-wrap';
+import { getSkipReason, EVENT_JOB_MAP } from '../utils/github-trigger-rules.js';
+
+const DEFAULT_WORKSPACE_REPOS = [
+  'adobe/mysticat-architecture',
+  'adobe/mysticat-ai-native-guidelines',
+  'Adobe-AEM-Sites/aem-sites-architecture',
+];
+
+// owner/repo format: non-slash owner + single slash + non-slash repo
+const WORKSPACE_REPO_PATTERN = /^[^/\s]+\/[^/\s]+$/;
+
+function getWorkspaceRepos(env, log) {
+  const raw = env.MYSTICAT_WORKSPACE_REPOS;
+  if (!raw) {
+    log.warn('MYSTICAT_WORKSPACE_REPOS not set, using built-in defaults', {
+      defaults: DEFAULT_WORKSPACE_REPOS,
+    });
+    return DEFAULT_WORKSPACE_REPOS;
+  }
+  const entries = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const valid = [];
+  const invalid = [];
+  entries.forEach((entry) => {
+    if (WORKSPACE_REPO_PATTERN.test(entry)) {
+      valid.push(entry);
+    } else {
+      invalid.push(entry);
+    }
+  });
+  if (invalid.length > 0) {
+    log.warn('MYSTICAT_WORKSPACE_REPOS has invalid entries (expected owner/repo format)', {
+      invalid,
+    });
+  }
+  if (valid.length === 0) {
+    log.warn('MYSTICAT_WORKSPACE_REPOS produced no valid entries, falling back to defaults', {
+      defaults: DEFAULT_WORKSPACE_REPOS,
+    });
+    return DEFAULT_WORKSPACE_REPOS;
+  }
+  return valid;
+}
+
+function WebhooksController(context) {
+  const { sqs, log, env } = context;
+  const workspaceRepos = getWorkspaceRepos(env, log);
+
+  function errorHandler(fn) {
+    return async (ctx) => {
+      try {
+        return await fn(ctx);
+      } catch (e) {
+        log.error('GitHub webhook handler error', e);
+        return internalServerError('Internal error');
+      }
+    };
+  }
+
+  const processGitHubWebhook = wrap(async (ctx) => {
+    const event = ctx.headers?.['x-github-event'];
+    const deliveryId = ctx.headers?.['x-github-delivery'];
+    const { data } = ctx;
+
+    // Validate required config up front. GITHUB_APP_SLUG is a security-relevant
+    // decision (which bot can trigger automated runs). Missing config must be
+    // a 5xx so GitHub retries once it is fixed — returning 204 here would
+    // mean GitHub treats the delivery as succeeded and never redelivers,
+    // permanently losing every webhook during the misconfiguration window.
+    if (!env.GITHUB_APP_SLUG) {
+      log.error('GITHUB_APP_SLUG not configured', { deliveryId });
+      return internalServerError('GITHUB_APP_SLUG not configured');
+    }
+
+    // Validate required payload fields
+    if (!data?.action) {
+      return badRequest('Missing required field: action');
+    }
+    if (!data?.installation?.id) {
+      return badRequest('Missing required field: installation.id');
+    }
+
+    // Check event-to-job-type mapping
+    const jobType = EVENT_JOB_MAP[event];
+    if (!jobType) {
+      log.info('Skipping unmapped event', { event, deliveryId });
+      return noContent();
+    }
+
+    const { action, pull_request: pr } = data;
+
+    // Validate pull_request-specific fields BEFORE getSkipReason. Doing so
+    // prevents a missing pull_request from surfacing as a misleading
+    // "non-default branch: undefined" 204 skip instead of a 400 bad request.
+    if (!pr?.number) {
+      return badRequest('Missing required field: pull_request.number');
+    }
+    if (!data.repository?.owner?.login) {
+      return badRequest('Missing required field: repository.owner.login');
+    }
+    if (!data.repository?.name) {
+      return badRequest('Missing required field: repository.name');
+    }
+
+    // Apply trigger rules (returns skip reason string or null)
+    const skipReason = getSkipReason(data, action, env);
+    if (skipReason) {
+      log.info('Skipping webhook', {
+        skipReason,
+        deliveryId,
+        event,
+        action,
+        owner: data.repository.owner.login,
+        repo: data.repository.name,
+        prNumber: pr.number,
+      });
+      return noContent();
+    }
+
+    // Build and enqueue job payload
+    const jobPayload = {
+      owner: data.repository.owner.login,
+      repo: data.repository.name,
+      event_type: event,
+      event_action: action,
+      event_ref: String(pr.number),
+      installation_id: String(data.installation.id),
+      delivery_id: deliveryId,
+      job_type: jobType,
+      workspace_repos: workspaceRepos,
+      retry_count: 0,
+    };
+
+    const queueUrl = env.MYSTICAT_GITHUB_JOBS_QUEUE_URL;
+    await sqs.sendMessage(queueUrl, jobPayload);
+
+    log.info('Enqueued webhook job', {
+      jobType,
+      deliveryId,
+      event,
+      action,
+      owner: jobPayload.owner,
+      repo: jobPayload.repo,
+      prNumber: pr.number,
+      installationId: jobPayload.installation_id,
+    });
+
+    return accepted({ status: 'accepted' });
+  })
+    .with(errorHandler);
+
+  return { processGitHubWebhook };
+}
+
+export default WebhooksController;

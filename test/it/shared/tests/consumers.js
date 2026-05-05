@@ -15,6 +15,7 @@ import { expect } from 'chai';
 import {
   CONSUMER_1_ID,
   CONSUMER_1_CLIENT_ID,
+  CONSUMER_2_ID,
   NON_EXISTENT_CONSUMER_ID,
 } from '../seed-ids.js';
 
@@ -52,12 +53,12 @@ export default function consumerTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/consumers');
         expect(res.status).to.equal(200);
-        expect(res.body).to.be.an('array').with.lengthOf(1);
-        expectConsumerDto(res.body[0]);
-        expect(res.body[0].consumerId).to.equal(CONSUMER_1_ID);
-        expect(res.body[0].clientId).to.equal(CONSUMER_1_CLIENT_ID);
-        expect(res.body[0].consumerName).to.equal('IT Test Consumer');
-        expect(res.body[0].status).to.equal('ACTIVE');
+        // CONSUMER_1 (site:read + site:write) and CONSUMER_2 (readAll capabilities).
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((c) => expectConsumerDto(c));
+        const ids = res.body.map((c) => c.consumerId);
+        expect(ids).to.include(CONSUMER_1_ID);
+        expect(ids).to.include(CONSUMER_2_ID);
       });
 
       it('user: returns 403 (requires S2S admin)', async () => {

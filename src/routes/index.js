@@ -97,6 +97,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} siteDetectionController - The site detection controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
+ * @param {Object} webhooksController - GitHub webhook handler controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -151,6 +152,7 @@ export default function getRouteHandlers(
   siteDetectionController,
   plgOnboardingController,
   drsBpPgAuditController,
+  webhooksController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -171,6 +173,7 @@ export default function getRouteHandlers(
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
+    'POST /webhooks/github': webhooksController.processGitHubWebhook,
     'GET /organizations': organizationsController.getAll,
     'POST /organizations': organizationsController.createOrganization,
     'GET /organizations/:organizationId': organizationsController.getByID,
@@ -432,6 +435,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
+    'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
@@ -449,6 +453,19 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
     'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
+    'GET /sites/:siteId/agentic-traffic/has-data': llmoMysticatController.getAgenticTrafficHasData,
+
+    // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
+    'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
+    'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
+    'GET /sites/:siteId/referral-traffic/by-platform': llmoMysticatController.getReferralTrafficByPlatform,
+    'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
+    'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
+    'GET /sites/:siteId/referral-traffic/by-url': llmoMysticatController.getReferralTrafficByUrl,
+    'GET /sites/:siteId/referral-traffic/by-device': llmoMysticatController.getReferralTrafficByDevice,
+    'GET /sites/:siteId/referral-traffic/business-impact': llmoMysticatController.getReferralTrafficBusinessImpact,
+    'GET /sites/:siteId/referral-traffic/weeks': llmoMysticatController.getReferralTrafficWeeks,
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
@@ -466,12 +483,16 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': llmoMysticatController.getTopics,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
     'GET /org/:spaceCatId/brands/all/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
     'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,

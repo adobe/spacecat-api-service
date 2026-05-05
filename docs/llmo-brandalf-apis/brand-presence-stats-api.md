@@ -28,10 +28,17 @@ Parameters are passed in the request body (POST-style) or as query params, depen
 | `model` | `platform` | string | `chatgpt` | LLM model (e.g. chatgpt, gemini, copilot) |
 | `showTrends` | `show_trends` | boolean/string | `false` | When truthy, adds weekly trends (max 8 weeks, newest-first) |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site. Validated against org membership. |
-| `categoryId` | `category_id` | string (UUID) | — | Filter by category. Must be valid UUID. |
+| `categoryId` | `category_id` | string (UUID or name) | — | One category: UUID matches `category_id`; non-UUID matches `category_name`. Merged with `categoryIds`. |
+| `categoryIds` | `category_ids` | string or array | — | Multiple categories (comma-separated or repeated). UUIDs and non-UUID names must not be combined (see errors). |
 | `topicIds` | — | string or array | — | Filter by topic UUID(s). Single UUID, comma-separated, or repeated param. |
-| `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
+| `regionCode` | `region_code`, `region` | string | — | One region code (e.g. US, DE, WW). Merged with `regionCodes`. |
+| `regionCodes` | `region_codes` | string or array | — | Multiple regions (comma-separated or repeated). |
 | `origin` | — | string | — | Filter by origin (e.g. human, ai) |
+
+**Multi-value stats behavior:** When more than one category (all UUIDs or all names) or more than one `regionCodes` entry is present, the handler calls `rpc_brand_presence_stats` once per Cartesian slice and **merges** rows by summing execution-derived counts and taking a **weighted** mean of `average_visibility_score` (weights = `total_executions` per slice). Merging assumes slices are **disjoint** (each execution matches at most one slice); overlapping slices would double-count.
+
+**Errors (stats):**
+- **400** `Cannot combine category UUID(s) with category name(s) for aggregated stats.` — mixed UUID + name in the same request.
 
 **showTrends behavior:**
 - Accepted values: `true`, `1`, `"true"`, `"1"` (case-insensitive)
@@ -67,10 +74,11 @@ The API calls the mysticat-data-service PostgREST RPC:
 | `p_model` | `model` | LLM model |
 | `p_brand_id` | `brandId` (when not `all`) | Brand UUID or NULL |
 | `p_site_id` | `siteId` | Site UUID or NULL |
-| `p_category_id` | `categoryId` (if valid UUID) | Category UUID or NULL |
+| `p_category_id` | Single UUID category (after merge) | Category UUID or NULL |
+| `p_category_name` | Single name category (no UUID in filter) | Name string or NULL (omitted when NULL) |
 | `p_topic_ids` | `topicIds` (parsed to array) | UUID array or NULL |
 | `p_origin` | `origin` | Origin string or NULL |
-| `p_region_code` | `regionCode` | Region code or NULL |
+| `p_region_code` | Single region (after merge) | Region code or NULL |
 
 **SQL query (conceptual):**
 ```sql
@@ -87,6 +95,7 @@ WHERE organization_id = p_organization_id
   AND (p_brand_id IS NULL OR brand_id = p_brand_id)
   AND (p_site_id IS NULL OR site_id = p_site_id)
   AND (p_category_id IS NULL OR category_id = p_category_id)
+  AND (p_category_name IS NULL OR category_name = p_category_name)
   AND (p_topic_ids IS NULL OR cardinality(p_topic_ids) = 0 OR topic_id = ANY(p_topic_ids))
   AND (p_origin IS NULL OR origin = p_origin)
   AND (p_region_code IS NULL OR region_code = p_region_code);
