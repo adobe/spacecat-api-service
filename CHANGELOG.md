@@ -1,3 +1,15 @@
+# [1.475.0](https://github.com/adobe/spacecat-api-service/compare/v1.474.1...v1.475.0) (2026-05-05)
+
+
+### Bug Fixes
+
+* **LLMO-4683:** forward operator-supplied region to V1 prompt generation ([#2312](https://github.com/adobe/spacecat-api-service/issues/2312)) ([54294c3](https://github.com/adobe/spacecat-api-service/commit/54294c358ac65f5ec596fb77e70edc801e09583c)), closes [adobe-rnd/llmo-data-retrieval-service#1426](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1426) [adobe-rnd/llmo-data-retrieval-service#1223](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1223) [adobe-rnd/llmo-data-retrieval-service#1426](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1426)
+
+
+### Features
+
+* **brands:** add (org, site) → brand resolver endpoint (LLMO-4716) ([#2334](https://github.com/adobe/spacecat-api-service/issues/2334)) ([ac212e8](https://github.com/adobe/spacecat-api-service/commit/ac212e82afe77bd5cc524b8fb8aa3e33a9785efa)), closes [hi#traffic](https://github.com/hi/issues/traffic)
+
 ## [1.474.1](https://github.com/adobe/spacecat-api-service/compare/v1.474.0...v1.474.1) (2026-05-05)
 
 
