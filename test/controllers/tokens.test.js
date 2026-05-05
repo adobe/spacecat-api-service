@@ -138,7 +138,7 @@ describe('Tokens Controller', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.tokens).to.have.lengthOf(2);
-      expect(body.pagination).to.deep.equal({ limit: 10, cursor: null, hasMore: false });
+      expect(body.pagination).to.deep.equal({ cursor: null });
       expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
         siteId,
         { limit: 10, cursor: undefined, returnCursor: true },
@@ -217,7 +217,7 @@ describe('Tokens Controller', () => {
       const result = await tokensController.getAll(context);
 
       const body = await result.json();
-      expect(body.pagination).to.deep.equal({ limit: 1, cursor: 'next-page-token', hasMore: true });
+      expect(body.pagination).to.deep.equal({ cursor: 'next-page-token' });
       expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
         siteId,
         sinon.match({ limit: 1, cursor: 'some-cursor', returnCursor: true }),
@@ -235,7 +235,7 @@ describe('Tokens Controller', () => {
 
       const body = await result.json();
       expect(body.tokens).to.deep.equal([]);
-      expect(body.pagination.hasMore).to.be.false;
+      expect(body.pagination.cursor).to.be.null;
     });
 
     it('caps limit at MAX_LIMIT (500)', async () => {
@@ -316,7 +316,7 @@ describe('Tokens Controller', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.pagination.limit).to.equal(100);
+      expect(body.pagination.cursor).to.be.null;
       expect(mockDataAccess.Token.allBySiteId).to.have.been.calledWith(
         siteId,
         { limit: 100, cursor: undefined, returnCursor: true },
