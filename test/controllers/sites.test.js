@@ -5161,7 +5161,7 @@ describe('Sites Controller', () => {
       // PLG-wizard triggers are remapped to site_not_enrolled
       // ────────────────────────────────────────────────────────────────────────────
 
-      it('internal caller, PRE_ONBOARD tier → 404 site_not_enrolled (remapped from aso_pre_onboard)', async () => {
+      it('internal caller, PRE_ONBOARD + not enrolled → 404 site_not_enrolled (tier check skipped, enrollment decides)', async () => {
         context.data = {
           siteId: SITE_IDS[0],
           imsOrg: INTERNAL_ORG_IMS_ID,
@@ -5179,6 +5179,24 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller, PRE_ONBOARD + enrolled → 200 (tier check skipped, site shown)', async () => {
+        context.data = {
+          siteId: SITE_IDS[0],
+          imsOrg: INTERNAL_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enr-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
       });
 
       it('internal caller, no entitlement → 404 site_not_enrolled (remapped from no_entitlement_for_product)', async () => {
@@ -5236,14 +5254,14 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(200);
       });
 
-      it('internal caller accessing CUSTOMER site (admin) with PRE_ONBOARD → remapped to site_not_enrolled', async () => {
-        // The key new capability of caller-based check: bypass fires even when the
-        // site lives in a customer org, because the *caller* is internal.
+      it('internal caller accessing CUSTOMER site (admin) with PRE_ONBOARD + not enrolled → 404 site_not_enrolled', async () => {
+        // Caller-based check: bypass fires even when the site lives in a customer org.
+        // PRE_ONBOARD tier check skipped for internal caller; no enrollment → site_not_enrolled.
         sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
         context.data = {
           siteId: SITE_IDS[1],
-          imsOrg: CUSTOMER_ORG_IMS_ID, // request is "give me HDFC's site"
-          callerImsOrg: INTERNAL_ORG_IMS_ID, // but caller is internal
+          imsOrg: CUSTOMER_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
         };
         mockDataAccess.Site.findById.resolves(testSites[1]);
         mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
@@ -5257,6 +5275,25 @@ describe('Sites Controller', () => {
         expect(response.status).to.equal(404);
         const body = await response.json();
         expect(body.resolveStatus).to.equal('site_not_enrolled');
+      });
+
+      it('internal caller accessing CUSTOMER site (admin) with PRE_ONBOARD + enrolled → 200', async () => {
+        sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+        context.data = {
+          siteId: SITE_IDS[1],
+          imsOrg: CUSTOMER_ORG_IMS_ID,
+          callerImsOrg: INTERNAL_ORG_IMS_ID,
+        };
+        mockDataAccess.Site.findById.resolves(testSites[1]);
+        mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+        mockTierClientStub.getAllEnrollment.resolves({
+          entitlement: { getTier: () => 'PRE_ONBOARD' },
+          enrollments: [{ getId: () => 'enr-1' }],
+        });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
       });
 
       // ────────────────────────────────────────────────────────────────────────────

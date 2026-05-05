@@ -1193,11 +1193,15 @@ function SitesController(ctx, log, env) {
     // independent of which org's data is being requested via organizationId/imsOrg.
     // We translate it to a Spacecat UUID once, up front, so the per-path remap can
     // decide whether the caller is an internal/demo org listed in ASO_PLG_EXCLUDED_ORGS.
+    log.info(`[resolveSite] ASO_PLG_EXCLUDED_ORGS=${context.env.ASO_PLG_EXCLUDED_ORGS ?? '(not set)'} callerImsOrg=${callerImsOrg ?? '(not provided)'}`);
     let callerIsInternal = false;
     if (hasText(callerImsOrg)) {
       const callerOrg = await Organization.findByImsOrgId(callerImsOrg);
       if (callerOrg) {
         callerIsInternal = isInternalOrg(callerOrg.getId(), context.env);
+        log.info(`[resolveSite] callerOrg UUID=${callerOrg.getId()} callerIsInternal=${callerIsInternal}`);
+      } else {
+        log.info(`[resolveSite] callerImsOrg=${callerImsOrg} not found in DB`);
       }
     }
 
@@ -1223,11 +1227,12 @@ function SitesController(ctx, log, env) {
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
-              // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS), remap PLG-wizard-triggering
-              // resolveStatuses ('no_entitlement_for_product', 'aso_pre_onboard') to
-              // 'site_not_enrolled' so the UI shows "No site onboarded" instead of the
-              // PLG onboarding wizard. Internal orgs aren't customers and shouldn't be
-              // prompted to onboard. site_not_enrolled itself is left unchanged.
+              // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
+              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
+              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
+              // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
+              // Customer callers are completely unaffected by this block.
               if (!entitlement) {
                 if (callerIsInternal) {
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
@@ -1237,11 +1242,10 @@ function SitesController(ctx, log, env) {
               }
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
-                if (callerIsInternal) {
-                  log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping aso_pre_onboard → site_not_enrolled for siteId=${siteId}`);
-                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                if (!callerIsInternal) {
+                  return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
                 }
-                return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
               }
 
               if (!enrollments?.length) {
