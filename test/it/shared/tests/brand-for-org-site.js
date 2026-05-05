@@ -18,6 +18,8 @@ import {
   SITE_2_ID,
   SITE_3_ID,
   BRAND_1_ID,
+  ORG_LEGACY_LLMO_ID,
+  SITE_LEGACY_LLMO_ID,
   NON_EXISTENT_ORG_ID,
   NON_EXISTENT_SITE_ID,
 } from '../seed-ids.js';
@@ -119,17 +121,39 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
       });
     });
 
-    describe('v1 org (no brandalf flag)', () => {
+    describe('v1 org (resolver returns v1)', () => {
+      // ORG_LEGACY_LLMO_ID owns SITE_LEGACY_LLMO_ID with created_at before the
+      // 2026-04-01 Brandalf GA cutoff → resolveLlmoOnboardingMode falls into
+      // the "pre-cutoff sites" branch and returns v1 even without a brandalf
+      // flag set. ORG_1 cannot be used here because all its sites are
+      // post-cutoff, so the resolver returns v2 by default.
+      const LEGACY_BRAND_ID = 'a1ffffff-ffff-4fff-bfff-ffffffffffff';
+
       before(async () => {
         await resetData();
-        await bindBrandToSite(BRAND_1_ID, SITE_1_ID);
-        // brandalf flag NOT set for ORG_1 → resolver returns v1 → endpoint 404s
+        // Insert a brand for the legacy org bound to the legacy site, so the
+        // test exercises "endpoint correctly 404s even when a brand WOULD have
+        // matched" — proving the resolver gate works.
+        const pg = getPostgrestClient();
+        const { error } = await pg.from('brands').upsert({
+          id: LEGACY_BRAND_ID,
+          organization_id: ORG_LEGACY_LLMO_ID,
+          name: 'Legacy Brand',
+          status: 'active',
+          origin: 'human',
+          regions: ['us'],
+          site_id: SITE_LEGACY_LLMO_ID,
+          updated_by: 'it-setup',
+        });
+        if (error) {
+          throw new Error(`Failed to seed legacy brand: ${error.message}`);
+        }
       });
 
       it('returns 404 even when a brand row exists for the site (gating works)', async () => {
         const http = getHttpClient();
         const res = await http.admin.get(
-          `/v2/orgs/${ORG_1_ID}/sites/${SITE_1_ID}/brand`,
+          `/v2/orgs/${ORG_LEGACY_LLMO_ID}/sites/${SITE_LEGACY_LLMO_ID}/brand`,
         );
         expect(res.status).to.equal(404);
       });
