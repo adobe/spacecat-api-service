@@ -1,3 +1,10 @@
+# [1.473.0](https://github.com/adobe/spacecat-api-service/compare/v1.472.1...v1.473.0) (2026-05-05)
+
+
+### Features
+
+* add semantic-value-visibility to run-audit allowlist ([#2321](https://github.com/adobe/spacecat-api-service/issues/2321)) ([e16cef2](https://github.com/adobe/spacecat-api-service/commit/e16cef22db6daa13b03928a330159c1a6c89916c))
+
 ## [1.472.1](https://github.com/adobe/spacecat-api-service/compare/v1.472.0...v1.472.1) (2026-05-05)
 
 
