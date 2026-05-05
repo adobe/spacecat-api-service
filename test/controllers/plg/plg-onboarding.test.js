@@ -130,6 +130,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       waitlistReason: overrides.waitlistReason || null,
       reviews: overrides.reviews || null,
       updatedBy: overrides.updatedBy || null,
+      createdBy: overrides.createdBy !== undefined ? overrides.createdBy : 'system',
       completedAt: overrides.completedAt || null,
       createdAt: overrides.createdAt || '2026-03-09T12:00:00.000Z',
       updatedAt: overrides.updatedAt || '2026-03-09T12:00:00.000Z',
@@ -149,6 +150,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       getWaitlistReason: sandbox.stub().returns(record.waitlistReason),
       getReviews: sandbox.stub().returns(record.reviews),
       getUpdatedBy: sandbox.stub().returns(overrides.updatedBy || null),
+      getCreatedBy: sandbox.stub().returns(overrides.createdBy !== undefined ? overrides.createdBy : 'system'),
       getCompletedAt: sandbox.stub().returns(record.completedAt),
       getCreatedAt: sandbox.stub().returns(record.createdAt),
       getUpdatedAt: sandbox.stub().returns(record.updatedAt),
@@ -5069,6 +5071,56 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         expect(res.status).to.equal(200);
         expect(res.value[0].updatedBy).to.be.null;
         expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
+      });
+
+      it('resolves createdBy IMS ID to email via getImsAdminProfile', async () => {
+        const record = createMockOnboarding({ createdBy: 'creator-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({ email: 'creator@example.com' }),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('creator@example.com');
+        expect(mockImsClient.getImsAdminProfile).to.have.been.calledWith('creator-ims-id@AdobeID');
+      });
+
+      it('falls back to IMS ID for createdBy when getImsAdminProfile returns no email', async () => {
+        const record = createMockOnboarding({ createdBy: 'creator-ims-id@AdobeID' });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = {
+          getImsAdminProfile: sandbox.stub().resolves({}),
+        };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.equal('creator-ims-id@AdobeID');
+      });
+
+      it('sets createdBy to null when createdBy is null', async () => {
+        const record = createMockOnboarding({ createdBy: null });
+        mockDataAccess.PlgOnboarding.all.resolves([record]);
+        const mockImsClient = { getImsAdminProfile: sandbox.stub() };
+
+        const res = await AdminPlgOnboardingController({ log: mockLog }).getAllOnboardings({
+          dataAccess: mockDataAccess,
+          imsClient: mockImsClient,
+          log: mockLog,
+        });
+
+        expect(res.status).to.equal(200);
+        expect(res.value[0].createdBy).to.be.null;
       });
     });
   });

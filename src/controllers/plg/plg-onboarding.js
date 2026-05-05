@@ -1570,12 +1570,16 @@ function PlgOnboardingController(ctx) {
       // This would eliminate the N * IMS_CONCURRENCY API calls on every list load and
       // significantly improve performance as the PLG onboarding table grows.
       const { imsClient } = context;
-      // Collect all unique IMS IDs from updatedBy and reviewedBy fields
+      // Collect all unique IMS IDs from updatedBy, createdBy and reviewedBy fields
       const imsIds = new Set();
       for (const r of records) {
         const updatedBy = r.getUpdatedBy();
         if (hasText(updatedBy) && updatedBy !== 'system') {
           imsIds.add(updatedBy);
+        }
+        const createdBy = r.getCreatedBy();
+        if (hasText(createdBy) && createdBy !== 'system') {
+          imsIds.add(createdBy);
         }
         for (const review of (r.getReviews() || [])) {
           if (hasText(review.reviewedBy) && review.reviewedBy !== 'admin') {
@@ -1605,9 +1609,11 @@ function PlgOnboardingController(ctx) {
         payload = records.map((record) => {
           const json = PlgOnboardingDto.toAdminJSON(record);
           const updatedBy = record.getUpdatedBy();
+          const createdBy = record.getCreatedBy();
           return {
             ...json,
             updatedBy: updatedBy ? (emailMap[updatedBy] ?? updatedBy) : null,
+            createdBy: createdBy ? (emailMap[createdBy] ?? createdBy) : null,
             reviews: json.reviews.map((review) => ({
               ...review,
               reviewedBy: emailMap[review.reviewedBy] ?? review.reviewedBy,
