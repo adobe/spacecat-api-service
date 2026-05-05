@@ -154,6 +154,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       getUpdatedAt: sandbox.stub().returns(record.updatedAt),
       setStatus: sandbox.stub(),
       setUpdatedBy: sandbox.stub(),
+      setCreatedBy: sandbox.stub(),
       setSiteId: sandbox.stub(),
       setOrganizationId: sandbox.stub(),
       setSteps: sandbox.stub(),
@@ -5156,6 +5157,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
@@ -7222,9 +7224,9 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
       });
 
-      describe('updateOnboardingStatus', () => {
+      describe('updateOnboarding', () => {
         it('returns 403 when caller is not admin', async () => {
-          const res = await PlgOnboardingController({ log: mockLog }).updateOnboardingStatus({
+          const res = await PlgOnboardingController({ log: mockLog }).updateOnboarding({
             data: { status: 'INACTIVE' },
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
@@ -7234,7 +7236,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         it('returns 400 when data is null', async () => {
-          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
             data: null,
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
@@ -7243,8 +7245,8 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(res.status).to.equal(400);
         });
 
-        it('returns 400 when status is missing', async () => {
-          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+        it('returns 400 when no fields provided', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
             data: {},
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
@@ -7254,7 +7256,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
         });
 
         it('returns 400 when status is invalid', async () => {
-          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
             data: { status: 'BOGUS' },
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
@@ -7263,8 +7265,39 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(res.status).to.equal(400);
         });
 
+        it('returns 400 when siteId is not a valid UUID', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
+            data: { siteId: 'not-a-uuid' },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 400 when organizationId is not a valid UUID', async () => {
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
+            data: { organizationId: 'not-a-uuid' },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
+        it('returns 400 when steps contains invalid keys', async () => {
+          mockDataAccess.PlgOnboarding.findById.resolves(mockOnboarding);
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
+            data: { steps: { orgResolved: true, unknownStep: true } },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+          });
+          expect(res.status).to.equal(400);
+        });
+
         it('returns 404 when record not found', async () => {
-          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
             data: { status: 'INACTIVE' },
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
@@ -7273,25 +7306,70 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           expect(res.status).to.equal(404);
         });
 
-        it('updates status and returns 200', async () => {
+        it('updates all editable fields and returns 200', async () => {
+          const newSiteId = '66331367-70e6-4a49-8445-4f6d9c265af9';
+          const newOrgId = '77441478-81f7-4b5a-9556-5a7e0d376b00';
           mockDataAccess.PlgOnboarding.findById.resolves(mockOnboarding);
-          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
-            data: { status: 'INACTIVE' },
+
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
+            data: {
+              status: 'WAITLISTED',
+              siteId: newSiteId,
+              organizationId: newOrgId,
+              steps: { orgResolved: true, rumVerified: true },
+              botBlocker: { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'], userAgent: 'bot' },
+              waitlistReason: 'pending review',
+              updatedBy: 'admin@example.com',
+              createdBy: 'admin@example.com',
+            },
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,
             attributes: {},
             env: {},
           });
+
           expect(res.status).to.equal(200);
-          expect(mockOnboarding.setStatus).to.have.been.calledWith('INACTIVE');
+          expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+          expect(mockOnboarding.setSiteId).to.have.been.calledWith(newSiteId);
+          expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(newOrgId);
+          expect(mockOnboarding.setBotBlocker).to.have.been.calledWith(
+            { type: 'cloudflare', ipsToAllowlist: ['1.2.3.4'], userAgent: 'bot' },
+          );
+          expect(mockOnboarding.setWaitlistReason).to.have.been.calledWith('pending review');
+          expect(mockOnboarding.setUpdatedBy).to.have.been.calledWith('admin@example.com');
+          expect(mockOnboarding.setCreatedBy).to.have.been.calledWith('admin@example.com');
+          expect(mockOnboarding.setSteps).to.have.been.calledWith(
+            { orgResolved: true, rumVerified: true },
+          );
           expect(mockOnboarding.save).to.have.been.called;
+        });
+
+        it('merges provided steps into existing steps', async () => {
+          const record = createMockOnboarding({
+            steps: { orgResolved: true, rumVerified: false, siteCreated: false },
+          });
+          mockDataAccess.PlgOnboarding.findById.resolves(record);
+
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
+            data: { steps: { rumVerified: true, siteCreated: true } },
+            params: { plgOnboardingId: TEST_ONBOARDING_ID },
+            dataAccess: mockDataAccess,
+            attributes: {},
+            env: {},
+          });
+
+          expect(res.status).to.equal(200);
+          expect(record.setSteps).to.have.been.calledWith(
+            { orgResolved: true, rumVerified: true, siteCreated: true },
+          );
+          expect(record.save).to.have.been.called;
         });
 
         it('updates status when record imsOrgId is missing', async () => {
           const record = createMockOnboarding({ imsOrgId: '' });
           mockDataAccess.PlgOnboarding.findById.resolves(record);
 
-          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboardingStatus({
+          const res = await AdminAccessPlgController({ log: mockLog }).updateOnboarding({
             data: { status: 'INACTIVE' },
             params: { plgOnboardingId: TEST_ONBOARDING_ID },
             dataAccess: mockDataAccess,

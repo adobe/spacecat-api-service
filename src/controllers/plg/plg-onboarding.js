@@ -27,6 +27,7 @@ import {
   detectLocale,
   hasText,
   isValidIMSOrgId,
+  isValidUUID,
   resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 
@@ -1969,10 +1970,12 @@ function PlgOnboardingController(ctx) {
 
   /**
    * PATCH /plg/records/:plgOnboardingId
-   * Admin: update the status of a PLG onboarding record.
-   * Body: { status }
+   * Admin: update editable fields of a PLG onboarding record.
+   * Body: { status, siteId, organizationId, steps, botBlocker,
+   *         waitlistReason, updatedBy, createdBy }
+   * For `steps`, only the provided keys are merged into the existing steps.
    */
-  const updateOnboardingStatus = async (context) => {
+  const updateOnboarding = async (context) => {
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can update PLG onboarding records');
@@ -1980,10 +1983,33 @@ function PlgOnboardingController(ctx) {
 
     const { data, params } = context;
     const { plgOnboardingId } = params;
-    const { status } = data || {};
+    const {
+      status,
+      siteId,
+      organizationId,
+      steps,
+      botBlocker,
+      waitlistReason,
+      updatedBy,
+      createdBy,
+    } = data || {};
 
-    if (!hasText(status) || !Object.values(STATUSES).includes(status)) {
-      return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+    if (Object.keys(data || {}).length === 0) {
+      return badRequest('No fields provided to update');
+    }
+
+    if (status !== undefined) {
+      if (!hasText(status) || !Object.values(STATUSES).includes(status)) {
+        return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+      }
+    }
+
+    if (siteId !== undefined && !isValidUUID(siteId)) {
+      return badRequest('Invalid siteId. Must be a valid UUID');
+    }
+
+    if (organizationId !== undefined && !isValidUUID(organizationId)) {
+      return badRequest('Invalid organizationId. Must be a valid UUID');
     }
 
     const { PlgOnboarding } = context.dataAccess;
@@ -1992,7 +2018,42 @@ function PlgOnboardingController(ctx) {
       return notFound(`PLG onboarding record ${plgOnboardingId} not found`);
     }
 
-    onboarding.setStatus(status);
+    if (status !== undefined) {
+      onboarding.setStatus(status);
+    }
+    if (siteId !== undefined) {
+      onboarding.setSiteId(siteId);
+    }
+    if (organizationId !== undefined) {
+      onboarding.setOrganizationId(organizationId);
+    }
+    if (botBlocker !== undefined) {
+      onboarding.setBotBlocker(botBlocker);
+    }
+    if (waitlistReason !== undefined) {
+      onboarding.setWaitlistReason(waitlistReason);
+    }
+    if (updatedBy !== undefined) {
+      onboarding.setUpdatedBy(updatedBy);
+    }
+    if (createdBy !== undefined) {
+      onboarding.setCreatedBy(createdBy);
+    }
+
+    if (steps !== undefined) {
+      const VALID_STEP_KEYS = new Set([
+        'orgResolved', 'rumVerified', 'siteCreated', 'siteResolved', 'siteOrgReassigned',
+        'authorUrlResolved', 'hlxConfigSet', 'codeConfigResolved', 'configUpdated',
+        'auditsEnabled', 'deliveryConfigQueued', 'entitlementCreated', 'entitlementFailed',
+        'orgResolutionFailed',
+      ]);
+      const invalidKeys = Object.keys(steps).filter((k) => !VALID_STEP_KEYS.has(k));
+      if (invalidKeys.length > 0) {
+        return badRequest(`Invalid step keys: ${invalidKeys.join(', ')}`);
+      }
+      onboarding.setSteps({ ...(onboarding.getSteps() || {}), ...steps });
+    }
+
     await onboarding.save();
     return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
@@ -2026,7 +2087,7 @@ function PlgOnboardingController(ctx) {
     getAllOnboardings,
     update,
     createOnboarding,
-    updateOnboardingStatus,
+    updateOnboarding,
     deleteOnboarding,
   };
 }
