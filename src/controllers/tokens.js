@@ -107,7 +107,9 @@ function TokensController(ctx) {
       return ok({
         tokens: (results.data || []).map(TokenDto.toJSON),
         pagination: {
+          limit: effectiveLimit,
           cursor: results.cursor ?? null,
+          hasMore: !!results.cursor,
         },
       });
     } catch (e) {
