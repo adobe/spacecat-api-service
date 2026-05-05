@@ -675,7 +675,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledTwice;
+      expect(ackMock).to.have.been.calledOnce;
 
       // Note: delivery config is now set during site creation, not afterward
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
@@ -824,22 +824,213 @@ describe('onboard-modal', () => {
       });
     });
 
-    it('responds with error when the onboarding request fails', async () => {
-      const bodyWithError = JSON.parse(JSON.stringify(body));
-      delete bodyWithError.view.state.values.site_url_input;
-      const onboardSiteModalAction = onboardSiteModal(context);
-      await onboardSiteModalAction({
-        ack: ackMock,
-        body: bodyWithError,
-        client: clientMock,
-      });
-      expect(ackMock).to.have.been.calledOnceWith({
-        response_action: 'errors',
-        errors: {
-          site_url_input: 'There was an error processing the onboarding request.',
+    it('should post error to channel when onboarding throws after modal is acknowledged', async () => {
+      const onboardError = new Error('enableHandlerForSite failed: missing deps');
+      const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().rejects(onboardError),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
         },
       });
-      expect(clientMock.chat.postMessage).to.not.have.been.called;
+
+      const { onboardSiteModal: onboardSiteModalThrows } = mockedModuleThrows;
+      configurationMock.findLatest.resolves(configurationMock);
+
+      const onboardSiteModalAction = onboardSiteModalThrows(context);
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      // ack called once (no errors object) since error happened after modal was acknowledged
+      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.not.have.been.calledWith(sinon.match({ response_action: 'errors' }));
+      // error posted to channel instead
+      expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
+        channel: 'C12345',
+        text: sinon.match(':x: Onboarding failed for'),
+        thread_ts: '1234567890.123456',
+      }));
+    });
+
+    it('should use fallbacks in error message when user name and imsOrgId are absent', async () => {
+      const onboardError = new Error('onboarding failed');
+      const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().rejects(onboardError),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalThrows } = mockedModuleThrows;
+      configurationMock.findLatest.resolves(configurationMock);
+
+      // user has no name, imsOrgId inputs are both empty
+      const bodyNoName = JSON.parse(JSON.stringify(body));
+      delete bodyNoName.user.name;
+      bodyNoName.view.state.values.ims_org_input.ims_org_id.value = '';
+      const contextNoOrg = { ...context, env: { ...context.env, DEMO_IMS_ORG: '' } };
+
+      const onboardSiteModalAction = onboardSiteModalThrows(contextNoOrg);
+      await onboardSiteModalAction({ ack: ackMock, body: bodyNoName, client: clientMock });
+
+      expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
+        text: sinon.match('*Triggered by:* unknown'),
+      }));
+    });
+
+    it('should log error when channel notification fails after modal is acknowledged', async () => {
+      const onboardError = new Error('onboarding failed');
+      const postMessageError = new Error('Slack API error');
+      const mockedModuleThrows = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().rejects(onboardError),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+      });
+
+      clientMock.chat.postMessage.rejects(postMessageError);
+
+      const { onboardSiteModal: onboardSiteModalThrows } = mockedModuleThrows;
+      configurationMock.findLatest.resolves(configurationMock);
+
+      const onboardSiteModalAction = onboardSiteModalThrows(context);
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Failed to notify channel of onboarding error:',
+        postMessageError,
+      );
+    });
+
+    it('should show unknown site when error fires before siteUrl is parsed', async () => {
+      const modalAction = onboardSiteModal(context);
+      // user.id is set so responseChannel is truthy, but no view → siteUrl stays undefined
+      const brokenBody = { user: { id: 'U123' } };
+
+      await modalAction({ ack: ackMock, body: brokenBody, client: clientMock });
+
+      expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
+        text: sinon.match('unknown site'),
+      }));
+    });
+
+    it('should use safe defaults when error has no message and siteUrl is not yet parsed', async () => {
+      const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({ audits: ['cwv'], imports: ['organic-traffic'] }),
+        },
+        '../../../../src/support/utils.js': {
+          // Throw an error without a message to cover the || 'unknown error' fallback
+          onboardSingleSite: sinon.stub().callsFake(() => {
+            const e = new Error();
+            e.message = '';
+            throw e;
+          }),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl: () => true,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+      });
+
+      const { onboardSiteModal: modalFn } = mockedModule;
+      configurationMock.findLatest.resolves(configurationMock);
+      const modalAction = modalFn(context);
+      await modalAction({ ack: ackMock, body, client: clientMock });
+
+      expect(clientMock.chat.postMessage).to.have.been.calledWith(sinon.match({
+        text: sinon.match('unknown site').or(sinon.match('unknown error')),
+      }));
+    });
+
+    it('should fall back to ack errors when responseChannel is unavailable', async () => {
+      const modalAction = onboardSiteModal(context);
+      const brokenBody = {}; // no user — responseChannel stays falsy
+
+      await modalAction({ ack: ackMock, body: brokenBody, client: clientMock });
+
+      expect(ackMock).to.have.been.calledWith(sinon.match({
+        response_action: 'errors',
+        errors: { site_url_input: 'There was an error processing the onboarding request.' },
+      }));
+    });
+
+    it('should truncate long error messages in Slack notification', async () => {
+      const longMessage = 'x'.repeat(500);
+      const onboardError = new Error(longMessage);
+      const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().rejects(onboardError),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true, type: 'none', confidence: 0 }),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalTrunc } = mockedModule;
+      configurationMock.findLatest.resolves(configurationMock);
+
+      const onboardSiteModalAction = onboardSiteModalTrunc(context);
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      const errorCall = clientMock.chat.postMessage.getCalls()
+        .find((call) => call.args[0].text?.includes(':x: Onboarding failed'));
+      expect(errorCall).to.exist;
+      // Error message should be truncated to 200 chars
+      const errorText = errorCall.args[0].text;
+      const errorLine = errorText.split('\n').find((l) => l.startsWith('*Error:*'));
+      expect(errorLine.length).to.be.at.most(210); // 200 chars + '*Error:* ' prefix
     });
 
     it('should post error message when onboarding returns errors', async () => {
@@ -1257,6 +1448,44 @@ describe('onboard-modal', () => {
         expect(warningMessage).to.exist;
 
         const successMessage = calls.find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
+        expect(successMessage).to.exist;
+      });
+
+      it('should continue onboarding when detectBotBlocker throws and notify user', async () => {
+        const onboardStub = sinon.stub().resolves({ siteId: 'site123', errors: [] });
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({ audits: ['scrape-top-pages'], imports: ['organic-traffic'] }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: onboardStub,
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '@adobe/spacecat-shared-utils': {
+            isValidUrl: () => true,
+            detectBotBlocker: sinon.stub().rejects(new Error('connection timeout')),
+          },
+        });
+
+        const modalAction = testModule.onboardSiteModal(context);
+
+        await modalAction({ ack: ackMock, body, client: clientMock });
+
+        // Onboarding should proceed despite bot detection failure
+        expect(onboardStub.calledOnce).to.be.true;
+
+        // User should be notified that bot detection was skipped
+        const warningMessage = clientMock.chat.postMessage.getCalls()
+          .find((call) => call.args[0].text?.includes('Bot protection detection skipped'));
+        expect(warningMessage).to.exist;
+
+        // Should log the warning
+        expect(context.log.warn).to.have.been.called;
+
+        const successMessage = clientMock.chat.postMessage.getCalls()
+          .find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
         expect(successMessage).to.exist;
       });
     });
