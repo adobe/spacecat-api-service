@@ -412,6 +412,90 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
+ * Resolves the single active brand for a given (organization, site) pair.
+ *
+ * Lookup order, mirroring the audit-worker pattern at
+ * `spacecat-audit-worker/src/llmo-customer-analysis/handler.js`:
+ *  1. Primary: `brands.site_id === siteId` (the brand's base-URL site, set during
+ *     v2 onboarding). LLMO-4592 invariant: ACTIVE brands have a unique
+ *     `(organization_id, site_id)` pair when site_id is set.
+ *  2. Fallback: `brand_sites` join, for brands created before `baseSiteId` was
+ *     populated during onboarding.
+ *
+ * If the data violates the LLMO-4592 invariant and multiple ACTIVE brands match,
+ * the first row (deterministic, ordered by name) is returned and a warning is
+ * logged so monitoring can surface the data integrity issue.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {string} siteId - Site UUID
+ * @param {object} postgrestClient - PostgREST client
+ * @param {object} [log] - Optional logger for the multi-match warning path
+ * @returns {Promise<object|null>} Brand in V2 config shape or null
+ */
+export async function getBrandBySite(organizationId, siteId, postgrestClient, log) {
+  if (!postgrestClient?.from || !hasText(organizationId) || !hasText(siteId)) {
+    return null;
+  }
+
+  const { data: primary, error: primaryError } = await postgrestClient
+    .from('brands')
+    .select(BRAND_SELECT)
+    .eq('organization_id', organizationId)
+    .eq('status', 'active')
+    .eq('site_id', siteId)
+    .order('name', { ascending: true });
+
+  if (primaryError) {
+    throw new Error(`Failed to resolve brand for site: ${primaryError.message}`);
+  }
+
+  if (primary && primary.length > 0) {
+    if (primary.length > 1) {
+      log?.warn?.(
+        `Multiple active brands for org ${organizationId} site ${siteId} `
+        + `(LLMO-4592 invariant violation): picking ${primary[0].id} deterministically`,
+      );
+    }
+    return mapDbBrandToV2(primary[0]);
+  }
+
+  // Fallback: brand_sites join — brands created before baseSiteId was wired.
+  const { data: viaJoin, error: joinError } = await postgrestClient
+    .from('brands')
+    .select(BRAND_SELECT)
+    .eq('organization_id', organizationId)
+    .eq('status', 'active')
+    .eq('brand_sites.site_id', siteId)
+    .order('name', { ascending: true });
+
+  if (joinError) {
+    throw new Error(`Failed to resolve brand for site (fallback): ${joinError.message}`);
+  }
+
+  if (!viaJoin || viaJoin.length === 0) {
+    return null;
+  }
+
+  // PostgREST embedded-resource filters return parent rows even when no child
+  // matches; re-check the embedded brand_sites array to keep matches honest.
+  const matches = viaJoin.filter(
+    (row) => Array.isArray(row.brand_sites)
+      && row.brand_sites.some((bs) => bs.site_id === siteId),
+  );
+
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    log?.warn?.(
+      `Multiple active brands via brand_sites for org ${organizationId} `
+      + `site ${siteId}: picking ${matches[0].id} deterministically`,
+    );
+  }
+  return mapDbBrandToV2(matches[0]);
+}
+
+/**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
  *

@@ -48,7 +48,12 @@ import {
   updateBrand,
   deleteBrand,
   getBrandById,
+  getBrandBySite,
 } from '../support/brands-storage.js';
+import {
+  resolveLlmoOnboardingMode,
+  LLMO_ONBOARDING_MODE_V2,
+} from '../support/llmo-onboarding-mode.js';
 import {
   listCategories,
   createCategory,
@@ -643,6 +648,70 @@ function BrandsController(ctx, log, env) {
       return ok(brand);
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Resolves the active brand for a (organization, site) pair.
+   *
+   * Gated by `resolveLlmoOnboardingMode` — returns 404 when the org is in v1
+   * mode (no flags, brandalf-migration-only, or kill-switch downgrade). When
+   * v2 and an active brand row matches the site (primary: brands.site_id;
+   * fallback: brand_sites join per LLMO-4592), returns the full V2 brand
+   * object so callers can pick `id` (or any other field).
+   *
+   * @returns {Promise<Response>} The active brand, or 404.
+   */
+  const getBrandForOrgSite = async (context) => {
+    const { spaceCatId, siteId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId) || !isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID (valid UUID) is required');
+      }
+      if (!hasText(siteId) || !isValidUUID(siteId)) {
+        return badRequest('Site ID (valid UUID) is required');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
+      }
+      if (site.getOrganizationId() !== spaceCatId) {
+        return notFound(`Site ${siteId} does not belong to organization ${spaceCatId}`);
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const mode = await resolveLlmoOnboardingMode(spaceCatId, context);
+      if (mode !== LLMO_ONBOARDING_MODE_V2) {
+        return notFound('No v2 brand configured for this organization');
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+      const brand = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+      if (!brand) {
+        return notFound(`No active brand for site ${siteId}`);
+      }
+
+      return ok(brand);
+    } catch (error) {
+      log.error(
+        `Error resolving brand for org ${spaceCatId} site ${siteId}:`,
+        error,
+      );
       return createErrorResponse(error);
     }
   };
@@ -1294,6 +1363,7 @@ function BrandsController(ctx, log, env) {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
     getBrandForOrg,
+    getBrandForOrgSite,
     listBrandsForOrg,
     listCategoriesForOrg,
     createCategoryForOrg,
