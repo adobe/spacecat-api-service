@@ -19,7 +19,7 @@ import routeRequiredCapabilities, { INTERNAL_ROUTES } from '../../src/routes/req
 const testDir = dirname(fileURLToPath(import.meta.url));
 
 const ALLOWED_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-const ALLOWED_ACTIONS = ['read', 'write'];
+const ALLOWED_ACTIONS = ['read', 'write', 'readAll'];
 const PATH_REGEX = /^\/[a-zA-Z0-9\-_/.:]+(\/[a-zA-Z0-9\-_/.:])*$/;
 
 describe('routeRequiredCapabilities', () => {

@@ -13,6 +13,13 @@
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { generateKeyPair, exportSPKI, SignJWT } from 'jose';
 
+import {
+  CONSUMER_1_CLIENT_ID,
+  CONSUMER_1_IMS_ORG_ID,
+  CONSUMER_2_CLIENT_ID,
+  CONSUMER_2_IMS_ORG_ID,
+} from './seed-ids.js';
+
 const ISSUER = 'https://spacecat.experiencecloud.live';
 const AUDIENCE = 'spacecat-users';
 const IMS_ORG_IDENT = 'AAAAAAAABBBBBBBBCCCCCCCC';
@@ -179,10 +186,62 @@ export async function createReadOnlyAdminToken() {
   });
 }
 
+/**
+ * Mints an S2S consumer JWT. The wrapper looks up
+ * `Consumer.findByClientIdAndImsOrgId(client_id, org)`, so the seeded Consumer row
+ * must use these same identifiers and ACTIVE status for the request to be honored.
+ *
+ * @param {{ clientId: string, imsOrgId: string }} opts
+ * @returns {Promise<string>}
+ */
+export async function createS2SConsumerToken({ clientId, imsOrgId }) {
+  return signToken({
+    sub: `s2s:${clientId}`,
+    is_s2s_consumer: true,
+    client_id: clientId,
+    org: imsOrgId,
+  });
+}
+
+/**
+ * S2S consumer with NO readAll capabilities (only site:read + site:write - CONSUMER_1).
+ * Used to assert that the readAll route remap rejects callers that lack the new capability.
+ */
+export async function createS2SConsumerReadOnlyToken() {
+  return createS2SConsumerToken({
+    clientId: CONSUMER_1_CLIENT_ID,
+    imsOrgId: CONSUMER_1_IMS_ORG_ID,
+  });
+}
+
+/**
+ * S2S token whose (client_id, org) pair has NO Consumer row in the database.
+ * Exercises the Layer 1 trust boundary: a token signed correctly by the auth-service
+ * is still rejected by the wrapper if the Consumer record does not exist.
+ */
+export async function createS2SConsumerUnknownToken() {
+  return createS2SConsumerToken({
+    clientId: 'unknown-client-id-999999999999',
+    imsOrgId: CONSUMER_1_IMS_ORG_ID,
+  });
+}
+
+/**
+ * S2S consumer holding `site:readAll` + `organization:readAll` (CONSUMER_2).
+ * Used to assert the positive path for cross-tenant list endpoints.
+ */
+export async function createS2SConsumerReadAllToken() {
+  return createS2SConsumerToken({
+    clientId: CONSUMER_2_CLIENT_ID,
+    imsOrgId: CONSUMER_2_IMS_ORG_ID,
+  });
+}
+
 export async function createAllTokens() {
   const [
     admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
     readOnlyAdmin,
+    s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
     createUserToken(),
@@ -191,6 +250,9 @@ export async function createAllTokens() {
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
     createReadOnlyAdminToken(),
+    createS2SConsumerReadOnlyToken(),
+    createS2SConsumerReadAllToken(),
+    createS2SConsumerUnknownToken(),
   ]);
   return {
     admin,
@@ -200,5 +262,8 @@ export async function createAllTokens() {
     delegatedUserTruncated,
     delegatedUserNoSource,
     readOnlyAdmin,
+    s2sConsumerReadOnly,
+    s2sConsumerReadAll,
+    s2sConsumerUnknown,
   };
 }

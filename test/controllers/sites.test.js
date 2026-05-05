@@ -579,7 +579,127 @@ describe('Sites Controller', () => {
 
     expect(mockDataAccess.Site.all).to.have.not.been.called;
     expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can view all sites');
+    expect(error).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+  });
+
+  it('gets all sites for a legacy API-key caller (non-JWT/non-IMS)', async () => {
+    // Legacy API-key auth has type !== 'jwt' && !== 'ims', which makes hasAdminAccess() true.
+    context.attributes.authInfo = new AuthInfo()
+      .withType('api_key')
+      .withScopes([])
+      .withProfile({ user_id: 'api-key-svc' })
+      .withAuthenticated(true);
+    mockDataAccess.Site.all.resolves(sites);
+    sitesController = SitesController(context, loggerStub, context.env);
+
+    const result = await sitesController.getAll();
+    const body = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(body).to.be.an('array').with.lengthOf(2);
+  });
+
+  describe('GET /sites - S2S readAll capability', () => {
+    function makeS2SConsumer({ clientId = 'svc-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg' } = {}) {
+      return { getClientId: () => clientId, getImsOrgId: () => imsOrgId };
+    }
+
+    function makeFreshConsumer({
+      id = 'consumer-id-1',
+      capabilities = ['site:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    beforeEach(() => {
+      // Non-admin S2S caller
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      mockDataAccess.Consumer = { findByClientIdAndImsOrgId: sandbox.stub() };
+      mockDataAccess.Site.all.resolves(sites);
+    });
+
+    it('grants access to S2S consumer with site:readAll', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      context.invocation = { id: 'req-abc-123' };
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+
+      const result = await sitesController.getAll(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-abc-123/,
+      );
+    });
+
+    it('denies S2S consumer with only site:read (no readAll)', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:read'] }));
+
+      const result = await sitesController.getAll(context);
+      const body = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Forbidden: admin access or site:readAll capability required');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites - reason=missing-capability clientId=svc-1 consumerId=consumer-id-1/,
+      );
+    });
+
+    it('denies S2S consumer that was revoked between L1 and L2', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ revoked: true }));
+
+      const result = await sitesController.getAll(context);
+
+      expect(result.status).to.equal(403);
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(loggerStub.info).to.have.been.calledWithMatch(/reason=revoked/);
+    });
+
+    it('denies S2S consumer that was suspended between L1 and L2', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ status: 'SUSPENDED' }));
+
+      const result = await sitesController.getAll(context);
+
+      expect(result.status).to.equal(403);
+      expect(loggerStub.info).to.have.been.calledWithMatch(/reason=not-active/);
+    });
+
+    it('denies S2S consumer whose row was deleted between L1 and L2', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId.resolves(null);
+
+      const result = await sitesController.getAll(context);
+
+      expect(result.status).to.equal(403);
+      expect(loggerStub.info).to.have.been.calledWithMatch(/reason=not-found clientId=svc-1/);
+    });
+
+    it('logs reason=not-s2s when no s2sConsumer is set', async () => {
+      // No s2sConsumer set: hasS2SCapability short-circuits with reason=not-s2s.
+      const result = await sitesController.getAll(context);
+
+      expect(result.status).to.equal(403);
+      expect(loggerStub.info).to.have.been.calledWithMatch(
+        /\[acl\] Denied GET \/sites - reason=not-s2s clientId=n\/a consumerId=n\/a/,
+      );
+    });
   });
 
   it('gets all sites by delivery type', async () => {

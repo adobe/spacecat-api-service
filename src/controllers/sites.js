@@ -45,6 +45,7 @@ import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -315,12 +316,22 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Gets all sites.
+   * Gets all sites. Accessible to admin callers (legacy admin path) and to S2S
+   * consumers that hold the `site:readAll` capability - see
+   * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
    * @returns {Promise<Response>} Array of sites response.
    */
-  const getAll = async () => {
-    if (!accessControlUtil.hasAdminReadAccess()) {
-      return forbidden('Only admins can view all sites');
+  const getAll = async (context) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold site:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /sites - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or site:readAll capability required');
     }
 
     // TODO: implement proper pagination or filtering to stay under AWS Lambda
@@ -335,6 +346,11 @@ function SitesController(ctx, log, env) {
     const sites = all
       .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
       .map((site) => SiteDto.toListJSON(site));
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+    }
+
     return ok(sites);
   };
 

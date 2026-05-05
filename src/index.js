@@ -100,6 +100,8 @@ import routeRequiredCapabilities from './routes/required-capabilities.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
+import WebhooksController from './controllers/webhooks.js';
+import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -251,6 +253,7 @@ async function run(request, context) {
     const pageRelationshipsController = PageRelationshipsController(context);
     const plgOnboardingController = PlgOnboardingController(context);
     const drsBpPgAuditController = DrsBpPgAuditController(context);
+    const webhooksController = WebhooksController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -303,6 +306,7 @@ async function run(request, context) {
       autofixChecksController,
       plgOnboardingController,
       drsBpPgAuditController,
+      webhooksController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -355,13 +359,30 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
 //    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
 //    (fail-closed), so unmapped routes are blocked for read-only admins
+//
+// authHandlers order contract:
+//  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
+//  - GitHubWebhookHmacHandler next: path-scoped to /webhooks/* and returns null
+//    for any other path, so non-webhook requests fall through cheaply. Must run
+//    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
+//    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
+//  - JwtHandler / AdobeImsHandler / ScopedApiKeyHandler / LegacyApiKeyHandler:
+//    standard auth paths for the rest of the API surface.
+// When adding a new path-scoped handler, place it in the same position (after
+// SkipAuthHandler, before the path-agnostic handlers) to preserve early-bail.
+// AUTH_HANDLERS order is enforced by test/auth-handlers.test.js.
+const AUTH_HANDLERS = [
+  SkipAuthHandler,
+  GitHubWebhookHmacHandler,
+  JwtHandler,
+  AdobeImsHandler,
+  ScopedApiKeyHandler,
+  LegacyApiKeyHandler,
+];
+
 const wrappedMain = wrap(run)
   .with(readOnlyAdminWrapper, { routeCapabilities: routeRequiredCapabilities })
-  .with(authWrapper, {
-    authHandlers: [
-      SkipAuthHandler, JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler,
-    ],
-  })
+  .with(authWrapper, { authHandlers: AUTH_HANDLERS })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
 export const main = wrappedMain
