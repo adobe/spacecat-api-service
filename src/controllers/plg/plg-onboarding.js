@@ -1476,7 +1476,10 @@ function PlgOnboardingController(ctx) {
       return badRequest('Authentication information is required');
     }
 
-    // Admin/API key holders can access any org's status
+    // Admin/API key holders can access any org's status. Read-only admins are NOT
+    // permitted on the PLG onboarding flow - this endpoint stays on hasAdminAccess()
+    // so that the PLG admin surface (status / waitlist / bypass / etc.) is gated
+    // exclusively by the full-admin role.
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       // Non-admin: validate caller's IMS tenant matches requested imsOrgId

@@ -1,3 +1,10 @@
+# [1.472.0](https://github.com/adobe/spacecat-api-service/compare/v1.471.0...v1.472.0) (2026-05-05)
+
+
+### Features
+
+* read only admin support ([#2062](https://github.com/adobe/spacecat-api-service/issues/2062)) ([d9a7782](https://github.com/adobe/spacecat-api-service/commit/d9a7782a1d48a5871afa07b35f2510a7f8037490))
+
 # [1.471.0](https://github.com/adobe/spacecat-api-service/compare/v1.470.0...v1.471.0) (2026-05-05)
 
 
