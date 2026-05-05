@@ -66,6 +66,7 @@ import {
   updateTopic,
   deleteTopic,
 } from '../support/topics-storage.js';
+import { dispatchCustomerAnalysisV2 } from '../support/llmo-customer-analysis-dispatch.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -424,6 +425,8 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'prompts', log);
+
       return createResponse({ created, updated, prompts: outPrompts }, 201);
     } catch (error) {
       log.error(`Error creating prompts for brand ${brandId}:`, error);
@@ -482,6 +485,9 @@ function BrandsController(ctx, log, env) {
       if (!prompt) {
         return notFound(`Prompt not found: ${promptId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'prompts', log);
+
       return ok(prompt);
     } catch (error) {
       log.error(`Error updating prompt ${promptId}:`, error);
@@ -538,6 +544,9 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Prompt not found: ${promptId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'prompts', log);
+
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
@@ -596,6 +605,8 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
         updatedBy,
       });
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'prompts', log);
 
       return ok(result);
     } catch (error) {
@@ -849,6 +860,8 @@ function BrandsController(ctx, log, env) {
         outcome,
       });
 
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'categories', log);
+
       // 201 on insert, 200 on idempotent update — lets callers (UI toast,
       // DRS audit log) distinguish "created new" from "ensured existing".
       return createResponse(category, created ? 201 : 200);
@@ -909,6 +922,9 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Category not found: ${categoryId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'categories', log);
+
       return ok(updated);
     } catch (error) {
       // PATCH to a name colliding with a sibling row in the same org
@@ -963,6 +979,9 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Category not found: ${categoryId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'categories', log);
+
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
@@ -1050,6 +1069,8 @@ function BrandsController(ctx, log, env) {
         log,
       });
 
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'topics', log);
+
       return createResponse(created, 201);
     } catch (error) {
       if (error?.status === 409) {
@@ -1106,6 +1127,9 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Topic not found: ${topicId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'topics', log);
+
       return ok(updated);
     } catch (error) {
       log.error(`Error updating topic ${topicId} for organization ${spaceCatId}:`, error);
@@ -1153,6 +1177,9 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Topic not found: ${topicId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'topics', log);
+
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
@@ -1202,6 +1229,8 @@ function BrandsController(ctx, log, env) {
         postgrestClient,
         updatedBy,
       });
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'brands', log);
 
       return createResponse(created, 201);
     } catch (error) {
@@ -1260,6 +1289,9 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'brands', log);
+
       return ok(updated);
     } catch (error) {
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
@@ -1308,6 +1340,9 @@ function BrandsController(ctx, log, env) {
       if (!deleted) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      await dispatchCustomerAnalysisV2(context, spaceCatId, 'brands', log);
+
       return createResponse(null, 204);
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);

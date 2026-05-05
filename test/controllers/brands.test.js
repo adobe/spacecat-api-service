@@ -4425,4 +4425,145 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(500);
     });
   });
+
+  describe('llmo-customer-analysis dispatch (LLMO-4744)', () => {
+    const ANALYSIS_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/0/audits-queue';
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+    let dispatchSqs;
+    let dispatchEnv;
+    let dispatchAuthAttrs;
+
+    beforeEach(() => {
+      // Augment mockDataAccess with Site.allByOrganizationId so the dispatch helper
+      // produces real SQS sends. Use the existing in-memory `sites` fixture.
+      mockDataAccess.Site.allByOrganizationId = sinon.stub().resolves(sites);
+
+      // PostgREST mock that satisfies all 13 success paths with a single from() shape.
+      mockDataAccess.services.postgrestClient = {
+        from: sinon.stub().callsFake(() => ({
+          select: sinon.stub().returnsThis(),
+          eq: sinon.stub().returnsThis(),
+          neq: sinon.stub().returnsThis(),
+          in: sinon.stub().returnsThis(),
+          order: sinon.stub().returnsThis(),
+          upsert: sinon.stub().returnsThis(),
+          delete: sinon.stub().returnsThis(),
+          update: sinon.stub().returnsThis(),
+          single: sinon.stub().resolves({
+            data: {
+              id: BRAND_UUID, name: 'Brand', status: 'active', origin: 'human',
+            },
+            error: null,
+          }),
+          maybeSingle: sinon.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-01T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+
+      dispatchSqs = { sendMessage: sinon.stub().resolves() };
+      dispatchEnv = { AUDIT_JOBS_QUEUE_URL: ANALYSIS_QUEUE_URL };
+      dispatchAuthAttrs = { authInfo: { profile: { email: 'user@test.com' } } };
+
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    const buildCtx = (overrides = {}) => ({
+      ...context,
+      sqs: dispatchSqs,
+      env: dispatchEnv,
+      attributes: dispatchAuthAttrs,
+      dataAccess: mockDataAccess,
+      ...overrides,
+    });
+
+    const findAnalysisCall = () => dispatchSqs.sendMessage.getCalls().find(
+      (c) => c.args[1]?.type === 'llmo-customer-analysis',
+    );
+
+    it('createBrandForOrg dispatches changeKind=brands per site on success', async () => {
+      const response = await brandsController.createBrandForOrg(buildCtx({
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Brand' },
+      }));
+
+      expect(response.status).to.equal(201);
+      const call = findAnalysisCall();
+      expect(call, 'expected llmo-customer-analysis dispatch').to.exist;
+      expect(call.args[0]).to.equal(ANALYSIS_QUEUE_URL);
+      expect(call.args[1]).to.deep.equal({
+        type: 'llmo-customer-analysis',
+        siteId: SITE_ID,
+        auditContext: {
+          onboardingMode: 'v2',
+          organizationId: ORGANIZATION_ID,
+          changeKind: 'brands',
+        },
+      });
+    });
+
+    it('createTopicForOrg dispatches changeKind=topics on success', async () => {
+      const response = await brandsController.createTopicForOrg(buildCtx({
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Topic' },
+      }));
+
+      expect(response.status).to.equal(201);
+      const call = findAnalysisCall();
+      expect(call, 'expected llmo-customer-analysis dispatch').to.exist;
+      expect(call.args[1].auditContext.changeKind).to.equal('topics');
+    });
+
+    it('does NOT dispatch on validation failure (400)', async () => {
+      const response = await brandsController.createBrandForOrg(buildCtx({
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { description: 'no name' },
+      }));
+
+      expect(response.status).to.equal(400);
+      expect(findAnalysisCall()).to.not.exist;
+    });
+
+    it('does NOT dispatch when SQS dispatch helper fails — keeps HTTP response intact', async () => {
+      // Helper swallows errors; response is unaffected
+      dispatchSqs.sendMessage = sinon.stub().rejects(new Error('SQS down'));
+
+      const response = await brandsController.createBrandForOrg(buildCtx({
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'Brand' },
+      }));
+
+      // Original mutation still succeeds — dispatch failure is non-fatal
+      expect(response.status).to.equal(201);
+    });
+
+    it('updateBrandForOrg + deleteBrandForOrg both dispatch changeKind=brands on success', async () => {
+      let response = await brandsController.updateBrandForOrg(buildCtx({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated' },
+      }));
+      expect(response.status).to.equal(200);
+      expect(findAnalysisCall()?.args[1].auditContext.changeKind).to.equal('brands');
+
+      dispatchSqs.sendMessage.resetHistory();
+      response = await brandsController.deleteBrandForOrg(buildCtx({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+      }));
+      expect(response.status).to.equal(204);
+      expect(findAnalysisCall()?.args[1].auditContext.changeKind).to.equal('brands');
+    });
+  });
 });
