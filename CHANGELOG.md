@@ -1,3 +1,10 @@
+## [1.472.1](https://github.com/adobe/spacecat-api-service/compare/v1.472.0...v1.472.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **scrape:** sanitize x-error header to prevent ERR_INVALID_CHAR on non-ASCII ([#2331](https://github.com/adobe/spacecat-api-service/issues/2331)) ([56500f9](https://github.com/adobe/spacecat-api-service/commit/56500f92eaeebd9e9354da5e0e439ec6c69eddf6))
+
 # [1.472.0](https://github.com/adobe/spacecat-api-service/compare/v1.471.0...v1.472.0) (2026-05-05)
 
 
