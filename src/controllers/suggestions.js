@@ -1313,6 +1313,16 @@ function SuggestionsController(ctx, sqs, env) {
       );
     }
 
+    if (!precheckOnly && succeededSuggestions.length > 0) {
+      context.log?.info('[autofix-triggered]', {
+        siteId,
+        opportunityId,
+        opportunityType: opportunity.getType(),
+        action: action || 'apply',
+        succeededSuggestionCount: succeededSuggestions.length,
+      });
+    }
+
     return createResponse(response, 207);
   };
 

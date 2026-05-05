@@ -4319,6 +4319,53 @@ describe('Suggestions Controller', () => {
       expect(sqsCallArgs[1].customData).to.deep.equal({});
     });
 
+    it('logs [autofix-triggered] after successful SQS dispatch', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        opportunityType: 'meta-tags',
+        action: 'apply',
+        succeededSuggestionCount: 1,
+      }));
+    });
+
+    it('does not log [autofix-triggered] when precheckOnly is true', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(altTextSuggs[0])]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], action: 'assess', precheckOnly: true },
+        ...context,
+      });
+
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-triggered]', sinon.match.any);
+    });
+
+    it('does not log [autofix-triggered] when no suggestions succeed', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-triggered]', sinon.match.any);
+    });
+
     it('auto-fix suggestions status returns bad request if no site ID is passed', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: {
