@@ -1372,6 +1372,71 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
+    /**
+     * LLMO-4526 — URL Inspector PG dashboard's owned-URLs flow synthesises
+     * `url-${index}-${slug}` ids because rpc_url_inspector_owned_urls does
+     * not return source_urls.id. When that synthetic id is forwarded to
+     * rpc_url_inspector_url_prompts (which takes a UUID), Postgres returns
+     * SQLSTATE 22P02 (`invalid input syntax for type uuid`). Coercing that
+     * to "no prompts for this row" keeps the URL Details dialog functional
+     * (agentic chart + URL info still render) instead of forcing the UI
+     * to render an opaque error state.
+     */
+    it('coerces invalid-UUID RPC errors to 200 + empty prompts (LLMO-4526)', async () => {
+      const synthUrlId = 'url-3-https---www-adobe-com-products-firefly-html-utm-source-chatgpt-com';
+      const { context } = createContext(
+        {},
+        { urlId: synthUrlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: null,
+              error: {
+                code: '22P02',
+                message: `invalid input syntax for type uuid: "${synthUrlId}"`,
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
+    it('coerces invalid-UUID RPC errors detected by message even when code is missing', async () => {
+      const synthUrlId = 'not-a-uuid';
+      const { context } = createContext(
+        {},
+        { urlId: synthUrlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: null,
+              error: {
+                message: 'invalid input syntax for uuid: "not-a-uuid"',
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
     it('uses url_id alias and handles null row fields', async () => {
       const urlId = '44444444-4444-4444-4444-444444444444';
       const rpcData = [{

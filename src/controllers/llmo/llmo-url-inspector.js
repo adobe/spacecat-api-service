@@ -23,7 +23,7 @@ import {
   validateSiteBelongsToOrg,
   validateModel,
 } from './llmo-brand-presence.js';
-import { parseAgentTypes } from './llmo-agentic-traffic.js';
+import { parseAgentTypes } from './llmo-agent-types.js';
 import { cachedOk } from '../../support/cached-response.js';
 
 /**
@@ -590,6 +590,22 @@ export function createUrlInspectorUrlPromptsHandler(
       });
 
       if (error) {
+        // PostgREST/Supabase wraps Postgres errors with `code` (SQLSTATE) and
+        // `message`. UUID parse failures (SQLSTATE 22P02 — invalid_text_representation)
+        // happen when callers pass synthetic url_ids — most commonly the URL
+        // Inspector PG dashboard's owned-urls flow, where the rpc_url_inspector_owned_urls
+        // RPC does not return a real source_urls.id and the dashboard
+        // synthesises `url-${index}-${slug}` ids per LLMO-4526 (multi-persona
+        // PR review M2 follow-up).
+        //
+        // The drilldown is genuinely empty for those rows (we do not know
+        // which prompts cited that URL), so it is more useful to clients to
+        // surface that as an empty list than as a 500 the dialog would have
+        // to interpret. Other Postgres errors continue to bubble up as 500.
+        if (error.code === '22P02' || /invalid input syntax for( type)? uuid/i.test(error.message)) {
+          ctx.log.info(`URL Inspector URL prompts: invalid url_id "${urlId}" — returning empty prompt list`);
+          return cachedOk({ prompts: [] });
+        }
         ctx.log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
         return internalServerError('Internal error processing URL Inspector URL prompts');
       }

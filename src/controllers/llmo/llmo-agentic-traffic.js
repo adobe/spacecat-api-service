@@ -15,6 +15,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
+import { parseAgentTypes } from './llmo-agent-types.js';
 import { cachedOk } from '../../support/cached-response.js';
 
 /**
@@ -35,15 +36,11 @@ const ERR_NOT_FOUND = 'not found';
 const VALID_INTERVALS = new Set(['day', 'week', 'month']);
 const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
 const VALID_SUCCESS_RATE_BUCKETS = new Set(['high', 'medium', 'low']);
-// Mirrors the values stored in agentic_traffic.agent_type. Lookup is case-insensitive
-// (we lowercase incoming tokens before matching) but the canonical casing is what the
-// PG predicate compares against, so we re-emit canonical values to the RPC.
-const VALID_AGENT_TYPES_CANONICAL = ['Chatbots', 'Research', 'Training bots'];
-const VALID_AGENT_TYPES_LOOKUP = new Map(
-  VALID_AGENT_TYPES_CANONICAL.map((value) => [value.toLowerCase(), value]),
-);
 // Allowlists mirror the CASE whitelists in the DB RPCs — unknown values are already
 // rejected server-side, but we validate here too for defence-in-depth.
+// `parseAgentTypes` and the canonical agent-type list now live in
+// `./llmo-agent-types.js` so the URL Inspector handler can share them
+// without cross-controller imports.
 const VALID_SORT_COLUMNS_BY_URL = new Set([
   'host', 'url_path', 'total_hits', 'unique_agents',
   'success_rate', 'avg_ttfb_ms', 'category_name',
@@ -77,39 +74,10 @@ const PLATFORM_CODE_TO_DB = {
   amazon: 'Amazon',
 };
 
-/**
- * Parse the additive `agentTypes` inclusion list into an array of canonical
- * agent_type values (`Chatbots`, `Research`, `Training bots`) or null.
- *
- * Accepts either a comma-separated string (`"Chatbots,Research"`) or an array
- * passed as-is by the caller. Whitespace is trimmed, casing is normalised
- * case-insensitively, and unknown values are silently dropped — same defence
- * as `successRate`. An empty resulting list collapses to null so the RPC
- * receives `p_agent_types=NULL` and returns the unfiltered baseline.
- */
-export function parseAgentTypes(raw) {
-  if (raw === undefined || raw === null) {
-    return null;
-  }
-  const tokens = Array.isArray(raw)
-    ? raw
-    : String(raw).split(',');
-  const canonical = tokens.reduce((acc, token) => {
-    if (typeof token !== 'string') {
-      return acc;
-    }
-    const key = token.trim().toLowerCase();
-    if (!key) {
-      return acc;
-    }
-    const value = VALID_AGENT_TYPES_LOOKUP.get(key);
-    if (value && !acc.includes(value)) {
-      acc.push(value);
-    }
-    return acc;
-  }, []);
-  return canonical.length > 0 ? canonical : null;
-}
+// Re-exported from `./llmo-agent-types.js` so existing imports (the test
+// suite, the URL Inspector handler before it was switched to import the
+// shared module directly) keep working without churn.
+export { parseAgentTypes };
 
 function defaultDateRange() {
   const end = new Date();
