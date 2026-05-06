@@ -509,7 +509,8 @@ export async function upsertPrompts({
     .from('prompts')
     .select('id,prompt_id,text,regions')
     .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid);
+    .eq('brand_id', brandUuid)
+    .neq('status', 'deleted');
 
   if (incomingIds.length > 0) {
     existingQuery = existingQuery.in('prompt_id', incomingIds);
