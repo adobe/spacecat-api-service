@@ -20,6 +20,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
+import esmock from 'esmock';
 
 import BrandsController from '../../src/controllers/brands.js';
 
@@ -2042,6 +2043,254 @@ describe('Brands Controller', () => {
       const response = await brandsController.getBrandForOrg({
         ...context,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('getBrandForOrgSite', () => {
+    const SAMPLE_BRAND = {
+      id: 'b1111111-1111-4111-b111-111111111111',
+      name: 'Acme',
+      status: 'active',
+    };
+
+    /**
+     * Build a BrandsController instance with resolveLlmoOnboardingMode and
+     * getBrandBySite mocked to controllable return values. Other helpers
+     * (resolveBrandUuid, listBrands, …) come through unchanged.
+     */
+    async function buildController({
+      mode,
+      brand,
+      brandError,
+    } = {}) {
+      const resolveLlmoOnboardingModeStub = sinon.stub().resolves(mode);
+      const getBrandBySiteStub = brandError
+        ? sinon.stub().rejects(brandError)
+        : sinon.stub().resolves(brand);
+
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/llmo-onboarding-mode.js': {
+          resolveLlmoOnboardingMode: resolveLlmoOnboardingModeStub,
+          LLMO_ONBOARDING_MODE_V2: 'v2',
+        },
+        '../../src/support/brands-storage.js': {
+          listBrands: sinon.stub().resolves([]),
+          upsertBrand: sinon.stub(),
+          updateBrand: sinon.stub(),
+          deleteBrand: sinon.stub(),
+          getBrandById: sinon.stub().resolves(null),
+          getBrandBySite: getBrandBySiteStub,
+        },
+      });
+
+      return {
+        controller: Mocked(context, loggerStub, mockEnv),
+        resolveLlmoOnboardingModeStub,
+        getBrandBySiteStub,
+      };
+    }
+
+    it('returns 200 with the brand when org is v2 and brand resolves', async () => {
+      const {
+        controller,
+        resolveLlmoOnboardingModeStub,
+        getBrandBySiteStub,
+      } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal(SAMPLE_BRAND);
+      expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
+      const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
+      expect(orgArg).to.equal(ORGANIZATION_ID);
+      // readOnly: true is load-bearing — without it the resolver could write
+      // to feature_flags from a GET (row-1 brandalf-revert side effect).
+      expect(optsArg).to.deep.equal({ readOnly: true });
+      expect(getBrandBySiteStub).to.have.been.calledOnce;
+      expect(getBrandBySiteStub.firstCall.args[0]).to.equal(ORGANIZATION_ID);
+      expect(getBrandBySiteStub.firstCall.args[1]).to.equal(SITE_ID);
+    });
+
+    it('returns 404 when resolver reports v1 (no v2 brand configured)', async () => {
+      const { controller, getBrandBySiteStub } = await buildController({ mode: 'v1' });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(404);
+      // Storage should not be called when resolver gates the request out.
+      expect(getBrandBySiteStub).to.not.have.been.called;
+    });
+
+    it('returns 404 when org is v2 but site has no active brand', async () => {
+      const { controller } = await buildController({ mode: 'v2', brand: null });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const { controller } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const { controller } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when siteId is missing', async () => {
+      const { controller } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when siteId is not a valid UUID', async () => {
+      const { controller } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: 'not-a-uuid' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      const { controller } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const Mocked = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/llmo-onboarding-mode.js': {
+          resolveLlmoOnboardingMode: sinon.stub().resolves('v2'),
+          LLMO_ONBOARDING_MODE_V2: 'v2',
+        },
+        '../../src/support/brands-storage.js': {
+          listBrands: sinon.stub().resolves([]),
+          upsertBrand: sinon.stub(),
+          updateBrand: sinon.stub(),
+          deleteBrand: sinon.stub(),
+          getBrandById: sinon.stub().resolves(null),
+          getBrandBySite: sinon.stub().resolves(SAMPLE_BRAND),
+        },
+      });
+      const unauthorizedController = Mocked({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.getBrandForOrgSite({
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const { controller } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when site does not belong to the organization (matches triggerConfigSync)', async () => {
+      const otherOrgSite = {
+        getOrganizationId: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      };
+      mockDataAccess.Site.findById.resolves(otherOrgSite);
+      const { controller, getBrandBySiteStub } = await buildController({
+        mode: 'v2',
+        brand: SAMPLE_BRAND,
+      });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+      // Resolver and storage should never be reached when site/org mismatch.
+      expect(getBrandBySiteStub).to.not.have.been.called;
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      const { controller } = await buildController({ mode: 'v2', brand: SAMPLE_BRAND });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      const { controller } = await buildController({
+        mode: 'v2',
+        brandError: new Error('DB connection lost'),
+      });
+
+      const response = await controller.getBrandForOrgSite({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, siteId: SITE_ID },
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);

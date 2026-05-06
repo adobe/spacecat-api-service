@@ -89,7 +89,9 @@ function OrganizationsController(ctx, env) {
   const getAll = async (context) => {
     const { log } = ctx;
     const requestId = context?.invocation?.id || 'unknown';
-    const isAdmin = accessControlUtil.hasAdminAccess();
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold organization:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
     const s2sResult = isAdmin
       ? { allowed: false, reason: 'admin-bypass' }
       : await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
@@ -165,7 +167,7 @@ function OrganizationsController(ctx, env) {
    * @throws {Error} If IMS org ID is not provided, org not found, or Slack config not found.
    */
   const getSlackConfigByImsOrgID = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view Slack configurations');
     }
     const response = await getByImsOrgID(context);
