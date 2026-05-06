@@ -4336,7 +4336,27 @@ describe('Suggestions Controller', () => {
         opportunityType: 'meta-tags',
         action: 'apply',
         succeededSuggestionCount: 1,
+        triggeredBy: 'test@test.com',
       }));
+    });
+
+    it('logs triggeredBy as unknown when profile email is absent', async () => {
+      const savedProfile = context.attributes.authInfo.profile;
+      context.attributes.authInfo.profile = null;
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
+
+      await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
+        triggeredBy: 'unknown',
+      }));
+      context.attributes.authInfo.profile = savedProfile;
     });
 
     it('does not log [autofix-triggered] when precheckOnly is true', async () => {

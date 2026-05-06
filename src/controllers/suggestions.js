@@ -1320,6 +1320,7 @@ function SuggestionsController(ctx, sqs, env) {
         opportunityType: opportunity.getType(),
         action: action || 'apply',
         succeededSuggestionCount: succeededSuggestions.length,
+        triggeredBy: context.attributes?.authInfo?.profile?.email || 'unknown',
       });
     }
 
