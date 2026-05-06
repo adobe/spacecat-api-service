@@ -628,6 +628,27 @@ describe('LlmoOpportunitiesController', () => {
       expect(result.status).to.equal(500);
     });
 
+    it('returns 500 when allByScope rejects', async () => {
+      mockContext.params.brandId = 'brand-uuid';
+      mockContext.dataAccess.Opportunity.allByScope.rejects(new Error('PostgREST unavailable'));
+
+      LlmoOpportunitiesController = await esmock(
+        '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+        {
+          ...defaultMocks(sandbox.stub().resolves(true)),
+          '../../../../src/support/brands-storage.js': {
+            getBrandById: sandbox.stub().resolves({ name: 'MyBrand', siteIds: [] }),
+          },
+        },
+      );
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(500);
+      expect(mockContext.log.error).to.have.been.called;
+    });
+
     it('returns badRequest for unexpected auth errors', async () => {
       mockContext.params.brandId = 'all';
       mockContext.dataAccess.Organization.findById.rejects(new Error('Unexpected'));
