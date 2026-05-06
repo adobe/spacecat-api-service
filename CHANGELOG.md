@@ -1,3 +1,31 @@
+# [1.478.0](https://github.com/adobe/spacecat-api-service/compare/v1.477.1...v1.478.0) (2026-05-06)
+
+
+### Features
+
+* enhance has-data endpoint to return available sources | LLMO-4261 ([#2347](https://github.com/adobe/spacecat-api-service/issues/2347)) ([bc8253c](https://github.com/adobe/spacecat-api-service/commit/bc8253c8e2c88502dc5f6ad2c6a68cdb2bb70cba))
+
+## [1.477.1](https://github.com/adobe/spacecat-api-service/compare/v1.477.0...v1.477.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* **llmo:** include subpath in generateDataFolder to prevent SharePoint folder collisions ([#2315](https://github.com/adobe/spacecat-api-service/issues/2315)) ([5f817e2](https://github.com/adobe/spacecat-api-service/commit/5f817e27f4b2524d82030fcd55220f403697de74))
+
+# [1.477.0](https://github.com/adobe/spacecat-api-service/compare/v1.476.2...v1.477.0) (2026-05-06)
+
+
+### Features
+
+* add has-data endpoint for referral traffic | LLMO-4261 ([#2339](https://github.com/adobe/spacecat-api-service/issues/2339)) ([69fddf2](https://github.com/adobe/spacecat-api-service/commit/69fddf2381ac67dc85d65afb905496f8dc7db919))
+
+## [1.476.2](https://github.com/adobe/spacecat-api-service/compare/v1.476.1...v1.476.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* sites resolve PLG gating ([#2309](https://github.com/adobe/spacecat-api-service/issues/2309)) ([a0ad339](https://github.com/adobe/spacecat-api-service/commit/a0ad3391721851fa171523ca23f8e4d5b1795604))
+
 ## [1.476.1](https://github.com/adobe/spacecat-api-service/compare/v1.476.0...v1.476.1) (2026-05-06)
 
 

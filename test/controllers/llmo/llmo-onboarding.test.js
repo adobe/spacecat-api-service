@@ -309,78 +309,114 @@ describe('LLMO Onboarding Functions', () => {
   };
 
   describe('generateDataFolder', () => {
-    it('should generate correct data folder name for production environment', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    let generateDataFolder;
 
-      // Test parameters
-      const baseURL = 'https://test.com';
-      const env = 'prod';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('test-com');
-    }).timeout(5000);
-
-    it('should generate correct data folder name for development environment', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test parameters
-      const baseURL = 'https://test.com';
-      const env = 'dev';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('dev/test-com');
+    before(async () => {
+      ({ generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {}));
     });
 
-    it('should handle complex domain names correctly', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test with a complex domain
-      const baseURL = 'https://my-awesome-site.example.com';
-      const env = 'dev';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result
-      expect(result).to.equal('dev/my-awesome-site-example-com');
+    it('should generate correct data folder name for production environment', () => {
+      expect(generateDataFolder('https://test.com', 'prod')).to.equal('test-com');
     });
 
-    it('should handle domains with special characters', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
-
-      // Test with special characters
-      const baseURL = 'https://test-site.example.com:8080';
-      const env = 'prod';
-
-      // Call the function
-      const result = generateDataFolder(baseURL, env);
-
-      // Verify result - should extract hostname and replace special chars with hyphens
-      expect(result).to.equal('test-site-example-com');
+    it('should generate correct data folder name for development environment', () => {
+      expect(generateDataFolder('https://test.com', 'dev')).to.equal('dev/test-com');
     });
 
-    it('should use default env as dev when not specified', async () => {
-      // Import the function
-      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+    it('should handle complex domain names correctly', () => {
+      expect(generateDataFolder('https://my-awesome-site.example.com', 'dev'))
+        .to.equal('dev/my-awesome-site-example-com');
+    });
 
-      // Test parameters without env (should default to 'dev')
-      const baseURL = 'https://test.com';
+    it('should strip port from folder name', () => {
+      expect(generateDataFolder('https://test-site.example.com:8080', 'prod'))
+        .to.equal('test-site-example-com');
+    });
 
-      // Call the function
-      const result = generateDataFolder(baseURL);
+    it('should produce the same folder name for URLs differing only by port', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com:8443/kings', 'prod'));
+    });
 
-      // Verify result
-      expect(result).to.equal('dev/test-com');
+    it('should use default env as dev when not specified', () => {
+      expect(generateDataFolder('https://test.com')).to.equal('dev/test-com');
+    });
+
+    it('should generate unique folder names for subpath sites on the same domain', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod')).to.equal('nba-com--kings');
+      expect(generateDataFolder('https://nba.com/lakers', 'prod')).to.equal('nba-com--lakers');
+      expect(generateDataFolder('https://nba.com/kings', 'dev')).to.equal('dev/nba-com--kings');
+    });
+
+    it('should produce the same folder name for root domain with or without trailing slash', () => {
+      expect(generateDataFolder('https://nba.com', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/', 'prod'));
+    });
+
+    it('should produce the same folder name for subpath with or without trailing slash', () => {
+      expect(generateDataFolder('https://nba.com/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings/', 'prod'));
+    });
+
+    it('should generate correct folder name for nested subpaths', () => {
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod')).to.equal('nba-com--us--kings');
+      expect(generateDataFolder('https://nba.com/us/kings', 'dev')).to.equal('dev/nba-com--us--kings');
+    });
+
+    it('should generate distinct folder names for paths that differ only by separator type', () => {
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us-kings', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us..kings', 'prod'));
+      expect(generateDataFolder('https://nba.com/us/kings', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba.com/us--kings', 'prod'));
+    });
+
+    it('should not collide hostname with consecutive non-alnum chars and a subpath', () => {
+      expect(generateDataFolder('https://nba--com/', 'prod'))
+        .to.not.equal(generateDataFolder('https://nba/com', 'prod'));
+    });
+
+    it('should handle malformed percent-encoded path segments without throwing', () => {
+      expect(() => generateDataFolder('https://a.com/%FF', 'prod')).to.not.throw();
+    });
+
+    it('should normalize percent-encoded path segments', () => {
+      expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/könig', 'prod'));
+      expect(generateDataFolder('https://nba.com/k%C3%B6nig', 'prod'))
+        .to.match(/^nba-com--/);
+    });
+
+    it('should case-fold path segments so /Kings and /kings resolve to the same folder', () => {
+      expect(generateDataFolder('https://nba.com/Kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should handle double slashes in paths correctly', () => {
+      expect(generateDataFolder('https://nba.com//kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should ignore query strings and URL fragments', () => {
+      expect(generateDataFolder('https://nba.com/kings?utm=foo', 'prod'))
+        .to.equal('nba-com--kings');
+      expect(generateDataFolder('https://nba.com/kings#section', 'prod'))
+        .to.equal('nba-com--kings');
+    });
+
+    it('should drop degenerate path segments that sanitize to empty', () => {
+      expect(generateDataFolder('https://nba.com/-/kings', 'prod'))
+        .to.equal(generateDataFolder('https://nba.com/kings', 'prod'));
+    });
+
+    it('should throw on a malformed base URL', () => {
+      expect(() => generateDataFolder('not a url', 'prod')).to.throw(TypeError);
+    });
+
+    it('should throw when baseURL has no hostname', () => {
+      expect(() => generateDataFolder('file:///etc/passwd', 'prod'))
+        .to.throw(TypeError, 'hostname is required');
     });
   });
 
