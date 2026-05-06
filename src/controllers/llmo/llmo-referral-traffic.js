@@ -630,6 +630,59 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
  */
 const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics']);
 
+// ============================================================================
+// /by-url-trend
+// ============================================================================
+
+/**
+ * GET /sites/:siteId/referral-traffic/by-url-trend
+ *
+ * Weekly pageview totals for a single URL path.
+ * Required query param: urlPath (exact path, e.g. /blog/my-post).
+ * Returns: { trend: [{ weekStart: "YYYY-MM-DD", pageviews: N }, ...] }
+ */
+export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficUrlTrend(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'by-url-trend',
+      async (ctx, client, siteId) => {
+        const q = ctx.data || {};
+        const urlPath = (q.urlPath || '').trim() || null;
+
+        if (!urlPath) {
+          return badRequest('urlPath query parameter is required');
+        }
+
+        const parsed = parseParams(ctx);
+
+        const { data, error } = await client.rpc('rpc_referral_traffic_url_trend', {
+          ...commonRpcParams(siteId, parsed),
+          p_url_path: urlPath,
+        });
+
+        if (error) {
+          ctx.log.error(`Referral traffic by-url-trend PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch referral traffic URL trend');
+        }
+
+        /* c8 ignore next 2 — same null-safety pattern as sibling handlers */
+        return ok({
+          trend: (data ?? []).map((row) => ({
+            weekStart: row.week_start,
+            pageviews: Number(row.total_pageviews),
+          })),
+        });
+      },
+    );
+  };
+}
+
+// ============================================================================
+// /business-impact
+// ============================================================================
+
 export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficBusinessImpact(context) {
     return withReferralTrafficAuth(
