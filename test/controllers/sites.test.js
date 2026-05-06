@@ -5189,7 +5189,7 @@ describe('Sites Controller', () => {
       expect(body.details).to.deep.include({ productCode: 'ASO' });
     });
 
-    it('should return 404 for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
+    it('should return 404 with aso_pre_onboard for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5208,6 +5208,7 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('aso_pre_onboard');
     });
 
     it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
@@ -5283,7 +5284,7 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('site');
     });
 
-    it('should return 404 for admin when organizationId path has no enrolled site', async () => {
+    it('should return 404 with no_entitlement_for_product for admin when organizationId path has no entitlement', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
@@ -5299,6 +5300,7 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
     });
 
     it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
@@ -5320,6 +5322,55 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(404);
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 with no_entitlement_for_product for non-existent organizationId (external caller)', async () => {
+      context.data = { organizationId: '00000000-0000-0000-0000-000000000000' };
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+    });
+
+    it('should return 404 with site_not_enrolled for non-existent organizationId when caller is internal', async () => {
+      const internalUuid = '9033554c-de8a-44ac-a356-09b51af8cc28';
+      const internalIms = '1234567890ABCDEF12345678@AdobeOrg';
+      context.env = { ...context.env, ASO_PLG_EXCLUDED_ORGS: internalUuid };
+      context.data = {
+        organizationId: '00000000-0000-0000-0000-000000000000',
+        callerImsOrg: internalIms,
+      };
+      mockDataAccess.Organization.findByImsOrgId
+        .withArgs(internalIms).resolves({ getId: () => internalUuid });
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
+    });
+
+    it('should return 404 with site_not_enrolled when organizationId has visible entitlement but no enrolled site', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-free-trial', getTier: () => 'FREE_TRIAL' },
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+      expect(body.resolveStatus).to.equal('site_not_enrolled');
     });
 
     describe('ASO_PLG_EXCLUDED_ORGS — internal/demo caller remapping (siteId path)', () => {
@@ -5565,7 +5616,7 @@ describe('Sites Controller', () => {
       // organizationId / imsOrg paths: no special handling (original flow preserved)
       // ────────────────────────────────────────────────────────────────────────────
 
-      it('internal caller, organizationId path: original flow → generic 404 (no resolveStatus)', async () => {
+      it('internal caller, organizationId path: no entitlement → 404 site_not_enrolled', async () => {
         context.data = {
           organizationId: INTERNAL_ORG_SPACECAT_ID,
           callerImsOrg: INTERNAL_ORG_IMS_ID,
@@ -5577,7 +5628,7 @@ describe('Sites Controller', () => {
 
         expect(response.status).to.equal(404);
         const body = await response.json();
-        expect(body.resolveStatus).to.be.undefined;
+        expect(body.resolveStatus).to.equal('site_not_enrolled');
       });
 
       it('internal caller, imsOrg path (no siteId): no entitlement → 404 site_not_enrolled', async () => {

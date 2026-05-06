@@ -1207,7 +1207,6 @@ function SitesController(ctx, log, env) {
     // independent of which org's data is being requested via organizationId/imsOrg.
     // We translate it to a Spacecat UUID once, up front, so the per-path remap can
     // decide whether the caller is an internal/demo org listed in ASO_PLG_EXCLUDED_ORGS.
-    log.info(`[resolveSite] ASO_PLG_EXCLUDED_ORGS=${context.env.ASO_PLG_EXCLUDED_ORGS ?? '(not set)'} callerImsOrg=${callerImsOrg ?? '(not provided)'}`);
     let callerIsInternal = false;
     if (hasText(callerImsOrg)) {
       try {
@@ -1222,6 +1221,43 @@ function SitesController(ctx, log, env) {
         log.warn('[resolveSite] caller org lookup failed, treating as non-internal', e);
       }
     }
+
+    // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
+    // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
+    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
+    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    const resolveByOrg = async (org, failureDetails) => {
+      const tierClient = TierClient.createForOrg(context, org, productCode);
+      const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+      if (!entitlement) {
+        if (callerIsInternal) {
+          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+        }
+        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+      }
+
+      if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+        if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+          return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+        }
+        log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+      }
+
+      if (enrolledSite && (accessControlUtil.hasAdminAccess()
+        || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
+        const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
+        return ok({
+          data: {
+            organization: OrganizationDto.toJSON(org),
+            site: SiteDto.toJSON(enrolledSite),
+            isSummitPlgEnabled,
+          },
+        });
+      }
+
+      return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+    };
 
     let organization;
     let site;
@@ -1285,22 +1321,15 @@ function SitesController(ctx, log, env) {
 
       if (hasText(organizationId) && isValidUUID(organizationId)) {
         organization = await Organization.findById(organizationId);
-        if (organization && await accessControlUtil.hasAccess(organization)) {
-          const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { entitlement: orgEntitlement, site: enrolledSite } = await tierClient
-            .getFirstEnrollment();
-
-          if (enrolledSite && (accessControlUtil.hasAdminAccess()
-            || CUSTOMER_VISIBLE_TIERS.includes(orgEntitlement?.getTier()))) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            return ok({
-              data: {
-                organization: OrganizationDto.toJSON(organization),
-                site: SiteDto.toJSON(enrolledSite),
-                isSummitPlgEnabled,
-              },
-            });
-          }
+        if (!organization) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            { productCode, organizationId },
+          );
+        }
+        if (await accessControlUtil.hasAccess(organization)) {
+          return resolveByOrg(organization, { productCode, organizationId });
         }
       } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
@@ -1312,37 +1341,7 @@ function SitesController(ctx, log, env) {
           );
         }
         if (await accessControlUtil.hasAccess(organization)) {
-          const tierClient = TierClient.createForOrg(context, organization, productCode);
-          const { entitlement: imsOrgEntitlement, site: enrolledSite } = await tierClient
-            .getFirstEnrollment();
-          const failureDetails = { productCode, organizationId: organization.getId() };
-
-          if (!imsOrgEntitlement) {
-            if (callerIsInternal) {
-              return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
-            }
-            return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
-          }
-
-          if (!CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement.getTier())) {
-            if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
-              return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
-            }
-          }
-
-          if (enrolledSite && (accessControlUtil.hasAdminAccess()
-            || CUSTOMER_VISIBLE_TIERS.includes(imsOrgEntitlement.getTier()))) {
-            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
-            return ok({
-              data: {
-                organization: OrganizationDto.toJSON(organization),
-                site: SiteDto.toJSON(enrolledSite),
-                isSummitPlgEnabled,
-              },
-            });
-          }
-
-          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+          return resolveByOrg(organization, { productCode, organizationId: organization.getId() });
         }
       }
 
