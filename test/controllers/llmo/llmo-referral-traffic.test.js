@@ -416,6 +416,16 @@ describe('llmo-referral-traffic', () => {
       const res = await handler(ctx);
       expect(res.status).to.equal(400);
     });
+
+    it('uses {} when ctx.data is null in trend-by-url handler (covers `ctx.data || {}` branch)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = null;
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      expect(client.rpc.getCall(0).args[1].p_url_search).to.equal(null);
+    });
   });
 
   // ── /by-platform ──────────────────────────────────────────────────────────
