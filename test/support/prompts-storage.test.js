@@ -516,16 +516,17 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.items).to.have.lengthOf(1);
-      expect(result.items[0].category).to.deep.include({
-        id: 'cat-uuid', name: 'Photoshop', origin: 'human',
+      // deep.equal (not deep.include) — symmetric with getPromptById test below
+      // and locks the exact embed shape so a regression dropping `uuid` (or
+      // adding an unintended field) fails fast. DRS reads category.uuid /
+      // topic.uuid to populate brand_presence_executions.category_id /
+      // .topic_id FKs.
+      expect(result.items[0].category).to.deep.equal({
+        id: 'cat-uuid', uuid: 'cat-uuid', name: 'Photoshop', origin: 'human',
       });
-      expect(result.items[0].topic).to.deep.include({
-        id: 'topic-uuid', name: 'Editing',
+      expect(result.items[0].topic).to.deep.equal({
+        id: 'topic-uuid', uuid: 'topic-uuid', name: 'Editing',
       });
-      // FK uuids: DRS reads category.uuid / topic.uuid to populate
-      // brand_presence_executions.category_id / .topic_id.
-      expect(result.items[0].category.uuid).to.equal('cat-uuid');
-      expect(result.items[0].topic.uuid).to.equal('topic-uuid');
     });
 
     it('throws on query error', async () => {
