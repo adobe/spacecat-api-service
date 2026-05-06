@@ -28,7 +28,13 @@ import {
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 
-import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
+import {
+  Suggestion as SuggestionModel,
+  GeoExperiment as GeoExperimentModel,
+  Site as SiteModel,
+  Entitlement as EntitlementModel,
+} from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
@@ -1042,6 +1048,21 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
+    }
+
+    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
+      try {
+        const asoProductCode = EntitlementModel.PRODUCT_CODES.ASO;
+        const tierClient = await TierClient.createForSite(context, site, asoProductCode);
+        const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
+        const blockedTiers = [EntitlementModel.TIERS.PLG, EntitlementModel.TIERS.FREE_TRIAL];
+        if (blockedTiers.includes(entitlement?.getTier()) && siteEnrollment) {
+          context.log.warn(`Auto-fix blocked for site ${siteId}: not supported for AEM Edge sites on PLG tier`);
+          return forbidden('unauthorized');
+        }
+      } catch (e) {
+        context.log?.warn(`Failed to check entitlement tier for site ${siteId}: ${e.message}`);
+      }
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
