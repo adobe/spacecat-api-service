@@ -74,6 +74,7 @@ import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
+import { generateAkamaiPapiConfig } from '../../support/akamai-papi-template.js';
 import {
   LLMO_CONFIG_DB_SYNC_TYPE,
   isSyncEnabledForSite,
@@ -1589,6 +1590,58 @@ function LlmoController(ctx) {
   };
 
   /**
+   * GET /sites/{siteId}/llmo/edge-optimize-config/akamai-papi
+   * Generates and returns a pre-filled Akamai PAPI JSON configuration for
+   * "Optimize at Edge" CDN routing.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} PAPI JSON file download
+   */
+  const getAkamaiPapiConfig = async (context) => {
+    const { log, dataAccess } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+
+    try {
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can download the Akamai config');
+      }
+
+      const baseURL = site.getBaseURL();
+      const { hostname } = new URL(baseURL.startsWith('http') ? baseURL : `https://${baseURL}`);
+
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+      if (!metaconfig || !Array.isArray(metaconfig.apiKeys) || metaconfig.apiKeys.length === 0) {
+        return badRequest('Edge Optimize API key not found. Please enable edge optimizations first to generate your API key.');
+      }
+
+      const [apiKey] = metaconfig.apiKeys;
+      const papiConfig = generateAkamaiPapiConfig(hostname, apiKey);
+
+      log.info(`Generated Akamai PAPI config for site ${siteId}, domain: ${hostname}`);
+
+      return ok(papiConfig, {
+        'Content-Type': 'application/json',
+        'Content-Disposition': `attachment; filename="akamai-edge-optimize-${hostname}.json"`,
+      });
+    } catch (error) {
+      log.error(`Failed to generate Akamai PAPI config for site ${siteId}:, error`);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  /**
    * GET /sites/{siteId}/llmo/strategy
    * Retrieves LLMO strategy data from S3
    * @param {object} context - Request context
@@ -2025,6 +2078,7 @@ function LlmoController(ctx) {
     getDemoRecommendations,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
+    getAkamaiPapiConfig,
     createOrUpdateStageEdgeConfig,
     getStrategy,
     saveStrategy,

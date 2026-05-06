@@ -428,6 +428,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
+    'GET /sites/:siteId/llmo/edge-optimize-config/akamai-papi': llmoController.getAkamaiPapiConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,

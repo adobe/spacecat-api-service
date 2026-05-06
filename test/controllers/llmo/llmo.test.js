@@ -7050,6 +7050,127 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('getAkamaiPapiConfig', () => {
+    let akamaiPapiContext;
+
+    beforeEach(() => {
+      mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
+
+      akamaiPapiContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+      };
+    });
+
+    it('should return 200 with PAPI JSON when site exists, has access, is admin, and metaconfig has apiKeys', async () => {
+      const metaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-papi-api-key'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(metaconfig);
+
+      const result = await controller.getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.property('rules');
+      expect(responseBody.rules.name).to.equal('default');
+      expect(responseBody.rules.children).to.be.an('array').with.lengthOf(1);
+      const apiKeyBehavior = responseBody.rules.children[0].behaviors.find(
+        (b) => b.name === 'modifyIncomingRequestHeader'
+          && b.options.headerName === 'x-edgeoptimize-api-key',
+      );
+      expect(apiKeyBehavior.options.headerValue).to.equal('test-papi-api-key');
+    });
+
+    it('should return 400 when metaconfig has no apiKeys (empty array)', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves({ siteId: TEST_SITE_ID, apiKeys: [] });
+
+      const result = await controller.getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Edge Optimize API key not found');
+    });
+
+    it('should return 400 when metaconfig is null', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+
+      const result = await controller.getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Edge Optimize API key not found');
+    });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('User does not have access to this site');
+    });
+
+    it('should return 403 when user is not an LLMO administrator', async () => {
+      const LlmoControllerNonAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true, true, false),
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const nonAdminController = LlmoControllerNonAdmin;
+
+      const result = await nonAdminController(mockContext).getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can download the Akamai config');
+    });
+
+    it('should return 404 when site not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Site not found');
+    });
+
+    it('should return 400 when tokowakaClient.fetchMetaconfig throws', async () => {
+      mockTokowakaClient.fetchMetaconfig.rejects(new Error('S3 fetch failed'));
+
+      const result = await controller.getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('S3 fetch failed');
+    });
+
+    it('should handle baseURL without http prefix by prepending https://', async () => {
+      mockSite.getBaseURL = sinon.stub().returns('www.example.com');
+      const metaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['bare-domain-api-key'],
+      };
+      mockTokowakaClient.fetchMetaconfig.resolves(metaconfig);
+
+      const result = await controller.getAkamaiPapiConfig(akamaiPapiContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.rules.comments).to.include('www.example.com');
+    });
+  });
+
   describe('getStrategy', () => {
     const mockStrategyData = {
       opportunities: [
