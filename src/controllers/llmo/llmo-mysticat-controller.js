@@ -63,9 +63,11 @@ import {
   createReferralTrafficByRegionHandler,
   createReferralTrafficByPageIntentHandler,
   createReferralTrafficByUrlHandler,
+  createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
   createReferralTrafficByDeviceHandler,
+  createReferralTrafficHasDataHandler,
 } from './llmo-referral-traffic.js';
 
 /**
@@ -218,11 +220,13 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getReferralTrafficByUrl = createReferralTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getReferralTrafficUrlTrend = createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess);
   const getReferralTrafficBusinessImpact = createReferralTrafficBusinessImpactHandler(
     getSiteAndValidateAccess,
   );
   const getReferralTrafficWeeks = createReferralTrafficWeeksHandler(getSiteAndValidateAccess);
   const getReferralTrafficByDevice = createReferralTrafficByDeviceHandler(getSiteAndValidateAccess);
+  const getReferralTrafficHasData = createReferralTrafficHasDataHandler(getSiteAndValidateAccess);
 
   return {
     getFilterDimensions,
@@ -271,9 +275,11 @@ function LlmoMysticatController(ctx) {
     getReferralTrafficByRegion,
     getReferralTrafficByPageIntent,
     getReferralTrafficByUrl,
+    getReferralTrafficUrlTrend,
     getReferralTrafficBusinessImpact,
     getReferralTrafficWeeks,
     getReferralTrafficByDevice,
+    getReferralTrafficHasData,
   };
 }
 

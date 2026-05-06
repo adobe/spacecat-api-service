@@ -108,6 +108,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/agentic-traffic/has-data',
 
   // Referral traffic PG dashboard endpoints (site-scoped) - UI only, not yet required by S2S
+  'GET /sites/:siteId/referral-traffic/has-data',
   'GET /sites/:siteId/referral-traffic/filter-dimensions',
   'GET /sites/:siteId/referral-traffic/kpis',
   'GET /sites/:siteId/referral-traffic/trend',
@@ -115,6 +116,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/referral-traffic/by-region',
   'GET /sites/:siteId/referral-traffic/by-page-intent',
   'GET /sites/:siteId/referral-traffic/by-url',
+  'GET /sites/:siteId/referral-traffic/by-url-trend',
   'GET /sites/:siteId/referral-traffic/by-device',
   'GET /sites/:siteId/referral-traffic/business-impact',
   'GET /sites/:siteId/referral-traffic/weeks',
@@ -317,6 +319,8 @@ const routeRequiredCapabilities = {
   // Tenant-scoped /sites/:siteId stays on site:read. See READALL_CAPABILITY_DESIGN.md.
   'GET /sites': CAP_SITE_READ_ALL,
   'POST /sites': 'site:write',
+  'POST /sites/detect/jobs': 'site:write',
+  'GET /sites/detect/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',
   'GET /sites/:siteId': 'site:read',

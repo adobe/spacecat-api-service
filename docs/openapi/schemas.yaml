@@ -5996,7 +5996,10 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (category_id)
+          description: |
+            Currently the UUID PK (categories.id) for backward compat —
+            aligning this to the category_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
@@ -6010,14 +6013,15 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (topic_id)
+          description: |
+            Currently the UUID PK (topics.id) for backward compat —
+            aligning this to the topic_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
           description: UUID primary key (topics.id)
         name:
-          type: string
-        categoryId:
           type: string
 
 V2PromptInput:
@@ -7522,6 +7526,72 @@ PageRelationshipsSearchResponse:
       $ref: '#/PageRelationshipsMapping'
     errors:
       $ref: '#/PageRelationshipsErrorMapping'
+
+CreateSiteDetectionJobResponse:
+  type: object
+  required: [jobId, status, createdAt, pollUrl]
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the newly created site detection job.
+    pollUrl:
+      type: string
+      format: uri
+      description: The URL to poll for the status of the site detection job.
+    status:
+      type: string
+      enum: [IN_PROGRESS]
+      description: Always IN_PROGRESS immediately after creation.
+
+SiteDetectionJobResponse:
+  type: object
+  required: [jobId, status, createdAt, updatedAt]
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the site detection job.
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    updatedAt:
+      type: string
+      format: date-time
+    result:
+      type: object
+      description: The result of the site detection job once completed or failed. Absent when the job is still IN_PROGRESS.
+      properties:
+        action:
+          type: string
+          enum: [created, rejected, duplicate]
+          description: The action taken by the site detection job.
+        domain:
+          type: string
+          description: The domain that was processed.
+        baseURL:
+          type: string
+          format: uri
+          description: The normalized base URL (present for action=created).
+        reason:
+          type: string
+          description: Human-readable reason for the action (present for rejected/duplicate).
+    error:
+      type: object
+      description: The error of the site detection job if it failed with an exception. Absent when no exception occurred.
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+        message:
+          type: string
+          description: Human-readable error message.
 
 BrandPresenceLlmModel:
   type: string

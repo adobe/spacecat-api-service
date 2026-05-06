@@ -15,7 +15,7 @@ import { GetObjectCommand } from '@aws-sdk/client-s3';
 const DEFAULT_CPC = 0.80;
 
 /**
- * Fetches Ahrefs aggregated metrics from S3 and calculates CPC values.
+ * Fetches SEO aggregated metrics from S3 and calculates CPC values.
  *
  * Note: Both cost and traffic values are already fully converted during import to be usd not cents:
  * - Cost values are in USD (converted from cents)
@@ -31,10 +31,10 @@ const DEFAULT_CPC = 0.80;
  * @returns {Promise<Object>} CPC data: { organicCPC, paidCPC, source }
  */
 export async function fetchCPCData(context, bucketName, siteId, log) {
-  const key = `metrics/${siteId}/ahrefs/agg-metrics.json`;
+  const key = `metrics/${siteId}/seo/agg-metrics.json`;
 
   try {
-    log.info(`Fetching Ahrefs CPC data from s3://${bucketName}/${key}`);
+    log.info(`Fetching SEO CPC data from s3://${bucketName}/${key}`);
 
     const command = new GetObjectCommand({
       Bucket: bucketName,
@@ -54,15 +54,15 @@ export async function fetchCPCData(context, bucketName, siteId, log) {
       ? data.paidCost / data.paidTraffic
       : DEFAULT_CPC;
 
-    log.info(`Ahrefs CPC calculated - organic: $${organicCPC.toFixed(4)}, paid: $${paidCPC.toFixed(4)}`);
+    log.info(`SEO CPC calculated - organic: $${organicCPC.toFixed(4)}, paid: $${paidCPC.toFixed(4)}`);
 
     return {
       organicCPC,
       paidCPC,
-      source: 'ahrefs',
+      source: 'seo',
     };
   } catch (error) {
-    log.warn(`Failed to fetch Ahrefs CPC data: ${error.message}. Using default CPC: $${DEFAULT_CPC}. Please make paid ahrefs import is enabled and run for this site to get accurate CPC data.`);
+    log.warn(`Failed to fetch SEO CPC data: ${error.message}. Using default CPC: $${DEFAULT_CPC}. Please ensure the SEO import is enabled and has run for this site to get accurate CPC data.`);
 
     return {
       organicCPC: DEFAULT_CPC,

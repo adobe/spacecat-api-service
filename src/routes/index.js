@@ -94,6 +94,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
+ * @param {Object} siteDetectionController - The site detection controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
  * @param {Object} webhooksController - GitHub webhook handler controller.
@@ -148,6 +149,7 @@ export default function getRouteHandlers(
   pageRelationshipsController,
   ephemeralRunController,
   autofixChecksController,
+  siteDetectionController,
   plgOnboardingController,
   drsBpPgAuditController,
   webhooksController,
@@ -218,6 +220,8 @@ export default function getRouteHandlers(
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'POST /preflight/beta/jobs': preflightController.createBetaPreflightJob,
     'GET /preflight/beta/jobs/:jobId': preflightController.getBetaPreflightJobStatusAndResult,
+    'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
+    'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
@@ -453,6 +457,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/has-data': llmoMysticatController.getAgenticTrafficHasData,
 
     // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/referral-traffic/has-data': llmoMysticatController.getReferralTrafficHasData,
     'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
     'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
     'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
@@ -460,6 +465,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
     'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
     'GET /sites/:siteId/referral-traffic/by-url': llmoMysticatController.getReferralTrafficByUrl,
+    'GET /sites/:siteId/referral-traffic/by-url-trend': llmoMysticatController.getReferralTrafficUrlTrend,
     'GET /sites/:siteId/referral-traffic/by-device': llmoMysticatController.getReferralTrafficByDevice,
     'GET /sites/:siteId/referral-traffic/business-impact': llmoMysticatController.getReferralTrafficBusinessImpact,
     'GET /sites/:siteId/referral-traffic/weeks': llmoMysticatController.getReferralTrafficWeeks,
@@ -526,7 +532,7 @@ export default function getRouteHandlers(
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
     'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
     'POST /plg/records': plgOnboardingController.createOnboarding,
-    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboarding,
     'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
