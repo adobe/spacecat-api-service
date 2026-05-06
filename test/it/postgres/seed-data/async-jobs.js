@@ -21,6 +21,15 @@
  */
 export const asyncJobs = [
   {
+    id: 'eeee2222-2222-4222-a222-222222222222',
+    status: 'IN_PROGRESS',
+    metadata: {
+      payload: { domain: 'detect.example.com', hlxVersion: null },
+      jobType: 'site-detection',
+      tags: ['site-detection'],
+    },
+  },
+  {
     id: 'eeee1111-1111-4111-b111-111111111111',
     status: 'COMPLETED',
     result_location: 'https://results.example.com/preflight-001',
