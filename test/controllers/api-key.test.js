@@ -28,6 +28,17 @@ import {
 use(sinonChai);
 use(chaiAsPromised);
 
+/**
+ * Builds a stub authInfo whose hasOrganization() returns true for the given orgId
+ * and whose getProfile() returns the provided profile.
+ */
+function makeAuthInfo({ profileEmail = 'test@example.com', orgs = ['test-org'] } = {}) {
+  return {
+    getProfile: () => ({ email: profileEmail }),
+    hasOrganization: (orgId) => orgs.includes(orgId),
+  };
+}
+
 describe('ApiKeyController tests', () => {
   let context;
   let apiKeyController;
@@ -39,7 +50,6 @@ describe('ApiKeyController tests', () => {
       pathInfo: {
         headers: {
           'x-gw-ims-org-id': 'test-org',
-          authorization: 'Bearer test-token',
         },
       },
       data: {
@@ -93,14 +103,7 @@ describe('ApiKeyController tests', () => {
         API_KEY_CONFIGURATION: JSON.stringify({ maxDomainsPerApiKey: 1, maxApiKeys: 3 }),
       },
       attributes: {
-        authInfo: {
-          profile: {
-            email: 'test@example.com',
-          },
-        },
-      },
-      imsClient: {
-        getImsUserProfile: sinon.stub().returns({ organizations: ['test-org'], email: 'test@email.com' }),
+        authInfo: makeAuthInfo(),
       },
     };
     apiKeyController = ApiKeyController(context);
@@ -143,42 +146,75 @@ describe('ApiKeyController tests', () => {
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
 
-    it('should throw an error if the organization is not found', async () => {
-      context.imsClient.getImsUserProfile.returns({ organizations: [] });
+    it('should throw an error if the caller is not a member of the requested org', async () => {
+      // hasOrganization returns false for the requested org
+      context.attributes.authInfo = makeAuthInfo({ orgs: ['some-other-org'] });
+      apiKeyController = ApiKeyController(context);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
 
-    it('should throw an error if bearer token is missing', async () => {
-      requestContext.pathInfo.headers.authorization = '';
+    it('should throw an error if authInfo is missing on attributes (no auth middleware)', async () => {
+      context.attributes = {};
+      apiKeyController = ApiKeyController(context);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
+      // Error message should point at the middleware boundary, not the
+      // request - the Authorization header was already consumed upstream.
+      expect(response.headers.get('x-error')).to.equal(
+        'Unauthorized: auth middleware did not populate authInfo',
+      );
+    });
+
+    it('should throw an error if attributes.authInfo.getProfile() returns no email/user_id', async () => {
+      context.attributes.authInfo = {
+        getProfile: () => ({}),
+        hasOrganization: () => true,
+      };
+      apiKeyController = ApiKeyController(context);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
 
-    it('should create a new API key', async () => {
+    it('should create a new API key with a username prefix (JWT caller, real email)', async () => {
+      // JWT auth surfaces the caller's real email on profile.email, so the
+      // generated key reads `<emailLocalPart>-<uuid>`.
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
       expect(responseJson).to.have.property('apiKey');
+      // makeAuthInfo defaults to test@example.com, so prefix should be `test`.
+      expect(responseJson.apiKey).to.match(/^test-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
-    it('should create a new API key if email is not present in the imsUserProfile', async () => {
-      context.imsClient.getImsUserProfile.returns({ organizations: ['test-org'] });
+    it('should generate a GUID-style prefix for IMS callers (profile.email is user_id)', async () => {
+      // For IMS auth, AdobeImsHandler.transformProfile sets profile.email to
+      // payload.user_id, which looks like `ABC123@AdobeID`. The username
+      // prefix of the generated API key will therefore be the GUID portion,
+      // not the caller's real email - documented behavior change from the
+      // previous IMS-round-trip controller. See PR #2344.
+      context.attributes.authInfo = makeAuthInfo({ profileEmail: 'ABC123@AdobeID' });
+      apiKeyController = ApiKeyController(context);
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
-      expect(responseJson).to.have.property('apiKey');
+      expect(responseJson.apiKey).to.match(/^ABC123-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
-    it('should create a new API key if the bearer prefix is missing', async () => {
-      requestContext.pathInfo.headers.authorization = 'test-token';
+    it('should fall back to a bare UUID api key when caller email/user_id starts with @', async () => {
+      // imsUserId guaranteed non-empty by resolveCaller. When it starts with
+      // `@` (e.g. an IMS-issued ID without a local-part), the username prefix
+      // is empty and we fall back to a bare UUID with no prefix.
+      context.attributes.authInfo = makeAuthInfo({ profileEmail: '@AdobeID' });
+      apiKeyController = ApiKeyController(context);
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
-      expect(responseJson).to.have.property('apiKey');
+      // Bare UUID, no username prefix.
+      expect(responseJson.apiKey).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
     it('should throw an error if the number of domains exceeds the limit', async () => {
@@ -198,7 +234,7 @@ describe('ApiKeyController tests', () => {
   });
 
   describe('deleteApiKey', () => {
-    it('should delete an API key', async () => {
+    it('should delete an API key owned by the caller', async () => {
       context.dataAccess.ApiKey.findById.returns({
         getImsUserId: () => 'test@example.com',
         getImsOrgId: () => 'test-org',
@@ -211,7 +247,7 @@ describe('ApiKeyController tests', () => {
       expect(response.status).to.equal(STATUS_NO_CONTENT);
     });
 
-    it('should throw an error if the API key is not found', async () => {
+    it('should return 404 if the API key belongs to a different user/org', async () => {
       context.dataAccess.ApiKey.findById.returns({
         getImsUserId: () => 'other@example.com',
         getImsOrgId: () => 'other-org',
@@ -219,6 +255,14 @@ describe('ApiKeyController tests', () => {
 
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_NOT_FOUND);
+    });
+
+    it('should return 401 if the caller is not a member of the requested org', async () => {
+      context.attributes.authInfo = makeAuthInfo({ orgs: [] });
+      apiKeyController = ApiKeyController(context);
+      const response = await apiKeyController.deleteApiKey({ ...requestContext });
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
+      expect(context.dataAccess.ApiKey.findById).to.not.have.been.called;
     });
   });
 
@@ -242,10 +286,34 @@ describe('ApiKeyController tests', () => {
       expect(responseJson).to.deep.equal([expectedJson]);
     });
 
-    it('should throw an error when getApiKeysByImsUserIdAndImsOrgId fails', async () => {
+    it('should return 401 when caller is not a member of the requested org', async () => {
+      context.attributes.authInfo = makeAuthInfo({ orgs: [] });
+      apiKeyController = ApiKeyController(context);
+      const response = await apiKeyController.getApiKeys({ ...requestContext });
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
+      expect(context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId).to.not.have.been.called;
+    });
+
+    it('should throw an error when allByImsOrgIdAndImsUserId fails', async () => {
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.throws(new Error('Dynamo Error'));
       const response = await apiKeyController.getApiKeys({ ...requestContext });
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  describe('configuration parsing', () => {
+    it('logs and falls back to defaults when API_KEY_CONFIGURATION is invalid JSON', async () => {
+      const logErrorStub = sinon.stub();
+      const ctx = {
+        ...context,
+        log: { error: logErrorStub },
+        env: { API_KEY_CONFIGURATION: 'not-json' },
+      };
+      const ctrl = ApiKeyController(ctx);
+      ctx.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
+      const response = await ctrl.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(STATUS_CREATED);
+      expect(logErrorStub).to.have.been.calledWithMatch(/Failed to parse API Key configuration/);
     });
   });
 });

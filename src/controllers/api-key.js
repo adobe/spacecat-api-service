@@ -26,19 +26,25 @@ import { ApiKeyDto } from '../dto/api-key.js';
 
 /**
  * ApiKey Controller. Provides methods for managing API keys such as create, delete, and get.
+ *
+ * Auth source: caller identity is established by the auth middleware
+ * (`JwtHandler` for JWT-bearing callers, `ApiKeyImsHandler` for IMS-bearing
+ * callers on `/tools/api-keys*`). The controller reads everything it needs
+ * from `attributes.authInfo` and never calls IMS directly. See
+ * `mysticat-architecture/platform/decisions/ims-to-jwt-api-key-controller-migration.md`.
+ *
  * @param {object} context - The context of the universal serverless function.
  * @param {object} context.env - Environment details.
  * @param {object} context.env.API_KEY_CONFIGURATION - Configuration for the API key controller.
  * @param {DataAccess} context.dataAccess - Data access.
  * @param {Logger} context.log - Logger.
- * @param {object} context.attributes - Attributes that include the user's profile details
- * @param {ImsClient} context.imsClient - IMS Client.
+ * @param {object} context.attributes - Attributes that include the user's authInfo.
  * @returns {object} ApiKey Controller
  * @constructor
  */
 function ApiKeyController(context) {
   const {
-    dataAccess, log, env, attributes, imsClient,
+    dataAccess, log, env, attributes,
   } = context;
   const { ApiKey } = dataAccess;
 
@@ -89,49 +95,49 @@ function ApiKeyController(context) {
   }
 
   /**
-   * Validate the IMS Org ID.
-   * @param {string} imsOrgId - The IMS Organization ID of the user.
-   * @param {string} imsUserToken - The IMS User access token provided by the user.
-   * @throws {ErrorWithStatusCode} If the IMS Org ID is invalid or
-   * if the user does not belong to the given imsOrg.
-   * @returns {object} imsUserProfile - The IMS User profile.
+   * Resolves and validates the caller's identity from the auth middleware.
+   *
+   * Replaces the previous IMS round-trip: the auth middleware has already
+   * verified the bearer token and populated `authInfo`, so we only need to
+   * confirm that the caller's tenants include the requested `imsOrgId`.
+   *
+   * @param {string} imsOrgId - The IMS Organization ID from the request header.
+   * @returns {{ authInfo: object, imsUserId: string }}
+   * @throws {ErrorWithStatusCode} - If the header is missing, the request is
+   *   unauthenticated, the profile is incomplete, or the caller does not
+   *   belong to the requested org.
    */
-  async function validateImsOrgId(imsOrgId, imsUserToken) {
+  function resolveCaller(imsOrgId) {
     if (!hasText(imsOrgId)) {
       throw new ErrorWithStatusCode('Missing x-gw-ims-org-id header', STATUS_UNAUTHORIZED);
     }
-    const imsUserProfile = await imsClient.getImsUserProfile(imsUserToken);
-    const { organizations } = imsUserProfile;
-    if (!organizations.includes(imsOrgId)) {
+
+    const authInfo = attributes?.authInfo;
+    if (!authInfo) {
+      // The Authorization header is consumed by the auth middleware, not by
+      // this controller. If authInfo is missing here, the middleware did not
+      // run or rejected the request silently - which is a server-side error
+      // surface, not a client-fixable one.
+      throw new ErrorWithStatusCode('Unauthorized: auth middleware did not populate authInfo', STATUS_UNAUTHORIZED);
+    }
+
+    const profile = authInfo.getProfile?.();
+    // While the property is named 'profile.email', for IMS auth this is the
+    // user_id (set by AdobeImsHandler.transformProfile, e.g. ABC123@AdobeID);
+    // for JWT auth it is the actual email. Either way, it is the stable
+    // per-user identifier we store as imsUserId on the ApiKey record. The
+    // username prefix derived below therefore differs in shape between IMS
+    // and JWT callers - this is intentional and documented.
+    const imsUserId = profile?.email;
+    if (!hasText(imsUserId)) {
+      throw new ErrorWithStatusCode('Invalid request: caller profile is missing email/user_id', STATUS_UNAUTHORIZED);
+    }
+
+    if (!authInfo.hasOrganization?.(imsOrgId)) {
       throw new ErrorWithStatusCode('Invalid request: Unable to find a reference to the Organization provided.', STATUS_UNAUTHORIZED);
     }
-    return imsUserProfile;
-  }
 
-  /**
-   * Get the IMS user token from the headers.
-   * @param {object} headers - The headers of the request.
-   * @returns {string} imsUserToken - The IMS User access token.
-   * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
-   */
-  function getImsUserToken(headers) {
-    const { authorization: authorizationHeader } = headers;
-    const BEARER_PREFIX = 'Bearer ';
-    if (!hasText(authorizationHeader)) {
-      throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
-    }
-    return authorizationHeader.startsWith(BEARER_PREFIX)
-      ? authorizationHeader.substring(BEARER_PREFIX.length) : authorizationHeader;
-  }
-
-  /**
-   * Get the IMS User ID from the profile. Currently, the email is assigned as the imsUserId.
-   * @param {object} profile
-   * @returns {string} imsUserId - The IMS User ID.
-   */
-  function getImsUserIdFromProfile(profile) {
-    // While the property is named 'profile.email', it is in fact the user's IMS User Id
-    return profile.email;
+    return { authInfo, imsUserId };
   }
 
   /**
@@ -144,27 +150,22 @@ function ApiKeyController(context) {
     const imsOrgId = headers['x-gw-ims-org-id'];
 
     try {
-      const imsUserToken = getImsUserToken(headers);
-
+      // Authenticate first, then validate the body. Failing fast on
+      // unauthenticated requests avoids leaking the expected request shape
+      // to anonymous callers.
+      const { imsUserId } = resolveCaller(imsOrgId);
       validateRequestData(data);
-      const imsUserProfile = await validateImsOrgId(imsOrgId, imsUserToken);
 
       // Check if the domains are within the limit. Currently, we only allow one domain per API key.
       if (data.domains.length > maxDomainsPerApiKey) {
         throw new ErrorWithStatusCode(`Invalid request: Exceeds the limit of ${maxDomainsPerApiKey} allowed domain(s)`, STATUS_FORBIDDEN);
       }
 
-      const { authInfo: { profile } } = attributes;
-
-      const imsUserId = getImsUserIdFromProfile(profile);
-
       // Check whether the user has already created the maximum number of
       // active API keys for the given imsOrgId.
       const apiKeys = await ApiKey.allByImsOrgIdAndImsUserId(imsOrgId, imsUserId);
 
-      const validApiKeys = apiKeys.filter(
-        (apiKey) => apiKey.isValid(),
-      );
+      const validApiKeys = apiKeys.filter((apiKey) => apiKey.isValid());
 
       // Check if the user has reached the maximum number of API keys.
       // Currently, we only allow 3 API keys per user.
@@ -172,13 +173,14 @@ function ApiKeyController(context) {
         throw new ErrorWithStatusCode(`Invalid request: Exceeds the limit of ${maxApiKeys} allowed API keys`, STATUS_FORBIDDEN);
       }
 
-      const { email } = imsUserProfile;
-      let username;
-      if (hasText(email)) {
-        [username] = email.split('@');
-      }
-
-      // Create the API key
+      // Username prefix is best-effort: we use the local-part of the caller's
+      // email/user_id when present, falling back to a bare UUID only when the
+      // ID leads with `@` (so split('@')[0] is empty). For IMS callers this
+      // resolves to the GUID-style prefix (e.g. ABC123 from ABC123@AdobeID),
+      // not a real email - the prefix is purely cosmetic and lets users
+      // recognize their own keys at a glance.
+      // imsUserId is guaranteed non-empty by resolveCaller().
+      const [username] = imsUserId.split('@');
       const apiKey = username ? `${username}-${crypto.randomUUID()}` : crypto.randomUUID();
       const hashedApiKey = hashWithSHA256(apiKey);
 
@@ -228,14 +230,11 @@ function ApiKeyController(context) {
     const imsOrgId = headers['x-gw-ims-org-id'];
 
     try {
-      const imsUserToken = getImsUserToken(headers);
-      await validateImsOrgId(imsOrgId, imsUserToken);
+      const { imsUserId } = resolveCaller(imsOrgId);
       const apiKeyEntity = await ApiKey.findById(id);
-      const { authInfo: { profile } } = attributes;
-
-      const imsUserId = getImsUserIdFromProfile(profile);
       if (!apiKeyEntity
-          || apiKeyEntity.getImsUserId() !== imsUserId || apiKeyEntity.getImsOrgId() !== imsOrgId) {
+          || apiKeyEntity.getImsUserId() !== imsUserId
+          || apiKeyEntity.getImsOrgId() !== imsOrgId) {
         throw new ErrorWithStatusCode('Invalid request: API key not found', STATUS_NOT_FOUND);
       }
 
@@ -251,7 +250,7 @@ function ApiKeyController(context) {
 
   /**
    * Retrieve the API keys relating to a specific imsUserId and imsOrgId combination.
-   * @param {Object} context - Context of the request.
+   * @param {Object} requestContext - Context of the request.
    * @returns {Promise<ApiKey[]>} - 200 OK with the list of ApiKey metadata.
    */
   async function getApiKeys(requestContext) {
@@ -259,11 +258,7 @@ function ApiKeyController(context) {
     const imsOrgId = headers['x-gw-ims-org-id'];
 
     try {
-      const imsUserToken = getImsUserToken(headers);
-      await validateImsOrgId(imsOrgId, imsUserToken);
-      const { authInfo: { profile } } = attributes;
-
-      const imsUserId = getImsUserIdFromProfile(profile);
+      const { imsUserId } = resolveCaller(imsOrgId);
       const apiKeys = await ApiKey.allByImsOrgIdAndImsUserId(imsOrgId, imsUserId);
       return ok(apiKeys.map((apiKey) => ApiKeyDto.toJSON(apiKey)));
     } catch (error) {
