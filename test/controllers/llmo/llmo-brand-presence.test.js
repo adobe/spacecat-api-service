@@ -2259,6 +2259,26 @@ describe('llmo-brand-presence', () => {
   });
 
   describe('createSentimentOverviewHandler', () => {
+    const RPC_NAME = 'rpc_brand_presence_sentiment_overview';
+
+    function makeRpcResult(rows = []) {
+      return { data: rows, error: null };
+    }
+
+    function makeRpcRow(overrides = {}) {
+      return {
+        week_str: '2026-W11',
+        week_number: 11,
+        year: 2026,
+        total_prompts: 2,
+        prompts_with_sentiment: 2,
+        positive_pct: 50,
+        neutral_pct: 0,
+        negative_pct: 50,
+        ...overrides,
+      };
+    }
+
     it('returns badRequest when postgrestService is missing', async () => {
       mockContext.dataAccess.Site.postgrestService = null;
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
@@ -2278,10 +2298,12 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('returns badRequest when query returns error', async () => {
-      const queryError = { message: 'relation does not exist' };
+    it('returns badRequest when RPC returns error', async () => {
+      const rpcError = { message: 'relation does not exist' };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
-        { data: [], error: queryError },
+        { data: [], error: null },
+        null,
+        { data: null, error: rpcError },
       );
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
@@ -2289,23 +2311,16 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(400);
       expect(mockContext.log.error).to.have.been.calledWith(
-        'Brand presence sentiment-overview PostgREST error: relation does not exist',
+        'Brand presence sentiment-overview RPC error: relation does not exist',
       );
     });
 
     it('returns ok with weeklyTrends for valid data', async () => {
-      const execData = {
-        data: [
-          {
-            execution_date: '2026-03-09', sentiment: 'positive', prompt: 'p1', region_code: 'US', topics: 't1',
-          },
-          {
-            execution_date: '2026-03-10', sentiment: 'negative', prompt: 'p2', region_code: 'US', topics: 't1',
-          },
-        ],
-        error: null,
-      };
-      mockContext.dataAccess.Site.postgrestService = createChainableMock(execData);
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult([makeRpcRow({ total_prompts: 2 })]),
+      );
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -2318,8 +2333,38 @@ describe('llmo-brand-presence', () => {
       expect(body.weeklyTrends[0].totalPrompts).to.equal(2);
     });
 
+    it('maps RPC row to weeklyTrends shape with correct sentiment array', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult([makeRpcRow({ positive_pct: 75, neutral_pct: 20, negative_pct: 5 })]),
+      );
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+      const body = await result.json();
+      const [trend] = body.weeklyTrends;
+
+      expect(trend.week).to.equal('2026-W11');
+      expect(trend.weekNumber).to.equal(11);
+      expect(trend.year).to.equal(2026);
+      expect(trend.sentiment).to.deep.equal([
+        { name: 'Positive', value: 75, color: '#047857' },
+        { name: 'Neutral', value: 20, color: '#4B5563' },
+        { name: 'Negative', value: 5, color: '#B91C1C' },
+      ]);
+      expect(trend.mentions).to.equal(0);
+      expect(trend.citations).to.equal(0);
+      expect(trend.visibilityScore).to.equal(0);
+      expect(trend.competitors).to.deep.equal([]);
+    });
+
     it('returns empty weeklyTrends when no data', async () => {
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult([]),
+      );
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -2332,10 +2377,11 @@ describe('llmo-brand-presence', () => {
     });
 
     it('handles data: null gracefully', async () => {
-      mockContext.dataAccess.Site.postgrestService = createChainableMock({
-        data: null,
-        error: null,
-      });
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        null,
+        { data: null, error: null },
+      );
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -2346,11 +2392,11 @@ describe('llmo-brand-presence', () => {
     });
 
     it('returns 403 when siteId does not belong to organization', async () => {
-      const execData = { data: [], error: null };
-      const sitesValidation = { data: [], error: null };
-      const chainMock = createChainableMock(execData, [execData, sitesValidation]);
+      // limit() for validateSiteBelongsToOrg returns empty → site not found → 403
       mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+      );
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       const result = await handler(mockContext);
@@ -2358,148 +2404,239 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('applies optional filters (category, topicIds, region, origin)', async () => {
-      const topicUuid = '0178a3f0-1234-7000-8000-000000000099';
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = {
-        categoryId: 'Acrobat',
-        topicIds: topicUuid,
-        region: 'US',
-        origin: 'human',
-      };
+    it('passes site_id to RPC when siteId belongs to organization', async () => {
+      const siteId = 'cccdac43-1a22-4659-9086-b762f59b9928';
+      // limit() returns one row → site found → proceed to RPC
+      const chainMock = createChainableMock(
+        { data: [{ id: siteId }], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.data = { siteId };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_site_id: siteId }),
+      );
+    });
+
+    it('calls RPC with correct base params', async () => {
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('category_name', 'Acrobat');
-      expect(chainMock.in).to.have.been.calledWith('topic_id', [topicUuid]);
-      expect(chainMock.eq).to.have.been.calledWith('region_code', 'US');
-      expect(chainMock.ilike).to.have.been.calledWith('origin', 'human');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({
+          p_organization_id: mockContext.params.spaceCatId,
+          p_brand_id: null,
+          p_site_id: null,
+          p_category_id: null,
+          p_category_name: null,
+          p_region_code: null,
+          p_origin: null,
+          p_topic_ids: null,
+        }),
+      );
     });
 
-    it('filters by topicIds (comma-separated UUIDs) when provided', async () => {
+    it('passes category name filter to RPC', async () => {
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.data = { categoryId: 'Acrobat' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_category_name: 'Acrobat', p_category_id: null }),
+      );
+    });
+
+    it('passes category UUID filter to RPC', async () => {
+      const uuid = '0178a3f0-1234-7000-8000-000000000099';
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.data = { categoryId: uuid };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_category_id: uuid, p_category_name: null }),
+      );
+    });
+
+    it('passes topicIds array to RPC', async () => {
       const topicUuids = [
         '0178a3f0-1234-7000-8000-000000000091',
         '0178a3f0-1234-7000-8000-000000000092',
       ];
-      const chainMock = createChainableMock({ data: [], error: null });
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
       mockContext.data = { topicIds: topicUuids.join(',') };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.in).to.have.been.calledWith('topic_id', topicUuids);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_topic_ids: topicUuids }),
+      );
     });
 
-    it('ignores non-UUID topicIds in sentiment-overview', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
+    it('passes null topic_ids to RPC when topicIds are non-UUID strings', async () => {
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
       mockContext.data = { topicIds: 'pdf editing' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      const topicInCalls = chainMock.in.getCalls().filter((c) => c.args[0] === 'topic_id');
-      expect(topicInCalls).to.have.lengthOf(0);
-    });
-
-    it('filters by brandId when single brand route', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.eq).to.have.been.calledWith(
-        'brand_id',
-        '0178a3f0-1234-7000-8000-000000000002',
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_topic_ids: null }),
       );
     });
 
-    it('filters by category_id when categoryId is a valid UUID', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = {
-        categoryId: '0178a3f0-1234-7000-8000-000000000099',
-      };
+    it('passes brand_id to RPC when single brand route', async () => {
+      const brandId = '0178a3f0-1234-7000-8000-000000000002';
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.params.brandId = brandId;
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith(
-        'category_id',
-        '0178a3f0-1234-7000-8000-000000000099',
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_brand_id: brandId }),
       );
     });
 
-    it('filters by multiple categoryIds using in()', async () => {
-      const u1 = '0178a3f0-1234-7000-8000-000000000091';
-      const u2 = '0178a3f0-1234-7000-8000-000000000092';
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { categoryIds: `${u1},${u2}` };
+    it('passes region_code to RPC', async () => {
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.data = { region: 'US' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.in).to.have.been.calledWith('category_id', [u1, u2]);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_region_code: 'US' }),
+      );
     });
 
-    it('filters by multiple regionCodes using in()', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { regionCodes: 'US,DE' };
+    it('passes origin to RPC', async () => {
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.data = { origin: 'human' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.in).to.have.been.calledWith('region_code', ['US', 'DE']);
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_origin: 'human' }),
+      );
     });
 
-    it('uses or() when UUID and name categories are combined', async () => {
-      const uuid = '0178a3f0-1234-7000-8000-000000000099';
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { categoryIds: uuid, categoryId: 'Acrobat' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.or).to.have.been.calledOnce;
-    });
-
-    it('uses WEEKS_QUERY_LIMIT (200000) for the query', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.limit).to.have.been.calledWith(200000);
-    });
-
-    it('selects execution_date, sentiment, prompt, region_code, topics', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.select).to.have.been.calledWith('execution_date, sentiment, prompt, region_code, topics');
-    });
-
-    it('maps platform param to model filter', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
+    it('passes resolved model to RPC', async () => {
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
       mockContext.data = { platform: 'gemini' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_model: 'gemini' }),
+      );
+    });
+
+    it('passes first category UUID to RPC when multiple UUID categories provided', async () => {
+      const u1 = '0178a3f0-1234-7000-8000-000000000091';
+      const u2 = '0178a3f0-1234-7000-8000-000000000092';
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.data = { categoryIds: `${u1},${u2}` };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_category_id: u1 }),
+      );
+    });
+
+    it('passes first region code to RPC when multiple region codes provided', async () => {
+      const chainMock = createChainableMock(
+        { data: [], error: null },
+        null,
+        makeRpcResult(),
+      );
+      mockContext.data = { regionCodes: 'US,DE' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createSentimentOverviewHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.rpc).to.have.been.calledWith(
+        RPC_NAME,
+        sinon.match({ p_region_code: 'US' }),
+      );
     });
   });
 
