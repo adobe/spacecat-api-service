@@ -23,6 +23,7 @@ import {
   createReferralTrafficByUrlHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
+  createReferralTrafficTrendByUrlHandler,
 } from '../../../src/controllers/llmo/llmo-referral-traffic.js';
 
 use(sinonChai);
@@ -315,6 +316,105 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficTrendHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client }));
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── /trend-by-url (LLMO-4729) ─────────────────────────────────────────────
+
+  describe('trend-by-url', () => {
+    it('forwards urlPathSearch as p_url_search to the RPC', async () => {
+      const client = makeRpcClient({
+        data: [{ traffic_date: '2026-01-05', total_pageviews: 250 }],
+      });
+      const ctx = makeContext({ client });
+      ctx.data = { ...ctx.data, urlPathSearch: '/products/firefly' };
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcCall = client.rpc.getCall(0);
+      expect(rpcCall.args[0]).to.equal('rpc_referral_traffic_trend_by_url');
+      expect(rpcCall.args[1].p_url_search).to.equal('/products/firefly');
+    });
+
+    it('accepts snake_case url_path_search alias', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { ...ctx.data, url_path_search: '/about' };
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc.getCall(0).args[1].p_url_search).to.equal('/about');
+    });
+
+    it('passes null p_url_search when neither alias is provided', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      await handler(makeContext({ client }));
+      expect(client.rpc.getCall(0).args[1].p_url_search).to.be.null;
+    });
+
+    it('defaults source to optel and threads dates + filters', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = {
+        ...ctx.data,
+        platform: 'openai',
+        region: 'US',
+        deviceType: 'desktop',
+        pageIntent: 'purchase',
+        urlPathSearch: '/products',
+      };
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_source).to.equal('optel');
+      expect(rpcArgs.p_start_date).to.equal('2026-01-01');
+      expect(rpcArgs.p_end_date).to.equal('2026-01-28');
+      expect(rpcArgs.p_platform).to.equal('openai');
+      expect(rpcArgs.p_region).to.equal('US');
+      expect(rpcArgs.p_device).to.equal('desktop');
+      expect(rpcArgs.p_page_intent).to.equal('purchase');
+      expect(rpcArgs.p_url_search).to.equal('/products');
+    });
+
+    it('maps RPC rows to a {date, pageviews} series', async () => {
+      const client = makeRpcClient({
+        data: [
+          { traffic_date: '2026-01-05', total_pageviews: 100 },
+          { traffic_date: '2026-01-12', total_pageviews: 250 },
+        ],
+      });
+      const ctx = makeContext({ client });
+      ctx.data = { ...ctx.data, urlPathSearch: '/products' };
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.trend).to.deep.equal([
+        { date: '2026-01-05', pageviews: 100 },
+        { date: '2026-01-12', pageviews: 250 },
+      ]);
+    });
+
+    it('returns an empty trend array when RPC returns no rows', async () => {
+      const client = makeRpcClient({ data: [], error: null });
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      const body = await res.json();
+      expect(body.trend).to.deep.equal([]);
+    });
+
+    it('returns 500 on PostgREST error', async () => {
+      const client = makeRpcClient({ data: null, error: { message: 'boom' } });
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns 400 when Site.postgrestService is missing', async () => {
+      const ctx = makeContext();
+      ctx.dataAccess.Site.postgrestService = null;
+      const handler = createReferralTrafficTrendByUrlHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(400);
     });
   });
 

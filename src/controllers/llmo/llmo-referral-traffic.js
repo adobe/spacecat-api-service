@@ -290,6 +290,56 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
 }
 
 // ============================================================================
+// /trend-by-url
+// ============================================================================
+
+/**
+ * GET /sites/:siteId/referral-traffic/trend-by-url
+ *
+ * Per-URL weekly aggregate of pageviews. Powers the per-URL referral series
+ * inside the URL Inspector PG details dialog (LLMO-4729).
+ *
+ * Mirrors the page-level /trend endpoint, with one extra query param
+ * `urlPathSearch` (alias: `url_path_search`) mapped to `p_url_search` on
+ * the RPC. The filter is a case-insensitive substring match on `url_path`,
+ * matching the same semantics as `/by-url`. An absent or empty
+ * urlPathSearch returns the page-wide trend (parity with the underlying
+ * RPC's NULL contract); the UI always passes a non-empty path.
+ */
+export function createReferralTrafficTrendByUrlHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficTrendByUrl(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'trend-by-url',
+      async (ctx, client, siteId) => {
+        const parsed = parseParams(ctx);
+        const q = ctx.data || {};
+        const urlPathSearch = q.urlPathSearch || q.url_path_search || null;
+
+        const { data, error } = await client.rpc('rpc_referral_traffic_trend_by_url', {
+          ...commonRpcParams(siteId, parsed),
+          p_url_search: urlPathSearch,
+        });
+
+        if (error) {
+          ctx.log.error(`Referral traffic trend-by-url PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch referral traffic trend by URL');
+        }
+
+        /* c8 ignore next 2 — PostgREST guarantees non-null data when error is null */
+        return ok({
+          trend: (data ?? []).map((row) => ({
+            date: row.traffic_date,
+            pageviews: Number(row.total_pageviews),
+          })),
+        });
+      },
+    );
+  };
+}
+
+// ============================================================================
 // /by-platform
 // ============================================================================
 

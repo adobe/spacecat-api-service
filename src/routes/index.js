@@ -455,6 +455,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
     'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
     'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
+    'GET /sites/:siteId/referral-traffic/trend-by-url': llmoMysticatController.getReferralTrafficTrendByUrl,
     'GET /sites/:siteId/referral-traffic/by-platform': llmoMysticatController.getReferralTrafficByPlatform,
     'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
     'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
