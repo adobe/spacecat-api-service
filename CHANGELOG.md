@@ -1,3 +1,10 @@
+# [1.477.0](https://github.com/adobe/spacecat-api-service/compare/v1.476.2...v1.477.0) (2026-05-06)
+
+
+### Features
+
+* add has-data endpoint for referral traffic | LLMO-4261 ([#2339](https://github.com/adobe/spacecat-api-service/issues/2339)) ([69fddf2](https://github.com/adobe/spacecat-api-service/commit/69fddf2381ac67dc85d65afb905496f8dc7db919))
+
 ## [1.476.2](https://github.com/adobe/spacecat-api-service/compare/v1.476.1...v1.476.2) (2026-05-06)
 
 
