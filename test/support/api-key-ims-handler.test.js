@@ -31,7 +31,10 @@ async function loadHandler({ superCheckAuthStub } = {}) {
         AdobeImsHandler: class StubAdobeImsHandler {
           constructor(log) {
             this.name = 'ims';
-            this.log = log;
+            // The real AbstractHandler installs `log` as a function-shaped
+            // logger (`this.log(message, level)`); preserve that shape so
+            // the subclass can call `this.log(...)` directly.
+            this.log = (message, level) => log?.[level || 'info']?.(message);
           }
 
           // Stand-in for AdobeImsHandler.checkAuth; routes calls to the
@@ -50,11 +53,18 @@ describe('ApiKeyImsHandler', () => {
   let superCheckAuthStub;
   let HandlerClass;
   let handler;
+  let logStubs;
 
   beforeEach(async () => {
     superCheckAuthStub = sinon.stub().resolves('SUPER_RESULT');
     HandlerClass = await loadHandler({ superCheckAuthStub });
-    handler = new HandlerClass({ debug: () => {}, info: () => {}, error: () => {} });
+    logStubs = {
+      debug: sinon.stub(),
+      info: sinon.stub(),
+      warn: sinon.stub(),
+      error: sinon.stub(),
+    };
+    handler = new HandlerClass(logStubs);
   });
 
   it('delegates to AdobeImsHandler.checkAuth for /tools/api-keys', async () => {
@@ -73,6 +83,20 @@ describe('ApiKeyImsHandler', () => {
     expect(superCheckAuthStub).to.have.been.calledOnce;
   });
 
+  it('emits an info log when the scoped IMS auth succeeds (migration signal)', async () => {
+    superCheckAuthStub.resolves({ ok: true });
+    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
+    expect(logStubs.info).to.have.been.calledOnceWithExactly(
+      'api-key request authenticated via scoped IMS handler - JWT migration pending',
+    );
+  });
+
+  it('does NOT emit the success log when super.checkAuth returns null (auth failed)', async () => {
+    superCheckAuthStub.resolves(null);
+    await handler.checkAuth({}, { pathInfo: { suffix: '/tools/api-keys' } });
+    expect(logStubs.info).to.not.have.been.called;
+  });
+
   it('returns null without calling super for non-/tools/api-keys paths', async () => {
     const ctx = { pathInfo: { suffix: '/sites' } };
     const result = await handler.checkAuth({}, ctx);
@@ -87,11 +111,17 @@ describe('ApiKeyImsHandler', () => {
     expect(superCheckAuthStub).to.not.have.been.called;
   });
 
-  it('returns null without calling super for a /tools/api-keys-look-alike', async () => {
-    // Guards against accidental prefix collisions: ensures the prefix check is
-    // anchored. The check uses startsWith so "/tools/api-keys-foo" *does* match;
-    // documenting current behavior with this assertion so any future tightening
-    // (e.g. word-boundary check) requires updating both the check and this test.
+  it('returns null for a /tools/api-keys-batch look-alike (boundary anchor)', async () => {
+    // The prefix check is anchored: only the exact path or a `/`-separated
+    // descendant matches. A sibling route that shares the same prefix string
+    // (e.g. /tools/api-keys-batch) must NOT trigger the IMS handler.
+    const ctx = { pathInfo: { suffix: '/tools/api-keys-batch' } };
+    const result = await handler.checkAuth({}, ctx);
+    expect(result).to.equal(null);
+    expect(superCheckAuthStub).to.not.have.been.called;
+  });
+
+  it('returns null without calling super for an unrelated /tools/<other> path', async () => {
     const ctx = { pathInfo: { suffix: '/tools/other-tool' } };
     const result = await handler.checkAuth({}, ctx);
     expect(result).to.equal(null);

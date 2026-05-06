@@ -159,6 +159,11 @@ describe('ApiKeyController tests', () => {
       apiKeyController = ApiKeyController(context);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
+      // Error message should point at the middleware boundary, not the
+      // request - the Authorization header was already consumed upstream.
+      expect(response.headers.get('x-error')).to.equal(
+        'Unauthorized: auth middleware did not populate authInfo',
+      );
     });
 
     it('should throw an error if attributes.authInfo.getProfile() returns no email/user_id', async () => {
@@ -171,23 +176,45 @@ describe('ApiKeyController tests', () => {
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
 
-    it('should create a new API key', async () => {
+    it('should create a new API key with a username prefix (JWT caller, real email)', async () => {
+      // JWT auth surfaces the caller's real email on profile.email, so the
+      // generated key reads `<emailLocalPart>-<uuid>`.
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
       expect(responseJson).to.have.property('apiKey');
+      // makeAuthInfo defaults to test@example.com, so prefix should be `test`.
+      expect(responseJson.apiKey).to.match(/^test-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    });
+
+    it('should generate a GUID-style prefix for IMS callers (profile.email is user_id)', async () => {
+      // For IMS auth, AdobeImsHandler.transformProfile sets profile.email to
+      // payload.user_id, which looks like `ABC123@AdobeID`. The username
+      // prefix of the generated API key will therefore be the GUID portion,
+      // not the caller's real email - documented behavior change from the
+      // previous IMS-round-trip controller. See PR #2344.
+      context.attributes.authInfo = makeAuthInfo({ profileEmail: 'ABC123@AdobeID' });
+      apiKeyController = ApiKeyController(context);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      const responseJson = await response.json();
+      expect(response.status).to.equal(STATUS_CREATED);
+      expect(responseJson.apiKey).to.match(/^ABC123-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
     it('should fall back to a bare UUID api key when caller email/user_id starts with @', async () => {
       // imsUserId guaranteed non-empty by resolveCaller. When it starts with
       // `@` (e.g. an IMS-issued ID without a local-part), the username prefix
-      // is empty and we fall back to a bare UUID.
+      // is empty and we fall back to a bare UUID with no prefix.
       context.attributes.authInfo = makeAuthInfo({ profileEmail: '@AdobeID' });
       apiKeyController = ApiKeyController(context);
       context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
+      const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
+      // Bare UUID, no username prefix.
+      expect(responseJson.apiKey).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
     it('should throw an error if the number of domains exceeds the limit', async () => {

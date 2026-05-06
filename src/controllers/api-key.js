@@ -114,14 +114,20 @@ function ApiKeyController(context) {
 
     const authInfo = attributes?.authInfo;
     if (!authInfo) {
-      throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
+      // The Authorization header is consumed by the auth middleware, not by
+      // this controller. If authInfo is missing here, the middleware did not
+      // run or rejected the request silently - which is a server-side error
+      // surface, not a client-fixable one.
+      throw new ErrorWithStatusCode('Unauthorized: auth middleware did not populate authInfo', STATUS_UNAUTHORIZED);
     }
 
     const profile = authInfo.getProfile?.();
     // While the property is named 'profile.email', for IMS auth this is the
-    // user_id (set by AdobeImsHandler.transformProfile); for JWT auth it is
-    // the actual email. Either way, it is the stable per-user identifier we
-    // store as imsUserId on the ApiKey record.
+    // user_id (set by AdobeImsHandler.transformProfile, e.g. ABC123@AdobeID);
+    // for JWT auth it is the actual email. Either way, it is the stable
+    // per-user identifier we store as imsUserId on the ApiKey record. The
+    // username prefix derived below therefore differs in shape between IMS
+    // and JWT callers - this is intentional and documented.
     const imsUserId = profile?.email;
     if (!hasText(imsUserId)) {
       throw new ErrorWithStatusCode('Invalid request: caller profile is missing email/user_id', STATUS_UNAUTHORIZED);
@@ -144,8 +150,11 @@ function ApiKeyController(context) {
     const imsOrgId = headers['x-gw-ims-org-id'];
 
     try {
-      validateRequestData(data);
+      // Authenticate first, then validate the body. Failing fast on
+      // unauthenticated requests avoids leaking the expected request shape
+      // to anonymous callers.
       const { imsUserId } = resolveCaller(imsOrgId);
+      validateRequestData(data);
 
       // Check if the domains are within the limit. Currently, we only allow one domain per API key.
       if (data.domains.length > maxDomainsPerApiKey) {
@@ -165,9 +174,11 @@ function ApiKeyController(context) {
       }
 
       // Username prefix is best-effort: we use the local-part of the caller's
-      // email/user_id when an `@` is present, falling back to a bare UUID
-      // (e.g. for IDs that lead with `@` or have no `@` at all). The username
-      // is purely cosmetic - it lets users recognize their own keys at a glance.
+      // email/user_id when present, falling back to a bare UUID only when the
+      // ID leads with `@` (so split('@')[0] is empty). For IMS callers this
+      // resolves to the GUID-style prefix (e.g. ABC123 from ABC123@AdobeID),
+      // not a real email - the prefix is purely cosmetic and lets users
+      // recognize their own keys at a glance.
       // imsUserId is guaranteed non-empty by resolveCaller().
       const [username] = imsUserId.split('@');
       const apiKey = username ? `${username}-${crypto.randomUUID()}` : crypto.randomUUID();

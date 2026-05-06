@@ -15,6 +15,20 @@ import { AdobeImsHandler } from '@adobe/spacecat-shared-http-utils';
 const API_KEY_PATH_PREFIX = '/tools/api-keys';
 
 /**
+ * Returns true when the request path is exactly `/tools/api-keys` or any
+ * descendant (`/tools/api-keys/<id>`). The boundary check (`=== prefix` or
+ * `prefix + '/'`) prevents a hypothetical sibling route like
+ * `/tools/api-keys-batch` from accidentally falling under this scope.
+ */
+function isApiKeyRoute(suffix) {
+  if (typeof suffix !== 'string') {
+    return false;
+  }
+  return suffix === API_KEY_PATH_PREFIX
+    || suffix.startsWith(`${API_KEY_PATH_PREFIX}/`);
+}
+
+/**
  * Route-scoped IMS auth handler for the api-key controller.
  *
  * Per the IMS-to-JWT migration design (mysticat-architecture
@@ -34,6 +48,12 @@ const API_KEY_PATH_PREFIX = '/tools/api-keys';
  * The path guard is a hardcoded prefix rather than a route-table lookup -
  * there are only three api-key routes, they are unlikely to change, and the
  * coupling to the routing layer is not worth the indirection.
+ *
+ * TODO(ASO-607): Once all IaaS callers have moved to JWT session tokens, this
+ * file (and the corresponding entry in src/index.js AUTH_HANDLERS) should be
+ * deleted. The success log below is the operational signal: if no requests
+ * hit this branch over a sustained period, the handler is unused and safe to
+ * remove.
  */
 export default class ApiKeyImsHandler extends AdobeImsHandler {
   // No constructor - inherit AdobeImsHandler's. The handler-name backing
@@ -43,10 +63,17 @@ export default class ApiKeyImsHandler extends AdobeImsHandler {
 
   async checkAuth(request, context) {
     const suffix = context?.pathInfo?.suffix;
-    if (typeof suffix !== 'string' || !suffix.startsWith(API_KEY_PATH_PREFIX)) {
+    if (!isApiKeyRoute(suffix)) {
       // Out-of-scope route - skip cleanly so the auth chain advances.
       return null;
     }
-    return super.checkAuth(request, context);
+    const result = await super.checkAuth(request, context);
+    if (result) {
+      // Operational signal for the IMS-to-JWT migration end-state. Once this
+      // log stops firing in production over a sustained window, the handler
+      // (and its registration in AUTH_HANDLERS) can be deleted - see ASO-607.
+      this.log('api-key request authenticated via scoped IMS handler - JWT migration pending', 'info');
+    }
+    return result;
   }
 }
