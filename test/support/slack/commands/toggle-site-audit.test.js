@@ -101,29 +101,17 @@ describe('UpdateSitesAuditsCommand', () => {
     sandbox.restore();
   });
 
-  it('enable an audit type for a site', async () => {
-    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
-
+  it('shows deprecation message when enable is requested', async () => {
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'some_audit'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
-      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
+      slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}The \`audit enable\` command is deprecated. Use one-off \`run audit\` from Slack without enabling the site. To disable audits, use \`audit disable\`.`),
+      'Expected deprecation message for audit enable',
     ).to.be.true;
-    expect(
-      configurationMock.save.called,
-      'Expected configuration.save to be called, but it was not',
-    ).to.be.true;
-    expect(
-      configurationMock.enableHandlerForSite.calledWith('some_audit', site),
-      'Expected configuration.enableHandlerForSite to be called with "some_audit" and site, but it was not',
-    ).to.be.true;
-    expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *enabled* for "https://site0.com".`),
-      'Expected Slack message to be sent confirming "some_audit" was enabled for "https://site0.com", but it was not',
-    ).to.be.true;
+    expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    expect(configurationMock.save.called).to.be.false;
   });
 
   it('disable an audit type for a site', async () => {
@@ -146,7 +134,7 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.disableHandlerForSite to be called with "some_audit" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *disabled* for "https://site0.com".`),
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been disabled for "https://site0.com".`),
       'Expected Slack message to be sent confirming "some_audit" was disabled for "https://site0.com", but it was not',
     ).to.be.true;
   });
@@ -172,7 +160,7 @@ describe('UpdateSitesAuditsCommand', () => {
       configurationMock.save.rejects(error);
 
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', 'http://site0.com', 'some_audit'];
+      const args = ['disable', 'http://site0.com', 'some_audit'];
       await command.handleExecution(args, slackContextMock);
 
       expect(
@@ -180,8 +168,8 @@ describe('UpdateSitesAuditsCommand', () => {
         'Expected log.error to be called with the provided error, but it was not',
       ).to.be.true;
       expect(
-        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: Test error`),
-        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: Test error"`,
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: Test error`),
+        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: Test error"`,
       ).to.be.true;
     });
   });
@@ -195,8 +183,8 @@ describe('UpdateSitesAuditsCommand', () => {
 
       exceptsAtBadRequest();
       expect(
-        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable".`),
-        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable"."`,
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable".`),
+        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable"."`,
       ).to.be.true;
     });
 
@@ -208,14 +196,14 @@ describe('UpdateSitesAuditsCommand', () => {
 
       exceptsAtBadRequest();
       expect(
-        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable".`),
-        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable"."`,
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable".`),
+        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: The "enableAudit" parameter is required and must be set to "enable" or "disable"."`,
       ).to.be.true;
     });
 
     it('if "baseURL" is not provided', async () => {
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', '', 'some_audit'];
+      const args = ['disable', '', 'some_audit'];
 
       await command.handleExecution(args, slackContextMock);
 
@@ -228,7 +216,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
     it('if "baseURL" has wrong site format', async () => {
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', 'wrong_site_format', 'some_audit'];
+      const args = ['disable', 'wrong_site_format', 'some_audit'];
 
       await command.handleExecution(args, slackContextMock);
 
@@ -243,7 +231,7 @@ describe('UpdateSitesAuditsCommand', () => {
       dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(null);
 
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', 'https://site0.com', 'some_audit'];
+      const args = ['disable', 'https://site0.com', 'some_audit'];
 
       await command.handleExecution(args, slackContextMock);
 
@@ -256,13 +244,13 @@ describe('UpdateSitesAuditsCommand', () => {
 
     it('if "auditType" parameter is missing', async () => {
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', 'http://site0.com', ''];
+      const args = ['disable', 'http://site0.com', ''];
       await command.handleExecution(args, slackContextMock);
 
       exceptsAtBadRequest();
       expect(
-        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: The audit type parameter is required.`),
-        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: The audit type parameter is required.", but it was not called with that message.`,
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: The audit type parameter is required.`),
+        `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: The audit type parameter is required.", but it was not called with that message.`,
       ).to.be.true;
     });
 
@@ -271,7 +259,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       const command = ToggleSiteAuditCommand(contextMock);
       const auditType = 'not_present_in_configuration_audit';
-      const args = ['enable', 'https://site0.com', auditType];
+      const args = ['disable', 'https://site0.com', auditType];
 
       await command.handleExecution(args, slackContextMock);
 
@@ -285,7 +273,7 @@ describe('UpdateSitesAuditsCommand', () => {
   });
 
   describe('CSV bulk operations', () => {
-    it('should process CSV file to enable with profile', async () => {
+    it('should show deprecation when enable is requested with CSV profile', async () => {
       const args = ['enable', 'demo'];
       const command = ToggleSiteAuditCommand(contextMock);
 
@@ -293,15 +281,12 @@ describe('UpdateSitesAuditsCommand', () => {
         name: 'sites.csv',
         url_private: 'https://mock-url',
       }];
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
 
       await command.handleExecution(args, slackContextMock);
 
-      expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(46); // 23 audits in demo profile × 2 sites
-      expect(configurationMock.save.calledOnce).to.be.true;
-      expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
+      expect(slackContextMock.say.calledWith(sinon.match(/audit enable.*deprecated/))).to.be.true;
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
     });
 
     it('should process CSV file to disable with profile', async () => {
@@ -323,7 +308,7 @@ describe('UpdateSitesAuditsCommand', () => {
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
 
-    it('should handle errors during audit enabling/disabling in bulk processing', async () => {
+    it('should handle errors during audit disabling in bulk processing', async () => {
       slackContextMock.files = [{
         name: 'sites.csv',
         url_private: 'http://mock-url',
@@ -332,21 +317,21 @@ describe('UpdateSitesAuditsCommand', () => {
       dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
       dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
 
-      configurationMock.enableHandlerForSite
+      configurationMock.disableHandlerForSite
         .withArgs('cwv', site)
         .onFirstCall().returns()
         .onSecondCall()
-        .throws(new Error('Test error during enable'));
+        .throws(new Error('Test error during disable'));
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(
         sinon.match((value) => value.includes(':clipboard: *Bulk Update Results*')
-          && value.includes('Successfully enabled for 1 sites')
+          && value.includes('Successfully disabled for 1 sites')
           && value.includes('https://site1.com')
           && value.includes('Failed to process 1 sites')
-          && value.includes('https://site2.com: Test error during enable')),
+          && value.includes('https://site2.com: Test error during disable')),
       )).to.be.true;
 
       expect(configurationMock.save.calledOnce).to.be.true;
@@ -364,7 +349,7 @@ describe('UpdateSitesAuditsCommand', () => {
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('Invalid URLs found'))).to.be.true;
     });
@@ -381,7 +366,7 @@ describe('UpdateSitesAuditsCommand', () => {
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match(':x: No valid URLs found in the CSV file.'))).to.be.true;
     });
@@ -398,7 +383,7 @@ describe('UpdateSitesAuditsCommand', () => {
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('CSV file is empty'))).to.be.true;
     });
@@ -414,12 +399,12 @@ describe('UpdateSitesAuditsCommand', () => {
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('Failed to download'))).to.be.true;
     });
 
-    it('should handle CSV file with invalid URLs', async () => {
+    it('should handle CSV file with invalid URLs (second occurrence)', async () => {
       fetchStub.resolves({
         ok: true,
         text: () => Promise.resolve('invalid-url1\ninvalid-url2'),
@@ -431,7 +416,7 @@ describe('UpdateSitesAuditsCommand', () => {
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('Invalid URLs found'))).to.be.true;
     });
@@ -451,11 +436,11 @@ describe('UpdateSitesAuditsCommand', () => {
       dataAccessMock.Site.findByBaseURL.withArgs('https://nonexistent-site.com').resolves(null);
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(
         sinon.match((value) => value.includes(':clipboard: *Bulk Update Results*')
-          && value.includes('Successfully enabled for 1 sites')
+          && value.includes('Successfully disabled for 1 sites')
           && value.includes('https://site1.com')
           && value.includes('Failed to process 1 sites')
           && value.includes('https://nonexistent-site.com: Site not found')),
@@ -476,7 +461,7 @@ describe('UpdateSitesAuditsCommand', () => {
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+      await command.handleExecution(['disable', 'cwv'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('CSV processing failed:'))).to.be.true;
     });
@@ -490,215 +475,54 @@ describe('UpdateSitesAuditsCommand', () => {
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'invalid-profile'], slackContextMock);
+      await command.handleExecution(['disable', 'invalid-profile'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('Invalid audit type or profile'))).to.be.true;
     });
   });
 
-  describe('preflight audit configuration', () => {
-    let preflightSiteMock;
-
-    beforeEach(() => {
+  describe('preflight audit (enable deprecated)', () => {
+    it('should show deprecation when enable preflight is requested', async () => {
       const auditConfig = new Map();
       auditConfig.set('preflight', { type: 'preflight' });
       configurationMock.getHandlers.returns(Object.fromEntries(auditConfig));
 
-      preflightSiteMock = {
+      const preflightSiteMock = {
         getBaseURL: sandbox.stub().returns('https://example.com'),
         getId: sandbox.stub().returns('site123'),
-        getAuthoringType: sandbox.stub(),
-        getDeliveryConfig: sandbox.stub(),
-        getHlxConfig: sandbox.stub(),
+        getAuthoringType: sandbox.stub().returns('cs'),
+        getDeliveryConfig: sandbox.stub().returns({ programId: '12345', environmentId: '67890' }),
+        getHlxConfig: sandbox.stub().returns({}),
       };
 
       dataAccessMock.Site.findByBaseURL.resolves(preflightSiteMock);
-    });
-
-    it('should enable preflight audit when authoring type and delivery config are present for cs', async () => {
-      preflightSiteMock.getAuthoringType.returns('cs');
-      preflightSiteMock.getDeliveryConfig.returns({ programId: '12345', environmentId: '67890' });
-      preflightSiteMock.getHlxConfig.returns({});
 
       const command = ToggleSiteAuditCommand(contextMock);
       await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
 
-      expect(configurationMock.enableHandlerForSite.calledWith('preflight', preflightSiteMock));
+      expect(slackContextMock.say.calledWith(sinon.match(/audit enable.*deprecated/))).to.be.true;
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
+    });
+
+    it('should disable preflight audit for a site', async () => {
+      const auditConfig = new Map();
+      auditConfig.set('preflight', { type: 'preflight' });
+      configurationMock.getHandlers.returns(Object.fromEntries(auditConfig));
+
+      const preflightSiteMock = {
+        getBaseURL: sandbox.stub().returns('https://example.com'),
+        getId: sandbox.stub().returns('site123'),
+      };
+
+      dataAccessMock.Site.findByBaseURL.withArgs('https://example.com').resolves(preflightSiteMock);
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['disable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(configurationMock.disableHandlerForSite.calledWith('preflight', preflightSiteMock)).to.be.true;
       expect(configurationMock.save.called).to.be.true;
-      expect(slackContextMock.say.calledWith(':white_check_mark: The audit "preflight" has been *enabled* for "https://example.com".'));
-    });
-
-    it('should enable preflight audit when authoring type and helix config are present for documentauthoring', async () => {
-      preflightSiteMock.getAuthoringType.returns('documentauthoring');
-      preflightSiteMock.getDeliveryConfig.returns({});
-      preflightSiteMock.getHlxConfig.returns({ rso: { owner: 'test', site: 'testsite' } });
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      expect(configurationMock.enableHandlerForSite.calledWith('preflight', preflightSiteMock));
-      expect(configurationMock.save.called).to.be.true;
-      expect(slackContextMock.say.calledWith(':white_check_mark: The audit "preflight" has been *enabled* for "https://example.com".'));
-    });
-
-    it('should prompt for configuration when authoring type is missing', async () => {
-      preflightSiteMock.getAuthoringType.returns(null);
-      preflightSiteMock.getDeliveryConfig.returns({});
-      preflightSiteMock.getHlxConfig.returns({});
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith({
-        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
-        blocks: sinon.match.array,
-      }));
-      expect(configurationMock.enableHandlerForSite.called).to.be.false;
-    });
-
-    it('should prompt for configuration when documentauthoring type missing helix config', async () => {
-      preflightSiteMock.getAuthoringType.returns('documentauthoring');
-      preflightSiteMock.getDeliveryConfig.returns({});
-      preflightSiteMock.getHlxConfig.returns({});
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith({
-        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
-        blocks: sinon.match.array,
-      }));
-      expect(configurationMock.enableHandlerForSite.called).to.be.false;
-    });
-
-    it('should prompt for configuration when cs type missing delivery config', async () => {
-      preflightSiteMock.getAuthoringType.returns('cs');
-      preflightSiteMock.getDeliveryConfig.returns({}); // Empty delivery config
-      preflightSiteMock.getHlxConfig.returns({});
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith({
-        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
-        blocks: sinon.match.array,
-      }));
-      expect(configurationMock.enableHandlerForSite.called).to.be.false;
-    });
-
-    it('should prompt for configuration when cs/crosswalk type missing delivery config', async () => {
-      preflightSiteMock.getAuthoringType.returns('cs/crosswalk');
-      preflightSiteMock.getDeliveryConfig.returns({ programId: '12345' }); // Missing environmentId
-      preflightSiteMock.getHlxConfig.returns({});
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith({
-        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
-        blocks: sinon.match.array,
-      })).to.be.true;
-      expect(configurationMock.enableHandlerForSite.called).to.be.false;
-    });
-
-    it('should prompt for configuration when ams type missing delivery config', async () => {
-      preflightSiteMock.getAuthoringType.returns('ams');
-      preflightSiteMock.getDeliveryConfig.returns({ }); // missing author url
-      preflightSiteMock.getHlxConfig.returns({});
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith({
-        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
-        blocks: sinon.match.array,
-      }));
-    });
-
-    it('should show correct missing items for documentauthoring with missing helix config', async () => {
-      preflightSiteMock.getAuthoringType.returns('documentauthoring');
-      preflightSiteMock.getDeliveryConfig.returns(null);
-      preflightSiteMock.getHlxConfig.returns(null);
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      // Verify the configuration prompt was called
-      expect(slackContextMock.say.called).to.be.true;
-
-      // Find calls that contain the expected text pattern
-      const sayCallsWithConfig = slackContextMock.say.getCalls().find((call) => {
-        const arg = call.args[0];
-        return typeof arg === 'object'
-               && arg.blocks
-               && arg.blocks[0]
-               && arg.blocks[0].text
-               && arg.blocks[0].text.text
-               && arg.blocks[0].text.text.includes('Helix Preview URL');
-      });
-
-      expect(sayCallsWithConfig).to.not.be.undefined;
-      expect(configurationMock.enableHandlerForSite.called).to.be.false;
-    });
-
-    it('should show correct missing items for cs with missing delivery config', async () => {
-      preflightSiteMock.getAuthoringType.returns('cs');
-      preflightSiteMock.getDeliveryConfig.returns({});
-      preflightSiteMock.getHlxConfig.returns({});
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      // Verify the configuration prompt was called
-      expect(slackContextMock.say.called).to.be.true;
-
-      // Find calls that contain the expected text pattern
-      const sayCallsWithConfig = slackContextMock.say.getCalls().find((call) => {
-        const arg = call.args[0];
-        return typeof arg === 'object'
-               && arg.blocks
-               && arg.blocks[0]
-               && arg.blocks[0].text
-               && arg.blocks[0].text.text
-               && arg.blocks[0].text.text.includes('AEM CS Preview URL');
-      });
-
-      expect(sayCallsWithConfig).to.not.be.undefined;
-      expect(configurationMock.enableHandlerForSite.called).to.be.false;
-    });
-
-    it('should show correct button value with site and audit type', async () => {
-      preflightSiteMock.getAuthoringType.returns(null);
-      preflightSiteMock.getId.returns('site123');
-      preflightSiteMock.getDeliveryConfig.returns({});
-      preflightSiteMock.getHlxConfig.returns({});
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
-
-      // Verify the configuration prompt was called
-      expect(slackContextMock.say.called).to.be.true;
-
-      // Find the call with button structure
-      const sayCallWithButton = slackContextMock.say.getCalls().find((call) => {
-        const arg = call.args[0];
-        return typeof arg === 'object'
-               && arg.blocks
-               && arg.blocks[1]
-               && arg.blocks[1].elements
-               && arg.blocks[1].elements[0]
-               && arg.blocks[1].elements[0].action_id === 'open_preflight_config';
-      });
-
-      expect(sayCallWithButton).to.not.be.undefined;
-
-      const button = sayCallWithButton.args[0].blocks[1].elements[0];
-      expect(button.action_id).to.equal('open_preflight_config');
-
-      const buttonValue = JSON.parse(button.value);
-      expect(buttonValue.siteId).to.equal('site123');
-      expect(buttonValue.auditType).to.equal('preflight');
-      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+      expect(slackContextMock.say.calledWith(':white_check_mark: The audit "preflight" has been disabled for "https://example.com".')).to.be.true;
     });
   });
 
@@ -755,7 +579,7 @@ describe('UpdateSitesAuditsCommand', () => {
       expect(slackContextMock.say.calledWith(sinon.match(/from profile "paid"/))).to.be.true;
     });
 
-    it('should reject enable all', async () => {
+    it('should show deprecation when enable all is requested', async () => {
       dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
       const command = ToggleSiteAuditCommandWithProfile(contextMock);
@@ -764,7 +588,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       expect(configurationMock.enableHandlerForSite.called).to.be.false;
       expect(configurationMock.save.called).to.be.false;
-      expect(slackContextMock.say.calledWith(sinon.match(/Enable all is not supported/))).to.be.true;
+      expect(slackContextMock.say.calledWith(sinon.match(/audit enable.*deprecated/))).to.be.true;
     });
 
     it('should show error if profile not found', async () => {
