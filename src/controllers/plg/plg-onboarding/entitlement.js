@@ -171,6 +171,7 @@ export async function revokePreviousAsoEnrollmentsForOrg(
   const expectedOrgId = organization.getId();
 
   // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  /* c8 ignore next 4 */
   if (isInternalOrg(expectedOrgId, env)) {
     log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
     return;

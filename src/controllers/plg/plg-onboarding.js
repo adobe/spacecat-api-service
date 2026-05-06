@@ -25,6 +25,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import LaunchDarklyClient from '@adobe/spacecat-shared-launchdarkly-client';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -44,7 +45,8 @@ import {
 } from '../../support/utils.js';
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
-import { STATUSES, REVIEW_DECISIONS } from './plg-onboarding/constants.js';
+import { ASO_PRODUCT_CODE, STATUSES, REVIEW_DECISIONS } from './plg-onboarding/constants.js';
+import { isValidHostname } from './plg-onboarding/validation.js';
 import { performAsoPlgOnboarding } from './plg-onboarding/onboarding-flow.js';
 import { revokeAsoSiteEnrollments } from './plg-onboarding/entitlement.js';
 import {
@@ -57,7 +59,7 @@ import {
   bypassAemSiteCheck,
   bypassDomainAlreadyAssigned,
 } from './plg-onboarding/bypass-handlers.js';
-import { getReviewerIdentity } from './plg-onboarding/internal-org.js';
+import { getReviewerIdentity, isInternalOrg } from './plg-onboarding/internal-org.js';
 
 function withFlowDeps(context) {
   // Keep request-context identity while giving extracted helpers the monolith's deps.
@@ -185,6 +187,37 @@ async function resolveImsEmailsForPlgRecords(records, context) {
 
 // ---------- Controller ----------
 
+const PLG_REJECTION_MESSAGES = {
+  'internal-org': { emoji: ':no_entry:', label: 'Rejected — Internal Org' },
+  'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
+};
+
+async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  const config = PLG_REJECTION_MESSAGES[reason];
+  /* c8 ignore next 4 */
+  if (!config) {
+    log.error(`Unknown PLG rejection reason: ${reason}`);
+    return;
+  }
+
+  const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *IMS Org:* \`${imsOrgId}\``;
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (err) {
+    log.error(`Failed to post PLG rejection notification: ${err.message}`);
+  }
+}
+
 /**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
@@ -239,7 +272,30 @@ function PlgOnboardingController(ctx) {
 
     const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
+    if (!isValidHostname(domain)) {
+      return badRequest('Invalid domain: must be a valid hostname');
+    }
+
     try {
+      const { Organization, Entitlement } = context.dataAccess;
+      const existingOrg = await Organization.findByImsOrgId(imsOrgId);
+      if (existingOrg) {
+        if (isInternalOrg(existingOrg.getId(), context.env)) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
+          return badRequest('PLG onboarding is not available for internal organizations');
+        }
+
+        const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
+        const hasPaidEntitlement = entitlements.some(
+          (e) => e.getProductCode() === ASO_PRODUCT_CODE
+            && e.getTier() === EntitlementModel.TIERS.PAID,
+        );
+        if (hasPaidEntitlement) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
+          return badRequest('PLG onboarding is not available for paid customers');
+        }
+      }
+
       const onboarding = await performAsoPlgOnboarding(
         { domain, imsOrgId, updatedBy },
         withFlowDeps(context),
@@ -270,6 +326,10 @@ function PlgOnboardingController(ctx) {
       return badRequest('Authentication information is required');
     }
 
+    // Admin/API key holders can access any org's status. Read-only admins are NOT
+    // permitted on the PLG onboarding flow - this endpoint stays on hasAdminAccess()
+    // so that the PLG admin surface (status / waitlist / bypass / etc.) is gated
+    // exclusively by the full-admin role.
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       const profile = authInfo.getProfile();

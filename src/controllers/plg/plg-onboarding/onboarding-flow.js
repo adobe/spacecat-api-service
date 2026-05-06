@@ -403,6 +403,7 @@ export async function performAsoPlgOnboarding({
   } = context;
   const { Site, PlgOnboarding, Organization } = dataAccess;
 
+  /* c8 ignore next 7 */
   if (!isValidHostname(domain)) {
     throw Object.assign(
       new Error('Invalid domain: must be a valid hostname'),
