@@ -1311,6 +1311,7 @@ function LlmoController(ctx) {
       log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
 
       // Send Slack notification only when opted field is being added
+      const optInHandlerStart = Date.now();
       if (isNewlyOpted) {
         try {
           const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
@@ -1331,45 +1332,45 @@ function LlmoController(ctx) {
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
 
-        // Detached from the response path so the UI's enable click is not blocked
-        // by the IMS lookup, bot-blocker probe (5s timeout), S3 read, and email
-        // send. Lambda's default callbackWaitsForEmptyEventLoop=true keeps the
-        // invocation alive until this promise settles, so the email still goes out.
-        ((async () => {
-          // profile.email holds the IMS userId (sub claim) for IMS-authenticated
-          // callers, so we resolve the real email via IMS. Best-effort: non-IMS
-          // auth modes leave optedBy unset, which the email helper handles.
-          let optedBy;
+        log.info(`[cdn-opt-in-notification] opt-in handler reached notification step in ${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+
+        // IMS lookup and S3 read run in parallel to minimise added latency.
+        // Previously this was a detached IIFE, but async Lambda handlers freeze
+        // the container when the handler promise resolves — detached promises are
+        // abandoned before they run. Awaiting directly is the reliable fix.
+        try {
+          const notificationStart = Date.now();
           const imsUserId = profile?.email;
-          if (imsUserId && context.imsClient) {
-            try {
-              const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
-              optedBy = adminProfile?.email;
-            } catch (imsErr) {
-              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
-            }
+
+          const [adminProfile, llmoCfgResult] = await Promise.allSettled([
+            imsUserId && context.imsClient
+              ? context.imsClient.getImsAdminProfile(imsUserId)
+              : Promise.resolve(null),
+            s3?.s3Client
+              ? readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket })
+              : Promise.resolve(null),
+          ]);
+
+          log.info(`[cdn-opt-in-notification] IMS + S3 parallel lookup took ${Date.now() - notificationStart}ms (site=${siteId})`);
+
+          let optedBy;
+          if (adminProfile.status === 'fulfilled') {
+            optedBy = adminProfile.value?.email;
+          } else {
+            log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${adminProfile.reason?.message}`);
           }
 
-          /* CDN provider is managed by log-infra and stored in the S3 LLMO config
-          during provisioning. Site DynamoDB cdnBucketConfig does not store it,
-          so S3 is the primary source.
-          Fallback to request cdnType (e.g. AEM CS Fastly self-service)
-          when S3 config is not yet available. */
           let notificationCdnType;
-          try {
-            if (s3?.s3Client) {
-              const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
-                s3Bucket: s3.s3Bucket,
-              });
-              notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
-            }
-          } catch (s3Err) {
-            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+          if (llmoCfgResult.status === 'fulfilled') {
+            notificationCdnType = llmoCfgResult.value?.config?.cdnBucketConfig?.cdnProvider;
+          } else {
+            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${llmoCfgResult.reason?.message}`);
           }
           if (!hasText(notificationCdnType) && hasText(cdnType)) {
             notificationCdnType = cdnType;
           }
 
+          const emailStart = Date.now();
           await notifyOptInIfNeeded(context, {
             siteId,
             siteBaseURL: baseURL,
@@ -1377,7 +1378,13 @@ function LlmoController(ctx) {
             orgId: site.getOrganizationId?.(),
             optedBy,
           });
-        })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
+          log.info(`[cdn-opt-in-notification] email send took ${Date.now() - emailStart}ms (site=${siteId})`);
+          log.info(`[cdn-opt-in-notification] total notification flow took ${Date.now() - notificationStart}ms (site=${siteId})`);
+        } catch (err) {
+          log.error('[cdn-opt-in-notification] Unhandled error:', err);
+        }
+
+        log.info(`[cdn-opt-in-notification] total added latency to opt-in API: ${Date.now() - optInHandlerStart}ms (site=${siteId})`);
       }
 
       let cdnTypeNormalized = null;
