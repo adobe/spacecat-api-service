@@ -412,6 +412,61 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
+ * Resolves the single active brand for a given (organization, site) pair.
+ *
+ * Lookup is `brands.site_id === siteId` AND `status === 'active'` AND
+ * `organization_id === organizationId`. `brands.site_id` is the authoritative
+ * mapping from a brand to its primary site — set during v2 onboarding. Per
+ * LLMO-4592, ACTIVE brands have a unique `(organization_id, site_id)` pair
+ * when site_id is set.
+ *
+ * `brand_sites` is intentionally NOT used here: that join table also stores
+ * citation entries (sites the brand mentions), so a `brand_sites` row
+ * matching `site_id` does not mean the brand IS the brand for that site.
+ * Brands missing `site_id` are not considered v2-onboarded for this site
+ * and resolve to null (404 at the endpoint).
+ *
+ * If the data violates the LLMO-4592 invariant and multiple ACTIVE brands
+ * match, the first row (deterministic, ordered by name) is returned and a
+ * warning is logged so monitoring can surface the data integrity issue.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {string} siteId - Site UUID
+ * @param {object} postgrestClient - PostgREST client
+ * @param {object} [log] - Optional logger for the multi-match warning path
+ * @returns {Promise<object|null>} Brand in V2 config shape or null
+ */
+export async function getBrandBySite(organizationId, siteId, postgrestClient, log) {
+  if (!postgrestClient?.from || !hasText(organizationId) || !hasText(siteId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select(BRAND_SELECT)
+    .eq('organization_id', organizationId)
+    .eq('status', 'active')
+    .eq('site_id', siteId)
+    .order('name', { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to resolve brand for site: ${error.message}`);
+  }
+
+  if (!data || data.length === 0) {
+    return null;
+  }
+
+  if (data.length > 1) {
+    log?.warn?.(
+      `Multiple active brands for org ${organizationId} site ${siteId} `
+      + `(LLMO-4592 invariant violation): picking ${data[0].id} deterministically`,
+    );
+  }
+  return mapDbBrandToV2(data[0]);
+}
+
+/**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
  *

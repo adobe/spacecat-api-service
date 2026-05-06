@@ -27,6 +27,7 @@ import {
   detectLocale,
   hasText,
   isValidIMSOrgId,
+  isValidUUID,
   resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 
@@ -410,6 +411,7 @@ async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitle
   const expectedOrgId = organization.getId();
 
   // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  /* c8 ignore next 4 */
   if (isInternalOrg(expectedOrgId, env)) {
     log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
     return;
@@ -633,6 +635,7 @@ async function performAsoPlgOnboarding({
     Site, PlgOnboarding, Organization,
   } = dataAccess;
 
+  /* c8 ignore next 7 */
   if (!isValidHostname(domain)) {
     throw Object.assign(
       new Error('Invalid domain: must be a valid hostname'),
@@ -1346,6 +1349,37 @@ async function performAsoPlgOnboarding({
   }
 }
 
+const PLG_REJECTION_MESSAGES = {
+  'internal-org': { emoji: ':no_entry:', label: 'Rejected — Internal Org' },
+  'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
+};
+
+async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  const config = PLG_REJECTION_MESSAGES[reason];
+  /* c8 ignore next 4 */
+  if (!config) {
+    log.error(`Unknown PLG rejection reason: ${reason}`);
+    return;
+  }
+
+  const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *IMS Org:* \`${imsOrgId}\``;
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (err) {
+    log.error(`Failed to post PLG rejection notification: ${err.message}`);
+  }
+}
+
 /**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
@@ -1404,7 +1438,30 @@ function PlgOnboardingController(ctx) {
       }
     }
 
+    if (!isValidHostname(domain)) {
+      return badRequest('Invalid domain: must be a valid hostname');
+    }
+
     try {
+      const { Organization, Entitlement } = context.dataAccess;
+      const existingOrg = await Organization.findByImsOrgId(imsOrgId);
+      if (existingOrg) {
+        if (isInternalOrg(existingOrg.getId(), context.env)) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
+          return badRequest('PLG onboarding is not available for internal organizations');
+        }
+
+        const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
+        const hasPaidEntitlement = entitlements.some(
+          (e) => e.getProductCode() === ASO_PRODUCT_CODE
+            && e.getTier() === EntitlementModel.TIERS.PAID,
+        );
+        if (hasPaidEntitlement) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
+          return badRequest('PLG onboarding is not available for paid customers');
+        }
+      }
+
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
@@ -1434,7 +1491,10 @@ function PlgOnboardingController(ctx) {
       return badRequest('Authentication information is required');
     }
 
-    // Admin/API key holders can access any org's status
+    // Admin/API key holders can access any org's status. Read-only admins are NOT
+    // permitted on the PLG onboarding flow - this endpoint stays on hasAdminAccess()
+    // so that the PLG admin surface (status / waitlist / bypass / etc.) is gated
+    // exclusively by the full-admin role.
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       // Non-admin: validate caller's IMS tenant matches requested imsOrgId
@@ -1921,10 +1981,12 @@ function PlgOnboardingController(ctx) {
 
   /**
    * PATCH /plg/records/:plgOnboardingId
-   * Admin: update the status of a PLG onboarding record.
-   * Body: { status }
+   * Admin: update editable fields of a PLG onboarding record.
+   * Body: { status, siteId, organizationId, steps, botBlocker,
+   *         waitlistReason, updatedBy, createdBy }
+   * For `steps`, only the provided keys are merged into the existing steps.
    */
-  const updateOnboardingStatus = async (context) => {
+  const updateOnboarding = async (context) => {
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can update PLG onboarding records');
@@ -1932,10 +1994,33 @@ function PlgOnboardingController(ctx) {
 
     const { data, params } = context;
     const { plgOnboardingId } = params;
-    const { status } = data || {};
+    const {
+      status,
+      siteId,
+      organizationId,
+      steps,
+      botBlocker,
+      waitlistReason,
+      updatedBy,
+      createdBy,
+    } = data || {};
 
-    if (!hasText(status) || !Object.values(STATUSES).includes(status)) {
-      return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+    if (Object.keys(data || {}).length === 0) {
+      return badRequest('No fields provided to update');
+    }
+
+    if (status !== undefined) {
+      if (!hasText(status) || !Object.values(STATUSES).includes(status)) {
+        return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+      }
+    }
+
+    if (siteId !== undefined && !isValidUUID(siteId)) {
+      return badRequest('Invalid siteId. Must be a valid UUID');
+    }
+
+    if (organizationId !== undefined && !isValidUUID(organizationId)) {
+      return badRequest('Invalid organizationId. Must be a valid UUID');
     }
 
     const { PlgOnboarding } = context.dataAccess;
@@ -1944,8 +2029,42 @@ function PlgOnboardingController(ctx) {
       return notFound(`PLG onboarding record ${plgOnboardingId} not found`);
     }
 
-    onboarding.setStatus(status);
-    onboarding.setUpdatedBy(getReviewerIdentity(context));
+    if (status !== undefined) {
+      onboarding.setStatus(status);
+    }
+    if (siteId !== undefined) {
+      onboarding.setSiteId(siteId);
+    }
+    if (organizationId !== undefined) {
+      onboarding.setOrganizationId(organizationId);
+    }
+    if (botBlocker !== undefined) {
+      onboarding.setBotBlocker(botBlocker);
+    }
+    if (waitlistReason !== undefined) {
+      onboarding.setWaitlistReason(waitlistReason);
+    }
+    if (updatedBy !== undefined) {
+      onboarding.setUpdatedBy(updatedBy);
+    }
+    if (createdBy !== undefined) {
+      onboarding.setCreatedBy(createdBy);
+    }
+
+    if (steps !== undefined) {
+      const VALID_STEP_KEYS = new Set([
+        'orgResolved', 'rumVerified', 'siteCreated', 'siteResolved', 'siteOrgReassigned',
+        'authorUrlResolved', 'hlxConfigSet', 'codeConfigResolved', 'configUpdated',
+        'auditsEnabled', 'deliveryConfigQueued', 'entitlementCreated', 'entitlementFailed',
+        'orgResolutionFailed',
+      ]);
+      const invalidKeys = Object.keys(steps).filter((k) => !VALID_STEP_KEYS.has(k));
+      if (invalidKeys.length > 0) {
+        return badRequest(`Invalid step keys: ${invalidKeys.join(', ')}`);
+      }
+      onboarding.setSteps({ ...(onboarding.getSteps() || {}), ...steps });
+    }
+
     await onboarding.save();
     return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
@@ -2056,7 +2175,7 @@ function PlgOnboardingController(ctx) {
     getAllOnboardings,
     update,
     createOnboarding,
-    updateOnboardingStatus,
+    updateOnboarding,
     transitionStatus,
     deleteOnboarding,
   };

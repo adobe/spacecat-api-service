@@ -1195,6 +1195,8 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} [params.deliveryType] - The delivery type for site creation
  * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
  *   HTTP clients set this via the `temp-onboarding` body field.
+ * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
+ *   prompt generation. Omitted → DRS client default ('US') applies.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
@@ -1202,7 +1204,7 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding,
+    tempOnboarding, region,
   } = params;
   const { env, log } = context;
 
@@ -1395,12 +1397,20 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           // config write path when `onboarding_mode` is absent from the DRS job
           // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
           // prompts to the v2 customer-config storage and break v1 onboardings.
+          //
+          // LLMO-4683: forward operator-supplied `region` so the GPT prompt-generation
+          // job conditions on the brand's market. Omitted → DRS client default ('US')
+          // applies, preserving prior behavior.
+          if (region) {
+            log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
+          }
           const drsJob = await drsClient.submitPromptGenerationJob({
             baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
             brandName: trimmedBrand,
             audience,
             siteId: site.getId(),
             imsOrgId,
+            ...(region ? { region } : {}),
           });
           if (!drsJob?.job_id) {
             throw new Error('DRS submitPromptGenerationJob returned no job_id');

@@ -77,7 +77,7 @@ function ProjectsController(ctx, env) {
    * @returns {Promise<Response>} Array of projects response.
    */
   const getAll = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view all projects');
     }
 
