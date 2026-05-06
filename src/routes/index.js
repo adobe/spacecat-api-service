@@ -453,6 +453,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/has-data': llmoMysticatController.getAgenticTrafficHasData,
 
     // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/referral-traffic/has-data': llmoMysticatController.getReferralTrafficHasData,
     'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
     'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
     'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
