@@ -1002,7 +1002,7 @@ describe('llmo-referral-traffic', () => {
   const ROW = { traffic_date: '2026-01-05' };
 
   describe('has-data', () => {
-    it('returns { hasData: true } when only optel has records', async () => {
+    it('returns hasData:true and availableSources:["optel"] when only optel has records', async () => {
       const client = makeHasDataChainClient({
         referral_traffic_optel: { data: [ROW], error: null },
       });
@@ -1010,19 +1010,25 @@ describe('llmo-referral-traffic', () => {
         makeContext({ client }),
       );
       expect(res.status).to.equal(200);
-      expect((await res.json()).hasData).to.equal(true);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['optel']);
     });
 
-    it('returns { hasData: true } when only cdn has records', async () => {
-      const client = makeHasDataChainClient({ referral_traffic_cdn: { data: [ROW], error: null } });
+    it('returns hasData:true and availableSources:["cdn"] when only cdn has records', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_cdn: { data: [ROW], error: null },
+      });
       const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
         makeContext({ client }),
       );
       expect(res.status).to.equal(200);
-      expect((await res.json()).hasData).to.equal(true);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['cdn']);
     });
 
-    it('returns { hasData: true } when both optel and cdn have records', async () => {
+    it('returns hasData:true and availableSources:["optel","cdn"] when both have records', async () => {
       const client = makeHasDataChainClient({
         referral_traffic_optel: { data: [ROW], error: null },
         referral_traffic_cdn: { data: [ROW], error: null },
@@ -1031,19 +1037,23 @@ describe('llmo-referral-traffic', () => {
         makeContext({ client }),
       );
       expect(res.status).to.equal(200);
-      expect((await res.json()).hasData).to.equal(true);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['optel', 'cdn']);
     });
 
-    it('returns { hasData: false } when both optel and cdn are empty', async () => {
+    it('returns hasData:false and availableSources:[] when both tables are empty', async () => {
       const client = makeHasDataChainClient();
       const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
         makeContext({ client }),
       );
       expect(res.status).to.equal(200);
-      expect((await res.json()).hasData).to.equal(false);
+      const body = await res.json();
+      expect(body.hasData).to.equal(false);
+      expect(body.availableSources).to.deep.equal([]);
     });
 
-    it('returns { hasData: false } when both tables return null data', async () => {
+    it('returns hasData:false and availableSources:[] when both tables return null data', async () => {
       const nullResults = Object.fromEntries(
         HAS_DATA_TABLES.map((t) => [t, { data: null, error: null }]),
       );
@@ -1052,7 +1062,9 @@ describe('llmo-referral-traffic', () => {
         makeContext({ client }),
       );
       expect(res.status).to.equal(200);
-      expect((await res.json()).hasData).to.equal(false);
+      const body = await res.json();
+      expect(body.hasData).to.equal(false);
+      expect(body.availableSources).to.deep.equal([]);
     });
 
     it('returns 500 and fails closed when one source errors (even if the other has data)', async () => {
