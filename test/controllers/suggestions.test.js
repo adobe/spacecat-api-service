@@ -4319,7 +4319,7 @@ describe('Suggestions Controller', () => {
       expect(sqsCallArgs[1].customData).to.deep.equal({});
     });
 
-    it('logs [autofix-triggered] after successful SQS dispatch', async () => {
+    it('logs [autofix-attempt] before and [autofix-triggered] after successful dispatch', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
@@ -4330,22 +4330,47 @@ describe('Suggestions Controller', () => {
         ...context,
       });
 
-      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
+      const expectedFields = sinon.match({
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         opportunityType: 'meta-tags',
         action: 'apply',
         succeededSuggestionCount: 1,
         triggeredBy: 'test@test.com',
-      }));
+      });
+      expect(context.log.info).to.have.been.calledWith('[autofix-attempt]', expectedFields);
+      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', expectedFields);
     });
 
     it('logs triggeredBy as unknown when profile email is absent', async () => {
       const savedProfile = context.attributes.authInfo.profile;
       context.attributes.authInfo.profile = null;
-      opportunity.getType = sandbox.stub().returns('meta-tags');
-      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
+      try {
+        opportunity.getType = sandbox.stub().returns('meta-tags');
+        mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+        mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
+
+        await suggestionsControllerWithMock.autofixSuggestions({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0]] },
+          ...context,
+        });
+
+        expect(context.log.info).to.have.been.calledWith('[autofix-attempt]', sinon.match({
+          triggeredBy: 'unknown',
+        }));
+        expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
+          triggeredBy: 'unknown',
+        }));
+      } finally {
+        context.attributes.authInfo.profile = savedProfile;
+      }
+    });
+
+    it('logs [autofix-attempt] and [autofix-triggered] for grouped dispatch', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(altTextSuggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...altTextSuggs[0], status: 'IN_PROGRESS' })]);
 
       await suggestionsControllerWithMock.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -4353,13 +4378,17 @@ describe('Suggestions Controller', () => {
         ...context,
       });
 
-      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
-        triggeredBy: 'unknown',
+      expect(context.log.info).to.have.been.calledWith('[autofix-attempt]', sinon.match({
+        opportunityType: 'alt-text',
+        succeededSuggestionCount: 1,
+        triggeredBy: 'test@test.com',
       }));
-      context.attributes.authInfo.profile = savedProfile;
+      expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', sinon.match({
+        opportunityType: 'alt-text',
+      }));
     });
 
-    it('does not log [autofix-triggered] when precheckOnly is true', async () => {
+    it('does not log audit events when precheckOnly is true', async () => {
       opportunity.getType = sandbox.stub().returns('alt-text');
       mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(altTextSuggs[0])]);
 
@@ -4369,10 +4398,11 @@ describe('Suggestions Controller', () => {
         ...context,
       });
 
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-attempt]', sinon.match.any);
       expect(context.log.info).to.not.have.been.calledWith('[autofix-triggered]', sinon.match.any);
     });
 
-    it('does not log [autofix-triggered] when no suggestions succeed', async () => {
+    it('does not log audit events when no suggestions succeed', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
       mockSuggestion.bulkUpdateStatus.resolves([]);
@@ -4383,6 +4413,7 @@ describe('Suggestions Controller', () => {
         ...context,
       });
 
+      expect(context.log.info).to.not.have.been.calledWith('[autofix-attempt]', sinon.match.any);
       expect(context.log.info).to.not.have.been.calledWith('[autofix-triggered]', sinon.match.any);
     });
 
@@ -5390,6 +5421,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5432,6 +5465,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5540,6 +5575,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5567,6 +5604,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5594,6 +5633,8 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: context.log,
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -5888,6 +5929,7 @@ describe('Suggestions Controller', () => {
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
         },
+        ...context,
       });
 
       // Should proceed to next checks (not forbidden)
@@ -10131,6 +10173,7 @@ describe('Suggestions Controller', () => {
         data: {
           suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
         },
+        ...context,
       });
 
       expect(response.status).to.equal(207);

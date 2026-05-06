@@ -1272,6 +1272,21 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
+    // profile.email is the IMS user ID (e.g. 82521D...@AdobeOrg), not an actual email address.
+    const { profile } = context.attributes.authInfo;
+    const auditFields = {
+      siteId,
+      opportunityId,
+      opportunityType: opportunity.getType(),
+      action: action || 'apply',
+      succeededSuggestionCount: succeededSuggestions.length,
+      triggeredBy: profile?.email || profile?.name || 'unknown',
+    };
+
+    if (!precheckOnly && succeededSuggestions.length > 0) {
+      context.log.info('[autofix-attempt]', auditFields);
+    }
+
     const autofixOptions = (urlParam) => ({
       url: urlParam,
       ...(precheckOnly === true && { precheckOnly: true }),
@@ -1314,14 +1329,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     if (!precheckOnly && succeededSuggestions.length > 0) {
-      context.log?.info('[autofix-triggered]', {
-        siteId,
-        opportunityId,
-        opportunityType: opportunity.getType(),
-        action: action || 'apply',
-        succeededSuggestionCount: succeededSuggestions.length,
-        triggeredBy: context.attributes?.authInfo?.profile?.email || 'unknown',
-      });
+      context.log.info('[autofix-triggered]', auditFields);
     }
 
     return createResponse(response, 207);
