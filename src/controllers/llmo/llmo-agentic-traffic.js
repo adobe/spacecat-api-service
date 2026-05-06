@@ -11,10 +11,12 @@
  */
 
 import {
-  ok, badRequest, forbidden, internalServerError,
+  badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
+import { parseAgentTypes } from './llmo-agent-types.js';
+import { cachedOk } from '../../support/cached-response.js';
 
 /**
  * Site-scoped agentic traffic handler factories.
@@ -36,6 +38,9 @@ const VALID_SORT_ORDERS = new Set(['asc', 'desc']);
 const VALID_SUCCESS_RATE_BUCKETS = new Set(['high', 'medium', 'low']);
 // Allowlists mirror the CASE whitelists in the DB RPCs — unknown values are already
 // rejected server-side, but we validate here too for defence-in-depth.
+// `parseAgentTypes` and the canonical agent-type list now live in
+// `./llmo-agent-types.js` so the URL Inspector handler can share them
+// without cross-controller imports.
 const VALID_SORT_COLUMNS_BY_URL = new Set([
   'host', 'url_path', 'total_hits', 'unique_agents',
   'success_rate', 'avg_ttfb_ms', 'category_name',
@@ -69,6 +74,11 @@ const PLATFORM_CODE_TO_DB = {
   amazon: 'Amazon',
 };
 
+// Re-exported from `./llmo-agent-types.js` so existing imports (the test
+// suite, the URL Inspector handler before it was switched to import the
+// shared module directly) keep working without churn.
+export { parseAgentTypes };
+
 function defaultDateRange() {
   const end = new Date();
   const start = new Date();
@@ -92,6 +102,10 @@ function parseAgenticTrafficParams(context) {
     platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
     categoryName: q.categoryName || q.category_name || null,
     agentType: q.agentType || q.agent_type || null,
+    // Additive inclusion list orthogonal to the single-value `agentType`. Used by the
+    // URL Inspector PG page to enforce `Agent Type ∈ {Chatbots, Research}`. Existing
+    // callers omit this and continue to receive the same data.
+    agentTypes: parseAgentTypes(q.agentTypes ?? q.agent_types),
     userAgent: q.userAgent || q.user_agent || null,
     contentType: q.contentType || q.content_type || null,
     // Normalise to null for unknown buckets — mirrors how PLATFORM_CODE_TO_DB handles
@@ -117,6 +131,20 @@ function buildRpcParams(siteId, parsed) {
     p_content_type: parsed.contentType,
     p_success_rate: parsed.successRate,
   };
+}
+
+/**
+ * Extra params for RPCs that accept the additive `p_agent_types TEXT[]` input
+ * (currently `rpc_agentic_traffic_kpis_trend` and `rpc_agentic_traffic_by_url`).
+ *
+ * Returned as its own object so we don't accidentally send `p_agent_types` to
+ * the other RPCs — PostgREST rejects calls with unknown named arguments, which
+ * would 500 every dashboard whose RPC signature we haven't extended.
+ */
+function buildAgentTypesRpcParam(parsed) {
+  return parsed.agentTypes !== null
+    ? { p_agent_types: parsed.agentTypes }
+    : {};
 }
 
 /**
@@ -175,7 +203,7 @@ export function createAgenticTrafficKpisHandler(getSiteAndValidateAccess) {
           return internalServerError('Failed to fetch agentic traffic KPIs');
         }
         /* c8 ignore next */ const row = (data || [])[0] || {};
-        return ok({
+        return cachedOk({
           totalHits: Number(row.total_hits ?? 0),
           successRate: row.success_rate !== null && row.success_rate !== undefined
             ? Number(row.success_rate) : null,
@@ -207,6 +235,7 @@ export function createAgenticTrafficKpisTrendHandler(getSiteAndValidateAccess) {
 
         const rpcParams = {
           ...buildRpcParams(siteId, parsed),
+          ...buildAgentTypesRpcParam(parsed),
           p_interval: interval,
         };
         const { data, error } = await client.rpc('rpc_agentic_traffic_kpis_trend', rpcParams);
@@ -214,7 +243,7 @@ export function createAgenticTrafficKpisTrendHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic kpis-trend PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic KPIs trend');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           periodStart: row.period_start,
           totalHits: Number(row.total_hits ?? 0),
           successRate: row.success_rate !== null && row.success_rate !== undefined
@@ -250,7 +279,7 @@ export function createAgenticTrafficByRegionHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic by-region PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by region');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           region: row.region || '',
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -283,7 +312,7 @@ export function createAgenticTrafficByCategoryHandler(getSiteAndValidateAccess) 
           ctx.log.error(`Agentic traffic by-category PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by category');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           categoryName: row.category_name || 'Uncategorized',
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -312,7 +341,7 @@ export function createAgenticTrafficByPageTypeHandler(getSiteAndValidateAccess) 
           ctx.log.error(`Agentic traffic by-page-type PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by page type');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           pageType: row.page_type || 'Other',
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -341,7 +370,7 @@ export function createAgenticTrafficByStatusHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic by-status PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by status');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           httpStatus: row.http_status,
           totalHits: Number(row.total_hits ?? 0),
         })));
@@ -380,10 +409,11 @@ export function createAgenticTrafficByUserAgentHandler(getSiteAndValidateAccess)
           ctx.log.error(`Agentic traffic by-user-agent PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by user agent');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           pageType: row.page_type || '',
           agentType: row.agent_type || '',
           uniqueAgents: Number(row.unique_agents ?? 0),
+          uniqueAgentNames: Array.isArray(row.unique_agent_names) ? row.unique_agent_names : [],
           totalHits: Number(row.total_hits ?? 0),
         })));
       },
@@ -423,6 +453,7 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
 
         const rpcParams = {
           ...buildRpcParams(siteId, parsed),
+          ...buildAgentTypesRpcParam(parsed),
           p_page_limit: limit,
           p_page_offset: pageOffset,
           p_url_path_search: urlPathSearch,
@@ -440,13 +471,14 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
         // total_count is returned in every row by the RPC; pick it from the first one
         /* c8 ignore next */
         const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
-        /* c8 ignore next */ return ok({
+        /* c8 ignore next */ return cachedOk({
           totalCount,
           rows: rows.map((row) => ({
             host: row.host || '',
             urlPath: row.url_path || '',
             totalHits: Number(row.total_hits ?? 0),
             uniqueAgents: Number(row.unique_agents ?? 0),
+            uniqueAgentNames: Array.isArray(row.unique_agent_names) ? row.unique_agent_names : [],
             topAgent: row.top_agent || '',
             topAgentType: row.top_agent_type || '',
             responseCodes: Array.isArray(row.response_codes) ? row.response_codes.map(Number) : [],
@@ -459,6 +491,17 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
               && row.avg_citability_score !== undefined
               ? Number(row.avg_citability_score) : null,
             deployedAtEdge: row.deployed_at_edge ?? false,
+            // hits_trend is the [{ week_start, value }] payload generated by
+            // rpc_agentic_traffic_by_url's week_series CTE — forwarded as-is
+            // so the URL Inspector PG dashboard can derive its Owned-table
+            // sparkline + WoW direction from the same per-URL series the
+            // single-URL chart in URLDetailsPgDialog consumes.
+            hitsTrend: Array.isArray(row.hits_trend)
+              ? row.hits_trend.map((point) => ({
+                weekStart: point.week_start,
+                value: Number(point.value ?? 0),
+              }))
+              : [],
           })),
         });
       },
@@ -490,7 +533,7 @@ export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAc
           return internalServerError('Failed to fetch agentic traffic filter dimensions');
         }
         /* c8 ignore next */ const row = (data || [])[0] || {};
-        return ok({
+        return cachedOk({
           categories: row.categories || [],
           agentTypes: row.agent_types || [],
           platforms: row.platforms || [],
@@ -528,7 +571,7 @@ export function createAgenticTrafficMoversHandler(getSiteAndValidateAccess) {
           ctx.log.error(`Agentic traffic movers PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic movers');
         }
-        /* c8 ignore next */ return ok((data ?? []).map((row) => ({
+        /* c8 ignore next */ return cachedOk((data ?? []).map((row) => ({
           host: row.host || '',
           urlPath: row.url_path || '',
           previousHits: Number(row.previous_hits ?? 0),
@@ -590,7 +633,7 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
         const maxDate = (maxResult.data || [])[0]?.traffic_date;
 
         if (!minDate || !maxDate) {
-          return ok({ weeks: [] });
+          return cachedOk({ weeks: [] });
         }
 
         const weeks = generateIsoWeekRange(minDate, maxDate).map((weekStr) => {
@@ -604,7 +647,42 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
           };
         });
 
-        return ok({ weeks });
+        return cachedOk({ weeks });
+      },
+    );
+  };
+}
+
+/**
+ * GET /sites/:siteId/agentic-traffic/has-data
+ *
+ * Fast existence check — returns { hasData: boolean } indicating whether any
+ * agentic traffic records exist for the site. Used by the PG dashboard to
+ * decide whether to show the no-data overlay without waiting for all parallel
+ * queries to settle.
+ *
+ * Runs a single PostgREST table query with limit(1) — no RPC required.
+ */
+export function createAgenticTrafficHasDataHandler(getSiteAndValidateAccess) {
+  return async function getAgenticTrafficHasData(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'has-data',
+      async (ctx, client, siteId) => {
+        const { data, error } = await client
+          .from('agentic_traffic')
+          .select('traffic_date')
+          .eq('site_id', siteId)
+          .limit(1);
+
+        if (error) {
+          ctx.log.error(`Agentic traffic has-data PostgREST error: ${error.message}`);
+          return internalServerError('Failed to check agentic traffic data');
+        }
+
+        /* c8 ignore next */
+        return cachedOk({ hasData: (data || []).length > 0 });
       },
     );
   };
@@ -661,7 +739,7 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
 
         // RETURNS JSONB → PostgREST delivers the object directly, not wrapped in an array
         /* c8 ignore next */ const result = data ?? {};
-        return ok({
+        return cachedOk({
           totalCitations: Number(result.totalCitations ?? 0),
           totalMentions: Number(result.totalMentions ?? 0),
           uniquePrompts: Number(result.uniquePrompts ?? 0),

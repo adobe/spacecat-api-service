@@ -21,6 +21,7 @@ import {
   createUrlInspectorCitedDomainsHandler,
   createUrlInspectorDomainUrlsHandler,
   createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorFilterDimensionsHandler,
 } from '../../../src/controllers/llmo/llmo-url-inspector.js';
 
 use(sinonChai);
@@ -433,7 +434,7 @@ describe('URL Inspector Handlers', () => {
   });
 
   describe('createUrlInspectorOwnedUrlsHandler', () => {
-    it('returns paginated owned URLs', async () => {
+    it('returns paginated owned URLs with agentic fields mapped', async () => {
       const rpcData = [
         {
           url: 'https://example.com/page1',
@@ -443,6 +444,11 @@ describe('URL Inspector Handlers', () => {
           regions: ['US', 'DE'],
           weekly_citations: [{ week: '2026-W10', value: 20 }],
           weekly_prompts_cited: [{ week: '2026-W10', value: 5 }],
+          agentic_hits: 160,
+          agentic_hits_trend: [
+            { week_start: '2026-01-12', value: 100 },
+            { week_start: '2026-01-19', value: 60 },
+          ],
           total_count: 100,
         },
         {
@@ -453,6 +459,8 @@ describe('URL Inspector Handlers', () => {
           regions: ['US'],
           weekly_citations: [{ week: '2026-W10', value: 15 }],
           weekly_prompts_cited: [{ week: '2026-W10', value: 4 }],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
           total_count: 100,
         },
       ];
@@ -471,6 +479,57 @@ describe('URL Inspector Handlers', () => {
       expect(body.urls[0].url).to.equal('https://example.com/page1');
       expect(body.urls[0].citations).to.equal(42);
       expect(body.urls[0].weeklyCitations).to.deep.equal([{ week: '2026-W10', value: 20 }]);
+      // Server-side agentic merge (LLMO-4526 M2): the dashboard reads these
+      // straight off each row, so they must come through camelCased and the
+      // trend's snake_case `week_start` must be normalised to `weekStart`.
+      expect(body.urls[0].agenticHits).to.equal(160);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([
+        { weekStart: '2026-01-12', value: 100 },
+        { weekStart: '2026-01-19', value: 60 },
+      ]);
+      expect(body.urls[1].agenticHits).to.equal(0);
+      expect(body.urls[1].agenticHitsTrend).to.deep.equal([]);
+    });
+
+    // Defence-in-depth: PostgREST occasionally returns null on numeric / text
+    // columns when the underlying JSONB element omits a key. The handler
+    // collapses missing `week_start` to null and missing `value` to 0 so the
+    // dashboard's WoW indicator never NaN-explodes a sparkline. This pins
+    // both `??` fallback branches inside the trend `.map` callback.
+    it('coerces null fields inside agentic_hits_trend points (weekStart→null, value→0)', async () => {
+      const rpcData = [
+        {
+          url: 'https://example.com/page1',
+          citations: 1,
+          prompts_cited: 1,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
+          agentic_hits: 0,
+          agentic_hits_trend: [
+            { week_start: null, value: null },
+            { /* week_start missing entirely */ value: 5 },
+            { week_start: '2026-01-12' /* value missing entirely */ },
+          ],
+          total_count: 1,
+        },
+      ];
+
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_owned_urls: { data: rpcData, error: null } },
+      });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([
+        { weekStart: null, value: 0 },
+        { weekStart: null, value: 5 },
+        { weekStart: '2026-01-12', value: 0 },
+      ]);
     });
 
     it('returns empty result when no data', async () => {
@@ -543,7 +602,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
-    it('passes filters and handles null row fields', async () => {
+    it('passes filters and handles null row fields (agentic + brand-presence)', async () => {
       const rpcData = [{
         url: 'https://example.com/page1',
         citations: null,
@@ -552,6 +611,8 @@ describe('URL Inspector Handlers', () => {
         regions: null,
         weekly_citations: null,
         weekly_prompts_cited: null,
+        agentic_hits: null,
+        agentic_hits_trend: null,
         total_count: null,
       }];
 
@@ -572,12 +633,86 @@ describe('URL Inspector Handlers', () => {
       expect(body.urls[0].regions).to.deep.equal([]);
       expect(body.urls[0].weeklyCitations).to.deep.equal([]);
       expect(body.urls[0].weeklyPromptsCited).to.deep.equal([]);
+      // Defence-in-depth: null/undefined agentic columns must collapse to
+      // safe defaults so the UI's WoW trend / sparkline never NaNs.
+      expect(body.urls[0].agenticHits).to.equal(0);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
 
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
       expect(rpcCall.args[1].p_category).to.equal('cat-1');
       expect(rpcCall.args[1].p_region).to.equal('US');
+      // Without `agentTypes` in the query string the handler must NOT add
+      // p_agent_types to the RPC payload — keeps the contract compatible
+      // with internal tooling that still calls the older 9-arg signature.
+      expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('forwards comma-separated agentTypes as p_agent_types array', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { agentTypes: 'Chatbots,Research' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    it('also accepts agentTypes as an array (no extra serialisation)', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { agentTypes: ['Chatbots', 'Research'] },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    it('drops unknown agentTypes values and omits the param when empty', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // The first three are unknown; the parser drops them all and the
+        // resulting list collapses to null, which means the handler should
+        // omit p_agent_types entirely (rather than sending an empty array
+        // that the RPC would interpret as an empty inclusion list).
+        { agentTypes: 'NotAType,, ,unknown' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('canonicalises agentTypes casing before forwarding', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // Mixed-case + snake_case alias + an unknown filler — the canonical
+        // values must come back regardless of the input shape.
+        { agent_types: 'chatbots, RESEARCH, training-bots' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      // 'training-bots' is unknown (canonical is 'Training bots') so it's
+      // dropped — keeps the URL Inspector PG inclusion list intentionally
+      // narrow until somebody plumbs Training bots into the dashboard.
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
     });
   });
 
@@ -1237,6 +1372,71 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
+    /**
+     * LLMO-4526 — URL Inspector PG dashboard's owned-URLs flow synthesises
+     * `url-${index}-${slug}` ids because rpc_url_inspector_owned_urls does
+     * not return source_urls.id. When that synthetic id is forwarded to
+     * rpc_url_inspector_url_prompts (which takes a UUID), Postgres returns
+     * SQLSTATE 22P02 (`invalid input syntax for type uuid`). Coercing that
+     * to "no prompts for this row" keeps the URL Details dialog functional
+     * (agentic chart + URL info still render) instead of forcing the UI
+     * to render an opaque error state.
+     */
+    it('coerces invalid-UUID RPC errors to 200 + empty prompts (LLMO-4526)', async () => {
+      const synthUrlId = 'url-3-https---www-adobe-com-products-firefly-html-utm-source-chatgpt-com';
+      const { context } = createContext(
+        {},
+        { urlId: synthUrlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: null,
+              error: {
+                code: '22P02',
+                message: `invalid input syntax for type uuid: "${synthUrlId}"`,
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
+    it('coerces invalid-UUID RPC errors detected by message even when code is missing', async () => {
+      const synthUrlId = 'not-a-uuid';
+      const { context } = createContext(
+        {},
+        { urlId: synthUrlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: null,
+              error: {
+                message: 'invalid input syntax for uuid: "not-a-uuid"',
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
     it('uses url_id alias and handles null row fields', async () => {
       const urlId = '44444444-4444-4444-4444-444444444444';
       const rpcData = [{
@@ -1385,6 +1585,289 @@ describe('URL Inspector Handlers', () => {
       const handler = createUrlInspectorStatsHandler(
         getOrgAndValidateAccess(),
       );
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+  });
+
+  describe('createUrlInspectorFilterDimensionsHandler', () => {
+    const DIMENSIONS_DATA = {
+      categories: [{ id: 'Reader', label: 'Reader' }],
+      regions: [{ id: 'US', label: 'US' }],
+      content_types: [{ id: 'owned', label: 'owned' }],
+    };
+
+    it('returns filter dimensions on success', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { startDate: '2026-01-01', endDate: '2026-01-31', platform: 'chatgpt-paid' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.categories).to.deep.equal(DIMENSIONS_DATA.categories);
+      expect(body.regions).to.deep.equal(DIMENSIONS_DATA.regions);
+      expect(body.content_types).to.deep.equal(DIMENSIONS_DATA.content_types);
+
+      // LLMO-4525 review (major): pin the FULL RPC argument contract so any
+      // drift in parameter names or types is caught here — not in prod.
+      // p_brand_id is NULL for brandId='all' (the default fixture).
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', {
+        p_site_id: SITE_ID,
+        p_start_date: '2026-01-01',
+        p_end_date: '2026-01-31',
+        p_platform: 'chatgpt-paid',
+        p_brand_id: null,
+      });
+    });
+
+    it('passes brandId from path to RPC when not \'all\'', async () => {
+      // LLMO-4525 review (major bug this PR fixes): previously the handler
+      // read brandId via parseFilterDimensionsParams (query string only),
+      // which always yielded undefined. It must come from ctx.params (path).
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_ID },
+        { startDate: '2026-01-01', endDate: '2026-01-31' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_brand_id: BRAND_ID,
+      }));
+    });
+
+    it('passes p_brand_id = null when brandId path param is \'all\'', async () => {
+      const { context, rpcStub } = createContext(
+        { brandId: 'all' },
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_brand_id: null,
+      }));
+    });
+
+    it('maps \'openai\' platform alias to canonical \'chatgpt-paid\' (MODEL_QUERY_ALIASES)', async () => {
+      // LLMO-4525 review (major): the UI sends platform='openai' via
+      // PLATFORM_CODES.ChatGPTPaid. The alias is resolved by validateModel
+      // in llmo-brand-presence.js. Guard this seam so silent regressions are
+      // caught at the API layer.
+      const { context, rpcStub } = createContext(
+        {},
+        { platform: 'openai' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_platform: 'chatgpt-paid',
+      }));
+    });
+
+    it('passes p_platform = null when platform is absent ("no filter" semantics)', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledOnceWith('rpc_url_inspector_filter_dimensions', sinon.match({
+        p_platform: null,
+      }));
+    });
+
+    it('defaults dates when startDate/endDate are absent', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: DIMENSIONS_DATA, error: null },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const call = rpcStub.firstCall.args[1];
+      // defaultDateRange returns a 28-day window ending today.
+      expect(call.p_start_date).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(call.p_end_date).to.match(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('returns 400 when siteId is missing', async () => {
+      const { context } = createContext({}, { siteId: undefined });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 403 when site does not belong to org', async () => {
+      const { context } = createContext({}, {});
+      context.dataAccess.Site.postgrestService.from = sinon.stub().returns({
+        select: sinon.stub().returns({
+          eq: sinon.stub().returns({
+            eq: sinon.stub().returns({
+              limit: sinon.stub().resolves({ data: [], error: null }),
+            }),
+          }),
+        }),
+      });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when RPC returns an error', async () => {
+      const { context } = createContext(
+        {},
+        {},
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: { data: null, error: { message: 'db error' } },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('logs enriched error context (code/details/hint + structured fields)', async () => {
+      // LLMO-4525 review (tester): when the RPC fails we need enough detail
+      // to triage without DB access. Assert the logger sees code/details/hint
+      // in the message and structured siteId/platform in the metadata object.
+      const { context } = createContext(
+        { brandId: BRAND_ID },
+        { platform: 'chatgpt-paid' },
+        {
+          rpcResults: {
+            rpc_url_inspector_filter_dimensions: {
+              data: null,
+              error: {
+                message: 'permission denied for function',
+                code: '42501',
+                details: 'missing grant on rpc_url_inspector_filter_dimensions',
+                hint: 'GRANT EXECUTE TO postgrest_anon',
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+
+      expect(context.log.error).to.have.been.calledOnce;
+      const [message, meta] = context.log.error.firstCall.args;
+      expect(message).to.contain('permission denied for function');
+      expect(message).to.contain('[code=42501]');
+      expect(message).to.contain('[details=missing grant');
+      expect(message).to.contain('[hint=GRANT EXECUTE TO postgrest_anon]');
+      expect(meta).to.include({
+        route: 'url-inspector-filter-dimensions',
+        siteId: SITE_ID,
+        platform: 'chatgpt-paid',
+        hasBrandIdFilter: true,
+      });
+    });
+
+    it('returns 500 and logs structured context when the RPC client throws', async () => {
+      // LLMO-4525 review (security): defence-in-depth — a throwing transport
+      // must not leak a stack to the caller, and we still want structured
+      // context in the log for triage.
+      const { context, rpcStub } = createContext({}, {});
+      rpcStub.callsFake(() => Promise.reject(new Error('ECONNRESET')));
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+
+      expect(context.log.error).to.have.been.calledOnce;
+      const [message, meta] = context.log.error.firstCall.args;
+      expect(message).to.contain('ECONNRESET');
+      expect(meta).to.include({ route: 'url-inspector-filter-dimensions', siteId: SITE_ID });
+    });
+
+    it('falls back to String(e) when a non-Error value is thrown', async () => {
+      // LLMO-4525 CI fix (branch coverage): the catch block uses
+      // `e?.message || e` so that both Error instances AND bare thrown
+      // values (strings, null, numbers — what some AWS SDK transports do
+      // under the hood) produce a useful log line. The happy-path throw
+      // test above only exercises the `.message` branch. This test pins
+      // the fallback branch so coverage does not regress to < 100 %.
+      // Matches the pattern used at the top of this file for
+      // `createUrlInspectorStatsHandler` (bare-string-reject test) which
+      // scopes the `prefer-promise-reject-errors` disable to a single
+      // line — intentional non-Error rejection to exercise the fallback.
+      const { context, rpcStub } = createContext({}, {});
+      /* eslint-disable prefer-promise-reject-errors */
+      rpcStub.callsFake(() => Promise.reject('bare-string-rejection'));
+      /* eslint-enable prefer-promise-reject-errors */
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+
+      expect(context.log.error).to.have.been.calledOnce;
+      const [message, meta] = context.log.error.firstCall.args;
+      expect(message).to.contain('bare-string-rejection');
+      expect(meta).to.include({ route: 'url-inspector-filter-dimensions', siteId: SITE_ID });
+    });
+
+    it('returns 400 for invalid platform value', async () => {
+      const { context } = createContext({}, { platform: 'not-a-real-model' });
+
+      const handler = createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
       expect(response.status).to.equal(400);

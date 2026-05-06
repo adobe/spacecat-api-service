@@ -44,6 +44,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 ```json
 {
   "topic": "PDF Editing",
+  "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "stats": {
     "averageVisibilityScore": 72.5,
     "averagePosition": 3.2,
@@ -77,6 +78,9 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
   "executions": [
     {
       "prompt": "best pdf editor for mac",
+      "promptId": "019cb903-1184-7f92-8325-f9d1176af316",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "executionId": "019cb903-1184-7f92-8325-f9d1176af317",
       "region": "US",
       "executionDate": "2026-03-08",
       "week": "2026-W10",
@@ -108,9 +112,18 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 }
 ```
 
+**Stable ids caveat:** Root **`topicId`** is `null` when the path is a topic **name** (not a UUID) and execution rows have no `topic_id` in Postgres. Each **`executions[]`** entry always includes **`topicId`** and **`promptId`** as strings; they are `""` when the corresponding column is null (legacy rows).
+
 ---
 
 ## Response Field Reference
+
+### Top-level fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `topic` | string | Display label: newest row with non-empty `topics`, else older rows, else decoded path |
+| `topicId` | string \| null | Stable topic UUID: newest row with `topic_id`, else older rows, else path UUID or null (see caveat) |
 
 ### `stats` Object
 
@@ -146,6 +159,9 @@ All execution rows for the topic within the date range. Sorted newest-first by `
 | Field | Type | Description |
 |-------|------|-------------|
 | `prompt` | string | The prompt text |
+| `promptId` | string | Prompt UUID; `""` when null |
+| `topicId` | string | Topic UUID for this execution row; `""` when null |
+| `executionId` | string | Execution row UUID; `""` when null |
 | `region` | string | Region code (e.g. US, DE) |
 | `executionDate` | string | Execution date (YYYY-MM-DD) |
 | `week` | string | ISO week string derived from `executionDate` |
@@ -178,7 +194,7 @@ Aggregated citation sources across all executions in the topic. Deduplicated by 
 ## Aggregation Logic
 
 1. Query all `brand_presence_executions` rows matching the topic and filters (using `TOPIC_DETAIL_SELECT`, derived in code from `DETAIL_SELECT` by dropping the `answer` column)
-2. Compute overall topic stats via `aggregateTopicData` (same logic as the `/topics` endpoint)
+2. Compute overall topic stats via `aggregateTopicData` over those rows (the `GET …/brand-presence/topics` list uses `rpc_brand_presence_topics` and returns per-row `topicId` separately)
 3. Compute weekly stats via `aggregateWeeklyDetailStats`:
    - Group rows by ISO week (derived from `execution_date`)
    - Per week: average visibility, average position, sum mentions/citations, average volume → category, average sentiment

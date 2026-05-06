@@ -96,6 +96,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @param {Object} drsBpPgAuditController - DRS Brand Presence PostgREST audit proxy controller.
+ * @param {Object} webhooksController - GitHub webhook handler controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -149,6 +150,7 @@ export default function getRouteHandlers(
   autofixChecksController,
   plgOnboardingController,
   drsBpPgAuditController,
+  webhooksController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -169,6 +171,7 @@ export default function getRouteHandlers(
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
+    'POST /webhooks/github': webhooksController.processGitHubWebhook,
     'GET /organizations': organizationsController.getAll,
     'POST /organizations': organizationsController.createOrganization,
     'GET /organizations/:organizationId': organizationsController.getByID,
@@ -199,6 +202,7 @@ export default function getRouteHandlers(
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.deletePromptByBrandAndId,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': brandsController.bulkDeletePromptsByBrand,
     'POST /v2/orgs/:spaceCatId/sites/:siteId/sync-config': brandsController.triggerConfigSync,
+    'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': brandsController.getBrandForOrgSite,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -428,6 +432,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
+    'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,
@@ -445,6 +450,20 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/agentic-traffic/weeks': llmoMysticatController.getAgenticTrafficWeeks,
     'GET /sites/:siteId/agentic-traffic/movers': llmoMysticatController.getAgenticTrafficMovers,
     'GET /sites/:siteId/agentic-traffic/url-brand-presence': llmoMysticatController.getAgenticTrafficUrlBrandPresence,
+    'GET /sites/:siteId/agentic-traffic/has-data': llmoMysticatController.getAgenticTrafficHasData,
+
+    // Referral Traffic PG — site-scoped endpoints (mysticat PostgREST)
+    'GET /sites/:siteId/referral-traffic/filter-dimensions': llmoMysticatController.getReferralTrafficFilterDimensions,
+    'GET /sites/:siteId/referral-traffic/kpis': llmoMysticatController.getReferralTrafficKpis,
+    'GET /sites/:siteId/referral-traffic/trend': llmoMysticatController.getReferralTrafficTrend,
+    'GET /sites/:siteId/referral-traffic/by-platform': llmoMysticatController.getReferralTrafficByPlatform,
+    'GET /sites/:siteId/referral-traffic/by-region': llmoMysticatController.getReferralTrafficByRegion,
+    'GET /sites/:siteId/referral-traffic/by-page-intent': llmoMysticatController.getReferralTrafficByPageIntent,
+    'GET /sites/:siteId/referral-traffic/by-url': llmoMysticatController.getReferralTrafficByUrl,
+    'GET /sites/:siteId/referral-traffic/by-url-trend': llmoMysticatController.getReferralTrafficUrlTrend,
+    'GET /sites/:siteId/referral-traffic/by-device': llmoMysticatController.getReferralTrafficByDevice,
+    'GET /sites/:siteId/referral-traffic/business-impact': llmoMysticatController.getReferralTrafficBusinessImpact,
+    'GET /sites/:siteId/referral-traffic/weeks': llmoMysticatController.getReferralTrafficWeeks,
 
     // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
     // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
@@ -462,12 +481,16 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics': llmoMysticatController.getTopics,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompts': llmoMysticatController.getTopicPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompt-execution-status': llmoMysticatController.getPromptExecutionStatus,
     'GET /org/:spaceCatId/brands/all/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/search': llmoMysticatController.getSearch,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/detail': llmoMysticatController.getTopicDetail,
     'GET /org/:spaceCatId/brands/all/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/topics/:topicId/prompt-detail': llmoMysticatController.getPromptDetail,
+    'GET /org/:spaceCatId/brands/all/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/prompts/:promptId/detail': llmoMysticatController.getPromptDetailByPromptId,
     'GET /org/:spaceCatId/brands/all/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/executions/:executionId/sources': llmoMysticatController.getExecutionSources,
     'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-movers': llmoMysticatController.getSentimentMovers,
@@ -490,6 +513,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
     'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
 
     // LLMO Opportunities (org-level)
     'GET /org/:spaceCatId/opportunities/count': llmoOpportunitiesController.getOpportunityCount,
@@ -502,7 +527,7 @@ export default function getRouteHandlers(
     'GET /plg/onboard/status/:imsOrgId': plgOnboardingController.getStatus,
     'PATCH /plg/onboard/:onboardingId': plgOnboardingController.update,
     'POST /plg/records': plgOnboardingController.createOnboarding,
-    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboardingStatus,
+    'PATCH /plg/records/:plgOnboardingId': plgOnboardingController.updateOnboarding,
     'DELETE /plg/records/:plgOnboardingId': plgOnboardingController.deleteOnboarding,
 
     // Tier Specific Routes
@@ -511,6 +536,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'POST /sites/:siteId/site-enrollments': siteEnrollmentController.createPlgEnrollment,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'GET /admin/users/:userId': userDetailsController.resolveUser,
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,

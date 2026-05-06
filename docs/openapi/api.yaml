@@ -57,6 +57,8 @@ tags:
     description: APIs for taking and retrieving webpage screenshots, specifically for consent banner analysis
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: llmo-probes
+    description: Connectivity probes for LLMO features. Currently covers edge-optimize WAF/Bot Manager detection.
   - name: entitlements
     description: Entitlement management operations
   - name: site-enrollments
@@ -111,6 +113,8 @@ paths:
     $ref: './hooks-api.yaml#/site-detection-rum'
   /hooks/site-integration/analytics/{hookSecret}:
     $ref: './hooks-api.yaml#/site-integration-analytics'
+  /webhooks/github:
+    $ref: './webhooks-api.yaml#/github-webhook'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
@@ -121,6 +125,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
+    $ref: './brands-v2-api.yaml#/v2-brand-for-org-site'
   /v2/orgs/{spaceCatId}/categories:
     $ref: './categories-v2-api.yaml#/v2-categories-for-org'
   /v2/orgs/{spaceCatId}/categories/{categoryId}:
@@ -488,6 +494,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-weeks'
   /sites/{siteId}/agentic-traffic/movers:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-movers'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/prompt-execution-status:
+    $ref: './llmo-api.yaml#/brand-presence-prompt-execution-status'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/stats:
     $ref: './llmo-api.yaml#/url-inspector-stats'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/owned-urls:
@@ -500,6 +508,8 @@ paths:
     $ref: './llmo-api.yaml#/url-inspector-domain-urls'
   /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/url-prompts:
     $ref: './llmo-api.yaml#/url-inspector-url-prompts'
+  /org/{spaceCatId}/brands/{brandId}/brand-presence/url-inspector/filter-dimensions:
+    $ref: './llmo-api.yaml#/url-inspector-filter-dimensions'
   /sites/{siteId}/agentic-traffic/url-brand-presence:
     $ref: './llmo-api.yaml#/llmo-agentic-traffic-url-brand-presence'
   /sites/{siteId}/llmo/config:
@@ -536,6 +546,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
+  /sites/{siteId}/llmo/probes/edge-optimize:
+    $ref: './llmo-api.yaml#/llmo-probe-edge-optimize'
   /sites/{siteId}/llmo/edge-optimize-routing:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
   /sites/{siteId}/llmo/strategy:
@@ -590,6 +602,11 @@ components:
       in: cookie
       name: sessionToken
       description: 'Authentication using session cookie'
+    github_webhook_signature:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: 'HMAC-SHA256 signature of the request body, provided by GitHub on webhook delivery'
   schemas:
     $ref: './schemas.yaml'
   examples:

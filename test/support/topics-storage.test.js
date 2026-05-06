@@ -50,6 +50,7 @@ describe('topics-storage', () => {
         description: 'All about SEO',
         status: 'active',
         brand_id: null,
+        topic_categories: [{ category_id: 'cat-uuid-a' }, { category_id: 'cat-uuid-b' }],
         created_at: '2026-01-01T00:00:00Z',
         created_by: 'admin@test.com',
         updated_at: '2026-02-01T00:00:00Z',
@@ -64,10 +65,80 @@ describe('topics-storage', () => {
       expect(result[0].id).to.equal('seo-best-practices');
       expect(result[0].uuid).to.equal('uuid-1');
       expect(result[0].name).to.equal('SEO Best Practices');
+      expect(result[0].categoryUuids).to.deep.equal(['cat-uuid-a', 'cat-uuid-b']);
       expect(result[0].createdAt).to.equal('2026-01-01T00:00:00Z');
       expect(result[0].createdBy).to.equal('admin@test.com');
       expect(result[0].updatedAt).to.equal('2026-02-01T00:00:00Z');
       expect(result[0].updatedBy).to.equal('user@test.com');
+    });
+
+    it('returns empty categoryUuids when topic has no topic_categories', async () => {
+      const dbRow = {
+        id: 'uuid-2',
+        topic_id: 'uncategorized',
+        name: 'Uncategorized Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        topic_categories: [],
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result[0].categoryUuids).to.deep.equal([]);
+    });
+
+    it('returns empty categoryUuids when topic_categories is absent from row', async () => {
+      const dbRow = {
+        id: 'uuid-3',
+        topic_id: 'legacy-topic',
+        name: 'Legacy Topic',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result[0].categoryUuids).to.deep.equal([]);
+    });
+
+    it('drops soft-deleted categories from categoryUuids', async () => {
+      const dbRow = {
+        id: 'uuid-4',
+        topic_id: 'mixed-status-topic',
+        name: 'Mixed',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        topic_categories: [
+          { category_id: 'cat-active', categories: { status: 'active' } },
+          { category_id: 'cat-deleted', categories: { status: 'deleted' } },
+          { category_id: 'cat-pending', categories: { status: 'pending' } },
+        ],
+        created_at: '2026-01-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+      };
+
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listTopics({ organizationId: ORG_ID, postgrestClient });
+      expect(result[0].categoryUuids).to.deep.equal(['cat-active', 'cat-pending']);
     });
 
     it('returns empty array and defaults status when data is null', async () => {
@@ -157,7 +228,12 @@ describe('topics-storage', () => {
       expect(result.createdBy).to.equal('user@test.com');
     });
 
-    it('upserts topic_categories when categoryId is provided', async () => {
+    it('upserts topic_categories when categoryId is provided and returns populated categoryUuids', async () => {
+      // After the topic upsert + junction upsert, createTopic re-fetches the
+      // topic with the topic_categories embed so the response shape matches
+      // listTopics. We simulate that by populating topic_categories on the
+      // shared mock row — both the upsert .single() and the refetch
+      // .maybeSingle() resolve from the same proxy.
       const dbRow = {
         id: 'uuid-tc',
         topic_id: 'cat-linked-topic',
@@ -165,6 +241,9 @@ describe('topics-storage', () => {
         description: null,
         status: 'active',
         brand_id: null,
+        topic_categories: [
+          { category_id: 'cat-uuid-123', categories: { status: 'active' } },
+        ],
         created_at: '2026-04-01T00:00:00Z',
         created_by: 'system',
         updated_at: '2026-04-01',
@@ -178,13 +257,16 @@ describe('topics-storage', () => {
       fromStub.withArgs('topic_categories').returns(tcQuery);
       const postgrestClient = { from: fromStub };
 
-      await createTopic({
+      const result = await createTopic({
         organizationId: ORG_ID,
         topic: { name: 'Category Linked', categoryId: 'cat-uuid-123' },
         postgrestClient,
       });
 
       expect(fromStub).to.have.been.calledWith('topic_categories');
+      // Response is symmetric with GET /topics — POST callers see the
+      // category they just linked.
+      expect(result.categoryUuids).to.deep.equal(['cat-uuid-123']);
     });
 
     it('warns via log when topic_categories upsert fails', async () => {
@@ -248,6 +330,102 @@ describe('topics-storage', () => {
       });
 
       expect(fromStub).to.not.have.been.calledWith('topic_categories');
+    });
+
+    it('falls back to upsert payload (categoryUuids:[]) and warns when refetch errors', async () => {
+      // The first from('topics') is the upsert+select+single (success).
+      // The second from('topics') is the refetch with the embed — simulate
+      // a transient PostgREST error so we exercise the WARN-and-fallback
+      // branch rather than the happy-path return.
+      const upsertedRow = {
+        id: 'uuid-refetch-err',
+        topic_id: 'refetch-err-topic',
+        name: 'Refetch Err',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+      const upsertQuery = createChainableQuery({ data: upsertedRow, error: null });
+      const refetchQuery = createChainableQuery({
+        data: null,
+        error: { message: 'transient PostgREST error' },
+      });
+      const tcQuery = createChainableQuery({ data: null, error: null });
+
+      let topicsCall = 0;
+      const fromStub = sinon.stub().callsFake((table) => {
+        if (table === 'topics') {
+          topicsCall += 1;
+          return topicsCall === 1 ? upsertQuery : refetchQuery;
+        }
+        if (table === 'topic_categories') {
+          return tcQuery;
+        }
+        return null;
+      });
+      const postgrestClient = { from: fromStub };
+      const log = { warn: sinon.stub() };
+
+      const result = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Refetch Err', categoryId: 'cat-id' },
+        postgrestClient,
+        log,
+      });
+
+      // Topic still resolves to the upsert payload — refetch failure is
+      // intentionally non-fatal so the create still succeeds.
+      expect(result.id).to.equal('refetch-err-topic');
+      expect(result.categoryUuids).to.deep.equal([]);
+      // Refetch error logged at warn so operators can correlate triage.
+      expect(log.warn).to.have.been.calledWith(
+        sinon.match(/Failed to refetch topic .* with category embed/),
+      );
+    });
+
+    it('falls back to upsert payload when refetch returns no row', async () => {
+      // Race window: the topic was upserted but the refetch sees data: null
+      // (e.g. the row was hard-deleted between writes, or RLS hides it).
+      // Fall through to the upsert payload — same defensive guard as the
+      // refetch-error path, exercised separately so both branches of the
+      // post-refetch if/else if are covered.
+      const upsertedRow = {
+        id: 'uuid-refetch-empty',
+        topic_id: 'refetch-empty-topic',
+        name: 'Refetch Empty',
+        description: null,
+        status: 'active',
+        brand_id: null,
+        created_at: '2026-04-01T00:00:00Z',
+        created_by: 'system',
+        updated_at: '2026-04-01',
+        updated_by: 'system',
+      };
+      const upsertQuery = createChainableQuery({ data: upsertedRow, error: null });
+      const refetchQuery = createChainableQuery({ data: null, error: null });
+
+      let topicsCall = 0;
+      const fromStub = sinon.stub().callsFake((table) => {
+        if (table === 'topics') {
+          topicsCall += 1;
+          return topicsCall === 1 ? upsertQuery : refetchQuery;
+        }
+        return null;
+      });
+      const postgrestClient = { from: fromStub };
+
+      const result = await createTopic({
+        organizationId: ORG_ID,
+        topic: { name: 'Refetch Empty' },
+        postgrestClient,
+      });
+
+      expect(result.id).to.equal('refetch-empty-topic');
+      expect(result.categoryUuids).to.deep.equal([]);
     });
 
     it('throws on database error during create', async () => {

@@ -1,3 +1,359 @@
+# [1.476.0](https://github.com/adobe/spacecat-api-service/compare/v1.475.1...v1.476.0) (2026-05-06)
+
+
+### Features
+
+* add URL trend endpoint for referral traffic | LLMO-4261 ([#2336](https://github.com/adobe/spacecat-api-service/issues/2336)) ([cfaa49e](https://github.com/adobe/spacecat-api-service/commit/cfaa49e56b67e40bd730b51839fa404d92515a78))
+
+## [1.475.1](https://github.com/adobe/spacecat-api-service/compare/v1.475.0...v1.475.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* update the plg onboarding update function ([#2333](https://github.com/adobe/spacecat-api-service/issues/2333)) ([1a79290](https://github.com/adobe/spacecat-api-service/commit/1a79290910f7831cb542b2b62fb051662f01b23c))
+
+# [1.475.0](https://github.com/adobe/spacecat-api-service/compare/v1.474.1...v1.475.0) (2026-05-05)
+
+
+### Bug Fixes
+
+* **LLMO-4683:** forward operator-supplied region to V1 prompt generation ([#2312](https://github.com/adobe/spacecat-api-service/issues/2312)) ([54294c3](https://github.com/adobe/spacecat-api-service/commit/54294c358ac65f5ec596fb77e70edc801e09583c)), closes [adobe-rnd/llmo-data-retrieval-service#1426](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1426) [adobe-rnd/llmo-data-retrieval-service#1223](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1223) [adobe-rnd/llmo-data-retrieval-service#1426](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1426)
+
+
+### Features
+
+* **brands:** add (org, site) → brand resolver endpoint (LLMO-4716) ([#2334](https://github.com/adobe/spacecat-api-service/issues/2334)) ([ac212e8](https://github.com/adobe/spacecat-api-service/commit/ac212e82afe77bd5cc524b8fb8aa3e33a9785efa)), closes [hi#traffic](https://github.com/hi/issues/traffic)
+
+## [1.474.1](https://github.com/adobe/spacecat-api-service/compare/v1.474.0...v1.474.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.7.0 ([#2335](https://github.com/adobe/spacecat-api-service/issues/2335)) ([39d24a4](https://github.com/adobe/spacecat-api-service/commit/39d24a43f6adccd653f9a977edd3339e3a04d9b1))
+
+# [1.474.0](https://github.com/adobe/spacecat-api-service/compare/v1.473.1...v1.474.0) (2026-05-05)
+
+
+### Features
+
+* **llmo:** forward agentTypes to agentic-traffic RPCs | LLMO-4526 ([#2290](https://github.com/adobe/spacecat-api-service/issues/2290)) ([72cc475](https://github.com/adobe/spacecat-api-service/commit/72cc475195796325c914d918f66a6ab9fbae08aa)), closes [adobe/mysticat-data-service#490](https://github.com/adobe/mysticat-data-service/issues/490) [mysticat#490](https://github.com/mysticat/issues/490) [adobe/mysticat-data-service#490](https://github.com/adobe/mysticat-data-service/issues/490) [adobe/project-elmo-ui#1640](https://github.com/adobe/project-elmo-ui/issues/1640) [mysticat#490](https://github.com/mysticat/issues/490)
+
+## [1.473.1](https://github.com/adobe/spacecat-api-service/compare/v1.473.0...v1.473.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2330](https://github.com/adobe/spacecat-api-service/issues/2330)) ([22849b9](https://github.com/adobe/spacecat-api-service/commit/22849b984a580bbfe393cee52fca222f817bd147))
+
+# [1.473.0](https://github.com/adobe/spacecat-api-service/compare/v1.472.1...v1.473.0) (2026-05-05)
+
+
+### Features
+
+* add semantic-value-visibility to run-audit allowlist ([#2321](https://github.com/adobe/spacecat-api-service/issues/2321)) ([e16cef2](https://github.com/adobe/spacecat-api-service/commit/e16cef22db6daa13b03928a330159c1a6c89916c))
+
+## [1.472.1](https://github.com/adobe/spacecat-api-service/compare/v1.472.0...v1.472.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* **scrape:** sanitize x-error header to prevent ERR_INVALID_CHAR on non-ASCII ([#2331](https://github.com/adobe/spacecat-api-service/issues/2331)) ([56500f9](https://github.com/adobe/spacecat-api-service/commit/56500f92eaeebd9e9354da5e0e439ec6c69eddf6))
+
+# [1.472.0](https://github.com/adobe/spacecat-api-service/compare/v1.471.0...v1.472.0) (2026-05-05)
+
+
+### Features
+
+* read only admin support ([#2062](https://github.com/adobe/spacecat-api-service/issues/2062)) ([d9a7782](https://github.com/adobe/spacecat-api-service/commit/d9a7782a1d48a5871afa07b35f2510a7f8037490))
+
+# [1.471.0](https://github.com/adobe/spacecat-api-service/compare/v1.470.0...v1.471.0) (2026-05-05)
+
+
+### Features
+
+* enhance referral traffic endpoint response | LLMO-4261 ([#2319](https://github.com/adobe/spacecat-api-service/issues/2319)) ([1974182](https://github.com/adobe/spacecat-api-service/commit/1974182460ecc30ea13910d7c4b5407b69c212bf))
+
+# [1.470.0](https://github.com/adobe/spacecat-api-service/compare/v1.469.0...v1.470.0) (2026-05-05)
+
+
+### Features
+
+* **plg:** reject onboarding for internal orgs and paid customers ([#2322](https://github.com/adobe/spacecat-api-service/issues/2322)) ([e1d74d6](https://github.com/adobe/spacecat-api-service/commit/e1d74d6ece717be53ed22815953a18c8f032458d))
+
+# [1.469.0](https://github.com/adobe/spacecat-api-service/compare/v1.468.2...v1.469.0) (2026-05-05)
+
+
+### Features
+
+* **s2s:** implement readAll capability for cross-tenant list endpoints ([#2305](https://github.com/adobe/spacecat-api-service/issues/2305)) ([c487f78](https://github.com/adobe/spacecat-api-service/commit/c487f7839e71ce1e2f752679ce86246c405097e2))
+
+## [1.468.2](https://github.com/adobe/spacecat-api-service/compare/v1.468.1...v1.468.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.56.1 ([#2323](https://github.com/adobe/spacecat-api-service/issues/2323)) ([47c032b](https://github.com/adobe/spacecat-api-service/commit/47c032be7314c3b8d16166932d0d15946f48900a))
+
+## [1.468.1](https://github.com/adobe/spacecat-api-service/compare/v1.468.0...v1.468.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2320](https://github.com/adobe/spacecat-api-service/issues/2320)) ([ebb203a](https://github.com/adobe/spacecat-api-service/commit/ebb203aab4c8cd9957399b31bfcde031fa2044e2))
+
+# [1.468.0](https://github.com/adobe/spacecat-api-service/compare/v1.467.0...v1.468.0) (2026-05-04)
+
+
+### Features
+
+* GitHub webhook handler (POST /webhooks/github) ([#2281](https://github.com/adobe/spacecat-api-service/issues/2281)) ([a525107](https://github.com/adobe/spacecat-api-service/commit/a525107d095e0f62d65b1347785b64bc199eeb59)), closes [#2255](https://github.com/adobe/spacecat-api-service/issues/2255) [adobe/spacecat-infrastructure#469](https://github.com/adobe/spacecat-infrastructure/issues/469) [adobe/spacecat-infrastructure#473](https://github.com/adobe/spacecat-infrastructure/issues/473)
+
+# [1.467.0](https://github.com/adobe/spacecat-api-service/compare/v1.466.1...v1.467.0) (2026-05-04)
+
+
+### Features
+
+* new endpoint to get prompt status ([#2311](https://github.com/adobe/spacecat-api-service/issues/2311)) ([6a0d566](https://github.com/adobe/spacecat-api-service/commit/6a0d566566a6d626ebf6c32508fb1647f64e3323))
+
+## [1.466.1](https://github.com/adobe/spacecat-api-service/compare/v1.466.0...v1.466.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.14.0 ([#2314](https://github.com/adobe/spacecat-api-service/issues/2314)) ([5c01b50](https://github.com/adobe/spacecat-api-service/commit/5c01b50b02c2d66d765ef4424deeaf417b853042))
+
+# [1.466.0](https://github.com/adobe/spacecat-api-service/compare/v1.465.0...v1.466.0) (2026-05-04)
+
+
+### Features
+
+* **llmo:** add edge-optimize connectivity probe endpoint ([#2232](https://github.com/adobe/spacecat-api-service/issues/2232)) ([f5a1a32](https://github.com/adobe/spacecat-api-service/commit/f5a1a32065b3782ef5fccf53291b7e8e98dd98f7))
+
+# [1.465.0](https://github.com/adobe/spacecat-api-service/compare/v1.464.2...v1.465.0) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.13.5 ([#2308](https://github.com/adobe/spacecat-api-service/issues/2308)) ([e52c6b5](https://github.com/adobe/spacecat-api-service/commit/e52c6b546a5a22135ede2c1c67480772774716e8))
+* **deps:** update external fixes ([#2306](https://github.com/adobe/spacecat-api-service/issues/2306)) ([78a0504](https://github.com/adobe/spacecat-api-service/commit/78a0504cab35f5ac8e523ba36b98a5fce39f4fcb))
+
+
+### Features
+
+* **llmo:** surface categoryUuids on V2 topics endpoints ([#2304](https://github.com/adobe/spacecat-api-service/issues/2304)) ([5679610](https://github.com/adobe/spacecat-api-service/commit/5679610fa38152c463679d1010273eddcfb9b232)), closes [adobe-rnd/llmo-data-retrieval-service#1512](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/1512)
+* referral traffic endpoints follow up | LLMO-4261 ([#2301](https://github.com/adobe/spacecat-api-service/issues/2301)) ([eb4a885](https://github.com/adobe/spacecat-api-service/commit/eb4a8856022239a86c78f36a50b4813389e1bc71))
+
+## [1.464.2](https://github.com/adobe/spacecat-api-service/compare/v1.464.1...v1.464.2) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.6.0 ([#2303](https://github.com/adobe/spacecat-api-service/issues/2303)) ([612723a](https://github.com/adobe/spacecat-api-service/commit/612723af08f79a0fab7a174fad5ce5297d78e91e))
+* Update docker-compose.yml ([#2307](https://github.com/adobe/spacecat-api-service/issues/2307)) ([0170eb0](https://github.com/adobe/spacecat-api-service/commit/0170eb070f98ee726696afc1b4e915c6784fcd65))
+
+## [1.464.1](https://github.com/adobe/spacecat-api-service/compare/v1.464.0...v1.464.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* revert structured resolveStatus envelope on /sites-resolve 404s ([#2253](https://github.com/adobe/spacecat-api-service/issues/2253)) ([#2299](https://github.com/adobe/spacecat-api-service/issues/2299)) ([51cd0fc](https://github.com/adobe/spacecat-api-service/commit/51cd0fceae35bba1e1f2f0fe8a4892da4b43bc5a))
+
+# [1.464.0](https://github.com/adobe/spacecat-api-service/compare/v1.463.1...v1.464.0) (2026-04-30)
+
+
+### Features
+
+* notify  LLMO team when a customer opted in for optimise at edge ([#2256](https://github.com/adobe/spacecat-api-service/issues/2256)) ([30f64d9](https://github.com/adobe/spacecat-api-service/commit/30f64d961cea3c36c3609d24f430ea952de14bab))
+
+## [1.463.1](https://github.com/adobe/spacecat-api-service/compare/v1.463.0...v1.463.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.26.0 ([#2296](https://github.com/adobe/spacecat-api-service/issues/2296)) ([48b67f6](https://github.com/adobe/spacecat-api-service/commit/48b67f6ea371914a3abaa4e84b8a452757e1384b))
+
+# [1.463.0](https://github.com/adobe/spacecat-api-service/compare/v1.462.1...v1.463.0) (2026-04-30)
+
+
+### Features
+
+* structured resolveStatus envelope on /sites-resolve 404s ([#2253](https://github.com/adobe/spacecat-api-service/issues/2253)) ([2b574ce](https://github.com/adobe/spacecat-api-service/commit/2b574ce57520c9ab6b1b6156ee6c4a172d8e0712))
+
+## [1.462.1](https://github.com/adobe/spacecat-api-service/compare/v1.462.0...v1.462.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* restore uuid PK in v2 prompts response (LLMO-4625) ([#2294](https://github.com/adobe/spacecat-api-service/issues/2294)) ([6dcdf0d](https://github.com/adobe/spacecat-api-service/commit/6dcdf0db9763ca29b81d7217ffd3c1839e4a2006)), closes [#2199](https://github.com/adobe/spacecat-api-service/issues/2199) [#2199](https://github.com/adobe/spacecat-api-service/issues/2199) [#1433](https://github.com/adobe/spacecat-api-service/issues/1433) [#1444](https://github.com/adobe/spacecat-api-service/issues/1444) [#1447](https://github.com/adobe/spacecat-api-service/issues/1447) [#1453](https://github.com/adobe/spacecat-api-service/issues/1453) [#1463](https://github.com/adobe/spacecat-api-service/issues/1463) [#1467](https://github.com/adobe/spacecat-api-service/issues/1467) [#2199](https://github.com/adobe/spacecat-api-service/issues/2199)
+
+# [1.462.0](https://github.com/adobe/spacecat-api-service/compare/v1.461.0...v1.462.0) (2026-04-30)
+
+
+### Features
+
+* referral traffic endpoints fetching data from Postgres | LLMO-4261 ([#2242](https://github.com/adobe/spacecat-api-service/issues/2242)) ([f06e8f7](https://github.com/adobe/spacecat-api-service/commit/f06e8f7d942b3da6350a677ce5c7883a1c146105))
+
+# [1.461.0](https://github.com/adobe/spacecat-api-service/compare/v1.460.0...v1.461.0) (2026-04-30)
+
+
+### Features
+
+* PLG bind aso entitlement to ims org ([#2287](https://github.com/adobe/spacecat-api-service/issues/2287)) ([8bbad55](https://github.com/adobe/spacecat-api-service/commit/8bbad558784673f292effafc97ff07b7754b697e))
+
+# [1.460.0](https://github.com/adobe/spacecat-api-service/compare/v1.459.0...v1.460.0) (2026-04-30)
+
+
+### Features
+
+* return topic + prompt ids in bp responses; add lookup by prompt id endpoint | LLMO-4440 ([#2248](https://github.com/adobe/spacecat-api-service/issues/2248)) ([face861](https://github.com/adobe/spacecat-api-service/commit/face861143e6a551deb190631ef3a70bdd7cc39d))
+* support multiple category ids and multiple topic ids as filters to llmo BP calls | LLMO-4297 ([#2221](https://github.com/adobe/spacecat-api-service/issues/2221)) ([c887a91](https://github.com/adobe/spacecat-api-service/commit/c887a9147f3355199262d733c171396231c18654))
+
+# [1.459.0](https://github.com/adobe/spacecat-api-service/compare/v1.458.1...v1.459.0) (2026-04-29)
+
+
+### Features
+
+* **plg:** clean up stale FIXED suggestions and FixEntities on PLG onboarding ([#2283](https://github.com/adobe/spacecat-api-service/issues/2283)) ([104d584](https://github.com/adobe/spacecat-api-service/commit/104d584124b44a59764bb1fdc07d23cb774d4a25))
+
+## [1.458.1](https://github.com/adobe/spacecat-api-service/compare/v1.458.0...v1.458.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.55.1 ([#2288](https://github.com/adobe/spacecat-api-service/issues/2288)) ([afc4d6d](https://github.com/adobe/spacecat-api-service/commit/afc4d6d8659d01105741a3f8b905b0902a5ec2bb))
+
+# [1.458.0](https://github.com/adobe/spacecat-api-service/compare/v1.457.5...v1.458.0) (2026-04-29)
+
+
+### Features
+
+* add has-data endpoint for agentic traffic | LLMO-4608 ([#2285](https://github.com/adobe/spacecat-api-service/issues/2285)) ([a5047f3](https://github.com/adobe/spacecat-api-service/commit/a5047f3bb63878a4eeca2517c52b2fb53bcca78f))
+
+## [1.457.5](https://github.com/adobe/spacecat-api-service/compare/v1.457.4...v1.457.5) (2026-04-29)
+
+
+### Bug Fixes
+
+* block adobe.com  access to hlx json for brandpresence files ([#2284](https://github.com/adobe/spacecat-api-service/issues/2284)) ([05872d2](https://github.com/adobe/spacecat-api-service/commit/05872d2392c1eb9696c2b02e8d3fce972bb80113))
+
+## [1.457.4](https://github.com/adobe/spacecat-api-service/compare/v1.457.3...v1.457.4) (2026-04-28)
+
+
+### Bug Fixes
+
+* add money-pages to Slack run-audit allowed audits list ([#2202](https://github.com/adobe/spacecat-api-service/issues/2202)) ([6080670](https://github.com/adobe/spacecat-api-service/commit/6080670e153776e62b8b2cf374a8e6ff055bd64d))
+
+## [1.457.3](https://github.com/adobe/spacecat-api-service/compare/v1.457.2...v1.457.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* **llmo:** trigger DRS prompt generation for v1 onboarding (LLMO-4534) ([#2272](https://github.com/adobe/spacecat-api-service/issues/2272)) ([cf9631e](https://github.com/adobe/spacecat-api-service/commit/cf9631e580ee5e2c6ad01c2b9fa67c6bc2912350))
+
+## [1.457.2](https://github.com/adobe/spacecat-api-service/compare/v1.457.1...v1.457.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.55.0 ([#2282](https://github.com/adobe/spacecat-api-service/issues/2282)) ([2ff49de](https://github.com/adobe/spacecat-api-service/commit/2ff49de3782ccbd0a05bfbe5f4c770b0b6c52519))
+
+## [1.457.1](https://github.com/adobe/spacecat-api-service/compare/v1.457.0...v1.457.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* cache control for llmo endpoint | LLMO-4480 ([#2274](https://github.com/adobe/spacecat-api-service/issues/2274)) ([65e2cb0](https://github.com/adobe/spacecat-api-service/commit/65e2cb0ea8c49605afa3c9b198acf660b1fa653e))
+
+# [1.457.0](https://github.com/adobe/spacecat-api-service/compare/v1.456.4...v1.457.0) (2026-04-28)
+
+
+### Features
+
+* **llmo:** expand onboarding CDN detection to all CDN providers | LLMO-4091 ([#2245](https://github.com/adobe/spacecat-api-service/issues/2245)) ([7634a52](https://github.com/adobe/spacecat-api-service/commit/7634a521de791b9a2e5c11adc1328f0fa802f5bd))
+
+## [1.456.4](https://github.com/adobe/spacecat-api-service/compare/v1.456.3...v1.456.4) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/mysticat-shared-seo-client to v1.3.0 ([#2280](https://github.com/adobe/spacecat-api-service/issues/2280)) ([58bb4d4](https://github.com/adobe/spacecat-api-service/commit/58bb4d405b5604c0e9bd63112c82e75ca2d97ee5))
+
+## [1.456.3](https://github.com/adobe/spacecat-api-service/compare/v1.456.2...v1.456.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-drs-client to v1.5.0 ([#2279](https://github.com/adobe/spacecat-api-service/issues/2279)) ([73e369e](https://github.com/adobe/spacecat-api-service/commit/73e369e62a719f8eb388a602d0fbc3727ac96edd))
+* llmo include topicId in the get topics api call ([#2268](https://github.com/adobe/spacecat-api-service/issues/2268)) ([90629c1](https://github.com/adobe/spacecat-api-service/commit/90629c16f315b05225fb7c22e89ca42f3b15c6a0))
+
+## [1.456.2](https://github.com/adobe/spacecat-api-service/compare/v1.456.1...v1.456.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* updated waitlisted reason for Ip allowlist and preonboarding flow ([#2260](https://github.com/adobe/spacecat-api-service/issues/2260)) ([5cea8e8](https://github.com/adobe/spacecat-api-service/commit/5cea8e8bf2140ab873023bbaab6de7f7cd1e09bc))
+
+## [1.456.1](https://github.com/adobe/spacecat-api-service/compare/v1.456.0...v1.456.1) (2026-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#2277](https://github.com/adobe/spacecat-api-service/issues/2277)) ([3fa4ebb](https://github.com/adobe/spacecat-api-service/commit/3fa4ebb3703ca059c9ce9b482afa717398071205))
+
+# [1.456.0](https://github.com/adobe/spacecat-api-service/compare/v1.455.3...v1.456.0) (2026-04-27)
+
+
+### Features
+
+* filter deleted prompts for brand presence dashboard | LLMO-4433 ([#2247](https://github.com/adobe/spacecat-api-service/issues/2247)) ([fbb82e1](https://github.com/adobe/spacecat-api-service/commit/fbb82e12c314a671522815c48827424e7ec49cf5))
+
+## [1.455.3](https://github.com/adobe/spacecat-api-service/compare/v1.455.2...v1.455.3) (2026-04-27)
+
+
+### Bug Fixes
+
+* use www-resolved domain for RUM AEM check in PLG onboarding ([#2246](https://github.com/adobe/spacecat-api-service/issues/2246)) ([9c5ab65](https://github.com/adobe/spacecat-api-service/commit/9c5ab65666b18aae31acf5e8a36d15d241968657))
+
+## [1.455.2](https://github.com/adobe/spacecat-api-service/compare/v1.455.1...v1.455.2) (2026-04-27)
+
+
+### Bug Fixes
+
+* **plg:** harden ASO enrollment revocation with org-identity guards and DB-confirmation reassignment     ([#2251](https://github.com/adobe/spacecat-api-service/issues/2251)) ([51df093](https://github.com/adobe/spacecat-api-service/commit/51df093204459f08e24b2949e7ae9d833d7e8f26))
+
+## [1.455.1](https://github.com/adobe/spacecat-api-service/compare/v1.455.0...v1.455.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.53.0 ([#2273](https://github.com/adobe/spacecat-api-service/issues/2273)) ([0931415](https://github.com/adobe/spacecat-api-service/commit/09314150391ae13edb09562c83705e14e4a2cd5e))
+
+# [1.455.0](https://github.com/adobe/spacecat-api-service/compare/v1.454.0...v1.455.0) (2026-04-27)
+
+
+### Features
+
+* add url-inspector filter-dimensions endpoint + fix openai model alias | LLMO-4525 ([#2269](https://github.com/adobe/spacecat-api-service/issues/2269)) ([35a320d](https://github.com/adobe/spacecat-api-service/commit/35a320dd5493f25e2fcc4edf6e66a4902fd8e844))
+
+# [1.454.0](https://github.com/adobe/spacecat-api-service/compare/v1.453.0...v1.454.0) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#2270](https://github.com/adobe/spacecat-api-service/issues/2270)) ([6876689](https://github.com/adobe/spacecat-api-service/commit/687668910bef6c9b9caf52f5530414b7dd4313ed))
+
+
+### Features
+
+* add GET /admin/user/:userid endpoint to resolve IMS user profiles ([#2266](https://github.com/adobe/spacecat-api-service/issues/2266)) ([ca7253b](https://github.com/adobe/spacecat-api-service/commit/ca7253bd2122e83da87e744624899178ebc01687))
+
+# [1.453.0](https://github.com/adobe/spacecat-api-service/compare/v1.452.0...v1.453.0) (2026-04-24)
+
+
+### Features
+
+* SITES-43069 - pass enabled preflight audits from Configuration to Mysticat ([#2210](https://github.com/adobe/spacecat-api-service/issues/2210)) ([6e8bd4e](https://github.com/adobe/spacecat-api-service/commit/6e8bd4e71a08b30c226146b9260c0593cc58d907))
+
 # [1.452.0](https://github.com/adobe/spacecat-api-service/compare/v1.451.0...v1.452.0) (2026-04-24)
 
 

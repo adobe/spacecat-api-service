@@ -10253,6 +10253,7 @@ describe('Suggestions Controller', () => {
       const config = {
         getLlmoConfig: () => ({ dataFolder: 'https://example.com/data' }),
         getEdgeOptimizeConfig: () => ({}),
+        getLlmoCdnBucketConfig: () => ({}),
         updateEdgeOptimizeConfig: sandbox.stub(),
       };
 

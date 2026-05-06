@@ -16,7 +16,7 @@ Two endpoints that power the **Data Insights table** in the Brand Presence dashb
 **Path parameters:**
 - `spaceCatId` — Organization ID (UUID)
 - `brandId` — `all` (all brands) or a specific brand UUID
-- `topicId` — URL-encoded topic name (e.g. `Merge%20PDF`)
+- `topicId` (topic prompts routes only) — URL-encoded **display topic name** (e.g. `Merge%20PDF`) or a **topic UUID** from `topics` / execution `topic_id`; same resolution as [Prompt Detail API](prompt-detail-api.md)
 
 ---
 
@@ -31,8 +31,10 @@ Both endpoints share the same filter and pagination parameters:
 | `model` | `platform` | string | `chatgpt` | LLM model (e.g. chatgpt, google-ai-mode, copilot) |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site |
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category UUID or name |
+| `categoryIds` | `category_ids` | string or array | — | Multiple categories (comma-separated or repeated); merged with `categoryId` |
 | `topicIds` | — | string (UUID CSV or array) | — | Filter by topic UUID(s) |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, JP) |
+| `regionCodes` | `region_codes` | string or array | — | Multiple regions; merged with `regionCode` |
 | `origin` | — | string | — | Filter by origin (case-insensitive; e.g. `human`, `ai`) |
 | `page` | — | integer | `0` | Zero-based page index |
 | `pageSize` | — | integer | `20` | Number of items per page |
@@ -56,6 +58,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics?s
   "topicDetails": [
     {
       "topic": "PDF Editing",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "promptCount": 47,
       "brandMentions": 312,
       "brandCitations": 198,
@@ -70,11 +73,14 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics?s
 }
 ```
 
+`topicId` is the stable **topics table UUID** for that row’s topic group when `rpc_brand_presence_topics` returns `topic_id` (from executions in the window). It is JSON `null` when every matching execution has a null `topic_id`.
+
 ### Topic Object Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `topic` | string | Topic/keyword name |
+| `topicId` | string \| null | Stable topic UUID (`topics.id` / execution `topic_id`) for use in `…/topics/:topicId/prompts`, `…/detail`, and `…/prompt-detail` when non-null; otherwise fall back to URL-encoded `topic` |
 | `promptCount` | number | Number of unique prompts (deduplicated by `prompt\|region_code`, keeping latest execution) |
 | `brandMentions` | number | Total mention count across **all** execution rows in the date range |
 | `brandCitations` | number | Total citation count across **all** execution rows in the date range |
@@ -86,17 +92,13 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics?s
 
 ### Aggregation Logic
 
-1. Query all `brand_presence_executions` rows matching the filters, with embedded `brand_presence_sources(url_id)` via PostgREST
-2. Group rows by `topics` column
-3. **Per topic**, perform a single pass:
-   - **Prompt deduplication**: Track unique `prompt|region_code` keys, keeping only the row with the latest `execution_date` — used solely for `promptCount`
-   - **Metrics accumulation**: Count `brandMentions`, `brandCitations`, and collect unique `url_id`s for `sourceCount` from **every** raw execution row (not just deduplicated ones)
-   - **Averages**: Sum and count `visibility_score`, `position`, `sentiment`, `volume` across all rows
-4. Sort, then paginate server-side
+Topic summaries are produced in PostgreSQL via **`rpc_brand_presence_topics`** (PostgREST `rpc`): filters, `GROUP BY` topic label, metrics, `topic_id` per group, sort, and pagination are applied server-side. The API maps each RPC row to the camelCase response above (including `topicId` from `topic_id`).
 
 ---
 
 ## 2. Topic Prompts Endpoint
+
+Topic prompts queries `brand_presence_executions` with the same **category** and **region** execution filters as sentiment overview, search, and drill-down routes (when those query params are present). Previously only `regionCode` was applied here; category filters now narrow prompts consistently with the rest of the dashboard.
 
 ### Sample URL
 
@@ -113,7 +115,9 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
   "items": [
     {
       "topic": "PDF Editing",
+      "topicId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "prompt": "best pdf editor for mac",
+      "promptId": "019cb903-1184-7f92-8325-f9d1176af316",
       "region": "US",
       "category": "Acrobat",
       "executionDate": "2026-03-08",
@@ -134,14 +138,18 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/topics/P
 }
 ```
 
-Root **`topic`** and **`topicId`** mirror the [Topic Detail API](topic-detail-api.md) conventions: same resolution from execution rows and the `:topicId` path (UUID path filters by `topic_id` but still returns a display label and stable id when the query returns rows). `topicId` is `null` when the path is a topic name and rows have no `topic_id`.
+Root **`topic`** and **`topicId`** mirror the [Topic Detail API](topic-detail-api.md) conventions: values are taken from execution rows (preferring the **newest `execution_date`** row that has `topics` / `topic_id`, then scanning older rows), with the same `:topicId` path fallbacks as topic detail. `topicId` is `null` when the path is a topic name and no row carries a `topic_id`.
+
+Each **`items[]`** row includes **`topicId`** and **`promptId`** as strings when the backing execution row has `topic_id` / `prompt_id`; otherwise those fields are the empty string (`""`). Legacy data may omit UUIDs in Postgres — clients should treat empty string like “unknown id” (same as [Topic Detail](topic-detail-api.md) / [Prompt Detail](prompt-detail-api.md) envelopes, where `topicId` can still be `null` at the root when the topic cannot be resolved to a UUID).
 
 ### Prompt Object Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `topic` | string | Topic name |
+| `topicId` | string | Topic UUID from the latest execution row for this prompt+region; `""` when null |
 | `prompt` | string | The prompt text |
+| `promptId` | string | Prompt UUID from the latest execution row; `""` when null |
 | `region` | string | Region code (e.g. US, DE) |
 | `category` | string | Category name |
 | `executionDate` | string | Date of the latest execution (YYYY-MM-DD) |

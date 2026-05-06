@@ -27,6 +27,7 @@ import {
   detectLocale,
   hasText,
   isValidIMSOrgId,
+  isValidUUID,
   resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 
@@ -40,6 +41,7 @@ import {
   autoResolveAuthorUrl,
   findDeliveryType,
   deriveProjectName,
+  resolveWwwUrl,
   updateCodeConfig,
   queueDeliveryConfigWriter,
 } from '../../support/utils.js';
@@ -47,6 +49,7 @@ import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { cleanupPlgSiteSuggestionsAndFixes } from './plg-onboarding-cleanup.js';
 
 const { STATUSES, REVIEW_DECISIONS } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
@@ -68,6 +71,14 @@ const REVIEW_REASONS = {
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
+
+class EntitlementWaitlistError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'EntitlementWaitlistError';
+  }
+}
+
 /**
  * Derives the review check key from the onboarding record's current state.
  * @param {object} onboarding - The PlgOnboarding record.
@@ -157,13 +168,13 @@ async function postPlgOnboardingNotification(onboarding, context) {
 
   let message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
     + `• *Domain:* \`${domain}\`\n`
-    + `• *IMS Org:* \`${imsOrgId}\``;
+    + `• *Onboarding requested on IMS Org:* \`${imsOrgId}\``;
 
   if (orgName) {
-    message += `\n• *Org Name:* ${orgName}`;
+    message += `\n• *IMS Org Name:* ${orgName}`;
   }
   if (organizationId) {
-    message += `\n• *Org ID:* \`${organizationId}\``;
+    message += `\n• *SpaceCat Org ID (derived from IMS Org):* \`${organizationId}\``;
   }
   if (siteId) {
     message += `\n• *Site ID:* \`${siteId}\``;
@@ -239,40 +250,65 @@ function getReviewerIdentity(context) {
   return hasText(profile?.email) ? profile.email : 'admin';
 }
 
-async function ensureAsoEntitlement(site, context) {
-  const { log } = context;
-  const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
-  try {
-    const result = await tierClient.createEntitlement(ASO_TIER);
-    log.info(`ASO entitlement ${result.entitlement.getId()} and enrollment ${result.siteEnrollment?.getId()} ensured for site ${site.getId()}`);
-    return result;
-  } catch (error) {
-    if (error.message?.includes('already exists') || error.message?.includes('Already enrolled')) {
-      log.info(`ASO entitlement already exists for site ${site.getId()}, fetching existing`);
-      return tierClient.checkValidEntitlement();
-    }
-    throw error;
-  }
+async function reassignSiteOrganization(site, organizationId) {
+  site.setOrganizationId(organizationId);
+  return site.save();
 }
 
-/**
- * Revokes the ASO site enrollment for any other site under the same entitlement.
- * Used to enforce one active PLG enrollment per org when upgrading from PRE_ONBOARD.
- * @param {object} site - The newly enrolled site.
- * @param {object} entitlement - The ASO entitlement for the org.
- * @param {object} context - Request context.
- */
-async function revokePreOnboardedSiteEnrollment(site, entitlement, context) {
-  const { dataAccess, log } = context;
-  const { SiteEnrollment } = dataAccess;
+// Resolves entitlement against the IMS-derived organization (passed in by the caller),
+// then enrollment for the site. Step 1 deliberately ignores site.getOrganizationId()
+// so the entitlement is bound to the customer org we resolved from imsOrgId — not to
+// whatever org the site currently points at (which may still be an internal/demo org
+// pre-reassignment).
+async function ensureAsoEntitlement(site, organization, context) {
+  const { log } = context;
+  const siteId = site.getId();
+  const organizationId = organization.getId();
 
-  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
-  const toRevoke = enrollments.filter((e) => e.getSiteId() !== site.getId());
+  // Step 1: ensure entitlement on the IMS-resolved organization (no site bound).
+  const orgClient = TierClient.createForOrg(context, organization, ASO_PRODUCT_CODE);
+  let entitlement;
+  try {
+    ({ entitlement } = await orgClient.createEntitlement(ASO_TIER));
+  } catch (createError) {
+    log.error(`ensureAsoEntitlement: createEntitlement failed for org ${organizationId}: ${createError.message}, fetching existing`);
+    try {
+      ({ entitlement } = await orgClient.checkValidEntitlement());
+    } catch (fetchError) {
+      log.error(`ensureAsoEntitlement: checkValidEntitlement also failed for org ${organizationId}: ${fetchError.message}`);
+    }
+  }
+  if (!entitlement) {
+    throw new EntitlementWaitlistError(`Unable to create or fetch ASO entitlement for org ${organizationId}`);
+  }
+  const entitlementOrgId = entitlement.getOrganizationId();
 
-  await Promise.all(toRevoke.map((e) => {
-    log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${e.getSiteId()}`);
-    return e.remove();
-  }));
+  if (entitlementOrgId !== organizationId) {
+    throw new EntitlementWaitlistError(
+      `ASO entitlement org drift: expected ${organizationId}, got ${entitlementOrgId} (site ${siteId})`,
+    );
+  }
+
+  // Step 2: create site enrollment bound directly to the entitlement ID above.
+  // We bypass TierClient.createForSite to avoid re-deriving org from site.getOrganizationId(),
+  // which may lag behind the DB if org reassignment just happened.
+  const { SiteEnrollment } = context.dataAccess;
+  let siteEnrollment;
+  const entitlementId = entitlement.getId();
+  try {
+    const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
+    siteEnrollment = existingEnrollments.find((se) => se.getEntitlementId() === entitlementId);
+    if (!siteEnrollment) {
+      siteEnrollment = await SiteEnrollment.create({ siteId, entitlementId });
+    }
+  } catch (enrollError) {
+    log.warn(`ensureAsoEntitlement: site enrollment failed for site ${siteId}: ${enrollError.message}`);
+  }
+  if (!siteEnrollment) {
+    throw new EntitlementWaitlistError(`Unable to create or fetch ASO enrollment for site ${siteId}`);
+  }
+
+  return { entitlement, siteEnrollment };
 }
 
 /**
@@ -342,6 +378,69 @@ async function revokeAsoSiteEnrollments(onboarding, context) {
 }
 
 /**
+ * Enforces the "one active ASO enrollment per org" business rule by revoking every ASO
+ * enrollment under the target entitlement other than the newly onboarded site's.
+ *
+ * The previous incident (2026-04-21) showed this pattern is dangerous when entitlement
+ * resolution drifts to the wrong org — a single mis-resolution mass-deletes unrelated sites.
+ * Two invariants guard against that here:
+ *
+ *   1. The entitlement's org MUST equal the customer org we resolved from the request's
+ *      imsOrgId. If they disagree, entitlement resolution drifted — abort loudly, don't delete.
+ *   2. The target customer org MUST NOT be internal/demo. Caller-level mistake guard.
+ *
+ * @param {object} newSite - The newly onboarded site (kept active).
+ * @param {object} organization - The customer organization resolved from imsOrgId (ground truth).
+ * @param {object} entitlement - The ASO entitlement returned by ensureAsoEntitlement.
+ * @param {object} context - Request context.
+ */
+async function revokePreviousAsoEnrollmentsForOrg(newSite, organization, entitlement, context) {
+  const { dataAccess, log, env } = context;
+  const { SiteEnrollment } = dataAccess;
+
+  const expectedOrgId = organization.getId();
+
+  // Guard 1: caller-level mistake — never mass-revoke under an internal/demo org.
+  /* c8 ignore next 4 */
+  if (isInternalOrg(expectedOrgId, env)) {
+    log.error(`Refusing to revoke sibling ASO enrollments: target organization ${expectedOrgId} is internal/demo.`);
+    return;
+  }
+
+  // Guard 2: tight invariant — the entitlement we got back must belong to the expected customer
+  // org. If TierClient ever drifts and hands back an entitlement for a different org, abort.
+  const entitlementOrgId = entitlement.getOrganizationId();
+  /* c8 ignore next 4 */
+  if (entitlementOrgId !== expectedOrgId) {
+    log.error(`Refusing to revoke sibling ASO enrollments: entitlement ${entitlement.getId()} belongs to org ${entitlementOrgId} but expected ${expectedOrgId} (resolved from request imsOrgId). Possible entitlement-resolution drift.`);
+    return;
+  }
+
+  const enrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  const newSiteId = newSite.getId();
+  const toRevoke = enrollments.filter((e) => e.getSiteId() !== newSiteId);
+
+  if (toRevoke.length === 0) {
+    return;
+  }
+
+  // Normally at most 1 sibling (previous PRE_ONBOARD site); more than 3 suggests drift or a bug.
+  if (toRevoke.length > 3) {
+    log.warn(`Found ${toRevoke.length} other ASO enrollments under entitlement ${entitlement.getId()} for org ${expectedOrgId}; revoking all. Investigate if unexpected.`);
+  }
+
+  await Promise.all(toRevoke.map(async (e) => {
+    const prevSiteId = e.getSiteId();
+    try {
+      log.info(`Revoking ASO enrollment ${e.getId()} for previously enrolled site ${prevSiteId} (org ${expectedOrgId})`);
+      await e.remove();
+    } catch (err) {
+      log.warn(`Failed to revoke ASO enrollment ${e.getId()} for site ${prevSiteId}: ${err.message}`);
+    }
+  }));
+}
+
+/**
  * Upserts a single LaunchDarkly flag's variation 0 to include the org + site.
  * Variation 0 value is a JSON object: { [imsOrgId]: [siteIds] }.
  *
@@ -397,10 +496,16 @@ async function upsertLdFlag(ldClient, flagKey, imsOrgId, siteId, log) {
  * Enables all PLG auto-fix LaunchDarkly feature flags for the given site's org.
  * Uses the experience-success-studio project token (LD_EXPERIENCE_SUCCESS_API_TOKEN).
  * Each flag update is non-fatal — onboarding continues even if one fails.
+ *
+ * Takes the target organization explicitly (resolved upstream from the request's imsOrgId)
+ * rather than re-deriving it from site.getOrganizationId(). An earlier production incident
+ * flipped flags under the wrong IMS org id because the in-memory site still reported its
+ * pre-reassignment (internal) org after save.
  * @param {object} site - The onboarded site.
+ * @param {object} organization - The target customer organization.
  * @param {object} context - Request context.
  */
-async function updateLaunchDarklyFlags(site, context) {
+async function updateLaunchDarklyFlags(site, organization, context) {
   const { log, env } = context;
 
   const apiToken = env[LD_API_TOKEN_ENV_VAR];
@@ -411,9 +516,7 @@ async function updateLaunchDarklyFlags(site, context) {
 
   const ldClient = new LaunchDarklyClient({ apiToken }, log);
 
-  const imsOrgId = (await context.dataAccess.Organization.findById(
-    site.getOrganizationId(),
-  ))?.getImsOrgId();
+  const imsOrgId = organization?.getImsOrgId?.();
 
   if (!imsOrgId) {
     log.warn(`Cannot update LaunchDarkly flags: no IMS org ID for site ${site.getId()}`);
@@ -521,6 +624,7 @@ async function performAsoPlgOnboarding({
     Site, PlgOnboarding, Organization,
   } = dataAccess;
 
+  /* c8 ignore next 7 */
   if (!isValidHostname(domain)) {
     throw Object.assign(
       new Error('Invalid domain: must be a valid hostname'),
@@ -602,7 +706,9 @@ async function performAsoPlgOnboarding({
       // still gets onboarded. Orphaned enrollments can be cleaned up out-of-band.
       const { SiteEnrollment, Entitlement } = dataAccess;
       const oldOrgId = alreadyOnboarded.getOrganizationId();
-      if (oldOrgId) {
+      if (oldOrgId && isInternalOrg(oldOrgId, env)) {
+        log.error(`Refusing to revoke ASO enrollment for displaced site ${alreadyOnboardedSiteId}: previous org ${oldOrgId} is internal/demo.`);
+      } else if (oldOrgId) {
         try {
           const entitlements = await Entitlement.allByOrganizationId(oldOrgId);
           const asoEntitlement = entitlements.find((e) => e.getProductCode() === ASO_PRODUCT_CODE);
@@ -657,79 +763,111 @@ async function performAsoPlgOnboarding({
   // Fast path: preonboarded sites just need enrollment + ONBOARDED
   if (onboarding.getStatus() === STATUSES.PRE_ONBOARDING && onboarding.getSiteId()) {
     log.info(`Fast-tracking preonboarded record ${onboarding.getId()}`);
-    const site = await Site.findById(onboarding.getSiteId());
+    let site = await Site.findById(onboarding.getSiteId());
     if (site) {
-      // Resolve customer's organization from imsOrgId
-      const organization = await createOrFindOrganization(imsOrgId, context);
-      const customerOrgId = organization.getId();
+      try {
+        // Resolve customer's organization from imsOrgId
+        const organization = await createOrFindOrganization(imsOrgId, context);
+        const customerOrgId = organization.getId();
+        // Anchor the onboarding record to the resolved customer org up-front, regardless of
+        // whether the site itself needs to be reassigned. Preonboarding records created earlier
+        // may carry a stale organizationId (e.g. the internal/demo org used during preonboard),
+        // and downstream consumers (notifications, displacement scoping) read it directly.
+        onboarding.setOrganizationId(customerOrgId);
 
-      // Check if site needs to be moved from internal org to customer org
-      const currentSiteOrgId = site.getOrganizationId();
-      let needsOrgReassignment = false;
+        // Check if site needs to be moved from internal org to customer org
+        const currentSiteOrgId = site.getOrganizationId();
+        let needsOrgReassignment = false;
 
-      // Note: On retry, currentSiteOrgId may already equal customerOrgId if a previous
-      // attempt successfully saved the org reassignment but failed during entitlement creation
-      if (currentSiteOrgId !== customerOrgId) {
-        if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
-          log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
-          needsOrgReassignment = true;
-        } else {
-          // Site is in different customer org - cannot reassign, must waitlist
-          const existingOrg = await Organization.findById(currentSiteOrgId);
-          /* c8 ignore next */
-          const existingImsOrgId = existingOrg?.getImsOrgId?.() || currentSiteOrgId;
-          /* c8 ignore next */
-          const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
-          const customerOrgName = organization.getName();
-          const waitlistReason = `Preonboarded site is assigned to different organization (org: ${existingOrgName}, id: ${existingImsOrgId}). Cannot be moved to '${customerOrgName}'.`;
+        // Note: On retry, currentSiteOrgId may already equal customerOrgId if a previous
+        // attempt successfully saved the org reassignment but failed during entitlement creation
+        if (currentSiteOrgId !== customerOrgId) {
+          if (isInternalOrg(currentSiteOrgId, env) && !isInternalOrgDemoSite(site.getId(), env)) {
+            log.info(`Preonboarded site ${site.getId()} is in internal org ${currentSiteOrgId}, will reassign to customer org ${customerOrgId}`);
+            needsOrgReassignment = true;
+          } else {
+            // Site is in different customer org - cannot reassign, must waitlist
+            const existingOrg = await Organization.findById(currentSiteOrgId);
+            /* c8 ignore next */
+            const existingImsOrgId = existingOrg?.getImsOrgId?.() || currentSiteOrgId;
+            /* c8 ignore next */
+            const existingOrgName = existingOrg?.getName?.() || currentSiteOrgId;
+            const customerOrgName = organization.getName();
+            let waitlistReason = `Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED} (org: ${existingOrgName}, id: ${existingImsOrgId}).`;
+            const siteEnrollments = await site.getSiteEnrollments();
+            if (!siteEnrollments || siteEnrollments.length === 0) {
+              waitlistReason += ` This domain has no active products in its existing org '${existingOrgName}'. It can be safely moved to '${customerOrgName}'.`;
+            } else {
+              waitlistReason += ` This domain cannot be moved to '${customerOrgName}' — it is already set up with active products in its existing org ('${existingOrgName}').`;
+            }
 
-          log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
+            log.warn(`Preonboarded site ${site.getId()} is in different customer org ${currentSiteOrgId}, expected ${customerOrgId} - waitlisting`);
 
+            onboarding.setStatus(STATUSES.WAITLISTED);
+            onboarding.setWaitlistReason(waitlistReason);
+            const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
+            onboarding.setSteps(steps);
+            if (updatedBy) {
+              onboarding.setUpdatedBy(updatedBy);
+            }
+            await onboarding.save();
+            await postPlgOnboardingNotification(onboarding, context);
+            return onboarding;
+          }
+        }
+
+        // Reassign site org if needed BEFORE entitlement operations.
+        // This ensures ensureAsoEntitlement gets the correct customer org's entitlement.
+        // The onboarding record's organizationId was already anchored above.
+        if (needsOrgReassignment) {
+          site = await reassignSiteOrganization(site, customerOrgId);
+          log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
+        }
+
+        const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+        await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
+        await updateLaunchDarklyFlags(site, organization, context);
+
+        const steps = {
+          ...(onboarding.getSteps() || {}),
+          entitlementCreated: true,
+        };
+        if (needsOrgReassignment) {
+          steps.siteOrgReassigned = true;
+        }
+        // Best-effort: clear out any stale FIXED suggestions and FixEntity rows from a
+        // prior onboarding lifecycle so the newly onboarded site starts from a clean slate.
+        // Never fatal — orphans can be reconciled out-of-band.
+        await cleanupPlgSiteSuggestionsAndFixes(site.getId(), context);
+        onboarding.setStatus(STATUSES.ONBOARDED);
+        onboarding.setWaitlistReason(null);
+        onboarding.setBotBlocker(null);
+        onboarding.setSteps(steps);
+        onboarding.setCompletedAt(new Date().toISOString());
+        if (updatedBy) {
+          onboarding.setUpdatedBy(updatedBy);
+        }
+        await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
+        return onboarding;
+      } catch (error) {
+        if (error instanceof EntitlementWaitlistError) {
           onboarding.setStatus(STATUSES.WAITLISTED);
-          onboarding.setWaitlistReason(waitlistReason);
-          const steps = { ...(onboarding.getSteps() || {}), orgResolutionFailed: true };
-          onboarding.setSteps(steps);
+          onboarding.setWaitlistReason(error.message);
+          onboarding.setSteps({ ...(onboarding.getSteps() || {}), entitlementFailed: true });
           if (updatedBy) {
             onboarding.setUpdatedBy(updatedBy);
           }
-          await onboarding.save();
-          await postPlgOnboardingNotification(onboarding, context);
+          try {
+            await onboarding.save();
+            await postPlgOnboardingNotification(onboarding, context);
+          } catch (saveError) {
+            log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+          }
           return onboarding;
         }
+        throw error;
       }
-
-      // Reassign site org if needed BEFORE entitlement operations
-      // This ensures ensureAsoEntitlement gets the correct customer org's entitlement
-      if (needsOrgReassignment) {
-        site.setOrganizationId(customerOrgId);
-        await site.save();
-        // Update PlgOnboarding's organizationId to match the site's new org
-        onboarding.setOrganizationId(customerOrgId);
-        log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
-      }
-
-      const { entitlement } = await ensureAsoEntitlement(site, context);
-      await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-      await updateLaunchDarklyFlags(site, context);
-
-      const steps = {
-        ...(onboarding.getSteps() || {}),
-        entitlementCreated: true,
-      };
-      if (needsOrgReassignment) {
-        steps.siteOrgReassigned = true;
-      }
-      onboarding.setStatus(STATUSES.ONBOARDED);
-      onboarding.setWaitlistReason(null);
-      onboarding.setBotBlocker(null);
-      onboarding.setSteps(steps);
-      onboarding.setCompletedAt(new Date().toISOString());
-      if (updatedBy) {
-        onboarding.setUpdatedBy(updatedBy);
-      }
-      await onboarding.save();
-      await postPlgOnboardingNotification(onboarding, context);
-      return onboarding;
     }
     log.warn(`Preonboarded site ${onboarding.getSiteId()} not found, falling through to full onboarding`);
   }
@@ -755,7 +893,9 @@ async function performAsoPlgOnboarding({
     const rumApiClient = RUMAPIClient.createFrom(context);
     let cachedDeliveryType = null;
     try {
-      await rumApiClient.retrieveDomainkey(domain);
+      const siteProxy = site ?? { getBaseURL: () => baseURL, getConfig: () => null };
+      const rumDomain = await resolveWwwUrl(siteProxy, context);
+      await rumApiClient.retrieveDomainkey(rumDomain);
       steps.rumVerified = true;
     } catch {
       steps.rumVerified = false;
@@ -835,7 +975,16 @@ async function performAsoPlgOnboarding({
         userAgent: botBlockerResult.userAgent,
       };
 
+      let waitlistReason = `Domain ${domain} is blocked by a bot blocker of type '${botBlockerInfo.type}'.`;
+      if (botBlockerInfo.ipsToAllowlist?.length) {
+        waitlistReason += ` The following IPs must be allowlisted: ${botBlockerInfo.ipsToAllowlist.join(', ')}.`;
+      }
+      if (botBlockerInfo.userAgent) {
+        waitlistReason += ` User-agent used: ${botBlockerInfo.userAgent}.`;
+      }
+
       onboarding.setStatus(STATUSES.WAITING_FOR_IP_ALLOWLISTING);
+      onboarding.setWaitlistReason(waitlistReason);
       onboarding.setBotBlocker(botBlockerInfo);
       onboarding.setSiteId(site?.getId() || null);
       onboarding.setSteps(steps);
@@ -1100,17 +1249,18 @@ async function performAsoPlgOnboarding({
     // This must happen BEFORE entitlement operations to ensure we get the correct org's entitlement
     if (needsOrgReassignment) {
       log.info(`Reassigning site ${site.getId()} to org ${organizationId} (was in internal/demo org)`);
-      site.setOrganizationId(organizationId);
-      await site.save();
+      site = await reassignSiteOrganization(site, organizationId);
       // Update PlgOnboarding's organizationId to match the site's new org
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
     }
 
-    // Step 10: Add ASO entitlement, revoke any pre-onboarded site's enrollment, update FF
-    const { entitlement } = await ensureAsoEntitlement(site, context);
-    await revokePreOnboardedSiteEnrollment(site, entitlement, context);
-    await updateLaunchDarklyFlags(site, context);
+    // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.
+    // Revocation is guarded by entitlement.organizationId === organization.getId() and an
+    // internal-org check, so cross-org mass-revokes are blocked on any resolution drift.
+    const { entitlement } = await ensureAsoEntitlement(site, organization, context);
+    await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
+    await updateLaunchDarklyFlags(site, organization, context);
 
     steps.entitlementCreated = true;
 
@@ -1126,6 +1276,11 @@ async function performAsoPlgOnboarding({
       log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
     }
 
+    // Best-effort: clear out any stale FIXED suggestions and FixEntity rows from a
+    // prior onboarding lifecycle so the newly onboarded site starts from a clean slate.
+    // Never fatal — orphans can be reconciled out-of-band.
+    await cleanupPlgSiteSuggestionsAndFixes(site.getId(), context);
+
     // Mark as completed
     onboarding.setStatus(STATUSES.ONBOARDED);
     onboarding.setWaitlistReason(null);
@@ -1140,6 +1295,22 @@ async function performAsoPlgOnboarding({
 
     return onboarding;
   } catch (error) {
+    if (error instanceof EntitlementWaitlistError) {
+      steps.entitlementFailed = true;
+      onboarding.setStatus(STATUSES.WAITLISTED);
+      onboarding.setWaitlistReason(error.message);
+      onboarding.setSteps(steps);
+      if (updatedBy) {
+        onboarding.setUpdatedBy(updatedBy);
+      }
+      try {
+        await onboarding.save();
+        await postPlgOnboardingNotification(onboarding, context);
+      } catch (saveError) {
+        log.error(`Failed to persist waitlist state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+      }
+      return onboarding;
+    }
     // Persist the error in the onboarding record
     onboarding.setStatus(STATUSES.ERROR);
     onboarding.setSteps(steps);
@@ -1157,6 +1328,37 @@ async function performAsoPlgOnboarding({
       log.error(`Failed to persist error state for onboarding ${onboarding.getId()}: ${saveError.message}`);
     }
     throw error;
+  }
+}
+
+const PLG_REJECTION_MESSAGES = {
+  'internal-org': { emoji: ':no_entry:', label: 'Rejected — Internal Org' },
+  'paid-customer': { emoji: ':no_entry:', label: 'Rejected — Paid Customer' },
+};
+
+async function postPlgRejectionNotification(domain, imsOrgId, reason, context) {
+  const { env, log } = context;
+  const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+  const token = env.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    return;
+  }
+
+  const config = PLG_REJECTION_MESSAGES[reason];
+  /* c8 ignore next 4 */
+  if (!config) {
+    log.error(`Unknown PLG rejection reason: ${reason}`);
+    return;
+  }
+
+  const message = `${config.emoji} *PLG Onboarding — ${config.label}*\n\n`
+    + `• *Domain:* \`${domain}\`\n`
+    + `• *IMS Org:* \`${imsOrgId}\``;
+
+  try {
+    await postSlackMessage(channelId, message, token);
+  } catch (err) {
+    log.error(`Failed to post PLG rejection notification: ${err.message}`);
   }
 }
 
@@ -1222,7 +1424,30 @@ function PlgOnboardingController(ctx) {
 
     const updatedBy = isInternalCall ? null : (authInfo?.getProfile()?.email || 'system');
 
+    if (!isValidHostname(domain)) {
+      return badRequest('Invalid domain: must be a valid hostname');
+    }
+
     try {
+      const { Organization, Entitlement } = context.dataAccess;
+      const existingOrg = await Organization.findByImsOrgId(imsOrgId);
+      if (existingOrg) {
+        if (isInternalOrg(existingOrg.getId(), context.env)) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'internal-org', context);
+          return badRequest('PLG onboarding is not available for internal organizations');
+        }
+
+        const entitlements = await Entitlement.allByOrganizationId(existingOrg.getId());
+        const hasPaidEntitlement = entitlements.some(
+          (e) => e.getProductCode() === ASO_PRODUCT_CODE
+            && e.getTier() === EntitlementModel.TIERS.PAID,
+        );
+        if (hasPaidEntitlement) {
+          await postPlgRejectionNotification(domain, imsOrgId, 'paid-customer', context);
+          return badRequest('PLG onboarding is not available for paid customers');
+        }
+      }
+
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId, updatedBy }, context);
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
@@ -1252,7 +1477,10 @@ function PlgOnboardingController(ctx) {
       return badRequest('Authentication information is required');
     }
 
-    // Admin/API key holders can access any org's status
+    // Admin/API key holders can access any org's status. Read-only admins are NOT
+    // permitted on the PLG onboarding flow - this endpoint stays on hasAdminAccess()
+    // so that the PLG admin surface (status / waitlist / bypass / etc.) is gated
+    // exclusively by the full-admin role.
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       // Non-admin: validate caller's IMS tenant matches requested imsOrgId
@@ -1342,12 +1570,16 @@ function PlgOnboardingController(ctx) {
       // This would eliminate the N * IMS_CONCURRENCY API calls on every list load and
       // significantly improve performance as the PLG onboarding table grows.
       const { imsClient } = context;
-      // Collect all unique IMS IDs from updatedBy and reviewedBy fields
+      // Collect all unique IMS IDs from updatedBy, createdBy and reviewedBy fields
       const imsIds = new Set();
       for (const r of records) {
         const updatedBy = r.getUpdatedBy();
         if (hasText(updatedBy) && updatedBy !== 'system') {
           imsIds.add(updatedBy);
+        }
+        const createdBy = r.getCreatedBy();
+        if (hasText(createdBy) && createdBy !== 'system') {
+          imsIds.add(createdBy);
         }
         for (const review of (r.getReviews() || [])) {
           if (hasText(review.reviewedBy) && review.reviewedBy !== 'admin') {
@@ -1377,9 +1609,11 @@ function PlgOnboardingController(ctx) {
         payload = records.map((record) => {
           const json = PlgOnboardingDto.toAdminJSON(record);
           const updatedBy = record.getUpdatedBy();
+          const createdBy = record.getCreatedBy();
           return {
             ...json,
             updatedBy: updatedBy ? (emailMap[updatedBy] ?? updatedBy) : null,
+            createdBy: createdBy ? (emailMap[createdBy] ?? createdBy) : null,
             reviews: json.reviews.map((review) => ({
               ...review,
               reviewedBy: emailMap[review.reviewedBy] ?? review.reviewedBy,
@@ -1593,7 +1827,7 @@ function PlgOnboardingController(ctx) {
         case REVIEW_REASONS.DOMAIN_ALREADY_ASSIGNED: {
           const domain = onboarding.getDomain();
           const baseURL = onboarding.getBaseURL();
-          const site = await Site.findByBaseURL(baseURL);
+          let site = await Site.findByBaseURL(baseURL);
 
           if (!site) {
             return badRequest('Site no longer exists for this domain');
@@ -1635,13 +1869,12 @@ function PlgOnboardingController(ctx) {
               return badRequest('Onboarding record has no associated organization');
             }
             const currentImsOrgId = onboarding.getImsOrgId();
-            site.setOrganizationId(currentOrgId);
             /* c8 ignore next */
             const existingDeliveryConfig = site.getDeliveryConfig() || {};
             if (existingDeliveryConfig.imsOrgId) {
               site.setDeliveryConfig({ ...existingDeliveryConfig, imsOrgId: currentImsOrgId });
             }
-            await site.save();
+            site = await reassignSiteOrganization(site, currentOrgId);
             log.info(`Moved site ${site.getId()} from org ${existingOrgId} to org ${currentOrgId}`);
             // Persist BYPASS review before performAsoPlgOnboarding; it reloads the row from DB.
             await onboarding.save();
@@ -1743,10 +1976,12 @@ function PlgOnboardingController(ctx) {
 
   /**
    * PATCH /plg/records/:plgOnboardingId
-   * Admin: update the status of a PLG onboarding record.
-   * Body: { status }
+   * Admin: update editable fields of a PLG onboarding record.
+   * Body: { status, siteId, organizationId, steps, botBlocker,
+   *         waitlistReason, updatedBy, createdBy }
+   * For `steps`, only the provided keys are merged into the existing steps.
    */
-  const updateOnboardingStatus = async (context) => {
+  const updateOnboarding = async (context) => {
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can update PLG onboarding records');
@@ -1754,10 +1989,33 @@ function PlgOnboardingController(ctx) {
 
     const { data, params } = context;
     const { plgOnboardingId } = params;
-    const { status } = data || {};
+    const {
+      status,
+      siteId,
+      organizationId,
+      steps,
+      botBlocker,
+      waitlistReason,
+      updatedBy,
+      createdBy,
+    } = data || {};
 
-    if (!hasText(status) || !Object.values(STATUSES).includes(status)) {
-      return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+    if (Object.keys(data || {}).length === 0) {
+      return badRequest('No fields provided to update');
+    }
+
+    if (status !== undefined) {
+      if (!hasText(status) || !Object.values(STATUSES).includes(status)) {
+        return badRequest(`Invalid status. Must be one of: ${Object.values(STATUSES).join(', ')}`);
+      }
+    }
+
+    if (siteId !== undefined && !isValidUUID(siteId)) {
+      return badRequest('Invalid siteId. Must be a valid UUID');
+    }
+
+    if (organizationId !== undefined && !isValidUUID(organizationId)) {
+      return badRequest('Invalid organizationId. Must be a valid UUID');
     }
 
     const { PlgOnboarding } = context.dataAccess;
@@ -1766,7 +2024,42 @@ function PlgOnboardingController(ctx) {
       return notFound(`PLG onboarding record ${plgOnboardingId} not found`);
     }
 
-    onboarding.setStatus(status);
+    if (status !== undefined) {
+      onboarding.setStatus(status);
+    }
+    if (siteId !== undefined) {
+      onboarding.setSiteId(siteId);
+    }
+    if (organizationId !== undefined) {
+      onboarding.setOrganizationId(organizationId);
+    }
+    if (botBlocker !== undefined) {
+      onboarding.setBotBlocker(botBlocker);
+    }
+    if (waitlistReason !== undefined) {
+      onboarding.setWaitlistReason(waitlistReason);
+    }
+    if (updatedBy !== undefined) {
+      onboarding.setUpdatedBy(updatedBy);
+    }
+    if (createdBy !== undefined) {
+      onboarding.setCreatedBy(createdBy);
+    }
+
+    if (steps !== undefined) {
+      const VALID_STEP_KEYS = new Set([
+        'orgResolved', 'rumVerified', 'siteCreated', 'siteResolved', 'siteOrgReassigned',
+        'authorUrlResolved', 'hlxConfigSet', 'codeConfigResolved', 'configUpdated',
+        'auditsEnabled', 'deliveryConfigQueued', 'entitlementCreated', 'entitlementFailed',
+        'orgResolutionFailed',
+      ]);
+      const invalidKeys = Object.keys(steps).filter((k) => !VALID_STEP_KEYS.has(k));
+      if (invalidKeys.length > 0) {
+        return badRequest(`Invalid step keys: ${invalidKeys.join(', ')}`);
+      }
+      onboarding.setSteps({ ...(onboarding.getSteps() || {}), ...steps });
+    }
+
     await onboarding.save();
     return ok(PlgOnboardingDto.toAdminJSON(onboarding));
   };
@@ -1800,7 +2093,7 @@ function PlgOnboardingController(ctx) {
     getAllOnboardings,
     update,
     createOnboarding,
-    updateOnboardingStatus,
+    updateOnboarding,
     deleteOnboarding,
   };
 }
