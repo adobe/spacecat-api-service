@@ -51,8 +51,8 @@ const AGENTIC_TRAFFIC_TABLES = [
   },
 ];
 
-function isClosedSunday(date, now = new Date()) {
-  return date.getUTCDay() === 0 && date < startOfUtcIsoWeek(now);
+function isCompletedIsoWeek(date, now = new Date()) {
+  return startOfUtcIsoWeek(date) < startOfUtcIsoWeek(now);
 }
 
 function chunkArray(items, size) {
@@ -260,7 +260,7 @@ function CheckAgenticTrafficDbStatusCommand(context) {
 
       const dateStr = formatUtcDate(targetDate);
       const weekStartStr = formatUtcDate(startOfUtcIsoWeek(targetDate));
-      const weeklyExpected = isClosedSunday(targetDate);
+      const weeklyExpected = isCompletedIsoWeek(targetDate);
       let siteScopeText = '';
       if (parsedArgs.siteId) {
         siteScopeText = ` for site \`${parsedArgs.siteId}\``;

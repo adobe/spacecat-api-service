@@ -259,6 +259,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
   });
 
   it('caps long site detail lists and points to focused site checks', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-04-23T12:00:00Z').getTime());
     const sites = Array.from({ length: 9 }, (_, index) => {
       const siteId = `11111111-2222-3333-4444-${String(index + 1).padStart(12, '0')}`;
       return makeSite(siteId, `https://site-${index + 1}.example.com`);
@@ -277,6 +278,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
 
     const cmd = CheckAgenticTrafficDbStatusCommand(context);
     await cmd.handleExecution(['2026-04-22'], slackContext);
+    clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
     expect(output).to.include('Dashboard-ready: *9*');
@@ -407,6 +409,51 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows / 10 hits');
     expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows / 0 hits');
     expect(output).to.include('missing: weekly');
+  });
+
+  it('marks weekly as required for a midweek date in a completed ISO week', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-04T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([
+      makeSite(TARGET_SITE_ID, 'https://midweek-completed.com'),
+    ]);
+    tableRows.agentic_traffic = [
+      { site_id: TARGET_SITE_ID, hits: 7, updated_at: '2026-04-29T22:00:00Z' },
+    ];
+    tableRows.agentic_traffic_daily = [
+      { site_id: TARGET_SITE_ID, hits: 7, updated_at: '2026-04-29T22:01:00Z' },
+    ];
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-04-29'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.include('Agentic Traffic DB Table Status — 2026-04-29');
+    expect(output).to.include('Missing weekly serving: *1*');
+    expect(output).to.include('Raw week (2026-04-27..2026-05-03): *1/1* sites, 1 rows / 7 hits');
+    expect(output).to.include('Weekly table (2026-04-27): *0/1* raw-week sites, 0 rows / 0 hits');
+    expect(output).to.include('missing: weekly');
+  });
+
+  it('does not mark weekly missing for a midweek date in the current (incomplete) ISO week', async () => {
+    const clock = sinon.useFakeTimers(new Date('2026-05-06T12:00:00Z').getTime());
+    context.dataAccess.Site.all.resolves([
+      makeSite(TARGET_SITE_ID, 'https://midweek-current.com'),
+    ]);
+    tableRows.agentic_traffic = [
+      { site_id: TARGET_SITE_ID, hits: 3, updated_at: '2026-05-05T22:00:00Z' },
+    ];
+    tableRows.agentic_traffic_daily = [
+      { site_id: TARGET_SITE_ID, hits: 3, updated_at: '2026-05-05T22:01:00Z' },
+    ];
+
+    const cmd = CheckAgenticTrafficDbStatusCommand(context);
+    await cmd.handleExecution(['2026-05-05'], slackContext);
+    clock.restore();
+
+    const output = slackContext.say.args.flat().join('\n');
+    expect(output).to.not.include('Missing weekly serving:');
+    expect(output).to.not.include('Raw week (2026-05-04..2026-05-10):');
   });
 
   it('does not mark weekly missing when a closed week has no raw week data for the site', async () => {

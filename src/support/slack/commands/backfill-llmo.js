@@ -279,6 +279,20 @@ function BackfillLlmoCommand(context) {
     try {
       const parsed = parseArgs(args);
 
+      if (parsed.mode
+        && parsed.audit
+        && parsed.audit !== AUDIT_TYPES.CDN_LOGS_REPORT) {
+        await say(`:warning: mode=${parsed.mode} is only supported for audit=${AUDIT_TYPES.CDN_LOGS_REPORT}.`);
+        return;
+      }
+
+      if (parsed.mode
+        && !isDbBackfillMode(parsed)
+        && !isWeeklyDbRefreshMode(parsed)) {
+        await say(':warning: Unsupported mode. Use mode=db for daily DB imports or mode=weekly-db for weekly DB refresh.');
+        return;
+      }
+
       if (!parsed.baseurl || (!parsed.audit && !isWeeklyDbRefreshMode(parsed))) {
         await say(':warning: Required: baseurl={baseURL|all} audit={auditType}');
         await say('Examples:');
@@ -335,11 +349,6 @@ function BackfillLlmoCommand(context) {
           break;
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
-          if (parsed.mode && !isDbBackfillMode(parsed) && !isWeeklyDbRefreshMode(parsed)) {
-            await say(':warning: Unsupported mode for cdn-logs-report. Use mode=db for daily DB imports, mode=weekly-db for weekly DB refresh, or omit mode for weekly report backfill.');
-            return;
-          }
-
           if (hasDateInput(parsed) && !isDbBackfillMode(parsed) && !isWeeklyDbRefreshMode(parsed)) {
             await say(':warning: For cdn-logs-report DB refreshes, use mode=db or mode=weekly-db with date=YYYY-MM-DD.');
             return;

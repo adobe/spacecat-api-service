@@ -492,7 +492,54 @@ describe('BackfillLlmoCommand', () => {
       ], slackContext);
 
       expect(slackContext.say.calledWith(
-        ':warning: Unsupported mode for cdn-logs-report. Use mode=db for daily DB imports, mode=weekly-db for weekly DB refresh, or omit mode for weekly report backfill.',
+        ':warning: Unsupported mode. Use mode=db for daily DB imports or mode=weekly-db for weekly DB refresh.',
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects mode=db for non-cdn-logs-report audits', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`,
+        'mode=db',
+        'date=2026-04-27',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        `:warning: mode=db is only supported for audit=${AUDIT_TYPES.CDN_LOGS_REPORT}.`,
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects mode=weekly-db for non-cdn-logs-report audits', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.LLM_ERROR_PAGES}`,
+        'mode=weekly-db',
+        'date=2026-04-27',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        `:warning: mode=weekly-db is only supported for audit=${AUDIT_TYPES.CDN_LOGS_REPORT}.`,
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
+    it('rejects unsupported mode without an audit type', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        'mode=foo',
+        'date=2026-04-27',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        ':warning: Unsupported mode. Use mode=db for daily DB imports or mode=weekly-db for weekly DB refresh.',
       )).to.be.true;
       expect(sqsStub.sendMessage).not.to.have.been.called;
     });
