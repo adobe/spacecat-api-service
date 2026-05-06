@@ -1018,8 +1018,11 @@ function SuggestionsController(ctx, sqs, env) {
           cancelInheritance,
         } = relationshipContext;
 
-        if (!fixTargetMode || (fixTargetMode !== 'source' && fixTargetMode !== 'local')) {
-          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode is required: "source" or "local"');
+        if (fixTargetMode === undefined || fixTargetMode === null) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode is required');
+        }
+        if (fixTargetMode !== 'source' && fixTargetMode !== 'local') {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"');
         }
 
         if (fixTargetMode === 'local' && !hasText(fixTargetPageId)) {
@@ -1050,6 +1053,16 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
+    }
+
+    // Relationship-aware autofix is only supported for specific opportunity types.
+    // Reject fixTargetGroups for unsupported types to prevent silent pass-through.
+    const RELATIONSHIP_AWARE_OPPTY_TYPES = ['meta-tags', 'alt-text'];
+    if (
+      isNonEmptyArray(fixTargetGroups)
+      && !RELATIONSHIP_AWARE_OPPTY_TYPES.includes(opportunity.getType())
+    ) {
+      return badRequest(`fixTargetGroups is not supported for opportunity type "${opportunity.getType()}"`);
     }
 
     // assess-urls action: validate pages and send worker message, return 202

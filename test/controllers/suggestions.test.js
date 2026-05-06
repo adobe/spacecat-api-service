@@ -4793,7 +4793,7 @@ describe('Suggestions Controller', () => {
       const error = await response.json();
       expect(error).to.have.property(
         'message',
-        'Each fixTargetGroup relationshipContext.fixTargetMode is required: "source" or "local"',
+        'Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"',
       );
     });
 
@@ -4820,7 +4820,7 @@ describe('Suggestions Controller', () => {
       const error = await response.json();
       expect(error).to.have.property(
         'message',
-        'Each fixTargetGroup relationshipContext.fixTargetMode is required: "source" or "local"',
+        'Each fixTargetGroup relationshipContext.fixTargetMode is required',
       );
     });
 
@@ -4927,14 +4927,8 @@ describe('Suggestions Controller', () => {
       });
     });
 
-    it('ignores fixTargetGroups for non-groupable opportunity type', async () => {
+    it('returns 400 when fixTargetGroups is sent for unsupported opportunity type', async () => {
       opportunity.getType = sandbox.stub().returns('broken-backlinks');
-      mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggs[0])],
-      );
-      mockSuggestion.bulkUpdateStatus.resolves([
-        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-      ]);
 
       const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
@@ -4953,10 +4947,12 @@ describe('Suggestions Controller', () => {
         ...context,
       });
 
-      expect(response.status).to.equal(207);
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
-      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
-      expect(sqsPayload).to.not.have.property('relationshipContext');
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'fixTargetGroups is not supported for opportunity type "broken-backlinks"',
+      );
     });
 
     it('sends multiple SQS messages for multiple fixTargetGroups', async () => {
