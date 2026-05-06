@@ -1,3 +1,10 @@
+## [1.478.2](https://github.com/adobe/spacecat-api-service/compare/v1.478.1...v1.478.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* **prompts:** prevent upsert from reactivating deleted prompts ([#2349](https://github.com/adobe/spacecat-api-service/issues/2349)) ([debd047](https://github.com/adobe/spacecat-api-service/commit/debd047dd330f2c88f098e5178309d934b4cadfd))
+
 ## [1.478.1](https://github.com/adobe/spacecat-api-service/compare/v1.478.0...v1.478.1) (2026-05-06)
 
 
