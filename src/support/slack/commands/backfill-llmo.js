@@ -32,6 +32,7 @@ const AUDIT_TYPES = {
   LLM_ERROR_PAGES: 'llm-error-pages',
 };
 const CDN_LOGS_ANALYSIS_DELAY_SECONDS = 5;
+const SQS_MAX_DELAY_SECONDS = 900;
 
 function parseArgs(args) {
   const parsed = {};
@@ -175,7 +176,12 @@ async function triggerBackfill(
             configuration.getQueues().audits,
             message,
             undefined,
-            { delaySeconds: (dayOffset - 1) * CDN_LOGS_ANALYSIS_DELAY_SECONDS },
+            {
+              delaySeconds: Math.min(
+                (dayOffset - 1) * CDN_LOGS_ANALYSIS_DELAY_SECONDS,
+                SQS_MAX_DELAY_SECONDS,
+              ),
+            },
           );
         }
       }
