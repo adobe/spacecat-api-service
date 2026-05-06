@@ -251,24 +251,24 @@ function LlmoOpportunitiesController(ctx) {
           && (!filterSiteId || opp.getSiteId() === filterSiteId),
       );
 
-      // Resolve siteBaseURL with a cache to avoid redundant lookups
-      const siteCache = new Map();
-      const resolveSite = (siteId) => {
-        if (!siteCache.has(siteId)) {
-          siteCache.set(siteId, Site.findById(siteId));
-        }
-        return siteCache.get(siteId);
-      };
+      // Resolve site data for unique siteIds with bounded concurrency and error isolation
+      const uniqueSiteIds = [...new Set(filteredOpps.map((opp) => opp.getSiteId()))];
+      const siteMap = new Map();
 
-      const opportunities = await Promise.all(
-        filteredOpps.map(async (opp) => {
-          const site = await resolveSite(opp.getSiteId());
-          return {
-            ...OpportunityDto.toJSON(opp),
-            siteBaseURL: site?.getBaseURL() ?? null,
-          };
-        }),
-      );
+      await processBatch(uniqueSiteIds, async (siteId) => {
+        try {
+          const site = await Site.findById(siteId);
+          siteMap.set(siteId, site ?? null);
+        } catch (siteError) {
+          log.warn(`Failed to fetch site ${siteId}: ${siteError.message}`);
+          siteMap.set(siteId, null);
+        }
+      }, MAX_CONCURRENT_SITES);
+
+      const opportunities = filteredOpps.map((opp) => ({
+        ...OpportunityDto.toJSON(opp),
+        siteBaseURL: siteMap.get(opp.getSiteId())?.getBaseURL() ?? null,
+      }));
 
       return ok({
         brandId, brandName, opportunities, total: opportunities.length,
