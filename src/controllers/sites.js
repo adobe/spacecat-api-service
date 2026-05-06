@@ -48,6 +48,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
+import { ensureSiteLocale } from '../support/locale.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -308,6 +309,7 @@ function SitesController(ctx, log, env) {
         ...context.data,
         baseURL, // override with normalized value
       });
+      await ensureSiteLocale(site, baseURL, log);
       return createResponse(SiteDto.toJSON(site), 201);
     } catch (error) {
       log.error(`Error creating site: ${error.message}`, error);

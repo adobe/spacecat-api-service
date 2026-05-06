@@ -49,6 +49,7 @@ import {
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
+import { ensureSiteLocale } from '../../support/locale.js';
 import {
   applyFilters,
   applyInclusions,
@@ -1841,6 +1842,7 @@ function LlmoController(ctx) {
             baseURL: stageBaseURL,
             organizationId,
           });
+          await ensureSiteLocale(stageSite, stageBaseURL, log);
         }
 
         let metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);

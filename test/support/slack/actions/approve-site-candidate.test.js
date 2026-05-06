@@ -16,7 +16,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
+import esmock from 'esmock';
 import {
   expectedAnnouncedMessage,
   expectedApprovedReply,
@@ -29,6 +29,8 @@ use(sinonChai);
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
+  let approveSiteCandidate;
+  let ensureSiteLocaleStub;
   const hlxConfig = {
     hlxVersion: 4,
     rso: {
@@ -45,7 +47,23 @@ describe('approveSiteCandidate', () => {
   let siteCandidate;
   let clock;
 
+  before(async function loadModule() {
+    this.timeout(10000);
+    ensureSiteLocaleStub = sinon.stub().resolves();
+    ({ default: approveSiteCandidate } = await esmock(
+      '../../../../src/support/slack/actions/approve-site-candidate.js',
+      {
+        '../../../../src/support/locale.js': {
+          ensureSiteLocale: (...args) => ensureSiteLocaleStub(...args),
+        },
+      },
+    ));
+  });
+
   beforeEach(async () => {
+    ensureSiteLocaleStub.resetHistory();
+    ensureSiteLocaleStub.resetBehavior();
+    ensureSiteLocaleStub.resolves();
     clock = sinon.useFakeTimers();
 
     slackClient = {
@@ -130,12 +148,26 @@ describe('approveSiteCandidate', () => {
         organizationId: 'default',
       },
     );
+    expect(ensureSiteLocaleStub).to.have.been.calledOnce;
+    expect(ensureSiteLocaleStub.firstCall.args[1]).to.equal(baseURL);
     expect(site.save.callCount).to.equal(0);
     expect(siteCandidate.setStatus).to.have.been.calledWith('APPROVED');
     expect(siteCandidate.setUpdatedBy).to.have.been.calledWith('approvers-username');
     expect(siteCandidate.save).to.have.been.calledOnce;
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
     expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
+  });
+
+  it('does not call ensureSiteLocale when site already exists', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    site.getIsLive = () => false;
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+    site.save.resolves(site);
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    expect(ensureSiteLocaleStub).to.not.have.been.called;
   });
 
   it('should approve site candidate as friends & family', async () => {

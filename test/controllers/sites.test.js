@@ -24,7 +24,6 @@ import nock from 'nock';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
-import SitesController from '../../src/controllers/sites.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -143,10 +142,16 @@ describe('Sites Controller', () => {
 
   let mockDataAccess;
   let sitesController;
+  let SitesController;
+  let ensureSiteLocaleStub;
   let context;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sites = buildSites();
+    ensureSiteLocaleStub = sandbox.stub().resolves();
+    ({ default: SitesController } = await esmock('../../src/controllers/sites.js', {
+      '../../src/support/locale.js': { ensureSiteLocale: ensureSiteLocaleStub },
+    }));
 
     mockDataAccess = {
       Audit: {
@@ -254,11 +259,23 @@ describe('Sites Controller', () => {
 
     expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
     expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    expect(ensureSiteLocaleStub).to.have.been.calledOnce;
+    expect(ensureSiteLocaleStub.firstCall.args[1]).to.equal('https://site1.com');
     expect(response.status).to.equal(201);
 
     const site = await response.json();
     expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('invokes ensureSiteLocale with the freshly-created site and normalized baseURL', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+    const response = await sitesController.createSite({ data: { baseURL: 'https://WWW.site1.com/' } });
+
+    expect(ensureSiteLocaleStub).to.have.been.calledOnce;
+    expect(ensureSiteLocaleStub.firstCall.args[0]).to.equal(sites[0]);
+    expect(ensureSiteLocaleStub.firstCall.args[1]).to.equal('https://site1.com');
+    expect(response.status).to.equal(201);
   });
 
   it('creates a site for a non-admin user', async () => {
