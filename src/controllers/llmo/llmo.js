@@ -1311,6 +1311,44 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
       const isNewlyOpted = !existingEdgeConfig.opted;
+
+      // Kick off IMS + S3 in parallel with saveSiteConfig — all three are independent
+      let notificationPrep = null;
+      let optInHandlerStart;
+      if (isNewlyOpted) {
+        optInHandlerStart = Date.now();
+        const imsUserId = profile?.email;
+
+        const imsStart = Date.now();
+        const imsPromise = imsUserId && context.imsClient
+          ? Promise.resolve(context.imsClient.getImsAdminProfile(imsUserId))
+            .then((r) => {
+              log.info(`[cdn-opt-in-notification] step=ims-resolved took=${Date.now() - imsStart}ms (site=${siteId})`);
+              return r;
+            })
+            .catch((e) => {
+              log.warn(`[cdn-opt-in-notification] step=ims-failed took=${Date.now() - imsStart}ms (site=${siteId})`);
+              throw e;
+            })
+          : Promise.resolve(null);
+
+        const s3Start = Date.now();
+        const s3Promise = s3?.s3Client
+          ? Promise.resolve(readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket }))
+            .then((r) => {
+              log.info(`[cdn-opt-in-notification] step=s3-resolved took=${Date.now() - s3Start}ms (site=${siteId})`);
+              return r;
+            })
+            .catch((e) => {
+              log.warn(`[cdn-opt-in-notification] step=s3-failed took=${Date.now() - s3Start}ms (site=${siteId})`);
+              throw e;
+            })
+          : Promise.resolve(null);
+
+        notificationPrep = Promise.allSettled([imsPromise, s3Promise]);
+        log.info(`[cdn-opt-in-notification] step=ims+s3-kicked-off elapsed=0ms (site=${siteId})`);
+      }
+
       currentConfig.updateEdgeOptimizeConfig({
         ...existingEdgeConfig,
         opted: existingEdgeConfig.opted ?? Date.now(),
@@ -1320,6 +1358,8 @@ function LlmoController(ctx) {
 
       // Send Slack notification only when opted field is being added
       if (isNewlyOpted) {
+        log.info(`[cdn-opt-in-notification] step=save-config-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+
         try {
           const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
 
@@ -1339,40 +1379,25 @@ function LlmoController(ctx) {
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
         }
 
-        // Detached from the response path so the UI's enable click is not blocked
-        // by the IMS lookup, bot-blocker probe (5s timeout), S3 read, and email
-        // send. Lambda's default callbackWaitsForEmptyEventLoop=true keeps the
-        // invocation alive until this promise settles, so the email still goes out.
-        ((async () => {
-          // profile.email holds the IMS userId (sub claim) for IMS-authenticated
-          // callers, so we resolve the real email via IMS. Best-effort: non-IMS
-          // auth modes leave optedBy unset, which the email helper handles.
+        log.info(`[cdn-opt-in-notification] step=slack-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+
+        try {
+          const imsS3WaitStart = Date.now();
+          const [adminProfile, llmoCfgResult] = await notificationPrep;
+          log.info(`[cdn-opt-in-notification] step=ims+s3-resolved wait=${Date.now() - imsS3WaitStart}ms elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+
           let optedBy;
-          const imsUserId = profile?.email;
-          if (imsUserId && context.imsClient) {
-            try {
-              const adminProfile = await context.imsClient.getImsAdminProfile(imsUserId);
-              optedBy = adminProfile?.email;
-            } catch (imsErr) {
-              log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${imsErr.message}`);
-            }
+          if (adminProfile.status === 'fulfilled') {
+            optedBy = adminProfile.value?.email;
+          } else {
+            log.warn(`[cdn-opt-in-notification] Could not resolve user email from IMS: ${adminProfile.reason?.message}`);
           }
 
-          /* CDN provider is managed by log-infra and stored in the S3 LLMO config
-          during provisioning. Site DynamoDB cdnBucketConfig does not store it,
-          so S3 is the primary source.
-          Fallback to request cdnType (e.g. AEM CS Fastly self-service)
-          when S3 config is not yet available. */
           let notificationCdnType;
-          try {
-            if (s3?.s3Client) {
-              const { config: llmoCfg } = await readConfig(siteId, s3.s3Client, {
-                s3Bucket: s3.s3Bucket,
-              });
-              notificationCdnType = llmoCfg?.cdnBucketConfig?.cdnProvider;
-            }
-          } catch (s3Err) {
-            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${s3Err.message}`);
+          if (llmoCfgResult.status === 'fulfilled') {
+            notificationCdnType = llmoCfgResult.value?.config?.cdnBucketConfig?.cdnProvider;
+          } else {
+            log.warn(`[cdn-opt-in-notification] Could not read S3 LLMO config for cdnProvider lookup (site=${siteId}): ${llmoCfgResult.reason?.message}`);
           }
           if (!hasText(notificationCdnType) && hasText(cdnType)) {
             notificationCdnType = cdnType;
@@ -1385,7 +1410,12 @@ function LlmoController(ctx) {
             orgId: site.getOrganizationId?.(),
             optedBy,
           });
-        })()).catch((err) => log.error('[cdn-opt-in-notification] Unhandled error:', err));
+          log.info(`[cdn-opt-in-notification] step=email-done elapsed=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
+        } catch (err) {
+          log.error('[cdn-opt-in-notification] Unhandled error:', err);
+        }
+
+        log.info(`[cdn-opt-in-notification] step=complete total=${Date.now() - optInHandlerStart}ms (site=${siteId})`);
       }
 
       let cdnTypeNormalized = null;
