@@ -21,6 +21,7 @@ import {
   createReferralTrafficByRegionHandler,
   createReferralTrafficByPageIntentHandler,
   createReferralTrafficByUrlHandler,
+  createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
 } from '../../../src/controllers/llmo/llmo-referral-traffic.js';
@@ -682,6 +683,103 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client }));
       expect(res.status).to.equal(500);
+    });
+  });
+
+  // ── /by-url-trend ─────────────────────────────────────────────────────────
+
+  describe('by-url-trend', () => {
+    it('returns 400 when urlPath param is missing', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when urlPath is only whitespace', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client, data: { urlPath: '   ' } }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns empty trend array when RPC returns no rows', async () => {
+      const client = makeRpcClient({ data: [], error: null });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client, data: { urlPath: '/blog' } }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.trend).to.deep.equal([]);
+    });
+
+    it('maps week_start and total_pageviews to camelCase response shape', async () => {
+      const client = makeRpcClient({
+        data: [
+          { week_start: '2026-04-14', total_pageviews: 120 },
+          { week_start: '2026-04-21', total_pageviews: 200 },
+        ],
+      });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client, data: { urlPath: '/products' } }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.trend).to.deep.equal([
+        { weekStart: '2026-04-14', pageviews: 120 },
+        { weekStart: '2026-04-21', pageviews: 200 },
+      ]);
+    });
+
+    it('passes urlPath to RPC as p_url_path', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPath: '/products' } }));
+      expect(client.rpc.getCall(0).args[1].p_url_path).to.equal('/products');
+    });
+
+    it('passes the RPC name rpc_referral_traffic_url_trend', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPath: '/products' } }));
+      expect(client.rpc.getCall(0).args[0]).to.equal('rpc_referral_traffic_url_trend');
+    });
+
+    it('forwards common params (source, dates, platform) to RPC', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      await handler(makeContext({
+        client,
+        data: {
+          urlPath: '/blog',
+          source: 'adobe_analytics',
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          platform: 'openai',
+        },
+      }));
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_source).to.equal('adobe_analytics');
+      expect(rpcArgs.p_start_date).to.equal('2026-01-01');
+      expect(rpcArgs.p_end_date).to.equal('2026-01-28');
+      expect(rpcArgs.p_platform).to.equal('openai');
+    });
+
+    it('uses {} when context.data is null', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = null;
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      // urlPath will be null → 400
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 500 and logs error on PostgREST failure', async () => {
+      const client = makeRpcClient({ data: null, error: { message: 'by-url-trend-fail' } });
+      const ctx = makeContext({ client, data: { urlPath: '/fail' } });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+      expect(res.status).to.equal(500);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/by-url-trend-fail/);
     });
   });
 
