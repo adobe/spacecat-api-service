@@ -192,6 +192,12 @@ HandlerConfig:
       items:
         type: string
         format: uri
+    includedURLs:
+      description: URLs to be included in the handler's processing
+      type: array
+      items:
+        type: string
+        format: uri
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -215,6 +221,8 @@ HandlerConfig:
     excludedURLs:
       - 'https://www.adobe.com/excluded-page'
       - 'https://www.adobe.com/another-excluded-page'
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
@@ -770,10 +778,25 @@ UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
-      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed
+      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed. Combined with replaceExcludedURLs to control merge vs replace behavior
       type: array
       items:
         type: string
+        format: uri
+    replaceExcludedURLs:
+      description: When true, excludedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
+    includedURLs:
+      description: Set of URLs to include. If empty, previously included URLs will be removed. Combined with replaceIncludedURLs to control merge vs replace behavior
+      type: array
+      items:
+        type: string
+        format: uri
+    replaceIncludedURLs:
+      description: When true, includedURLs fully replaces the existing list. When false (default), values are appended and deduplicated
+      type: boolean
+      default: false
     groupedURLs:
       description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
       type: array
@@ -790,6 +813,8 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+    includedURLs:
+      - 'https://www.adobe.com/included-page'
     groupedURLs:
       - name: 'catalog'
         pattern: '/products/'
