@@ -5996,7 +5996,10 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (category_id)
+          description: |
+            Currently the UUID PK (categories.id) for backward compat —
+            aligning this to the category_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
@@ -6010,14 +6013,15 @@ V2Prompt:
       properties:
         id:
           type: string
-          description: Business key (topic_id)
+          description: |
+            Currently the UUID PK (topics.id) for backward compat —
+            aligning this to the topic_id business key is a deferred
+            breaking change. Use `uuid` for FK linkage today.
         uuid:
           type: string
           format: uuid
           description: UUID primary key (topics.id)
         name:
-          type: string
-        categoryId:
           type: string
 
 V2PromptInput:
