@@ -13,6 +13,7 @@
 import {
   ok, badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
+import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 
 /**
@@ -725,6 +726,62 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
             revenue: Number(row?.revenue ?? 0),
           },
         });
+      },
+    );
+  };
+}
+
+/**
+ * Traffic Insights sources — the only tables that feed the Traffic Insights tab.
+ * Business Impact (adobe_analytics, ga4) has its own DRS provider check and is
+ * intentionally excluded here.
+ */
+const TRAFFIC_INSIGHTS_TABLES = [
+  SOURCE_TO_TABLE.optel,
+  SOURCE_TO_TABLE.cdn,
+];
+
+/**
+ * GET /sites/:siteId/referral-traffic/has-data
+ *
+ * Fast existence check — returns { hasData: boolean } indicating whether any
+ * Traffic Insights data (optel or cdn) exists for the site. Used by the PG
+ * dashboard to decide whether to show the onboarding overlay without waiting
+ * for all parallel data queries to settle.
+ *
+ * Only optel and cdn are checked because those are the sole sources for the
+ * Traffic Insights tab. Business Impact sources (adobe_analytics, ga4) are
+ * gated separately via the DRS analytics-provider endpoint.
+ *
+ * Both tables are checked in parallel with limit(1) — no RPC required.
+ * Returns true if either result set is non-empty; fails closed if any query errors.
+ */
+export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficHasData(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'has-data',
+      async (ctx, client, siteId) => {
+        let results;
+        try {
+          results = await Promise.all(
+            TRAFFIC_INSIGHTS_TABLES.map((table) => client.from(table).select('traffic_date').eq('site_id', siteId).limit(1)),
+          );
+        } catch (err) {
+          ctx.log.error(`Referral traffic has-data PostgREST error: ${err.message} (siteId=${siteId})`);
+          return internalServerError('Failed to check referral traffic data');
+        }
+
+        for (const [i, result] of results.entries()) {
+          if (result.error) {
+            ctx.log.error(`Referral traffic has-data ${TRAFFIC_INSIGHTS_TABLES[i]} PostgREST error: ${result.error.message} (siteId=${siteId})`);
+            return internalServerError('Failed to check referral traffic data');
+          }
+        }
+
+        const hasData = results.some((r) => (r.data || []).length > 0);
+        return cachedOk({ hasData });
       },
     );
   };

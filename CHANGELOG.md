@@ -1,3 +1,31 @@
+## [1.477.1](https://github.com/adobe/spacecat-api-service/compare/v1.477.0...v1.477.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* **llmo:** include subpath in generateDataFolder to prevent SharePoint folder collisions ([#2315](https://github.com/adobe/spacecat-api-service/issues/2315)) ([5f817e2](https://github.com/adobe/spacecat-api-service/commit/5f817e27f4b2524d82030fcd55220f403697de74))
+
+# [1.477.0](https://github.com/adobe/spacecat-api-service/compare/v1.476.2...v1.477.0) (2026-05-06)
+
+
+### Features
+
+* add has-data endpoint for referral traffic | LLMO-4261 ([#2339](https://github.com/adobe/spacecat-api-service/issues/2339)) ([69fddf2](https://github.com/adobe/spacecat-api-service/commit/69fddf2381ac67dc85d65afb905496f8dc7db919))
+
+## [1.476.2](https://github.com/adobe/spacecat-api-service/compare/v1.476.1...v1.476.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* sites resolve PLG gating ([#2309](https://github.com/adobe/spacecat-api-service/issues/2309)) ([a0ad339](https://github.com/adobe/spacecat-api-service/commit/a0ad3391721851fa171523ca23f8e4d5b1795604))
+
+## [1.476.1](https://github.com/adobe/spacecat-api-service/compare/v1.476.0...v1.476.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* **prompts-v2:** expose category.uuid and topic.uuid on V2Prompt ([#2338](https://github.com/adobe/spacecat-api-service/issues/2338)) ([38e9b73](https://github.com/adobe/spacecat-api-service/commit/38e9b735ea2ff92ec8772f6d9b08a98e02c05753))
+
 # [1.476.0](https://github.com/adobe/spacecat-api-service/compare/v1.475.1...v1.476.0) (2026-05-06)
 
 
