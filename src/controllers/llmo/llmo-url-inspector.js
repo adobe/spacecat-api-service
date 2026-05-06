@@ -48,6 +48,18 @@ import { cachedOk } from '../../support/cached-response.js';
  *   - `brandId === 'all'` or missing → no brand filter (`p_brand_id = NULL`).
  */
 
+// Mirror the referral controller's source whitelist (LLMO-4261).
+// Used by the owned-urls handler to forward `p_referral_source` to
+// `rpc_url_inspector_owned_urls` (LLMO-4729 Decision A pull-in). Unknown /
+// missing values fall back to 'optel' for parity with /url-inspector.
+const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4']);
+const DEFAULT_REFERRAL_SOURCE = 'optel';
+
+function parseReferralSource(q) {
+  const raw = q.referralSource ?? q.referral_source;
+  return VALID_REFERRAL_SOURCES.has(raw) ? raw : DEFAULT_REFERRAL_SOURCE;
+}
+
 /**
  * Resolve platform/model from request. Returns null when absent (no default model).
  * When provided, validates against the llm_model enum.
@@ -201,6 +213,12 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
  * so owned URLs ranked beyond the top 500 silently showed `agenticHits = 0`.
  * Doing the JOIN in the RPC means the table can paginate 50 owned URLs at a
  * time without losing fidelity.
+ *
+ * Server-side referral merge (LLMO-4729 Decision A pull-in): each row also
+ * carries `referralHits` and `referralHitsTrend` joined from
+ * `referral_traffic_<source>` for the same site / date range, scoped by the
+ * `referralSource` query param (default `'optel'`). Replaces the always-N/A
+ * Referral Hits column the table used to render before this work landed.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
@@ -236,6 +254,12 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const offset = pagination.page * pagination.pageSize;
       const agentTypes = parseAgentTypes(q.agentTypes ?? q.agent_types);
+      // Always forward p_referral_source so the RPC reads from a deterministic
+      // source table — unknown / missing values collapse to 'optel' (mirrors
+      // /url-inspector and the controller default in llmo-referral-traffic.js).
+      // The RPC also has DEFAULT 'optel', but forwarding makes the wire shape
+      // explicit and lets the handler tests pin down the routing.
+      const referralSource = parseReferralSource(q);
 
       // Only forward p_agent_types when the caller actually supplied a value.
       // Omitting the param keeps the RPC contract compatible with internal
@@ -250,6 +274,7 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
         p_brand_id: filterByBrandId,
         p_limit: pagination.pageSize,
         p_offset: offset,
+        p_referral_source: referralSource,
       };
       if (agentTypes) {
         rpcParams.p_agent_types = agentTypes;
@@ -276,6 +301,13 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
         agenticHits: Number(r.agentic_hits ?? 0),
         agenticHitsTrend: Array.isArray(r.agentic_hits_trend)
           ? r.agentic_hits_trend.map((point) => ({
+            weekStart: point.week_start ?? null,
+            value: Number(point.value ?? 0),
+          }))
+          : [],
+        referralHits: Number(r.referral_hits ?? 0),
+        referralHitsTrend: Array.isArray(r.referral_hits_trend)
+          ? r.referral_hits_trend.map((point) => ({
             weekStart: point.week_start ?? null,
             value: Number(point.value ?? 0),
           }))

@@ -434,7 +434,7 @@ describe('URL Inspector Handlers', () => {
   });
 
   describe('createUrlInspectorOwnedUrlsHandler', () => {
-    it('returns paginated owned URLs with agentic fields mapped', async () => {
+    it('returns paginated owned URLs with agentic + referral fields mapped', async () => {
       const rpcData = [
         {
           url: 'https://example.com/page1',
@@ -449,6 +449,11 @@ describe('URL Inspector Handlers', () => {
             { week_start: '2026-01-12', value: 100 },
             { week_start: '2026-01-19', value: 60 },
           ],
+          referral_hits: 9400,
+          referral_hits_trend: [
+            { week_start: '2026-01-12', value: 4400 },
+            { week_start: '2026-01-19', value: 5000 },
+          ],
           total_count: 100,
         },
         {
@@ -461,6 +466,8 @@ describe('URL Inspector Handlers', () => {
           weekly_prompts_cited: [{ week: '2026-W10', value: 4 }],
           agentic_hits: 0,
           agentic_hits_trend: [],
+          referral_hits: 0,
+          referral_hits_trend: [],
           total_count: 100,
         },
       ];
@@ -489,6 +496,57 @@ describe('URL Inspector Handlers', () => {
       ]);
       expect(body.urls[1].agenticHits).to.equal(0);
       expect(body.urls[1].agenticHitsTrend).to.deep.equal([]);
+      // Server-side referral merge (LLMO-4729 Decision A pull-in): same
+      // camelCase + weekStart normalisation as agentic. The dashboard renders
+      // these in the Owned URLs table's Referral Hits column + sparkline.
+      expect(body.urls[0].referralHits).to.equal(9400);
+      expect(body.urls[0].referralHitsTrend).to.deep.equal([
+        { weekStart: '2026-01-12', value: 4400 },
+        { weekStart: '2026-01-19', value: 5000 },
+      ]);
+      expect(body.urls[1].referralHits).to.equal(0);
+      expect(body.urls[1].referralHitsTrend).to.deep.equal([]);
+    });
+
+    // Same defence-in-depth as the agentic-trend test below — referral side
+    // gets its own coverage so the `??` fallbacks inside the referral
+    // trend's `.map` callback are pinned.
+    it('coerces null fields inside referral_hits_trend points (weekStart→null, value→0)', async () => {
+      const rpcData = [
+        {
+          url: 'https://example.com/page1',
+          citations: 1,
+          prompts_cited: 1,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
+          referral_hits: 0,
+          referral_hits_trend: [
+            { week_start: null, value: null },
+            { /* week_start missing entirely */ value: 5 },
+            { week_start: '2026-01-12' /* value missing entirely */ },
+          ],
+          total_count: 1,
+        },
+      ];
+
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_owned_urls: { data: rpcData, error: null } },
+      });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].referralHitsTrend).to.deep.equal([
+        { weekStart: null, value: 0 },
+        { weekStart: null, value: 5 },
+        { weekStart: '2026-01-12', value: 0 },
+      ]);
     });
 
     // Defence-in-depth: PostgREST occasionally returns null on numeric / text
@@ -602,7 +660,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
-    it('passes filters and handles null row fields (agentic + brand-presence)', async () => {
+    it('passes filters and handles null row fields (agentic + referral + brand-presence)', async () => {
       const rpcData = [{
         url: 'https://example.com/page1',
         citations: null,
@@ -613,6 +671,8 @@ describe('URL Inspector Handlers', () => {
         weekly_prompts_cited: null,
         agentic_hits: null,
         agentic_hits_trend: null,
+        referral_hits: null,
+        referral_hits_trend: null,
         total_count: null,
       }];
 
@@ -637,6 +697,9 @@ describe('URL Inspector Handlers', () => {
       // safe defaults so the UI's WoW trend / sparkline never NaNs.
       expect(body.urls[0].agenticHits).to.equal(0);
       expect(body.urls[0].agenticHitsTrend).to.deep.equal([]);
+      // Same defence for the LLMO-4729 referral columns.
+      expect(body.urls[0].referralHits).to.equal(0);
+      expect(body.urls[0].referralHitsTrend).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
 
       const rpcCall = rpcStub.firstCall;
@@ -647,6 +710,10 @@ describe('URL Inspector Handlers', () => {
       // p_agent_types to the RPC payload — keeps the contract compatible
       // with internal tooling that still calls the older 9-arg signature.
       expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
+      // Without `referralSource` in the query string the handler defaults
+      // to 'optel' (LLMO-4729 Decision A pull-in — mirrors the controller
+      // default in llmo-referral-traffic.js).
+      expect(rpcCall.args[1].p_referral_source).to.equal('optel');
     });
 
     it('forwards comma-separated agentTypes as p_agent_types array', async () => {
@@ -713,6 +780,78 @@ describe('URL Inspector Handlers', () => {
       // dropped — keeps the URL Inspector PG inclusion list intentionally
       // narrow until somebody plumbs Training bots into the dashboard.
       expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    // -----------------------------------------------------------------------
+    // LLMO-4729 (Decision A pull-in) — referralSource forwarding
+    // -----------------------------------------------------------------------
+    // The owned-URLs handler reads the optional `referralSource` query param
+    // and forwards it as `p_referral_source` to rpc_url_inspector_owned_urls
+    // so the RPC reads from the right `referral_traffic_<source>` table.
+    // Whitelist mirrors the one in llmo-referral-traffic.js.
+
+    it('forwards referralSource query param as p_referral_source', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { referralSource: 'cdn' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1].p_referral_source).to.equal('cdn');
+    });
+
+    it('accepts referral_source snake_case alias', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { referral_source: 'ga4' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1].p_referral_source).to.equal('ga4');
+    });
+
+    it('falls back to optel for unknown referralSource values', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // Unknown value; mirrors the parser's rejection of
+        // not-on-the-whitelist sources (defence in depth — the underlying
+        // RPC's CASE statement falls through to optel too, but doing it in
+        // the handler avoids a wasted RPC trip on hostile input).
+        { referralSource: 'nope' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1].p_referral_source).to.equal('optel');
+    });
+
+    it('forwards every whitelisted referralSource verbatim', async () => {
+      // Pin the four known sources so a future contributor adding (or
+      // removing) one in the whitelist must update this assertion in lock-
+      // step with the controller + the underlying RPC's CASE branches.
+      for (const source of ['optel', 'cdn', 'adobe_analytics', 'ga4']) {
+        // eslint-disable-next-line no-await-in-loop
+        const { context, rpcStub } = createContext(
+          {},
+          { referralSource: source },
+          { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+        );
+        const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+        // eslint-disable-next-line no-await-in-loop
+        await handler(context);
+        expect(
+          rpcStub.firstCall.args[1].p_referral_source,
+          `whitelist member '${source}' should round-trip`,
+        ).to.equal(source);
+      }
     });
   });
 
