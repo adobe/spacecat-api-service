@@ -1,3 +1,10 @@
+## [1.478.1](https://github.com/adobe/spacecat-api-service/compare/v1.478.0...v1.478.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* add log trail for autofix flow to address sec review ([#2343](https://github.com/adobe/spacecat-api-service/issues/2343)) ([1b05012](https://github.com/adobe/spacecat-api-service/commit/1b0501273e820f75c154378b660955029ae4e6d2))
+
 # [1.478.0](https://github.com/adobe/spacecat-api-service/compare/v1.477.1...v1.478.0) (2026-05-06)
 
 
