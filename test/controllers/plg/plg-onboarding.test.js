@@ -620,6 +620,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,
@@ -1977,6 +1978,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
           },
           '../../../src/support/utils.js': {
             autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+            resolveWwwUrl: resolveWwwUrlStub,
             updateCodeConfig: updateCodeConfigStub,
             findDeliveryType: findDeliveryTypeStub,
             deriveProjectName: deriveProjectNameStub,

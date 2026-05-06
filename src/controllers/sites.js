@@ -61,6 +61,8 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
+const DEFAULT_PAGE_SIZE = 100;
+const MAX_PAGE_SIZE = 500;
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -372,6 +374,52 @@ function SitesController(ctx, log, env) {
     const sites = (await Site.allByDeliveryType(deliveryType))
       .map((site) => SiteDto.toJSON(site));
     return ok(sites);
+  };
+
+  /**
+   * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
+   * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
+   * code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * Cursor-paginated: pass `limit` (default 100, max 500) and the `cursor`
+   * returned in the previous response to fetch the next page. Sites are
+   * ordered by ID.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Paginated sites response.
+   */
+  const getAllByEnrollmentAndTier = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
+    const tier = context.params?.tier;
+    const productCode = context.data?.productCode;
+    const cursor = context.data?.cursor || null;
+    const parsedLimit = parseInt(context.data?.limit, 10);
+
+    if (!hasText(tier)) {
+      return badRequest('Tier required');
+    }
+    if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
+      return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
+    }
+    if (context.data?.limit !== undefined
+      && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
+      return badRequest('Page size must be a positive integer');
+    }
+    const limit = Math.min(parsedLimit || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+
+    const all = (await Site.allByEnrollmentAndTier(tier, productCode))
+      .sort((a, b) => a.getId().localeCompare(b.getId()));
+    const remaining = cursor ? all.filter((s) => s.getId() > cursor) : all;
+    const page = remaining.slice(0, limit);
+    const hasMore = remaining.length > page.length;
+    const nextCursor = hasMore ? page[page.length - 1].getId() : null;
+
+    return ok({
+      sites: page.map((site) => SiteDto.toJSON(site)),
+      pagination: { limit, cursor: nextCursor, hasMore },
+    });
   };
 
   /**
@@ -1420,6 +1468,7 @@ function SitesController(ctx, log, env) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    getAllByEnrollmentAndTier,
     getByID,
     removeSite,
     updateSite,

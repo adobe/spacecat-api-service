@@ -347,6 +347,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/latest-metrics': 'site:read',
   'GET /sites/by-base-url/:baseURL': 'site:read',
   'GET /sites/by-delivery-type/:deliveryType': 'site:read',
+  'GET /sites/by-tier/:tier': 'site:read',
   'GET /sites/with-latest-audit/:auditType': 'site:read',
 
   // Opportunities

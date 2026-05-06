@@ -695,6 +695,31 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteListPaginated:
+  type: object
+  required:
+    - sites
+    - pagination
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/Site'
+    pagination:
+      type: object
+      required:
+        - limit
+        - hasMore
+      properties:
+        limit:
+          type: integer
+          description: Number of sites returned in this page
+        cursor:
+          type: [string, 'null']
+          description: Cursor for the next page; null when there is no more data
+        hasMore:
+          type: boolean
+          description: Whether more sites are available
 SiteWithLatestAuditList:
   type: array
   items:
