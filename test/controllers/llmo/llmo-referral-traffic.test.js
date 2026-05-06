@@ -58,16 +58,27 @@ function makeWeeksChainClient(
 }
 
 /**
- * Chain-based client — used by the /has-data handler which queries the table
- * directly via .from().select().eq().limit() (single call).
+ * Chain-based client — used by the /has-data handler which queries optel and
+ * cdn tables in parallel via .from().select().eq().limit().
+ *
+ * @param {object} optelResult  - PostgREST result for referral_traffic_optel
+ * @param {object} cdnResult    - PostgREST result for referral_traffic_cdn
  */
-function makeHasDataChainClient(result = { data: [], error: null }) {
-  const chain = {
+function makeHasDataChainClient(
+  optelResult = { data: [], error: null },
+  cdnResult = { data: [], error: null },
+) {
+  const makeChain = (result) => ({
     select: sinon.stub().returnsThis(),
     eq: sinon.stub().returnsThis(),
     limit: sinon.stub().resolves(result),
-  };
-  return { from: sinon.stub().returns(chain), chain };
+  });
+  const optelChain = makeChain(optelResult);
+  const cdnChain = makeChain(cdnResult);
+  const fromStub = sinon.stub();
+  fromStub.withArgs('referral_traffic_optel').returns(optelChain);
+  fromStub.withArgs('referral_traffic_cdn').returns(cdnChain);
+  return { from: fromStub, optelChain, cdnChain };
 }
 
 function makeContext(overrides = {}) {
@@ -981,8 +992,11 @@ describe('llmo-referral-traffic', () => {
   // ── /has-data ─────────────────────────────────────────────────────────────
 
   describe('has-data', () => {
-    it('returns { hasData: true } when records exist for the site', async () => {
-      const client = makeHasDataChainClient({ data: [{ traffic_date: '2026-01-05' }], error: null });
+    it('returns { hasData: true } when optel has records', async () => {
+      const client = makeHasDataChainClient(
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+        { data: [], error: null },
+      );
       const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client }));
       expect(res.status).to.equal(200);
@@ -990,8 +1004,35 @@ describe('llmo-referral-traffic', () => {
       expect(body.hasData).to.equal(true);
     });
 
-    it('returns { hasData: false } when no records exist for the site', async () => {
-      const client = makeHasDataChainClient({ data: [], error: null });
+    it('returns { hasData: true } when cdn has records and optel is empty', async () => {
+      const client = makeHasDataChainClient(
+        { data: [], error: null },
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+      );
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+    });
+
+    it('returns { hasData: true } when both optel and cdn have records', async () => {
+      const client = makeHasDataChainClient(
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+      );
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+    });
+
+    it('returns { hasData: false } when both optel and cdn are empty', async () => {
+      const client = makeHasDataChainClient(
+        { data: [], error: null },
+        { data: [], error: null },
+      );
       const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client }));
       expect(res.status).to.equal(200);
@@ -999,8 +1040,11 @@ describe('llmo-referral-traffic', () => {
       expect(body.hasData).to.equal(false);
     });
 
-    it('returns { hasData: false } when data is null', async () => {
-      const client = makeHasDataChainClient({ data: null, error: null });
+    it('returns { hasData: false } when both tables return null data', async () => {
+      const client = makeHasDataChainClient(
+        { data: null, error: null },
+        { data: null, error: null },
+      );
       const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client }));
       expect(res.status).to.equal(200);
@@ -1008,28 +1052,61 @@ describe('llmo-referral-traffic', () => {
       expect(body.hasData).to.equal(false);
     });
 
-    it('returns 500 on PostgREST error', async () => {
-      const client = makeHasDataChainClient({ data: null, error: { message: 'has-data-fail' } });
+    it('returns 500 on optel PostgREST error', async () => {
+      const client = makeHasDataChainClient(
+        { data: null, error: { message: 'optel-has-data-fail' } },
+        { data: [], error: null },
+      );
       const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
       const res = await handler(makeContext({ client }));
       expect(res.status).to.equal(500);
     });
 
-    it('logs the PostgREST error message on failure', async () => {
-      const client = makeHasDataChainClient({ data: null, error: { message: 'has-data-fail' } });
+    it('returns 500 on cdn PostgREST error', async () => {
+      const client = makeHasDataChainClient(
+        { data: [], error: null },
+        { data: null, error: { message: 'cdn-has-data-fail' } },
+      );
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const res = await handler(makeContext({ client }));
+      expect(res.status).to.equal(500);
+    });
+
+    it('logs the optel error message on optel failure', async () => {
+      const client = makeHasDataChainClient(
+        { data: null, error: { message: 'optel-has-data-fail' } },
+        { data: [], error: null },
+      );
       const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
       const ctx = makeContext({ client });
       await handler(ctx);
-      expect(ctx.log.error).to.have.been.calledWithMatch(/has-data-fail/);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/optel-has-data-fail/);
     });
 
-    it('queries referral_traffic_optel table with the site id', async () => {
-      const client = makeHasDataChainClient({ data: [], error: null });
+    it('logs the cdn error message on cdn failure', async () => {
+      const client = makeHasDataChainClient(
+        { data: [], error: null },
+        { data: null, error: { message: 'cdn-has-data-fail' } },
+      );
+      const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
+      const ctx = makeContext({ client });
+      await handler(ctx);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/cdn-has-data-fail/);
+    });
+
+    it('queries both referral_traffic_optel and referral_traffic_cdn with the site id', async () => {
+      const client = makeHasDataChainClient(
+        { data: [], error: null },
+        { data: [], error: null },
+      );
       const handler = createReferralTrafficHasDataHandler(stubbedValidateAccess);
       await handler(makeContext({ client }));
       expect(client.from).to.have.been.calledWith('referral_traffic_optel');
-      expect(client.chain.eq).to.have.been.calledWith('site_id', SITE_ID);
-      expect(client.chain.limit).to.have.been.calledWith(1);
+      expect(client.from).to.have.been.calledWith('referral_traffic_cdn');
+      expect(client.optelChain.eq).to.have.been.calledWith('site_id', SITE_ID);
+      expect(client.cdnChain.eq).to.have.been.calledWith('site_id', SITE_ID);
+      expect(client.optelChain.limit).to.have.been.calledWith(1);
+      expect(client.cdnChain.limit).to.have.been.calledWith(1);
     });
 
     it('returns 400 when Site.postgrestService is missing', async () => {
