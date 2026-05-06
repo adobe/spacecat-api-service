@@ -1,3 +1,10 @@
+## [1.475.1](https://github.com/adobe/spacecat-api-service/compare/v1.475.0...v1.475.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* update the plg onboarding update function ([#2333](https://github.com/adobe/spacecat-api-service/issues/2333)) ([1a79290](https://github.com/adobe/spacecat-api-service/commit/1a79290910f7831cb542b2b62fb051662f01b23c))
+
 # [1.475.0](https://github.com/adobe/spacecat-api-service/compare/v1.474.1...v1.475.0) (2026-05-05)
 
 
