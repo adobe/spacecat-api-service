@@ -76,6 +76,7 @@ import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
+import StrategyController from './controllers/strategy/index.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import UserActivitiesController from './controllers/user-activities.js';
@@ -229,6 +230,7 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
+    const strategyController = StrategyController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fixesController = new FixesController(context);
@@ -307,6 +309,7 @@ async function run(request, context) {
       plgOnboardingController,
       drsBpPgAuditController,
       webhooksController,
+      strategyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
