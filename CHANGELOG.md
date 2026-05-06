@@ -1,3 +1,10 @@
+## [1.476.1](https://github.com/adobe/spacecat-api-service/compare/v1.476.0...v1.476.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* **prompts-v2:** expose category.uuid and topic.uuid on V2Prompt ([#2338](https://github.com/adobe/spacecat-api-service/issues/2338)) ([38e9b73](https://github.com/adobe/spacecat-api-service/commit/38e9b735ea2ff92ec8772f6d9b08a98e02c05753))
+
 # [1.476.0](https://github.com/adobe/spacecat-api-service/compare/v1.475.1...v1.476.0) (2026-05-06)
 
 
