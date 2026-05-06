@@ -874,6 +874,14 @@ llmo-onboard:
                 description: |
                   When true, skips updating helix-query.yaml in the project-elmo-ui-data GitHub repo
                   (temporary onboarding; default is false).
+              region:
+                type: string
+                pattern: '^[A-Z]{2}$'
+                description: |
+                  Optional ISO 3166-1 alpha-2 country code for the brand's primary market.
+                  Forwarded to DRS prompt generation so the GPT job conditions on the right region.
+                  If omitted, the DRS client defaults to 'US' (backward-compatible).
+                example: "IN"
             required:
               - domain
               - brandName
@@ -972,6 +980,15 @@ llmo-onboard:
                   format: date-time
                   description: The timestamp when onboarding was initiated
                   example: "2025-01-15T10:30:00Z"
+                region:
+                  type: string
+                  pattern: '^[A-Z]{2}$'
+                  description: |
+                    Echo of the ISO 3166-1 alpha-2 region code accepted by the
+                    server. Present only when the caller supplied `region` in
+                    the request body; omitted when the DRS default ('US')
+                    applies.
+                  example: "IN"
               required:
                 - message
                 - domain
@@ -2342,6 +2359,7 @@ llmo-agentic-traffic-kpis-trend:
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
       - { name: contentType, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/agentTypes'
       - name: interval
         in: query
         description: Bucketing interval; defaults to `week`
@@ -2575,6 +2593,7 @@ llmo-agentic-traffic-by-url:
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
       - { name: contentType, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/agentTypes'
       - name: pageSize
         in: query
         description: Number of rows per page (default 50, max 500)
@@ -2841,6 +2860,7 @@ url-inspector-owned-urls:
         in: query
         required: false
         schema: { type: string }
+      - $ref: './parameters.yaml#/agentTypes'
       - name: page
         in: query
         required: false

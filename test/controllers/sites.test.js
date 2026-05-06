@@ -272,6 +272,16 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new sites');
   });
 
+  it('returns forbidden for read-only admin when creating a site', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new sites');
+  });
+
   it('returns bad request when creating a site without baseURL', async () => {
     const response = await sitesController.createSite({ data: {} });
 
@@ -548,6 +558,17 @@ describe('Sites Controller', () => {
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
 
     expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
+  });
+
+  it('gets all sites for a read-only admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+    mockDataAccess.Site.all.resolves(sites);
+
+    const result = await sitesController.getAll();
+    const resultSites = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(resultSites).to.be.an('array').with.lengthOf(2);
   });
 
   it('gets all sites for a non-admin user', async () => {

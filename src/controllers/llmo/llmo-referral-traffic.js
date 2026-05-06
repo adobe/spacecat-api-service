@@ -296,9 +296,10 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
 /**
  * GET /sites/:siteId/referral-traffic/by-platform
  *
- * Returns [{ platform, pageviews, bounceRate, channels, visits, avgTimeOnSite, revenue }]
+ * Returns [{ platform, pageviews, bounceRate, channels, visits, avgTimeOnSite, revenue,
+ *          visitors, orders }]
  * sorted descending. Empty trf_platform values are returned as 'unknown' by the RPC.
- * visits/avgTimeOnSite/revenue are null for optel and cdn sources.
+ * visits/avgTimeOnSite/revenue/visitors/orders are null for optel and cdn sources.
  */
 export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficByPlatform(context) {
@@ -328,6 +329,8 @@ export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess)
             visits: row.visits != null ? Number(row.visits) : null,
             avgTimeOnSite: row.avg_time_on_site != null ? Number(row.avg_time_on_site) : null,
             revenue: row.revenue != null ? Number(row.revenue) : null,
+            visitors: row.visitors != null ? Number(row.visitors) : null,
+            orders: row.orders != null ? Number(row.orders) : null,
           })),
         });
       },
@@ -626,6 +629,59 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
  * visits = 0.
  */
 const VALID_BUSINESS_IMPACT_SOURCES = new Set(['ga4', 'adobe_analytics']);
+
+// ============================================================================
+// /by-url-trend
+// ============================================================================
+
+/**
+ * GET /sites/:siteId/referral-traffic/by-url-trend
+ *
+ * Weekly pageview totals for a single URL path.
+ * Required query param: urlPath (exact path, e.g. /blog/my-post).
+ * Returns: { trend: [{ weekStart: "YYYY-MM-DD", pageviews: N }, ...] }
+ */
+export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
+  return async function getReferralTrafficUrlTrend(context) {
+    return withReferralTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'by-url-trend',
+      async (ctx, client, siteId) => {
+        const q = ctx.data || {};
+        const urlPath = (q.urlPath || '').trim() || null;
+
+        if (!urlPath) {
+          return badRequest('urlPath query parameter is required');
+        }
+
+        const parsed = parseParams(ctx);
+
+        const { data, error } = await client.rpc('rpc_referral_traffic_url_trend', {
+          ...commonRpcParams(siteId, parsed),
+          p_url_path: urlPath,
+        });
+
+        if (error) {
+          ctx.log.error(`Referral traffic by-url-trend PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch referral traffic URL trend');
+        }
+
+        /* c8 ignore next 2 — same null-safety pattern as sibling handlers */
+        return ok({
+          trend: (data ?? []).map((row) => ({
+            weekStart: row.week_start,
+            pageviews: Number(row.total_pageviews),
+          })),
+        });
+      },
+    );
+  };
+}
+
+// ============================================================================
+// /business-impact
+// ============================================================================
 
 export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAccess) {
   return async function getReferralTrafficBusinessImpact(context) {

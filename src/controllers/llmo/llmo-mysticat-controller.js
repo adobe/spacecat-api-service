@@ -63,6 +63,7 @@ import {
   createReferralTrafficByRegionHandler,
   createReferralTrafficByPageIntentHandler,
   createReferralTrafficByUrlHandler,
+  createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
   createReferralTrafficByDeviceHandler,
@@ -218,6 +219,7 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getReferralTrafficByUrl = createReferralTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getReferralTrafficUrlTrend = createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess);
   const getReferralTrafficBusinessImpact = createReferralTrafficBusinessImpactHandler(
     getSiteAndValidateAccess,
   );
@@ -271,6 +273,7 @@ function LlmoMysticatController(ctx) {
     getReferralTrafficByRegion,
     getReferralTrafficByPageIntent,
     getReferralTrafficByUrl,
+    getReferralTrafficUrlTrend,
     getReferralTrafficBusinessImpact,
     getReferralTrafficWeeks,
     getReferralTrafficByDevice,
