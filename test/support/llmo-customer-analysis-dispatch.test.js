@@ -93,7 +93,7 @@ describe('dispatchCustomerAnalysisV2', () => {
         changeKind: 'brands',
       },
     });
-    expect(log.info).to.have.been.calledWithMatch(/Dispatched 2 message\(s\)/);
+    expect(log.info).to.have.been.calledWithMatch(/Dispatched 2\/2 message\(s\)/);
   });
 
   it('falls back to site.getSiteId() when getId is not present', async () => {
@@ -165,7 +165,8 @@ describe('dispatchCustomerAnalysisV2', () => {
 
     expect(sqs.sendMessage).to.have.been.calledTwice;
     expect(log.warn).to.have.been.calledWithMatch(/Failed to dispatch for site site-1/);
-    expect(log.info).to.have.been.calledWithMatch(/Dispatched 2 message\(s\)/);
+    // Final log reports successful sends out of total — site-1 failed, site-2 succeeded
+    expect(log.info).to.have.been.calledWithMatch(/Dispatched 1\/2 message\(s\)/);
   });
 
   it('does not throw when Site lookup fails — logs unexpected error', async () => {
@@ -220,7 +221,7 @@ describe('dispatchCustomerAnalysisV2', () => {
 
     await dispatchCustomerAnalysisV2(context, ORG_ID, 'brands', explicitLog);
 
-    expect(explicitLog.info).to.have.been.calledWithMatch(/Dispatched 1 message/);
+    expect(explicitLog.info).to.have.been.calledWithMatch(/Dispatched 1\/1 message/);
     expect(log.info).to.not.have.been.called;
   });
 

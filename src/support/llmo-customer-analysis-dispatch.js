@@ -81,6 +81,7 @@ export async function dispatchCustomerAnalysisV2(context, organizationId, change
       return;
     }
 
+    let sent = 0;
     await Promise.all(sites.map(async (site) => {
       const siteId = site.getId?.() || site.getSiteId?.();
       if (!siteId) {
@@ -97,12 +98,13 @@ export async function dispatchCustomerAnalysisV2(context, organizationId, change
             changeKind,
           },
         });
+        sent += 1;
       } catch (sendError) {
         logger.warn(`[${AUDIT_TYPE}] Failed to dispatch for site ${siteId} (org ${organizationId}, changeKind=${changeKind}): ${sendError.message}`);
       }
     }));
 
-    logger.info(`[${AUDIT_TYPE}] Dispatched ${sites.length} message(s) for org ${organizationId} changeKind=${changeKind}`);
+    logger.info(`[${AUDIT_TYPE}] Dispatched ${sent}/${sites.length} message(s) for org ${organizationId} changeKind=${changeKind}`);
   } catch (error) {
     logger.warn(`[${AUDIT_TYPE}] Unexpected error during dispatch for org ${organizationId} changeKind=${changeKind}: ${error.message}`);
   }

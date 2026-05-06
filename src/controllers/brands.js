@@ -606,7 +606,13 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      await dispatchCustomerAnalysisV2(context, spaceCatId, 'prompts', log);
+      // Skip dispatch when nothing was actually deleted (every requested
+      // promptId was already gone), to match the implicit guard the other
+      // mutating endpoints get from their `if (!result) return notFound`
+      // branches.
+      if (result?.metadata?.success > 0) {
+        await dispatchCustomerAnalysisV2(context, spaceCatId, 'prompts', log);
+      }
 
       return ok(result);
     } catch (error) {
