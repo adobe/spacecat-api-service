@@ -1675,6 +1675,10 @@ describe('Paid TrafficController', async () => {
 
         expect(res.status).to.equal(200);
 
+        // Verify S3 key uses the correct 'seo' path (not the old 'ahrefs' path)
+        const s3Call = mockS3GetObject.getCall(0);
+        expect(s3Call.args[0].input.Key).to.equal(`metrics/${SITE_ID}/seo/agg-metrics.json`);
+
         // Validate cached data
         expect(lastPutObject).to.exist;
         const decompressed = await gunzipAsync(lastPutObject.input.Body);
@@ -2085,7 +2089,7 @@ describe('Paid TrafficController', async () => {
         mockS3.send.callsFake((cmd) => {
           if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
             // For SEO CPC data
-            if (cmd.input.Key && cmd.input.Key.includes('seo')) {
+            if (cmd.input.Key && cmd.input.Key.endsWith('/seo/agg-metrics.json')) {
               return mockS3GetObject(cmd);
             }
             // For signed URL verification - return success
